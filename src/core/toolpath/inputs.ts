@@ -9,8 +9,11 @@ import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
-import { openReach, opensStock, openRegion } from '../geometry/open-sides'
+import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
+import type { MaterialBand } from '../geometry/through-depth'
 import { pocketRegion, profileChain } from '../geometry/outline'
+import { regionArea, type Region } from '../geometry/2d/model'
+import { cutTop, levels } from './common'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
 import { FEED_FIELD_LABEL, type ResolvedFeeds } from '../plan/feeds'
@@ -32,6 +35,34 @@ import type { GeneratorRequest } from './request'
 import { setupWcs, toWcs } from './wcs'
 
 const WHERE = 'toGeneratorInputs'
+
+/**
+ * Whether cutting a partly cleared pocket in two (`rest` down to `level`, then `region` from
+ * there) saves work: levels × area below the unsplit cut's, by at least `SPLIT_GAIN` (equal steps
+ * per part can add a level, and a rest grown into the cleared part can cover most of the region).
+ */
+function splitSaves(
+  region: Region,
+  rest: Region,
+  op: { readonly onZ: number; readonly depth: number },
+  level: number,
+  band: MaterialBand,
+  stepdown: number,
+): boolean {
+  const floor = op.onZ - op.depth
+  const top = cutTop(op.onZ, floor, band)
+  const n = (a: number, b: number) => levels(a, b, stepdown).length
+  const whole = regionArea(region)
+  const split = n(top, level) * regionArea(rest) + n(level, floor) * whole
+  return split < n(top, floor) * whole * (1 - SPLIT_GAIN)
+}
+
+/** The least share of the work a split must save. */
+const SPLIT_GAIN = 0.05
+
+/** A drilling input's `material`: the band's top only (holes skip no levels below). */
+const holeBand = (m: MaterialBand | undefined): { material?: MaterialBand } =>
+  m?.top === undefined ? {} : { material: { top: m.top } }
 
 /** The plan's tool copy in canonical mm/degrees; corner radius 0 flat, RE bull nose, D/2 ball. */
 export function toolpathTool(tool: Tool, id: string): ToolpathTool {
@@ -248,7 +279,12 @@ export function toGeneratorInputs(
     ...(maxFeedRate === undefined ? {} : { maxFeedRate }),
   }
   // the material earlier cuts left (DF61): milled cuts skip the passes wholly in air
-  const material = input.material === undefined ? {} : { material: input.material }
+  // (the band only: a pocket's partial coverage is resolved here, below)
+  const band: MaterialBand = {
+    ...(input.material?.top === undefined ? {} : { top: input.material.top }),
+    ...(input.material?.bottom === undefined ? {} : { bottom: input.material.bottom }),
+  }
+  const material = Object.keys(band).length === 0 ? {} : { material: band }
   const s = input.strategy
   const milling = (): AppResult<CuttingParams> =>
     cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover'], id)
@@ -297,21 +333,46 @@ export function toGeneratorInputs(
             direction: s.direction,
           }
           const placed = pocketRegion(op)
+          const R = tool.diameter / 2
+          const reach = openReach(R, s.finishAllowance)
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
           // tool runs past the edge there
-          if (region2d !== undefined && opensStock(region2d, placed.region, stock))
-            return openRegion(
-              region2d,
-              placed.region,
-              stock,
-              openReach(tool.diameter / 2, s.finishAllowance),
-            ).map((region) => ({
-              kind: 'regionPocket',
-              ...turned,
-              inputs: [
-                { ...base, ...material, cutting: c, operation: { ...placed, region }, strategy },
-              ],
-            }))
+          const open = region2d !== undefined && opensStock(region2d, placed.region, stock)
+          const partial = input.material?.partial
+          if (region2d !== undefined && (open || partial !== undefined))
+            return (
+              open ? openRegion(region2d, placed.region, stock, reach) : Ok(placed.region)
+            ).map((region): GeneratorRequest => {
+              const whole = { ...placed, region }
+              // partly cleared (DF61 follow-up): the uncovered part down to the cleared level,
+              // then the whole region from there; no split when it could skip material
+              const rest =
+                partial === undefined
+                  ? undefined
+                  : uncoveredRegion(region2d, region, partial.region, reach, R)
+              if (
+                partial === undefined ||
+                rest === undefined ||
+                !splitSaves(region, rest, placed, partial.level, band, c.stepdown)
+              )
+                return {
+                  kind: 'regionPocket',
+                  ...turned,
+                  inputs: [{ ...base, ...material, cutting: c, operation: whole, strategy }],
+                }
+              const below = { material: { ...band, top: partial.level } }
+              const lower = { ...base, ...below, cutting: c, operation: whole, strategy }
+              if (rest.pieces.length === 0)
+                return { kind: 'regionPocket', ...turned, inputs: [lower] }
+              const upper = {
+                ...base,
+                ...material,
+                cutting: c,
+                operation: { region: rest, onZ: placed.onZ, depth: placed.onZ - partial.level },
+                strategy,
+              }
+              return { kind: 'regionPocket', ...turned, inputs: [upper, lower] }
+            })
           // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2
           // output); general shapes go to the region generator in the face frame (T1 wiring)
           return Ok(
@@ -394,6 +455,8 @@ export function toGeneratorInputs(
         ...turned,
         inputs: visits.map(({ operation }): DrillingInput => ({
           ...base,
+          // a hole below material earlier cuts cleared starts on the material (DF61 follow-up)
+          ...holeBand(input.materials?.get(operation.id)),
           cutting: { spindleSpeed: c.spindleSpeed, feedRate: c.feedRate, plungeRate: c.plungeRate },
           operation,
           strategy,

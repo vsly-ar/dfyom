@@ -552,7 +552,8 @@ describe('auto choice (apply hook design.toolAutoChoice)', () => {
     const s = await setup('inch')
     await s.run('design.pocket.add', {
       partId: s.partId,
-      shape: rect('2', '1', '1/8'),
+      // inside the 100 × 60 mm stock (a pocket beyond it has open corners, DF61 follow-up)
+      shape: { ...rect('2', '1', '1/8'), center: ['2', '1.2'] },
       depth: '1/4',
     })
     await s.apply()

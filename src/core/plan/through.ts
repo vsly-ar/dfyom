@@ -2,7 +2,7 @@
  * Through depths and material bands in the plan's own order (DF50, DF61): a through profile or
  * hole counts the material that facings and pockets of the opposite direction cleared under it in
  * an earlier setup of this plan (design reads the default setup order instead), and every facing,
- * pocket and profile the material earlier cuts left over its region (`materialBands`). The
+ * pocket, profile and drilling the material earlier cuts left over its region (`materialBands`). The
  * toolpaths, the tool checks and `plan.operation.list`'s `throughDepth` take them from here.
  * Doc: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
  * docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
@@ -10,12 +10,12 @@
 import { toGeometryInput } from '../design/geometry-input'
 import type { Operation } from '../design/operation'
 import type { Region2dPort } from '../geometry/2d/port'
-import { materialBands, throughDepths, type MaterialBand } from '../geometry/through-depth'
+import { materialBands, throughDepths, type MaterialCover } from '../geometry/through-depth'
 import type { LoadedPlan } from './plan'
 
 interface Derived {
   readonly through: ReadonlyMap<string, number>
-  readonly bands: ReadonlyMap<string, MaterialBand>
+  readonly bands: ReadonlyMap<string, MaterialCover>
 }
 
 const memo = new WeakMap<LoadedPlan, Map<Region2dPort | undefined, Derived>>()
@@ -50,7 +50,8 @@ function derived(plan: LoadedPlan, port: Region2dPort | undefined): Derived {
     const none: Derived = { through: new Map(), bands: new Map() }
     out = toGeometryInput(plan.part, plan.stock, port).mapOr(none, (input): Derived => ({
       through: throughDepths(input.operations, input.stock, port, earlier(setupOf)),
-      bands: materialBands(input.operations, input.stock, port, earlier(indexOf)),
+      // openings count from the next setup on (the slug may still sit in its slot in its own)
+      bands: materialBands(input.operations, input.stock, port, earlier(indexOf), earlier(setupOf)),
     }))
     byPort.set(port, out)
   }
@@ -70,13 +71,14 @@ export function planThroughDepths(
 }
 
 /**
- * The material band (DF61) by design operation id of every facing, pocket and profile whose
- * whole region earlier cuts of the plan (machining order) cleared above or below it.
+ * The material band (DF61) by design operation id of every facing, pocket, profile and drilling
+ * whose whole region earlier cuts of the plan (machining order) cleared above or below it, with a
+ * pocket's partial coverage.
  */
 export function planMaterialBands(
   plan: LoadedPlan,
   port?: Region2dPort,
-): ReadonlyMap<string, MaterialBand> {
+): ReadonlyMap<string, MaterialCover> {
   return derived(plan, port).bands
 }
 

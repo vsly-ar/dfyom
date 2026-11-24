@@ -4,7 +4,9 @@
  * machined in an earlier setup, already removed material under its whole slot or hole. The
  * geometry evaluation (tabs, `dfm.reach`, tool fit), the toolpaths and the plan's tool checks all
  * read it from `throughDepth` of the operation. `materialBands` (DF61) uses the same model for
- * the material a cut meets, so its toolpath skips passes that lie wholly in air.
+ * the material a cut meets, so its toolpath skips passes that lie wholly in air; since the DF61
+ * follow-ups also over a pocket's partly cleared region, for drillings, and with openings (inside
+ * through profiles without tabs) of earlier setups as removals.
  * Pure; pockets need the 2D port (without it only facings count).
  * Doc: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
  * docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
@@ -26,10 +28,6 @@ import { pocketRegion, profileChain } from './outline'
 
 type Profile = Extract<OperationGeometry, { kind: 'profile' }>
 type Drilling = Extract<OperationGeometry, { kind: 'drilling' }>
-/** What clears material from a face: facings, pockets and blind profiles (steps, grooves). */
-type Removal = Extract<OperationGeometry, { kind: 'facing' | 'pocket' }> | Profile
-type Shaped = Exclude<Removal, { kind: 'facing' }>
-
 /** Whether `earlier` is machined in a setup before the one of `later` (its own setup: false). */
 export type RunsBefore = (earlier: OperationGeometry, later: OperationGeometry) => boolean
 
@@ -156,61 +154,129 @@ function holeRegion(op: Drilling, stock: StockGeometry, port: Region2dPort): Reg
 }
 
 /**
- * Whether pocket or blind profile `p` clears the whole `target` (a region in the face frame of the
- * target's direction; `m` maps `p`'s frame into it, absent: the same frame). A pocket clears its
- * region (a floor fillet leaves material along the walls: only the region inset by its radius is
- * flat), a blind profile its slot (DF61).
+ * An inside through profile without tabs (an opening, DF61 follow-up): once cut, its loop's
+ * interior (slot and slug) is gone through the whole stock. With tabs the slug and the tabs stay.
  */
-function removalCovers(
-  port: Region2dPort,
-  stock: StockGeometry,
-  p: Shaped,
-  target: Region,
-  m?: ReturnType<typeof frameMap>,
-): boolean {
-  let region: Region | undefined
-  if (p.kind === 'profile') region = slotRegion(p, stock, port)
-  else {
-    const own = pocketRegion(p).region
-    region = p.floorRadius > 0 ? port.offset(own, p.floorRadius).mapOr(undefined, (r) => r) : own
-  }
-  if (region === undefined) return false
+const isOpening = (op: OperationGeometry): op is Profile =>
+  isThroughGeometry(op) &&
+  op.side === 'inside' &&
+  op.tabs.count === 0 &&
+  (op.tabs.positions === undefined || op.tabs.positions.length === 0)
+
+/** The region inside an opening's loop, in its face frame, within the stock face rectangle. */
+function openingRegion(op: Profile, stock: StockGeometry, port: Region2dPort): Region | undefined {
+  const { chain, closed } = profileChain(op)
+  if (!closed || chain.elements.length === 0) return undefined
+  const local = localStock(op.direction ?? '+z', stock)
   return port
-    .difference(target, m === undefined ? region : mapRegion(region, m))
-    .mapOr(false, (left) => regionArea(left) <= COVER_AREA)
+    .intersect({ pieces: [{ outer: chain, holes: [] }] }, rectangle(local.length, local.width))
+    .mapOr(undefined, (r) => r)
 }
 
 /**
- * Depth below the stock face of the removals' direction (mm) to which `removals` (machined
- * earlier) clear the whole `slot`: a facing from the face, a pocket only where its `on` level is
- * already cleared (stacked pockets add up), a blind profile from the face, each only when its
- * region (less its floor fillet zone) or slot covers the slot.
+ * One clearing as a measured cut sees it: from `top` down to `bottom` (depths below the stock
+ * face of the clearing's direction; a pocket starts at its `on` level), over the whole face
+ * (`'face'`: a facing) or over a region in the measured cut's face frame (undefined when the port
+ * fails: it then counts nowhere).
+ */
+interface Clear {
+  readonly id: string
+  readonly top: number
+  readonly bottom: number
+  readonly region: 'face' | (() => Region | undefined)
+}
+
+/**
+ * The clearings of facings (and with the port pockets and blind profiles) of `direction` other
+ * than `op` machined before it, in the face frame of `frame` (the measured cut's direction). A
+ * pocket clears its region (a floor fillet leaves material along the walls: only the region
+ * inset by its radius is flat), a blind profile its slot (DF61). With `openings` (a port and the
+ * setup order) also the openings of an earlier setup on the same axis: through the whole extent.
+ */
+function clearsOf(
+  ops: readonly OperationGeometry[],
+  direction: Direction,
+  frame: Direction,
+  op: OperationGeometry,
+  stock: StockGeometry,
+  port: Region2dPort | undefined,
+  before: RunsBefore,
+  openings?: RunsBefore,
+): Clear[] {
+  const mapper = (from: Direction) =>
+    from === frame ? undefined : lazy(() => frameMap(from, frame, stock))
+  const placed = (from: Direction, own: () => Region | undefined) => {
+    const m = mapper(from)
+    return lazy(() => {
+      const r = own()
+      return r === undefined || m === undefined ? r : mapRegion(r, m())
+    })
+  }
+  const out: Clear[] = []
+  for (const o of ops) {
+    if (o === op || !before(o, op) || (o.direction ?? '+z') !== direction) continue
+    if (o.kind === 'facing') out.push({ id: o.id, top: 0, bottom: o.depth, region: 'face' })
+    else if (port === undefined) continue
+    else if (o.kind === 'pocket') {
+      const p = o
+      const own = () => {
+        const r = pocketRegion(p).region
+        return p.floorRadius > 0 ? port.offset(r, p.floorRadius).mapOr(undefined, (x) => x) : r
+      }
+      out.push({ id: o.id, top: -o.onZ, bottom: o.depth - o.onZ, region: placed(direction, own) })
+    } else if (o.kind === 'profile' && o.depth !== undefined) {
+      const p = o
+      const own = () => slotRegion(p, stock, port)
+      out.push({ id: o.id, top: 0, bottom: o.depth, region: placed(direction, own) })
+    }
+  }
+  if (openings !== undefined && port !== undefined) {
+    const extent = localStock(frame, stock).thickness
+    for (const o of ops) {
+      const from = o.direction ?? '+z'
+      if (o === op || !isOpening(o) || (from !== frame && from !== OPPOSITE[frame])) continue
+      if (!openings(o, op)) continue
+      const p = o
+      const own = () => openingRegion(p, stock, port)
+      out.push({ id: o.id, top: 0, bottom: extent, region: placed(from, own) })
+    }
+  }
+  return out
+}
+
+/**
+ * Depth below the stock face of the clearings' direction (mm) to which `clears` (machined
+ * earlier) clear the whole `target`: a facing from the face, a pocket only where its `on` level
+ * is already cleared (stacked pockets add up), a blind profile or opening from the face, each only
+ * when its region covers the target (less than `COVER_AREA` uncovered).
  */
 function clearedDepth(
-  removals: readonly Removal[],
-  slot: () => Region | undefined,
-  covers: (p: Shaped, slot: Region) => boolean,
+  clears: readonly Clear[],
+  target: () => Region | undefined,
+  port: Region2dPort | undefined,
 ): number {
   const memo = new Map<string, boolean>()
-  const covered = (r: Removal): boolean => {
-    if (r.kind === 'facing') return true
-    let c = memo.get(r.id)
-    if (c === undefined) {
-      const s = slot()
-      c = s !== undefined && covers(r, s)
-      memo.set(r.id, c)
+  const covered = (c: Clear): boolean => {
+    if (c.region === 'face') return true
+    let v = memo.get(c.id)
+    if (v === undefined) {
+      const t = target()
+      const r = c.region()
+      v =
+        t !== undefined &&
+        r !== undefined &&
+        port !== undefined &&
+        port.difference(t, r).mapOr(false, (left) => regionArea(left) <= COVER_AREA)
+      memo.set(c.id, v)
     }
-    return c
+    return v
   }
   let depth = 0
   for (let changed = true; changed;) {
     changed = false
-    for (const r of removals) {
-      const top = r.kind === 'pocket' ? -r.onZ : 0
-      // removals are facings, pockets and blind profiles: a depth each
-      const bottom = r.kind === 'pocket' ? r.depth - r.onZ : r.depth!
-      if (bottom <= depth + EPSILON || top > depth + EPSILON || !covered(r)) continue
-      depth = bottom
+    for (const c of clears) {
+      if (c.bottom <= depth + EPSILON || c.top > depth + EPSILON || !covered(c)) continue
+      depth = c.bottom
       changed = true
     }
   }
@@ -234,9 +300,8 @@ export function throughDepths(
   for (const op of ops) {
     if (!isThroughCut(op)) continue
     const direction = op.direction ?? '+z'
-    const opposite = OPPOSITE[direction]
-    const removals = removalsOf(ops, opposite, op, port, before)
-    if (removals.length === 0) continue
+    const clears = clearsOf(ops, OPPOSITE[direction], direction, op, stock, port, before)
+    if (clears.length === 0) continue
     const slot = lazy(() =>
       port === undefined
         ? undefined
@@ -244,9 +309,7 @@ export function throughDepths(
           ? slotRegion(op, stock, port)
           : holeRegion(op, stock, port),
     )
-    const m = frameMap(opposite, direction, stock)
-    // `port` is defined: pockets are only collected with it
-    const cleared = clearedDepth(removals, slot, (p, s) => removalCovers(port!, stock, p, s, m))
+    const cleared = clearedDepth(clears, slot, port)
     if (cleared <= EPSILON) continue
     const extent = localStock(direction, stock).thickness
     const depth = extent - cleared
@@ -254,28 +317,6 @@ export function throughDepths(
     out.set(op.id, depth)
   }
   return out
-}
-
-/**
- * Facings (and with the port pockets and blind profiles) of `direction` other than `op` machined
- * before it.
- */
-function removalsOf(
-  ops: readonly OperationGeometry[],
-  direction: Direction,
-  op: OperationGeometry,
-  port: Region2dPort | undefined,
-  before: RunsBefore,
-): Removal[] {
-  return ops.filter(
-    (o): o is Removal =>
-      o !== op &&
-      (o.kind === 'facing' ||
-        (port !== undefined &&
-          (o.kind === 'pocket' || (o.kind === 'profile' && o.depth !== undefined)))) &&
-      (o.direction ?? '+z') === direction &&
-      before(o, op),
-  )
 }
 
 /** A value computed on first use. */
@@ -304,22 +345,125 @@ export interface MaterialBand {
 }
 
 /**
- * The material band of every facing, pocket and profile for which earlier cuts (`before`)
- * cleared material over its **whole** region: facings and pockets of its own direction above it
- * (`top`) and, for a blind cut, of the opposite direction below it (`bottom`; a through profile
- * has its `throughDepth` for that). The region is the face rectangle (facing), the pocket region
- * or the profile's slot, clipped to the stock face rectangle. Coverage as `throughDepths`; without
- * the port only facings count. Cuts without a band are left out.
+ * Partial coverage of a pocket (DF61 follow-up): earlier cuts of its own direction cleared
+ * `region` (a part of the pocket region, face frame) down to z `level`, below the band's top.
+ * The toolpath wiring cuts the rest of the region down to `level` first and the whole region
+ * from `level` down (`uncoveredRegion`, docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61).
+ */
+export interface PartialCover {
+  readonly level: number
+  readonly region: Region
+}
+
+/** A material band with the partial coverage of a pocket (plan side only; not a generator input). */
+export interface MaterialCover extends MaterialBand {
+  readonly partial?: PartialCover
+}
+
+/** Area changes below this (mm²) end the partial-coverage iteration. */
+const AREA_STABLE = 1e-6
+
+/**
+ * The deepest worthwhile partial coverage of `target` by `clears` (depths below the face), below
+ * `from` (where the cut's material begins over its whole region) and not below `floor`: per
+ * clearing the part of the target it clears (its region where the material above its own top is
+ * already cleared – everywhere down to `whole`, the depth cleared over the whole target – the
+ * least fixed point, so stacked pockets chain as in `clearedDepth`), then the
+ * level L whose cleared part saves the most volume, (L − from) × area. Undefined without one.
+ */
+function partialCover(
+  port: Region2dPort,
+  clears: readonly Clear[],
+  target: Region,
+  from: number,
+  whole: number,
+  floor: number,
+): PartialCover | undefined {
+  const shaped = clears
+    .filter((c): c is Clear & { region: () => Region | undefined } => c.region !== 'face')
+    .sort((a, b) => a.top - b.top)
+  const levels = [
+    ...new Set(shaped.map((c) => Math.min(c.bottom, floor)).filter((L) => L > from + EPSILON)),
+  ]
+  if (levels.length === 0) return undefined
+  const ok = <T>(r: { isOk(): boolean; unwrap(): T }): T | undefined =>
+    r.isOk() ? r.unwrap() : undefined
+  const own = new Map<Clear, Region | undefined>()
+  for (const c of shaped) {
+    const r = c.region()
+    own.set(c, r === undefined ? undefined : ok(port.intersect(r, target)))
+  }
+  const effective = new Map<Clear, Region>()
+  const union = (rs: readonly Region[]): Region | undefined => {
+    let acc: Region | undefined
+    for (const r of rs) {
+      if (r.pieces.length === 0) continue
+      acc = acc === undefined ? r : ok(port.union(acc, r))
+      if (acc === undefined) return undefined
+    }
+    return acc ?? { pieces: [] }
+  }
+  const support = (c: Clear): Region | undefined => {
+    if (c.top <= whole + EPSILON) return target
+    return union(
+      shaped
+        .filter((q) => q !== c && q.bottom >= c.top - EPSILON)
+        .map((q) => effective.get(q))
+        .filter((r): r is Region => r !== undefined),
+    )
+  }
+  let total = -1
+  for (let round = 0; round <= shaped.length; round++) {
+    for (const c of shaped) {
+      const o = own.get(c)
+      const s = o === undefined ? undefined : support(c)
+      const e = o === undefined || s === undefined ? undefined : ok(port.intersect(o, s))
+      if (e === undefined) effective.delete(c)
+      else effective.set(c, e)
+    }
+    const next = [...effective.values()].reduce((a, r) => a + regionArea(r), 0)
+    if (Math.abs(next - total) <= AREA_STABLE) break
+    total = next
+  }
+  let best: { score: number; cover: PartialCover } | undefined
+  for (const L of levels) {
+    const region = union(
+      shaped
+        .filter((q) => q.bottom >= L - EPSILON)
+        .map((q) => effective.get(q))
+        .filter((r): r is Region => r !== undefined),
+    )
+    if (region === undefined) continue
+    const area = regionArea(region)
+    if (area <= COVER_AREA) continue
+    const score = (L - from) * area
+    if (best === undefined || score > best.score) best = { score, cover: { level: -L, region } }
+  }
+  return best?.cover
+}
+
+/**
+ * The material band of every facing, pocket, profile and drilling for which earlier cuts
+ * (`before`, the machining order) cleared material over its **whole** region: facings, pockets
+ * and blind profiles of its own direction above it (`top`) and, for a blind milled cut, of the
+ * opposite direction below it (`bottom`; a through profile has its `throughDepth` for that, a
+ * drilling gets no bottom). The region is the face rectangle (facing), the pocket region, the
+ * profile's slot or the hole, clipped to the stock face rectangle. Openings (inside through
+ * profiles without tabs) of an earlier setup (`setupBefore`) on the same axis clear their loop's
+ * interior through the whole extent. A pocket also gets its best `partial` coverage below the
+ * top. Coverage as `throughDepths`; without the port only facings count. Cuts without a band are
+ * left out.
  */
 export function materialBands(
   ops: readonly OperationGeometry[],
   stock: StockGeometry,
   port: Region2dPort | undefined,
   before: RunsBefore,
-): Map<string, MaterialBand> {
-  const out = new Map<string, MaterialBand>()
+  setupBefore: RunsBefore = before,
+): Map<string, MaterialCover> {
+  const out = new Map<string, MaterialCover>()
   for (const op of ops) {
-    if (op.kind !== 'facing' && op.kind !== 'pocket' && op.kind !== 'profile') continue
+    if (op.kind === 'chamfer') continue
     const direction = op.direction ?? '+z'
     const local = localStock(direction, stock)
     const face = rectangle(local.length, local.width)
@@ -327,32 +471,38 @@ export function materialBands(
       if (op.kind === 'facing') return face
       if (port === undefined) return undefined
       if (op.kind === 'profile') return slotRegion(op, stock, port)
+      if (op.kind === 'drilling') return holeRegion(op, stock, port)
       return port.intersect(pocketRegion(op).region, face).mapOr(undefined, (r) => r)
     })
-    // depths below the face where the cut starts and where its floor is (none: through)
-    const start = op.kind === 'pocket' ? -op.onZ : 0
-    const floor = op.kind === 'pocket' ? op.depth - op.onZ : op.depth
+    // depths below the face where the cut starts and where its floor is (none: through, a hole)
+    const start = op.kind === 'pocket' || op.kind === 'drilling' ? -op.onZ : 0
+    const floor =
+      op.kind === 'pocket' ? op.depth - op.onZ : op.kind === 'drilling' ? undefined : op.depth
     let top: number | undefined
-    const same = removalsOf(ops, direction, op, port, before)
+    let partial: PartialCover | undefined
+    const same = clearsOf(ops, direction, direction, op, stock, port, before, setupBefore)
     if (same.length > 0) {
-      const cleared = clearedDepth(same, target, (p, s) => removalCovers(port!, stock, p, s))
+      const cleared = clearedDepth(same, target, port)
       if (cleared > start + EPSILON) top = -cleared
+      const t = target()
+      if (op.kind === 'pocket' && port !== undefined && t !== undefined && floor !== undefined)
+        partial = partialCover(port, same, t, Math.max(start, cleared), cleared, floor)
     }
     let bottom: number | undefined
     if (floor !== undefined) {
       const opposite = OPPOSITE[direction]
-      const below = removalsOf(ops, opposite, op, port, before)
+      const below = clearsOf(ops, opposite, direction, op, stock, port, before)
       if (below.length > 0) {
-        const m = frameMap(opposite, direction, stock)
-        const cleared = clearedDepth(below, target, (p, s) => removalCovers(port!, stock, p, s, m))
+        const cleared = clearedDepth(below, target, port)
         const z = cleared - local.thickness
         if (cleared > EPSILON && z > -floor + EPSILON) bottom = z
       }
     }
-    if (top !== undefined || bottom !== undefined)
+    if (top !== undefined || bottom !== undefined || partial !== undefined)
       out.set(op.id, {
         ...(top === undefined ? {} : { top }),
         ...(bottom === undefined ? {} : { bottom }),
+        ...(partial === undefined ? {} : { partial }),
       })
   }
   return out

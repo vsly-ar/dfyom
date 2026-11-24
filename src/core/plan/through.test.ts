@@ -11,6 +11,7 @@ import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { toGeneratorInputs } from '../toolpath/inputs'
 import { generateRequest } from '../toolpath/request'
 import type { Toolpath } from '../toolpath/model'
+import { Heightmap } from '../toolpath/testing/oracles'
 import type { PlanWarning } from './checks'
 import { planOperationInputs } from './inputs'
 import { planSetup, type PlanSetup } from './plan.fixture'
@@ -195,5 +196,87 @@ describe('passes over the material earlier cuts left (DF61)', () => {
     // no move between the stock face and the facing floor; down to the step's floor
     expect(z.filter((v) => v < 0 && v > -2 + 1e-9)).toEqual([])
     expect(Math.min(...z)).toBeCloseTo(-5, 9)
+  })
+})
+
+describe('partial coverage and holes on cleared material (DF61 follow-ups)', () => {
+  /** Pocket 1 (30 × 30, 6 deep) first, then pocket 2 (60 × 40, 8 deep) round it, both on top. */
+  async function stacked(): Promise<{ s: PlanSetup; planId: string }> {
+    const s = await planSetup({ part: false, services: { region2d } })
+    const pocket = (length: string, width: string, depth: string) =>
+      s.run('design.pocket.add', {
+        partId: s.partId,
+        shape: { kind: 'rectangle', center: ['50', '30'], length, width, cornerRadius: '4' },
+        depth,
+        floorRadius: '0',
+      })
+    await pocket('30', '30', '6')
+    await pocket('60', '40', '8')
+    await s.run('project.apply', {})
+    return { s, planId: await s.create({ machineLibraryItemId: s.machineId }) }
+  }
+
+  it('a pocket partly over a deeper earlier one cuts the rest down to its floor first', async () => {
+    const { s, planId } = await stacked()
+    const input = inputOf(s, planId, 'pocket2')
+    expect(input.material?.partial?.level).toBe(-6)
+    const request = expectOk(toGeneratorInputs(input, region2d))
+    expect(request.kind).toBe('regionPocket')
+    expect(request.inputs).toHaveLength(2)
+    const split = toolpathOf(s, planId, 'pocket2')
+    const { material: _, ...plain } = input
+    const whole = expectOk(
+      generateRequest(expectOk(toGeneratorInputs(plain, region2d)), noSteps, () => Ok(region2d)),
+    )
+    expect(split.stats.estimatedSeconds).toBeLessThan(whole.stats.estimatedSeconds)
+    // heightmap oracle: pocket 1 then pocket 2 leaves what pocket 1 then the unsplit pocket leaves
+    const first = toolpathOf(s, planId, 'pocket1')
+    const tool = expectOk(toGeneratorInputs(input, region2d)).inputs[0]!.tool
+    const after = (tp: Toolpath) => {
+      const map = new Heightmap(100, 60, 0.25)
+      map.sweep(tool, first)
+      map.sweep(tool, tp)
+      return map
+    }
+    const a = after(split)
+    const b = after(whole)
+    let worst = 0
+    for (let k = 0; k < a.z.length; k++) worst = Math.max(worst, a.z[k]! - b.z[k]!)
+    expect(worst).toBeLessThan(1e-6)
+  })
+
+  it('a hole on top inside a deeper earlier pocket starts its cycle on the pocket floor', async () => {
+    const { s } = await stacked()
+    await s.run('design.drilling.add', {
+      partId: s.partId,
+      center: ['50', '30'],
+      diameter: '6',
+      bottom: 'flat',
+      depth: '10',
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: opOf(s, planId, 'drill1').id,
+      overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
+    })
+    // the plan drills first; after the pockets the hole meets their floor
+    await s.run('plan.operation.move', {
+      planId,
+      planOperationId: opOf(s, planId, 'drill1').id,
+      toIndex: 2,
+    })
+    expect(inputOf(s, planId, 'drill1').materials?.get('drill1')).toEqual({ top: -8 })
+    // the 6 mm end mill bores it: every feed move on or below the pocket floor, the retract
+    // plane above it
+    const moves = toolpathOf(s, planId, 'drill1').passes.flatMap((p) => p.moves)
+    const ends = moves.map((m) => (m.kind === 'drill' ? m.bottom : m.to[2]))
+    const feeds = moves.filter((m) => m.kind !== 'rapid' && m.kind !== 'drill')
+    expect(feeds.length).toBeGreaterThan(0)
+    expect(Math.max(...feeds.map((m) => m.to[2]))).toBe(-8)
+    expect(Math.min(...ends)).toBeCloseTo(-10, 9)
+    const rapids = moves.filter((m) => m.kind === 'rapid').map((m) => m.to[2])
+    expect(Math.min(...rapids)).toBeLessThan(0)
   })
 })
