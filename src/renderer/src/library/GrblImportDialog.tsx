@@ -51,7 +51,12 @@ export function settingFieldLabel(field: string): string {
     case 'arcTolerance':
       return m.arcTolerance
     case 'spindle':
-      return axis === 'minSpeed' ? m.minSpeed : m.maxSpeed
+      return axis === 'minSpeed' ||
+        axis === 'maxSpeed' ||
+        axis === 'controllerMinSpeed' ||
+        axis === 'controllerMaxSpeed'
+        ? m[axis]
+        : field
     case 'pullOff':
       return m.pullOff
     case 'softLimits':

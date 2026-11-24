@@ -49,6 +49,17 @@ const DEFS: readonly SettingDef[] = [
   ...axes(100, 'stepsPerMm', 'scalar', { scalarUnit: 'steps/mm', group: 'stepsPerMm' }),
 ]
 
+/**
+ * `$30`/`$31` map to `spindle.controllerMaxSpeed`/`controllerMinSpeed` when the machine sets them
+ * (a speed controller whose PWM range differs from the usable speeds), else to `maxSpeed`/`minSpeed`.
+ */
+function controllerRange(machine: MachineValuesDTO, def: SettingDef): SettingDef {
+  const field =
+    def.n === 30 ? 'controllerMaxSpeed' : def.n === 31 ? 'controllerMinSpeed' : undefined
+  if (field === undefined || machine.spindle[field] === undefined) return def
+  return { ...def, path: ['spindle', field] }
+}
+
 /** Mapped outside DEFS (not quantities): `$20` soft limits, `$23` homing corner. */
 const FLAGS = new Set([20, 23])
 
@@ -151,7 +162,8 @@ export function machineSettingsDiff(
   const changes: SettingsChange[] = []
   const unchanged: string[] = []
   const skipped: SettingsSkip[] = []
-  for (const def of DEFS) {
+  for (const mapped of DEFS) {
+    const def = controllerRange(machine, mapped)
     const v = settings.get(def.n)
     if (v === undefined) continue
     const base = { setting: name(def.n), field: def.path.join('.'), value: v }

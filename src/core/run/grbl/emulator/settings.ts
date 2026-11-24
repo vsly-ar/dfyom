@@ -73,8 +73,8 @@ export function machineSettings(m: Machine): SettingValues {
     130: m.travel.x.canonical,
     131: m.travel.y.canonical,
     132: m.travel.z.canonical,
-    30: m.spindle.maxSpeed.canonical,
-    31: m.spindle.minSpeed.mapOr(0, (q) => q.canonical),
+    30: m.spindle.controllerMaxSpeed.unwrapOr(m.spindle.maxSpeed).canonical,
+    31: m.spindle.controllerMinSpeed.or(m.spindle.minSpeed).mapOr(0, (q) => q.canonical),
     23: homingMaskOf(m.homingCorner.unwrapOr('backRight')),
     27: m.pullOff.mapOr(1, (q) => q.canonical),
   }

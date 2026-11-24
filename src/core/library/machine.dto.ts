@@ -52,6 +52,12 @@ export const MachineValuesDtoSchema = z.object({
     control: z.enum(['gcode', 'manual']).describe('manual: export pauses for a dial router'),
     maxSpeed: quantityDto('spindleSpeed').describe('$30'),
     minSpeed: quantityDto('spindleSpeed').optional().describe('$31; below maxSpeed'),
+    controllerMaxSpeed: quantityDto('spindleSpeed')
+      .optional()
+      .describe('$30 when it differs from maxSpeed (PWM range); settings check only'),
+    controllerMinSpeed: quantityDto('spindleSpeed')
+      .optional()
+      .describe('$31 when it differs from minSpeed (PWM range); settings check only'),
     power: quantityDto('power')
       .optional()
       .describe('Rated output power, for the feeds-and-speeds power check'),
