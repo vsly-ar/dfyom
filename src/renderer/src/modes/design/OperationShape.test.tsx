@@ -162,6 +162,32 @@ describe('operation inspector for shapes', () => {
     expect(within(inspector()).getByRole('button', { name: 'Edit shape' })).toBeInTheDocument()
     await expectNoAxeViolations(inspector())
 
+    // the used shape in the Shapes dialog: its row menu's Remove says why it is refused (DF70),
+    // Delete does nothing
+    const tools = screen.getByRole('toolbar', { name: 'Part setup' })
+    act(() => within(tools).getByRole('button', { name: 'Shapes' }).click())
+    const shapes = await screen.findByRole('dialog', { name: 'Shapes' })
+    const row = within(shapes).getByRole('button', { name: /^Shape 1/ })
+    expect(row).toHaveTextContent('Used by 1')
+    expect(row).toHaveAccessibleDescription(
+      'Right-click or Shift+F10 for actions. Used by Pocket 1.',
+    )
+    row.focus()
+    await user.keyboard('{Delete}')
+    expect(part().shapes).toHaveLength(1)
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    const remove = within(menu).getByRole('menuitem', { name: /^Remove/ })
+    expect(remove).toHaveAttribute('aria-disabled', 'true')
+    expect(remove).toHaveTextContent('Used by Pocket 1.')
+    await expectNoAxeViolations(document.body)
+    await user.click(remove)
+    expect(part().shapes).toHaveLength(1)
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
     // back to an inline rectangle sized from the shape's bounding box
     await choose(user, 'Shape', 'Rectangle')
     await waitFor(() =>

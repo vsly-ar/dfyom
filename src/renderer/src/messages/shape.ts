@@ -66,7 +66,6 @@ export const shapeMessages = {
     items: (n: number) => plural(n, 'item'),
     openPath: 'Open path',
     failed: 'Does not resolve',
-    remove: (name: string) => `Remove ${name}`,
     removed: (name: string) => `Removed ${name}`,
     referenced: (names: readonly string[]) =>
       `Used by ${names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}.`,
