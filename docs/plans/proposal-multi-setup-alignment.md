@@ -134,3 +134,7 @@ Each with a recommendation; "Q58 ok" takes it.
 - Does the alignment step belong to the setup-change prompt (one dialog) or to its own Run panel the prompt opens? (UI review with 1.3.)
 - Registration holes for a flip need the flip axis fixed in the machine frame (pins in the spoilboard); how is the axis shown and checked when the setup's work zero corner moves to the other side after the flip?
 - Tiling across a 90° turned setup (a stock longer than the travel in both X and Y): two-dimensional tile grids or only one axis first?
+
+## Ideas from the user after the answers
+
+- **Islands for marks in the overlap (2026-11-24, TG #246):** pockets and facings of a tile may intentionally leave material uncut in the overlap as a place for the alignment marks; the next tile removes it after repositioning, erasing the marks too. To fold into the tiling phase's docs.
