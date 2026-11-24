@@ -1049,4 +1049,99 @@ describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, ()
     await r.advance(() => false)
     expectOk(await r.result)
   })
+
+  // DF82: holds DFYOM did not send, from the controller side (its hold and cycle-start buttons,
+  // its safety door). Spec: docs/modes/run.md#external-holds-df82
+  /** Mid-run with the controller at real time, the machine moving (`Run`). */
+  async function moving(r: Awaited<ReturnType<typeof realRun>>) {
+    await r.streaming()
+    r.port().setTimeScale(1)
+    await r.advance(() => r.port().emulator.status().state === 'Run')
+    expect(r.done()).toBe(false)
+    return r.t.d.job(r.jobId).unwrap()
+  }
+
+  it("the machine's hold button pauses the run job at Hold:0; job.resume (UI) resumes it", async () => {
+    const r = await realRun()
+    const { t, jobId } = r
+    const handle = await moving(r)
+    r.port().press('feedHold')
+    expect(await waitFor(() => handle.state === 'paused')).toBe(true)
+    expect(r.port().emulator.status().state).toBe('Hold:0')
+    expect(await waitFor(() => t.status().holdBy === 'machine')).toBe(true)
+    expect(t.status()).toMatchObject({ state: 'Hold:0', job: { phase: 'held' } })
+    // agents may not resume a real run (Q50); the UI may
+    expectErrCode(await t.run('job.resume', { jobId }), 'permission.denied')
+    expect(expectOk(await t.run('job.resume', { jobId }, ui))).toEqual({ state: 'running' })
+    expect(handle.state).toBe('running')
+    expect(await waitFor(() => r.port().emulator.status().state === 'Run')).toBe(true)
+    // our own pause, ended by the machine's cycle-start button: the job runs again
+    expect(expectOk(await t.run('job.pause', { jobId }, ui))).toEqual({ state: 'paused' })
+    expect(await waitFor(() => t.status().holdBy === 'app')).toBe(true)
+    r.port().press('cycleStart')
+    expect(await waitFor(() => handle.state === 'running')).toBe(true)
+    expect(await waitFor(() => t.status().job?.phase === 'streaming')).toBe(true)
+    // and the machine's hold, ended by its cycle-start button
+    await r.advance(() => r.port().emulator.status().state === 'Run')
+    r.port().press('feedHold')
+    expect(await waitFor(() => handle.state === 'paused')).toBe(true)
+    r.port().press('cycleStart')
+    expect(await waitFor(() => handle.state === 'running')).toBe(true)
+    r.port().setTimeScale('max')
+    await r.advance(() => false)
+    expectOk(await r.result)
+  })
+
+  it('the safety door pauses the run job; job.resume is refused until the door is closed', async () => {
+    const r = await realRun()
+    const { t, jobId } = r
+    const handle = await moving(r)
+    r.port().door(true)
+    expect(await waitFor(() => handle.state === 'paused')).toBe(true)
+    expect(r.port().emulator.status().state).toBe('Door:1')
+    const e = expectErrCode(await t.run('job.resume', { jobId }, ui), 'run.state')
+    expect(e.message).toContain('the safety door is open: close it, then resume')
+    expect(handle.state).toBe('paused')
+    // closing the door does not resume by itself (GRBL waits for the cycle start)
+    r.port().door(false)
+    expect(await waitFor(() => t.status().state === 'Door:0')).toBe(true)
+    expect(handle.state).toBe('paused')
+    expect(expectOk(await t.run('job.resume', { jobId }, ui))).toEqual({ state: 'running' })
+    r.port().setTimeScale('max')
+    await r.advance(() => false)
+    expectOk(await r.result)
+  })
+
+  it("the machine's hold button pauses a Probe Z job at Hold:0; job.resume finishes the probe", async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings }, timeScale: 'max' }),
+    })
+    expectOk(
+      await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
+    )
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    const port = t.serial!.opened[0]!
+    port.emulator.setProbePlate(t.status().mpos[2] - 20)
+    port.setTimeScale(1)
+    const { jobId } = expectOk(
+      await t.run('run.machine.probeZ', { plateThickness: 5, feed: 300 }, ui),
+    ) as { jobId: string }
+    const handle = t.d.job(jobId).unwrap()
+    expect(await waitFor(() => port.emulator.status().state === 'Run')).toBe(true)
+    port.press('feedHold')
+    expect(await waitFor(() => handle.state === 'paused')).toBe(true)
+    expect(port.emulator.status().state).toBe('Hold:0')
+    expect(await waitFor(() => t.status().holdBy === 'machine')).toBe(true)
+    expect(expectOk(await t.run('job.resume', { jobId }, ui))).toEqual({ state: 'running' })
+    // the machine's own cycle start after its hold resumes the job too (once DFYOM saw it move)
+    expect(await waitFor(() => t.status().state === 'Run')).toBe(true)
+    port.press('feedHold')
+    expect(await waitFor(() => handle.state === 'paused')).toBe(true)
+    port.press('cycleStart')
+    expect(await waitFor(() => handle.state === 'running')).toBe(true)
+    port.setTimeScale('max')
+    const probed = expectOk(await handle.result) as { contact: number[] }
+    expect(probed.contact[2]).toBeLessThan(0)
+  })
 })

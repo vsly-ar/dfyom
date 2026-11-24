@@ -33,6 +33,9 @@ export const RUN_PHASES = [
   'stopped',
 ] as const
 
+/** Who held the machine (DF82, docs/modes/run.md#external-holds-df82): DFYOM's `!`, or not. */
+export const HOLD_SOURCES = ['app', 'machine'] as const
+
 export const ToolChangeSchema = z.object({
   n: z.number().int(),
   name: z.string().max(500),
@@ -79,6 +82,11 @@ export type ConnectedInfo = z.output<typeof ControllerInfoSchema>
 export const HostStatusSchema = z.object({
   /** GRBL's state as reported, e.g. `Hold:0`. */
   state: z.string().max(50),
+  /**
+   * While the state is `Hold`: `app` when DFYOM sent the feed hold, `machine` for a hold it did
+   * not send (the controller's hold button or pin, DF82). Absent at an `M0` pause.
+   */
+  holdBy: z.enum(HOLD_SOURCES).exactOptional(),
   homed: z.boolean(),
   mpos: Vec3Schema,
   wpos: Vec3Schema,
@@ -277,6 +285,8 @@ export const HostMessage = z.discriminatedUnion('type', [
     type: z.literal('phase'),
     jobId: Id,
     phase: z.enum(RUN_PHASES),
+    /** In `held`: who held the run (`machine`: the hold button or the safety door, DF82). */
+    heldBy: z.enum(HOLD_SOURCES).exactOptional(),
     toolChange: ToolChangeSchema.exactOptional(),
     message: z.string().max(500).exactOptional(),
   }),

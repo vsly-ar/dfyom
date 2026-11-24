@@ -4,7 +4,7 @@
  * Doc: docs/modes/run-v0.1.md#commands-and-queries
  */
 import { z } from 'zod'
-import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import type { JobContext, JobDirectory, Services } from '../commands/context'
 import { loadPlan } from '../plan/plan'
@@ -16,6 +16,7 @@ import { setupWorkholding } from '../plan/workholding/setup'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
+import { STILL_STATES } from './grbl/sender'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
 import { Machine } from '../library/machine'
@@ -31,7 +32,7 @@ import {
   Vec3Schema,
   type MachineAction,
 } from './host/protocol'
-import { RunStatusSchema } from './service'
+import { RunStatusSchema, type MachineService } from './service'
 import { runAlignGoto, runAlignTick } from './align-commands'
 import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
 import { settingsCheck, SettingsCheckSchema } from './settings-check'
@@ -106,19 +107,50 @@ async function actStoppable(
   const machine = m.unwrap()
   const stop = () => void machine.machine({ kind: 'reset' })
   ctx.signal.addEventListener('abort', stop, { once: true })
+  let controlling = 0
+  const control = async (kind: 'feedHold' | 'cycleStart'): AsyncAppResult<void> => {
+    controlling++
+    try {
+      return (await machine.machine({ kind })).map(() => undefined)
+    } finally {
+      controlling--
+    }
+  }
   const offPause = holdable
-    ? ctx.onPause({
-        hold: async () => (await machine.machine({ kind: 'feedHold' })).map(() => undefined),
-        resume: async () => (await machine.machine({ kind: 'cycleStart' })).map(() => undefined),
-      })
+    ? ctx.onPause({ hold: () => control('feedHold'), resume: () => control('cycleStart') })
     : undefined
+  const offAdopt = holdable ? adoptMachineHolds(ctx, machine, () => controlling > 0) : undefined
   try {
     const r = await machine.machine(action)
     return r.mapErr((e) => e.withContext(where))
   } finally {
+    offAdopt?.()
     offPause?.()
     ctx.signal.removeEventListener('abort', stop)
   }
+}
+
+/**
+ * A held manual cycle the job did not hold itself (DF82): the machine's hold button, its safety
+ * door. When the machine comes to a standstill in a hold (`Hold:0`, `Door:0`/`Door:1`, entered
+ * from another state) the job is paused; when a cycle start the job did not send moves it again
+ * (`Run`), it runs. Not while its own `job.pause`/`job.resume` is in flight (`controlling`).
+ * Doc: docs/modes/run.md#external-holds-df82
+ */
+function adoptMachineHolds(
+  ctx: JobContext,
+  machine: MachineService,
+  controlling: () => boolean,
+): () => void {
+  let wasStill = STILL_STATES.has(machine.status().state)
+  return machine.onStatus((s) => {
+    const still = STILL_STATES.has(s.state)
+    if (!controlling()) {
+      if (still && !wasStill && !ctx.pause.paused) ctx.adoptPause(true)
+      else if (s.state.startsWith('Run') && ctx.pause.paused) ctx.adoptPause(false)
+    }
+    wasStill = still
+  })
 }
 
 /**

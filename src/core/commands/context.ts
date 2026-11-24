@@ -128,6 +128,13 @@ export interface JobContext extends CommandContext {
    * registered, `job.pause` fails `job.notPausable`. Doc: docs/architecture/commands.md#pausing-a-job
    */
   readonly onPause: (handler: PauseHandler) => () => void
+  /**
+   * For `handled` jobs: the work was held or released without `job.pause`/`job.resume` (a hold
+   * the machine reports that DFYOM did not send: its hold button or safety door, DF82). The job's
+   * state follows (`paused`/`running`, with the lifecycle event), so `job.resume` resumes it as
+   * usual. A no-op for other policies or a finished job. Doc: docs/architecture/commands.md#pausing-a-job
+   */
+  readonly adoptPause: (paused: boolean) => void
 }
 
 /** Holds and resumes a job's work (`JobContext.onPause`). */

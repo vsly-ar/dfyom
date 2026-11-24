@@ -48,6 +48,17 @@ export class VirtualGrblTransport implements ControllerTransport {
     return Promise.resolve(Ok(undefined))
   }
 
+  /**
+   * Acts on the controller from its own side at the current clock time (a pin or button test hook,
+   * e.g. `GrblEmulator.pressButton`), then delivers what it answered and reschedules its events.
+   */
+  controllerSide(act: (emulator: GrblEmulator) => void): void {
+    if (this.closed) return
+    this.emulator.advanceTo(this.clock.now())
+    act(this.emulator)
+    this.pump()
+  }
+
   onData(listener: (bytes: Uint8Array) => void): () => void {
     this.listeners.add(listener)
     this.pump()

@@ -29,7 +29,13 @@ export const runMessages = {
     stopping: 'Stopping',
     hold: 'Feed hold',
     holding: 'Holding…',
+    /** DF82: a hold DFYOM did not send (the controller's feed-hold button or pin). */
+    heldByMachine: 'Held (machine button)',
     door: 'Door open',
+    /** GRBL `Door:0`: the safety door is closed again; Resume continues (DF82). */
+    doorClosed: 'Held (door closed)',
+    /** GRBL `Door:3`: restoring the spindle after the door, then moving on. */
+    doorResuming: 'Resuming…',
     paused: 'Paused by program',
     needsHoming: 'Needs homing',
     toolChange: 'Tool change',

@@ -28,7 +28,7 @@ import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
 import { alignmentGate } from './alignment'
-import type { JobAbout, MachineService, RunningJob, RunPlan } from './service'
+import type { JobAbout, JobListener, MachineService, RunningJob, RunPlan } from './service'
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
 
@@ -172,10 +172,14 @@ function bindJobAbort(m: MachineService, ctx: JobContext): () => void {
  * moves. Before the stream starts, a pause parks the job at the start gate; once it streams,
  * `job.pause` is a feed hold the machine host confirms at `Hold:0` (at a tool change or `M0` wait
  * at once) and `job.resume` a cycle start. A pause while the start is in flight waits for it.
- * Doc: docs/architecture/commands.md#pausing-a-job
+ * A hold DFYOM did not send (the machine's hold button, its safety door) is adopted: the job is
+ * paused once the run is held, and runs again when the machine's cycle start resumes it.
+ * Doc: docs/architecture/commands.md#pausing-a-job, docs/modes/run.md#external-holds-df82
  */
 class RunPause {
   private stage: 'preparing' | 'starting' | 'streaming' | 'over' = 'preparing'
+  /** `job.pause`/`job.resume` in flight: their own phase changes are not adopted. */
+  private controlling = 0
   private gate: { readonly wait: Promise<void>; readonly open: () => void } | undefined
   private startSettled: Promise<void> = Promise.resolve()
   private settleStart: () => void = () => {}
@@ -212,7 +216,27 @@ class RunPause {
     this.settleStart()
   }
 
+  /**
+   * A phase of the stream: a `held` the machine reports by itself pauses the job, `streaming`
+   * after a hold (the machine's cycle start) resumes it (DF82). Ignored while `job.pause` or
+   * `job.resume` is in flight: the dispatcher changes the state then, after its log event.
+   */
+  phase(p: Parameters<JobListener['phase']>[0]): void {
+    if (this.stage === 'over' || this.stage === 'preparing' || this.controlling > 0) return
+    if (p.phase === 'held' && p.heldBy === 'machine') this.ctx.adoptPause(true)
+    else if (p.phase === 'streaming') this.ctx.adoptPause(false)
+  }
+
   private async hold(): AsyncAppResult<void> {
+    this.controlling++
+    try {
+      return await this.holdNow()
+    } finally {
+      this.controlling--
+    }
+  }
+
+  private async holdNow(): AsyncAppResult<void> {
     if (this.stage === 'preparing') {
       if (this.gate === undefined) {
         let open = () => {}
@@ -229,6 +253,15 @@ class RunPause {
   }
 
   private async resume(): AsyncAppResult<void> {
+    this.controlling++
+    try {
+      return await this.resumeNow()
+    } finally {
+      this.controlling--
+    }
+  }
+
+  private async resumeNow(): AsyncAppResult<void> {
     const gate = this.gate
     if (gate !== undefined) {
       this.gate = undefined
@@ -462,7 +495,7 @@ async function checkAndStart(
     { lines: e.lines, sections: programSections(e) },
     {
       progress: (p) => ctx.progress({ done: p.done, total: p.total, label: `${prefix}${p.label}` }),
-      phase: () => {},
+      phase: (p) => pause.phase(p),
     },
     { workZero, machineKey },
     about,

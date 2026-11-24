@@ -421,6 +421,11 @@ export class JobRun<R = unknown> implements JobHandle<R> {
           if (this.pauseHandler === handler) this.pauseHandler = undefined
         }
       },
+      adoptPause: (paused) => {
+        if (this.pausePolicy.kind !== 'handled') return
+        if (paused) this.pause()
+        else this.resume()
+      },
     }
     this.result = started.then(() => this.execute(doc, args, jobCtx))
   }

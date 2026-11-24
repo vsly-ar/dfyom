@@ -98,14 +98,14 @@ SenderProgram = { lines: readonly string[]; sections: readonly { fromLine: numbe
 
 ### Run phases
 
-| Phase                         | Entered by                                   | Left by                                                           |
-| ----------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
-| `streaming`                   | `run()`, resume, continue                    | hold, marker, `M0`, error, alarm, stop, done                      |
-| `held`                        | `hold()` (`!`); state `Hold:1` then `Hold:0` | `resume()` (`~`); `stop()`                                        |
-| `programPause`                | plain `M0` reached (`Hold:0`)                | `continueProgram()` (`~`); `stop()`                               |
-| `toolChange`                  | marker rule                                  | `continueProgram()`; `stop()`. Jog and work-zero commands allowed |
-| `stopping`                    | `stop()`, error                              | `Idle` after the reset → `stopped` / `failed`                     |
-| `done` · `failed` · `stopped` | end of program; error/alarm/connection; stop | – (terminal)                                                      |
+| Phase                         | Entered by                                                                                                                                           | Left by                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `streaming`                   | `run()`, resume, continue                                                                                                                            | hold, marker, `M0`, error, alarm, stop, done                          |
+| `held`                        | `hold()` (`!`); state `Hold:1` then `Hold:0`; a hold not sent (`Hold:0`, `Door:0`/`Door:1`: `heldBy: 'machine'`, [DF82](run.md#external-holds-df82)) | `resume()` (`~`); the machine's cycle start (a later `Run`); `stop()` |
+| `programPause`                | plain `M0` reached (`Hold:0`)                                                                                                                        | `continueProgram()` (`~`); `stop()`                                   |
+| `toolChange`                  | marker rule                                                                                                                                          | `continueProgram()`; `stop()`. Jog and work-zero commands allowed     |
+| `stopping`                    | `stop()`, error                                                                                                                                      | `Idle` after the reset → `stopped` / `failed`                         |
+| `done` · `failed` · `stopped` | end of program; error/alarm/connection; stop                                                                                                         | – (terminal)                                                          |
 
 ### Stop, errors and alarms
 

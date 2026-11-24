@@ -70,6 +70,12 @@ export interface Overrides {
   readonly rapid: number
   readonly spindle: number
 }
+/**
+ * GRBL states in which a held machine stands still: `Hold:0`, and a safety door's `Door:0` (closed,
+ * ready to resume) and `Door:1` (ajar). `Hold:1` and `Door:2` still decelerate (DF82).
+ */
+export const STILL_STATES: ReadonlySet<string> = new Set(['Hold:0', 'Door:0', 'Door:1'])
+
 const NO_OVERRIDES: Overrides = { feed: 100, rapid: 100, spindle: 100 }
 
 /** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
@@ -144,8 +150,16 @@ function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): 
   }
 }
 
+/**
+ * Who held the machine (hardening DF82): `app` – DFYOM sent the `!`; `machine` – a hold DFYOM did
+ * not send (the controller's feed-hold button or pin, or its safety door).
+ */
+export type HoldSource = 'app' | 'machine'
+
 export interface PhaseChange {
   readonly phase: RunPhase
+  /** In `held`: who held the run (`machine`: the hold button or the safety door, DF82). */
+  readonly heldBy?: HoldSource
   readonly toolChange?: ToolChangeInfo
   /** The `M0`'s message (its preceding comment) in `programPause`. */
   readonly message?: string
@@ -276,6 +290,10 @@ interface ActiveRun {
   sendMarker?: boolean
   /** `hold()` while waiting at a tool change or pause: `continueProgram()` waits for `resume()`. */
   holdAfterWait?: boolean
+  /** In `held`: who held it (DF82). */
+  heldBy?: HoldSource | undefined
+  /** In `held`: reports requested after this ordinal follow the hold (a later `Run` is a cycle start). */
+  heldMark?: number | undefined
 }
 
 /** Which wait `continueProgram()` would end: tool change `n`, or the `n`-th program pause. */
@@ -388,6 +406,11 @@ export class GrblSender {
   private lastG54: Vec3 | undefined
   private overrides: Overrides | undefined
 
+  /**
+   * Our last `!` (report ordinal when it went out), until a report requested after it shows the
+   * machine out of Hold: a Hold meanwhile is ours (`holdBy` `app`), any other a `machine` hold (DF82).
+   */
+  private ownHoldMark: number | undefined
   /** Stop sequence: waiting for `Hold:0` after `!` (report ordinal must exceed the mark). */
   private holdMark: number | undefined
   private cancelHoldTimeout: (() => void) | undefined
@@ -425,6 +448,17 @@ export class GrblSender {
   /** The current run's phase, if a program runs. */
   get phase(): RunPhase | undefined {
     return this.run_?.phase
+  }
+
+  /**
+   * Who holds the machine while the last report says `Hold` (DF82): `app` after our `!`,
+   * `machine` for a hold we did not send (the controller's hold button or pin). Not at an `M0`
+   * pause (the program's own hold). Docs: docs/modes/run.md#external-holds-df82
+   */
+  get holdBy(): HoldSource | undefined {
+    if (this.latest?.state.startsWith('Hold') !== true || this.run_?.phase === 'programPause')
+      return undefined
+    return this.ownHoldMark !== undefined ? 'app' : 'machine'
   }
 
   /** The current run's 1-based line (last acknowledged + 1). */
@@ -631,6 +665,7 @@ export class GrblSender {
     }
     if (run?.phase !== 'streaming') return this.phaseError('hold')
     this.writeBytes(Uint8Array.of(REALTIME.hold))
+    run.heldBy = 'app'
     this.setPhase(run, 'held')
     return Ok(undefined)
   }
@@ -850,6 +885,7 @@ export class GrblSender {
   }
 
   private writeBytes(bytes: Uint8Array): void {
+    if (bytes.length === 1 && bytes[0] === REALTIME.hold) this.ownHoldMark = this.pollsWritten
     void this.transport.write(bytes).then((r) => {
       if (r.isErr()) this.connectionLost(`write failed: ${r.unwrapErr().message}`)
     })
@@ -949,6 +985,13 @@ export class GrblSender {
       this.wcoPending = false
     }
     const prev = this.latest
+    // a report requested after our `!` that is no longer Hold: our hold is over (DF82)
+    if (
+      this.ownHoldMark !== undefined &&
+      this.reportsSeen > this.ownHoldMark &&
+      report.state !== 'Hold'
+    )
+      this.ownHoldMark = undefined
     if (report.overrides !== undefined) this.overrides = report.overrides
     const k = this.inches ? 25.4 : 1
     this.latest = {
@@ -1002,17 +1045,36 @@ export class GrblSender {
         if (state === 'Hold:0' || state === 'Idle' || report.state === 'Alarm') this.sendReset()
       return
     }
-    if (run.phase === 'streaming' && state === 'Hold:0') {
+    if (run.phase === 'streaming' && STILL_STATES.has(state)) {
       // a report requested before our `~` still shows the hold we just left
       if (this.resumeMark !== undefined && this.reportsSeen <= this.resumeMark) return
       const oldest = this.inflight[0]
-      if (oldest?.kind === 'program' && isProgramPause(run.program.lines[oldest.index])) {
+      if (
+        state === 'Hold:0' &&
+        oldest?.kind === 'program' &&
+        isProgramPause(run.program.lines[oldest.index])
+      ) {
         run.message =
           pauseText(run.program.lines[oldest.index]) ??
           commentText(run.program.lines[oldest.index - 1]) ??
           'Program paused (M0)'
         this.setPhase(run, 'programPause')
-      } else this.setPhase(run, 'held') // a hold we did not send (door, button)
+      } else {
+        // a hold we did not send (the hold button, the safety door), once motion has stopped (DF82)
+        run.heldBy = 'machine'
+        this.setPhase(run, 'held')
+      }
+      return
+    }
+    if (
+      run.phase === 'held' &&
+      run.heldMark !== undefined &&
+      this.reportsSeen > run.heldMark &&
+      (state === 'Run' || state === 'Idle')
+    ) {
+      // a cycle start we did not send (the controller's cycle-start button, DF82): streams on
+      this.setPhase(run, 'streaming')
+      this.fill()
       return
     }
     if (this.freshMark === undefined || this.reportsSeen <= this.freshMark) return
@@ -1206,6 +1268,8 @@ export class GrblSender {
     const waiting = (p: RunPhase) => p === 'held' || p === 'programPause' || p === 'toolChange'
     if (waiting(run.phase) && !waiting(phase)) this.endWait(run)
     if (!waiting(run.phase) && waiting(phase)) run.waitingSince = this.clock.now()
+    if (phase === 'held') run.heldMark = this.pollsWritten
+    else run.heldBy = run.heldMark = undefined
     run.phase = phase
     this.log.debug({ phase }, 'run phase')
     this.emitPhase(run)
@@ -1221,6 +1285,7 @@ export class GrblSender {
   private emitPhase(run: ActiveRun): void {
     run.events.phase?.({
       phase: run.phase,
+      ...(run.phase === 'held' && run.heldBy !== undefined ? { heldBy: run.heldBy } : {}),
       ...(run.phase === 'toolChange' && run.toolChange !== undefined
         ? { toolChange: run.toolChange }
         : {}),
