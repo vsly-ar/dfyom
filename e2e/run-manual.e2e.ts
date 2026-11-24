@@ -13,7 +13,7 @@
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, idleActivity, test } from './app.fixture'
+import { expect, idleActivity, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -124,7 +124,7 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   await expect(machine.getByText('Idle')).toBeVisible()
   for (const axis of ['X', 'Y', 'Z'])
     await expect(cell(`Machine position ${axis}`)).toHaveText('-1.000')
-  await expect(navigator.getByText(/The work zero is at machine 0/)).toBeVisible()
+  await expect(inspector.getByText(/The work zero is at machine 0/)).toBeVisible()
 
   // DF34: +X in 0.1 mm steps, queued; neither the moving state nor a message moves the jog pad.
   // P6: the refusal below overflows the panel; with always-visible scroll bars (macOS "Show scroll
@@ -153,7 +153,7 @@ test('manual control without a plan: home top right, jog to the travel end, zero
     await expect(machine.getByText('Idle')).toBeVisible()
   }
   await expect(cell('Machine position X')).toHaveText('-10.000')
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   for (const axis of ['X', 'Y', 'Z'])
     await expect(cell(`Work position ${axis}`)).toHaveText(/^0\.000/)
   await expect(cell('Machine position Y')).toHaveText('-11.000')

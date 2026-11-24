@@ -205,17 +205,63 @@ export function formatFeed(mmPerMin: number, units: UnitSystem): string {
   return units === 'inch' ? (mmPerMin / MM_PER_INCH).toFixed(1) : mmPerMin.toFixed(0)
 }
 
-/** How the jog pad jogs: one step per click, or while a button is held (M3). */
-export type JogMode = 'step' | 'continuous'
+// ── Jog step and feed (DF88, docs/conventions/ui.md#jog-position-and-probing-df88) ──────────
 
-/** Jog steps per unit system, in the project unit (inch values are converted to mm to send). */
-export const JOG_STEPS: Readonly<Record<UnitSystem, readonly string[]>> = {
-  mm: ['0.1', '1', '10', '100'],
-  inch: ['0.001', '0.01', '0.1', '1'],
+/** Jog step presets per unit system, in the project unit (the usual inch ladder for inch). */
+export const JOG_PRESETS: Readonly<Record<UnitSystem, readonly number[]>> = {
+  mm: [0.1, 1, 5, 10, 20, 50, 100],
+  inch: [0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1],
+}
+/** The step before one is chosen, in the project unit. */
+export const DEFAULT_JOG_STEP: Readonly<Record<UnitSystem, number>> = { mm: 10, inch: 0.1 }
+/** The largest custom step (mm). */
+export const MAX_JOG_STEP_MM = 1000
+
+/** A length in the project unit → mm. */
+export const toMm = (v: number, units: UnitSystem): number =>
+  units === 'inch' ? v * MM_PER_INCH : v
+/** mm → the project unit. */
+export const fromMm = (mm: number, units: UnitSystem): number =>
+  units === 'inch' ? mm / MM_PER_INCH : mm
+
+/** The step (mm) to jog: the chosen one, else the unit's default. */
+export const jogStepMm = (step: number | undefined, units: UnitSystem): number =>
+  step ?? toMm(DEFAULT_JOG_STEP[units], units)
+
+/** The preset `stepMm` is in this unit system, if any (else it is a custom step). */
+export function jogPresetOf(stepMm: number, units: UnitSystem): number | undefined {
+  const v = fromMm(stepMm, units)
+  return JOG_PRESETS[units].find((p) => Math.abs(p - v) <= p * 1e-9)
 }
 
-export function stepToMm(step: string, units: UnitSystem): number {
-  return Number(step) * (units === 'inch' ? MM_PER_INCH : 1)
+/** A step value in the project unit as the step picker shows it ("0.1", "0.001", "2.5"). */
+export const formatStep = (v: number): string => String(+v.toPrecision(6))
+
+/** Jog feed default and limit when the machine's is unknown (mm/min). */
+export const JOG_FEED_DEFAULT = 2000
+export const JOG_FEED_FALLBACK_MAX = 5000
+
+export interface JogFeedRange {
+  /** mm/min. */
+  readonly min: number
+  readonly max: number
+  readonly step: number
+}
+
+/**
+ * The jog feed slider's range (mm/min): 100 mm/min steps (5 in/min in inch projects) from one
+ * step up to the machine's limit (the lower X/Y max feed rate), else 5000 mm/min.
+ */
+export function jogFeedRange(units: UnitSystem, machineMax: number | undefined): JogFeedRange {
+  const step = units === 'inch' ? 5 * MM_PER_INCH : 100
+  const limit = machineMax ?? JOG_FEED_FALLBACK_MAX
+  return { min: step, max: Math.max(step, Math.floor(limit / step + 1e-9) * step), step }
+}
+
+/** A feed snapped to the range's steps and inside it. */
+export function clampJogFeed(feed: number, r: JogFeedRange): number {
+  const snapped = Math.round(feed / r.step) * r.step
+  return Math.min(r.max, Math.max(r.min, snapped))
 }
 
 type Xyz = readonly [number, number, number]

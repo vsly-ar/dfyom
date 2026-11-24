@@ -11,7 +11,7 @@ import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
 import { useReplica } from '../../shell/ShellContext'
-import { JogPad, useJogMode } from './JogPad'
+import { JogPad, useJogControls } from './JogPad'
 import { activeJob, formatLength, runGates, surfaceName } from './machine-state'
 import { canResume, planRunInfo, resumeChanges, resumePoints } from './plan-info'
 import { useRun, useRunStore, waitKey, type PreflightCheck } from './run-store'
@@ -278,8 +278,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const dismissed = useRun((s) => s.dismissedWait)
-  const jogStep = useRun((s) => s.jogStep)
-  const jogMode = useJogMode()
+  const jog = useJogControls(doc)
   const pending = useRun((s) => s.pending)
   const progress = useRun((s) => s.progress)
   const ids = { jog: useId(), zero: useId() }
@@ -322,16 +321,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
             <li key={s}>{s}</li>
           ))}
         </ol>
-        <JogPad
-          {...jogMode}
-          units={units}
-          step={jogStep}
-          onStep={a.setJogStep}
-          onJog={(axis, mm, feed) => void a.jog(axis, mm, feed)}
-          onCancel={() => void a.jogCancel()}
-          disabledReason={gates.jog}
-          reasonId={ids.jog}
-        />
+        <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} />
         {/* DF69: back over the surface's touch-off spot after jogging away */}
         <TouchOffButton doc={doc} toolChange={tc} gate={gates.jog} reasonId={ids.jog} />
         <WorkZeroButtons

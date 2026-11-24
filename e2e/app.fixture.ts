@@ -276,4 +276,18 @@ export async function closeDialog(dialog: Locator, button = 'Done'): Promise<voi
   await expect(dialog).toBeHidden()
 }
 
+/**
+ * Sets the work zero on X, Y and Z with the "0" buttons in the Run inspector's Position table
+ * (DF88: there is no "Zero X Y Z" button), waiting for each to reach the DRO.
+ */
+export async function zeroXyz(page: Page): Promise<void> {
+  const dro = page
+    .getByRole('complementary', { name: 'Inspector' })
+    .getByRole('table', { name: 'Position' })
+  for (const axis of ['X', 'Y', 'Z']) {
+    await dro.getByRole('button', { name: `Set ${axis} zero` }).click()
+    await expect(dro.getByRole('cell', { name: `Work position ${axis}` })).toHaveText(/^-?0\.0+/)
+  }
+}
+
 export { expect } from '@playwright/test'

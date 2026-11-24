@@ -15,6 +15,8 @@ export interface ConfirmDialogProps {
   title: ReactNode
   /** The consequence: "Its toolpaths and export settings are deleted. This cannot be undone." */
   description: ReactNode
+  /** Below the description, e.g. a "Don't ask again" checkbox (DF88). */
+  extra?: ReactNode
   /** Verb + object naming the action ("Remove plan"). */
   confirmLabel: string
   onConfirm: () => void
@@ -30,6 +32,7 @@ export interface ConfirmDialogProps {
 export function ConfirmDialog({
   title,
   description,
+  extra,
   confirmLabel,
   onConfirm,
   cancelLabel = 'Cancel',
@@ -58,6 +61,7 @@ export function ConfirmDialog({
           <AlertDialog.Description className={styles['body']}>
             {description}
           </AlertDialog.Description>
+          {extra === undefined ? null : <div className={styles['body']}>{extra}</div>}
           <div className={styles['footer']}>
             {/* Radix focuses Cancel first: the safe choice */}
             <AlertDialog.Cancel asChild>

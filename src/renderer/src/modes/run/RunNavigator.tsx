@@ -1,7 +1,9 @@
-// Run mode navigator (ui.md#app-shell: "Run: connection, homing, jog, work zero"): the plan to run
-// and, when it has several, the setup (one program per setup, task E2), the virtual machine connection and its time scale, homing and unlock (confirmed), the jog pad
-// and the work zero. Disabled controls say why: once, in one notice above the homing, jog and
-// work-zero sections (one reason usually disables them all), each control described by its line.
+// Run mode navigator (ui.md#app-shell: "Run: connection, homing, jog, probing"): the plan to run
+// and, when it has several, the setup (one program per setup, task E2), the virtual machine connection and its time scale, homing and unlock (confirmed;
+// the real-machine Home confirmation can be skipped per machine, DF88), the jog pad and probing
+// (the per-axis zero buttons are in the inspector's Position table since DF88). Disabled controls
+// say why: once, in one notice above the homing, jog and probing sections (one reason usually
+// disables them all), each control described by its line.
 // Without a plan ("No plan (manual control)") it connects with a library machine (DF31). Without a
 // project (DF80) only the machine select shows: manual control. The
 // notice keeps a reserved height and a refused action shows at the end of the panel, so messages
@@ -14,11 +16,12 @@ import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
+import { useSettings } from '../../shell/ShellContext'
+import { Icon, Button, Checkbox, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
 import { AlarmPanel, LostConnectionWarning } from './AlarmPanel'
-import { JogPad, useJogMode } from './JogPad'
+import { JogPad, useJogControls, useMachineJog } from './JogPad'
 import { useLibraryItems } from '../plan/usePlan'
-import { actionText, formatLength, isConnected, needsHoming, runGates } from './machine-state'
+import { actionText, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
@@ -88,12 +91,15 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const planId = useRun((s) => s.planId)
   const setupId = useRun((s) => s.setupId)
   const timeScale = useRun((s) => s.timeScale)
-  const jogStep = useRun((s) => s.jogStep)
-  const jogMode = useJogMode()
+  const jog = useJogControls(doc)
+  const machineKey = useMachineJog(doc).key
+  const skipHome = useSettings((s) => s.settings.skipHomeConfirm)
+  const updateSettings = useSettings((s) => s.update)
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [homeOpen, setHomeOpen] = useState(false)
+  const [dontAsk, setDontAsk] = useState(false)
   const connectTo = useRun((s) => s.connectTo)
   const ports = useRun((s) => s.ports)
   const portPath = useRun((s) => s.portPath)
@@ -139,7 +145,6 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
     text,
   }))
   const reasonId = (r: string | null) => reasons.find((x) => x.text === r)?.id ?? ''
-  const atHome = connected && status.homed && status.workZero.every((v) => v === 0)
   const next = manual ? m.readyNoPlan : m.ready
   const refused = actionError === undefined ? undefined : actionText(actionError, units)
   const ids = {
@@ -294,7 +299,16 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}
             // a real machine not yet homed moves to its corner: confirmed once (run.md § Safety 3)
-            onClick={() => (serial && !status.homed ? setHomeOpen(true) : void a.home())}
+            // DF88: unless "Don't ask again" was checked for this library machine
+            onClick={() => {
+              const ask =
+                serial &&
+                !status.homed &&
+                (machineKey === undefined || !skipHome.includes(machineKey))
+              if (!ask) return void a.home()
+              setDontAsk(false)
+              setHomeOpen(true)
+            }}
           >
             {m.home}
           </Button>
@@ -316,8 +330,23 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           onOpenChange={setHomeOpen}
           title={runMessages.homeConfirm.title}
           description={runMessages.homeConfirm.description}
+          {...(machineKey === undefined
+            ? {}
+            : {
+                extra: (
+                  <Checkbox
+                    label={runMessages.homeConfirm.dontAsk}
+                    checked={dontAsk}
+                    onCheckedChange={(c) => setDontAsk(c === true)}
+                  />
+                ),
+              })}
           confirmLabel={runMessages.homeConfirm.confirm}
-          onConfirm={() => void a.home()}
+          onConfirm={() => {
+            if (dontAsk && machineKey !== undefined && !skipHome.includes(machineKey))
+              updateSettings({ skipHomeConfirm: [...skipHome, machineKey] })
+            void a.home()
+          }}
         />
         <ConfirmDialog
           open={unlockOpen}
@@ -330,26 +359,11 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
       </Section>
 
       <Section title={m.jog}>
-        <JogPad
-          {...jogMode}
-          units={units}
-          step={jogStep}
-          onStep={a.setJogStep}
-          onJog={(axis, mm, feed) => void a.jog(axis, mm, feed)}
-          onCancel={() => void a.jogCancel()}
-          disabledReason={gates.jog}
-          reasonId={ids.jog}
-          reasonShown={false}
-        />
+        <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} reasonShown={false} />
       </Section>
 
-      <Section title={m.workZero}>
-        <WorkZeroButtons
-          gate={gates.workZero}
-          reasonId={ids.zero}
-          reasonShown={false}
-          onZero={(axes) => void a.setWorkZero(axes)}
-        />
+      {/* DF88: the zero buttons moved to the Position table; Probe Z is what is left */}
+      <Section title={m.probing}>
         <ProbeZButton
           thickness={plate}
           gate={gates.workZero}
@@ -358,15 +372,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           busy={busy('run.machine.probeZ')}
           onProbe={(t) => void a.probeZ(t)}
         />
-        {connected ? (
-          <p className={styles['hint']}>
-            G54 {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}
-            {runMessages.dro.units[units]}
-            {atHome ? ` · ${m.workZeroAtHome}` : null}
-          </p>
-        ) : (
-          <p className={styles['hint']}>{m.workZeroHint}</p>
-        )}
+        {plate === undefined ? <p className={styles['hint']}>{m.noPlate}</p> : null}
       </Section>
 
       {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
@@ -415,17 +421,6 @@ export function WorkZeroButtons({
             {only === undefined ? m.zeroAxis(axis.toUpperCase()) : runMessages.toolChange.setZ}
           </Button>
         ))}
-        {only === undefined ? (
-          <Button
-            size="lg"
-            icon={<Icon name="work-zero" />}
-            disabled={disabled}
-            {...describe}
-            onClick={() => onZero(['x', 'y', 'z'])}
-          >
-            {m.zeroAll}
-          </Button>
-        ) : null}
       </div>
       {reasonShown ? <Why id={reasonId} reason={gate} /> : null}
     </>

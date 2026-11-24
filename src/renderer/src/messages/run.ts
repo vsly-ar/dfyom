@@ -98,17 +98,22 @@ export const runMessages = {
     step: 'Jog step',
     jogButton: (axis: string, dir: '+' | '−') => `Jog ${axis}${dir}`,
     cancelJog: 'Stop jog',
-    /** Step or continuous (hold to jog) jogging (docs/modes/run-machine.md#machine-readiness-m3). */
-    jogMode: 'Jog mode',
-    jogModeStep: 'Step',
-    jogModeContinuous: 'Continuous',
-    holdHint: 'Hold to jog; release to stop.',
+    /** The step picker (DF88, docs/conventions/ui.md#jog-position-and-probing-df88). */
+    stepCaption: 'Step',
+    stepPresets: 'Jog step presets',
+    stepPreset: (value: string, unit: string) => `${value} ${unit}`,
+    customStep: 'Custom jog step',
+    customPlaceholder: 'Custom',
+    customInvalid: (max: string, unit: string) => `Above 0, at most ${max} ${unit}`,
+    jogFeed: 'Jog feed',
+    /** How the pad works, the pad's description. */
+    jogHint: 'Click to jog one step; hold to jog until released.',
     /** After a real connection was lost without a reset (run-machine.md#lost-connection-m2). */
     lost: 'Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop.',
-    workZero: 'Work zero',
+    /** DF88: only Probe Z is left of the former "Work zero" section. */
+    probing: 'Probing',
+    noPlate: 'Set the machine’s touch plate thickness in the Library to probe Z.',
     zeroAxis: (axis: string) => `Zero ${axis}`,
-    zeroAll: 'Zero X Y Z',
-    workZeroHint: 'Sets the work zero (G54) at the current tool position.',
   },
 
   /** Why a control is disabled (ui.md: disabled controls explain why). */
@@ -242,6 +247,8 @@ export const runMessages = {
     description:
       'It moves to its home corner. Keep hands clear and know where the emergency stop is.',
     confirm: 'Home',
+    /** DF88: per library machine, cleared in Settings. */
+    dontAsk: 'Don’t ask again for this machine',
   },
 
   /** Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4). */
@@ -336,6 +343,10 @@ export const runMessages = {
     /** A coordinate while the position is not known (DF46). */
     unknown: '—',
     unknownHint: 'Position unknown until homed.',
+    /** DF88: the per-axis zero buttons in the table. */
+    zero: '0',
+    setZero: (axis: string) => `Set ${axis} zero`,
+    workZeroHint: 'Set the work zero (G54) per axis at the current tool position with its 0.',
   },
 
   progress: {

@@ -1,11 +1,12 @@
 // Settings dialog: theme (Light / Dark / System), reduced motion, "Allow local agents to connect",
 // the default placement anchor of new pockets and profiles (task F2), the snap grid per unit
-// system (task U3).
+// system (task U3), the jog hotkey style and "Ask again" for the skipped homing confirmations
+// (DF88).
 // Changes apply at once to every window and persist (main's settings store).
 // Doc: docs/conventions/ui.md#settings
 import { useEffect, useId, useState } from 'react'
 import type { LocalHttpState } from '../../../shared/preload-api'
-import { THEMES, type ThemeSetting } from '../../../shared/settings'
+import { JOG_KEY_STYLES, THEMES, type ThemeSetting } from '../../../shared/settings'
 import { Quantity } from '../../../core/quantity/quantity'
 import type { UnitId } from '../../../core/quantity/units'
 import { fail, Ok, type AppResult } from '../../../shared/result'
@@ -53,6 +54,8 @@ export function SettingsDialog(): React.JSX.Element {
   const anchorHint = useId()
   const gridHint = useId()
   const autoApplyHint = useId()
+  const jogKeysHint = useId()
+  const homeHint = useId()
   const delays: readonly number[] = AUTO_APPLY_DELAYS.includes(
     settings.autoApplyDelay as (typeof AUTO_APPLY_DELAYS)[number],
   )
@@ -140,6 +143,46 @@ export function SettingsDialog(): React.JSX.Element {
           </div>
           <p id={autoApplyHint} className={styles['settingHint']}>
             {m.autoApplyHint}
+          </p>
+        </div>
+        <div className={styles['settingRow']}>
+          <span className={styles['settingLabel']} aria-hidden="true">
+            {m.jogKeys}
+          </span>
+          <div className={styles['settingSelect']}>
+            <Select<string>
+              aria-label={m.jogKeys}
+              aria-describedby={jogKeysHint}
+              options={[
+                ...JOG_KEY_STYLES.map((s) => ({ value: s, label: m.jogKeyStyles[s] })),
+                { value: 'custom', label: m.jogKeysCustom, disabled: true },
+              ]}
+              value={settings.jogKeys}
+              onValueChange={(v) => {
+                const style = JOG_KEY_STYLES.find((s) => s === v)
+                if (style !== undefined) update({ jogKeys: style })
+              }}
+            />
+          </div>
+          <p id={jogKeysHint} className={styles['settingHint']}>
+            {m.jogKeysHint}
+          </p>
+        </div>
+        <div className={styles['settingRow']}>
+          <span className={styles['settingLabel']} aria-hidden="true">
+            {m.homeConfirm}
+          </span>
+          <div>
+            <Button
+              disabled={settings.skipHomeConfirm.length === 0}
+              aria-describedby={homeHint}
+              onClick={() => update({ skipHomeConfirm: [] })}
+            >
+              {m.homeConfirmReset}
+            </Button>
+          </div>
+          <p id={homeHint} className={styles['settingHint']}>
+            {m.homeConfirmHint(settings.skipHomeConfirm.length)}
           </p>
         </div>
         <div className={styles['settingRow']}>

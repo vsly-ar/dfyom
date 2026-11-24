@@ -8,7 +8,7 @@
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -158,7 +158,7 @@ test('run: the gCode panel follows the executing line and stops following on a s
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
 
   await inspector.getByRole('button', { name: 'Start run' }).click()
   await page
