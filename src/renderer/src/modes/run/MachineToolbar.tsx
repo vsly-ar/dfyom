@@ -46,6 +46,10 @@ export function MachineToolbar(): React.JSX.Element {
             <span className={styles['virtualChip']}>
               {runMessages.virtualChip(runMessages.timeScale(status.connection.timeScale))}
             </span>
+          ) : status.connection.target === 'serial' && status.connection.port !== undefined ? (
+            <span className={styles['serialChip']}>
+              {runMessages.serialChip(status.connection.port.path)}
+            </span>
           ) : null}
           {streaming ? (
             <Tooltip content={m.feedHold} shortcut={m.feedHoldShortcut}>

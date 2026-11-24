@@ -126,6 +126,27 @@ export function setupFrame(
 }
 
 /**
+ * The part corner a setup's work zero (G54) sits at, named by the part faces that meet there
+ * besides the up face: "front left" for an unrotated top setup, "back left" for the bottom. On
+ * the machine it is always the front-left corner of the up face (docs/modes/plan-v0.2.md
+ * #implementation-task-f6; run-mode setup-change prompt, hardening M7).
+ */
+export function setupZeroCorner(
+  direction: Direction,
+  rotation: WcsRotation,
+  stock: StockSize,
+): string {
+  const o = setupFrame(direction, rotation, stock).origin
+  const zero = (a: number) => Math.abs(a) < 1e-9
+  const axis = direction[1]
+  const words: string[] = []
+  if (axis !== 'z') words.push(zero(o[2]) ? 'top' : 'bottom')
+  if (axis !== 'y') words.push(zero(o[1]) ? 'front' : 'back')
+  if (axis !== 'x') words.push(zero(o[0]) ? 'left' : 'right')
+  return words.join(' ')
+}
+
+/**
  * How the stock sits on the machine for a setup (the run-mode setup-change prompt, task E2): its
  * extents along machine X, Y, Z (`u`/`v` swapped by a 90°/270° turn) and the part faces the
  * operator sees on top (machine +Z), in front (machine −Y) and on the right (machine +X). The work

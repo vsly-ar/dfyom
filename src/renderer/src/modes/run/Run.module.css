@@ -32,6 +32,17 @@
   justify-self: stretch;
 }
 
+/* continuous jog: the hint in the step control's place, at its height (the pad does not move) */
+.holdHint {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
 /* (specific enough to beat the small SegmentedControl's item padding) */
 .jog .jogSteps[data-size] > button {
   flex: 1 1 auto;
@@ -112,6 +123,43 @@
 .notice > div {
   display: grid;
   gap: var(--space-1);
+}
+
+/* serial port select + refresh (run-machine.md#ports-and-the-port-picker) */
+.portRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* the settings check of a real connection failed: runs are refused (run-machine.md) */
+.settingsWarning {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-subtle);
+}
+
+.settingsWarning > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-top: calc((var(--lh-sm) - var(--icon-sm)) / 2);
+  color: var(--warning);
+}
+
+.settingsWarning > div {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+
+.settingsWarning .why {
+  color: var(--text);
 }
 
 .mono {
@@ -286,6 +334,17 @@
   font-size: var(--text-sm);
 }
 
+/* Whose run (M7): plan · setup above the progress bar */
+.runOf {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.runOf .hint {
+  font-weight: 400;
+}
+
 .endNote {
   margin: 0;
 }
@@ -349,7 +408,8 @@
   display: inline-flex;
 }
 
-.virtualChip {
+.virtualChip,
+.serialChip {
   display: inline-flex;
   align-items: center;
   height: 22px;
@@ -414,4 +474,136 @@
 
 .workZeroDot {
   fill: var(--vp-tool);
+}
+
+/* "X0 Y0" next to the work-zero ring (M7) */
+.workZeroLabel {
+  fill: var(--text);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+/* a real machine: solid border (the virtual machine's is dashed) */
+.serialChip {
+  border-style: solid;
+  color: var(--text);
+}
+
+/* the alarm panel and the lost-connection warning at the end of the navigator (run-machine.md M2, M3) */
+.alarmPanel {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-subtle);
+}
+
+.alarmPanel > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-top: calc((var(--lh-sm) - var(--icon-sm)) / 2);
+  color: var(--danger);
+}
+
+/* GRBL's start-up lock (DF46): the next step, not an error */
+.alarmPanel[data-kind='lock'] {
+  border-color: var(--border);
+  background: var(--bg-chrome);
+}
+
+.alarmPanel[data-kind='lock'] > svg {
+  color: var(--info);
+}
+
+.alarmPanel > div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.alarmTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.alarmNext {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.alarmSteps {
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+/* inspector overrides (M6): label, value, −10/+10/100 % in one row; a changed value is marked */
+.overrideRow {
+  display: grid;
+  grid-template-columns: 3.75rem 3rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.overrideButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.overrideRapidsRow {
+  grid-template-columns: 3.75rem minmax(0, 1fr);
+}
+
+.overrideRapids {
+  justify-self: start;
+}
+
+.overrideLabel {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.overrideValue {
+  justify-self: start;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  transition:
+    background-color var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard);
+}
+
+.overrideValue[data-changed] {
+  border-color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.overrideHint {
+  margin: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--warning);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
 }

@@ -42,9 +42,13 @@ export type StatusCode = (typeof STATUS)[keyof typeof STATUS]
 
 export type SpindleDir = 'off' | 'cw' | 'ccw'
 
+/** Motion modes: G0–G3 and the probe cycles G38.2–G38.5 (docs/architecture/grbl.md#probing). */
+export type MotionMode = 0 | 1 | 2 | 3 | 38.2 | 38.3 | 38.4 | 38.5
+const PROBE_MODES: ReadonlySet<number> = new Set([38.2, 38.3, 38.4, 38.5])
+
 /** Modal parser state (gc_state) for the emulated subset. Lengths in mm, machine coordinates. */
 export interface ParserState {
-  readonly motion: 0 | 1 | 2 | 3
+  readonly motion: MotionMode
   readonly metric: boolean
   readonly absolute: boolean
   /** mm/min; 0 = undefined (GRBL has no default feed). */
@@ -90,6 +94,15 @@ export type Action =
   | { readonly kind: 'setWco'; readonly wco: Vec3 }
   | { readonly kind: 'pause' }
   | { readonly kind: 'programEnd' }
+  /** G38.x: probe toward (or `away` from) the workpiece; `noError` for G38.3/G38.5. */
+  | {
+      readonly kind: 'probe'
+      readonly target: Vec3
+      /** mm/min. */
+      readonly feed: number
+      readonly away: boolean
+      readonly noError: boolean
+    }
 
 export interface ParsedBlock {
   readonly state: ParserState
@@ -162,7 +175,14 @@ function readWords(line: string): Result<Words, StatusCode> {
     const value = Number(num[0])
     const int = Math.trunc(value)
     const mantissa = Math.round(100 * (value - int))
-    if (letter === 'G') {
+    if (letter === 'G' && int === 38) {
+      // G38.2–G38.5 (GRBL: any other mantissa is unsupported)
+      if (![20, 30, 40, 50].includes(mantissa)) return Err(STATUS.unsupportedCommand)
+      if (axisCommand !== undefined) return Err(STATUS.axisCommandConflict)
+      axisCommand = 'motion'
+      if (g.has('motion')) return Err(STATUS.modalGroupViolation)
+      g.set('motion', 38 + mantissa / 100)
+    } else if (letter === 'G') {
       const group = G_GROUPS.get(int)
       if (group === undefined) return Err(STATUS.unsupportedCommand)
       // GRBL order: the axis-command conflict is checked in the case, the mantissa after it.
@@ -213,9 +233,9 @@ export function parseBlock(
   const absolute = w.g.has('distance') ? w.g.get('distance') === 90 : state.absolute
   const toMm = (v: number) => (metric ? v : v * MM_PER_INCH)
   const nonModal = w.g.get('nonModal')
-  let motion: ParserState['motion'] = jog ? 1 : state.motion
+  let motion: MotionMode = jog ? 1 : state.motion
   const gm = w.g.get('motion')
-  if (gm !== undefined) motion = gm as ParserState['motion']
+  if (gm !== undefined) motion = gm as MotionMode
 
   const axisWords = AXES.filter((a) => has(a))
   let axisCommand = w.axisCommand
@@ -279,7 +299,20 @@ export function parseBlock(
 
   const actions: Action[] = []
   let moves: Move[] = []
-  if (axisCommand === 'motion') {
+  let probe: Extract<Action, { kind: 'probe' }> | undefined
+  if (axisCommand === 'motion' && PROBE_MODES.has(motion)) {
+    // [G38 errors]: feed undefined, no axis words, target equals the current position
+    if (feed === 0) return Err(STATUS.undefinedFeedRate)
+    if (axisWords.length === 0) return Err(STATUS.noAxisWords)
+    if (target.every((v, i) => v === state.position[i])) return Err(STATUS.invalidTarget)
+    probe = {
+      kind: 'probe',
+      target,
+      feed,
+      away: motion === 38.4 || motion === 38.5,
+      noError: motion === 38.3 || motion === 38.5,
+    }
+  } else if (axisCommand === 'motion') {
     if (motion === 0) {
       if (axisWords.length > 0) moves = [{ kind: 'move', target, rapid: true, feed }]
     } else {
@@ -323,7 +356,9 @@ export function parseBlock(
   if (nonModal === 4) actions.push({ kind: 'dwell', seconds: val('P') ?? 0 })
   if (nonModal === 10) actions.push({ kind: 'setWco', wco })
   actions.push(...moves)
-  const position = moves.length > 0 ? target : state.position
+  if (probe !== undefined) actions.push(probe)
+  // a probe's end is known only after it ran: the emulator syncs the position then
+  const position = moves.length > 0 || probe !== undefined ? target : state.position
 
   let next: ParserState = {
     motion,

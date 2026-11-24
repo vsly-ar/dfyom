@@ -351,6 +351,55 @@ describe('machine host', () => {
     expect(lastStatus(h)?.job).toBeUndefined()
   })
 
+  // docs/modes/z-reference.md#dfyom-run (DF69 with M4)
+  it('a tool change onto a faced floor: the virtual plate lies on it, the zero level follows', async () => {
+    const h = harness()
+    await connectedHost(h, { prepare: { workZero: [-500, -500, -50] } })
+    const lines = [
+      'G21 G90 G54',
+      'G0 Z5',
+      'G1 X50 F3000',
+      'M5',
+      'G0 Z10',
+      'X50 Y30',
+      '(Z0 for tool 2: Facing 1 floor, 0.50 below the stock top)',
+      '(Touch off Z here, X50 Y30: set Z0 on that surface)',
+      '(DFYOM TOOL CHANGE 2: 3 mm flat)',
+      'M0 ;Install T2 3 mm flat, then zero Z on Facing 1 floor',
+      'G90 G94 G17 G21',
+      'G0 X0 Y0',
+      'M30',
+    ]
+    expectOk(await h.request({ type: 'jobStart', jobId: 'j1', program: { lines, sections: [] } }))
+    expect(await h.pump(() => lastStatus(h)?.job?.phase === 'toolChange')).toBe(true)
+    expect(lastStatus(h)?.job?.toolChange).toMatchObject({ n: 2, level: -0.5, at: [50, 30] })
+    expect(lastStatus(h)?.zeroLevel).toBeUndefined()
+    // the plate (5 mm) on the faced floor: G54 Z moves down by the floor's level
+    const probed = expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'probeZ', plateThickness: 5, maxTravel: 25, feed: 300, retract: 2 },
+      }),
+    ) as { workZero: number[] }
+    expect(probed.workZero[2]).toBeCloseTo(-50.5, 3)
+    await h.pump(() => lastStatus(h)?.zeroLevel !== undefined)
+    expect(lastStatus(h)?.zeroLevel).toBe(-0.5)
+    expectOk(
+      await h.request({
+        type: 'jobControl',
+        jobId: 'j1',
+        action: 'continue',
+        expect: { toolChange: 2 },
+      }),
+    )
+    expect(await h.pump(() => h.of('jobEnd').length > 0)).toBe(true)
+    // G54 Z stays on the floor after the run; a zero outside a run is on the stock top again
+    expect(lastStatus(h)?.zeroLevel).toBe(-0.5)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'setWorkZero', axes: ['z'] } }))
+    await h.pump(() => lastStatus(h)?.zeroLevel === undefined)
+    expect(lastStatus(h)?.zeroLevel).toBeUndefined()
+  })
+
   it('pre-flight, hold/resume, stop and the time scale', async () => {
     const h = harness()
     await connectedHost(h, { prepare: { workZero: [-500, -500, -50] } })

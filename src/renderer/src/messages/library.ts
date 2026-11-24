@@ -314,7 +314,12 @@ export const libraryMessages = {
         manualSpindle: 'The spindle is set by hand; a dial router ignores spindle speeds.',
         notPositive: 'Zero or less is not a usable value.',
         allAxes: 'All three axes are needed, and the paste does not give all of them.',
-      } satisfies Record<'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes', string>,
+        zHomesDown: 'Z homes down on this controller ($23); DFYOM machines home Z up.',
+      } satisfies Record<
+        'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes' | 'zHomesDown',
+        string
+      >,
+      onOff: { on: 'on', off: 'off' } as Record<string, string>,
       summary: (read: number, unchanged: number) =>
         `${read} ${read === 1 ? 'setting' : 'settings'} read, ${unchanged} unchanged.`,
       ignored: (list: string) => `Not used by DFYOM: ${list}.`,
@@ -352,6 +357,8 @@ export const libraryMessages = {
     probePlateSize: 'Touch plate size',
     probePlateSizeNote:
       'Optional: the largest extent of your Z touch plate. Touch-off spots leave room for it.',
+    probePlateThickness: 'Touch plate thickness',
+    probePlateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',

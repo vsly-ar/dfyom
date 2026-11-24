@@ -23,6 +23,7 @@ import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
+import { commentLine } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
 import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
 import type { LinkSettings } from '../toolpath/links'
@@ -88,6 +89,12 @@ export interface PlanExportOptions {
   readonly signal?: AbortSignal
   /** Per plan operation while toolpaths are checked or regenerated. */
   readonly progress?: (p: JobProgress) => void
+  /**
+   * Section resume (hardening M5): the plan operation of the setup to start at, with the safe
+   * re-entry (docs/modes/run-machine.md#section-resume-m5); another id is `input.malformed`, rule
+   * `unknownOperation`.
+   */
+  readonly resumeFrom?: string
 }
 
 export interface PlanExport extends GrblExport {
@@ -99,6 +106,11 @@ export interface PlanExport extends GrblExport {
   readonly softLimitChecked: boolean
   /** Links lowered below the clearance height (DF64). */
   readonly lowLinks: number
+  /** The first line (1-based) of each plan operation in the program, in machining order. */
+  readonly operationLines: readonly {
+    readonly planOperationId: string
+    readonly fromLine: number
+  }[]
 }
 
 const neverAborted = new AbortController().signal
@@ -140,6 +152,18 @@ export async function exportPlan(
   )
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()
+  const resumeFrom =
+    opts.resumeFrom === undefined
+      ? undefined
+      : all.findIndex((x) => x.planOperationId === opts.resumeFrom)
+  if (resumeFrom === -1)
+    return fail('input.malformed', `operation ${opts.resumeFrom} is not in this setup`, {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: [
+        { path: ['from'], rule: 'unknownOperation', message: 'not an operation of the setup' },
+      ],
+    })
   if (all.length === 0)
     return fail('plan.check', 'the plan has no operations to export', {
       where,
@@ -197,12 +221,16 @@ export async function exportPlan(
   }
   // DF64: links between operations over the in-process stock (docs/modes/safe-links.md)
   const settings = linkSettings(setup, plan.stock, plan.machine)
+  // a section resume (M5) links only from its operation on: the resumed operation starts as
+  // generated, from the clearance height (safe-links.md#not-covered), and the field ignores the
+  // operations left out (higher, so never less safe)
+  const from = resumeFrom ?? 0
   const links =
     settings.retraction === 'full'
       ? undefined
       : cachedSetupLinks(
-          all,
-          generated.map((g) => g.toolpath),
+          all.slice(from),
+          generated.slice(from).map((g) => g.toolpath),
           settings,
         )
   const hit = links?.collisions[0]
@@ -211,7 +239,7 @@ export async function exportPlan(
       where,
       data: { planId, setupId: setup.id },
       issues: links!.collisions.map((c) => ({
-        path: [all[c.index]!.planOperationId, 'link'],
+        path: [all[from + c.index]!.planOperationId, 'link'],
         rule: 'collision',
         message: `the link into this operation runs at Z ${c.to[2]}, below the safe Z ${c.needed}`,
         params: { z: c.to[2], needed: c.needed },
@@ -219,7 +247,7 @@ export async function exportPlan(
     })
   const operations: ExportOperation[] = all.map((input, i) => {
     const { ids, label } = generated[i]!
-    const toolpath = links?.toolpaths[i] ?? generated[i]!.toolpath
+    const toolpath = (i < from ? undefined : links?.toolpaths[i - from]) ?? generated[i]!.toolpath
     const positions: Record<string, string> = {}
     for (const id of ids) {
       const text = positionComment(part, id)
@@ -272,8 +300,13 @@ export async function exportPlan(
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
+      ...(resumeFrom === undefined ? {} : { resumeFrom }),
     },
-    { generator: opts.generator ?? programGenerator(services.appVersion) },
+    {
+      generator: opts.generator ?? programGenerator(services.appVersion),
+      // a resume always waits at its tool (run-machine.md#section-resume-m5)
+      ...(resumeFrom === undefined ? {} : { firstToolLoaded: false }),
+    },
   )
   return exported
     .map((e) => ({
@@ -282,6 +315,11 @@ export async function exportPlan(
       regenerated,
       softLimitChecked: opts.workZero !== undefined,
       lowLinks: links?.summary.low ?? 0,
+      operationLines: operationLines(
+        e.lines,
+        operations.slice(resumeFrom ?? 0).map((o) => o.label),
+        all.slice(resumeFrom ?? 0).map((x) => x.planOperationId),
+      ),
     }))
     .mapErr((e) => e.withContext(where, { planId }))
 }
@@ -302,6 +340,26 @@ function programZRef(
 ): { zRef?: NonNullable<ExportOperation['zRef']> } {
   if (z === undefined) return {}
   return { zRef: { label: zRefText(z), level: z.level, at: [z.at[0], z.at[1]], top: z.top } }
+}
+
+/**
+ * Each operation's first line (1-based): its label comment, matched in machining order (a label
+ * text may repeat; position comments come after their operation's label).
+ */
+function operationLines(
+  lines: readonly string[],
+  labels: readonly string[],
+  ids: readonly string[],
+): { planOperationId: string; fromLine: number }[] {
+  const out: { planOperationId: string; fromLine: number }[] = []
+  let at = 0
+  labels.forEach((label, k) => {
+    const i = lines.indexOf(commentLine(label), at)
+    if (i < 0) return
+    out.push({ planOperationId: ids[k]!, fromLine: i + 1 })
+    at = i + 1
+  })
+  return out
 }
 
 /**

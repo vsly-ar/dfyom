@@ -65,13 +65,18 @@ interface LinksRow {
 const list = (s: PlanSetup, planId: string) =>
   s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[]; links: LinksRow[] }
 
-async function exported(s: PlanSetup, planId: string) {
+async function exported(s: PlanSetup, planId: string, resumeFrom?: string) {
   return expectOk(
-    await exportPlan(s.d.doc, planId, {
-      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
-      toolpaths: createToolpathCache(),
-      region2d,
-    }),
+    await exportPlan(
+      s.d.doc,
+      planId,
+      {
+        workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+        toolpaths: createToolpathCache(),
+        region2d,
+      },
+      resumeFrom === undefined ? {} : { resumeFrom },
+    ),
   )
 }
 
@@ -156,5 +161,19 @@ describe('export with minimum retraction', () => {
     // the cut lines are the same
     const cuts = (t: string) => t.split('\n').filter((l) => /^G1|^G2|^G3/.test(l))
     expect(cuts(withoutAppVersion(min.text))).toEqual(cuts(withoutAppVersion(full.text)))
+  })
+
+  it('a section resume starts its operation as generated, from the clearance height (M5)', async () => {
+    const { s, planId, setupId } = await onePlan()
+    await s.run('plan.setup.update', { planId, setupId, clampHeight: '0' })
+    const second = s.plan(planId).setups[0]!.operations[2]!.id
+    const resumed = await exported(s, planId, second)
+    // one link left (none: the resumed operation is the last), nothing lowered
+    expect(resumed.lowLinks).toBe(0)
+    await s.run('plan.setup.update', { planId, setupId, retraction: 'full' })
+    const full = await exported(s, planId, second)
+    // the same program but for the header's clamp line
+    const body = (t: string) => t.slice(t.indexOf('G90'))
+    expect(body(resumed.text)).toBe(body(full.text))
   })
 })

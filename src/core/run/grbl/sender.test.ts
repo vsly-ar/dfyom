@@ -287,6 +287,8 @@ describe('tool changes and pauses', () => {
         name: '3 mm flat',
         surface: 'Facing 1 floor, 0.50 below the stock top',
         spot: 'X50 Y30',
+        level: -0.5,
+        at: [50, 30],
       },
     })
     await drive(r.clock, r.sender.freshStatus())
