@@ -177,6 +177,20 @@ export const planMessages = {
     noTime: 'Generate toolpaths to see the time.',
     carried: (setup: string) => `Stays in the spindle from ${setup}: no change at the setup start.`,
     refused: (message: string) => `Not moved: ${message}`,
+    /** DF69: the tool run's Z reference surface (docs/modes/z-reference.md#ui). */
+    zFrom: 'Z from',
+    /** "Facing 1 floor · −0.5 mm" */
+    zValue: (label: string, level: string) => `${label} · ${level}`,
+    zNone: 'No flat surface',
+    zButton: (tool: string, value: string, chosen: boolean) =>
+      `Z from for ${tool}: ${value}${chosen ? '' : ' (default)'}. Choose the surface`,
+    zDefault: (value: string | undefined) =>
+      value === undefined ? 'Default' : `Default (${value})`,
+    zDefaultHint: 'The top face, else the last facing floor, else the largest flat floor',
+    zCandidate: (area: string, spot: string, small: boolean) =>
+      `Touch off at ${spot}, flat patch ${area}${small ? ', too small for the touch plate' : ''}`,
+    zSurfaces: 'Flat surfaces',
+    zRefused: (message: string) => `Not changed: ${message}`,
   },
 
   operations: {
@@ -473,7 +487,7 @@ const NO_NAMES: FindingNames = {
 }
 
 /** An area (mm²) in the project's units: "12.3 mm²", "0.0191 in²". */
-const areaText = (mm2: number, units: UnitSystem): string =>
+export const areaText = (mm2: number, units: UnitSystem): string =>
   units === 'mm'
     ? `${Math.round(mm2 * 10) / 10} mm²`
     : `${Math.round((mm2 / 645.16) * 10000) / 10000} in²`
