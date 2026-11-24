@@ -11,6 +11,7 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
+import type { UnitSystem } from '../project/document'
 import type { SessionCallResult } from './session'
 
 /** Reserved arg of the summarized reads: `"summary"` (default) or `"full"`. */
@@ -54,6 +55,8 @@ export interface ShaperSession {
   resultSchema(name: string): z.ZodType | undefined
   /** A library snapshot of the bound project (`ProjectDoc.snapshots`), to name tools. */
   snapshot?(id: string): unknown
+  /** The bound project's unit system (default mm). */
+  unitSystem?(): UnitSystem | undefined
 }
 
 type Obj = Record<string, unknown>
@@ -269,8 +272,11 @@ export class ResultShaper {
     const design = plan['design'] as Obj
     const taken = isObj(design['taken']) ? design['taken'] : {}
     let planSeconds: number | null = 0
+    const inch = this.session.unitSystem?.() === 'inch'
     const setups = ((plan['setups'] as Obj[]) ?? []).map((s) => {
       let setupSeconds: number | null = 0
+      // DF59: the per-side maximum of the current toolpaths' reach past the stock (mm)
+      let reach: Record<Side, number> | null = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 }
       const operations = ((s['operations'] as Obj[]) ?? []).map((o) => {
         const id = o['id'] as string
         const listed = ops.get(id)
@@ -279,6 +285,10 @@ export class ResultShaper {
         const seconds = path?.stats?.estimatedSeconds ?? null
         if (seconds === null || tp?.['stale'] === true) setupSeconds = null
         else if (setupSeconds !== null) setupSeconds += seconds
+        const reachOf = isObj(tp?.['overreach']) ? (tp['overreach'] as Record<Side, number>) : null
+        if (reachOf === null || tp?.['stale'] === true) reach = null
+        else if (reach !== null)
+          for (const k of SIDES) reach[k] = Math.max(reach[k], reachOf[k] ?? 0)
         const feeds = isObj(listed?.['feeds'])
           ? Object.fromEntries(
               Object.entries(listed['feeds'] as Obj).map(([k, f]) => [
@@ -313,6 +323,7 @@ export class ResultShaper {
         rotation: s['rotation'] ?? 0,
         clearanceHeight: s['clearanceHeight'],
         retractHeight: s['retractHeight'],
+        overreach: reach === null ? null : overreachIn(reach, inch),
         operations,
         seconds: setupSeconds,
       }
@@ -338,6 +349,19 @@ export class ResultShaper {
       detail: FULL_HINT,
     }
   }
+}
+
+type Side = 'xMin' | 'xMax' | 'yMin' | 'yMax'
+const SIDES: readonly Side[] = ['xMin', 'xMax', 'yMin', 'yMax']
+
+/**
+ * A setup's reach past the stock (mm) in the project's units, rounded up to 0.1 mm or 0.01 in
+ * (DF59, llm-api.md#result-size).
+ */
+function overreachIn(mm: Record<Side, number>, inch: boolean): Record<Side, number> {
+  const [per, step] = inch ? [1 / 25.4, 100] : [1, 10]
+  const up = (v: number) => Math.ceil(v * per * step - 1e-9) / step || 0
+  return { xMin: up(mm.xMin), xMax: up(mm.xMax), yMin: up(mm.yMin), yMax: up(mm.yMax) }
 }
 
 /** Identity of a DFM warning: code, operation, parameter, and its index among equal ones. */

@@ -147,6 +147,11 @@ describe('plan.export', () => {
     expect(text).toContain('(Work zero G54 X0 Y0: front-left corner of the top face)')
     expect(text).toContain('(Z0 on the top face: the stock surface facing up)')
     expect(text).toMatch(/^\(Stock X \d+ Y \d+ Z \d+ mm on the machine\)$/m)
+    // DF59: the test part's facing overshoots the stock on every side
+    expect(text).toMatch(
+      /^\(Tool reaches past stock: left [\d.]+, right [\d.]+, front [\d.]+, back [\d.]+ mm\)$/m,
+    )
+    expect(text).toContain('(Keep clamps clear of those sides, below clearance Z 10 mm)')
     const toolNames = plan.snapshots.filter((c) => c.kind === 'tool').map((c) => c.values.name)
     for (const name of toolNames) expect(text).toContain(name)
     const design = plan.design.part.operations

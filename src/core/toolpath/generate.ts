@@ -21,7 +21,9 @@ import { toolpathGenerate } from '../workers/tasks'
 import type { ToolpathCache } from './cache'
 import { toGeneratorInputs } from './inputs'
 import type { Toolpath } from './model'
+import { toolpathOverreach, type Overreach } from './overreach'
 import { ToolpathSchema } from './schemas'
+import { setupOrientation } from './wcs'
 
 const ErrorSchema = AppErrorDataSchema
 
@@ -46,6 +48,24 @@ export function cacheOf(
 /** What to try when the geometry kernel fails on an operation (llm-api.md#a7-refusals-that-say-what-to-do). */
 const GEOMETRY_HINT =
   'the 2D offset failed at this geometry: change a size, offset or stepover of the operation slightly (e.g. 0.01 mm) and generate again'
+
+/**
+ * How far the tool of `input` reaches past the stock sides along `toolpath` (hardening DF59):
+ * docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+ */
+export function inputOverreach(input: PlanOperationInput, toolpath: Toolpath): Overreach {
+  const stock = {
+    length: input.stock.length.canonical,
+    width: input.stock.width.canonical,
+    thickness: input.stock.thickness.canonical,
+  }
+  const size = setupOrientation(input.setup.direction, input.setup.rotation, stock).size
+  return toolpathOverreach(toolpath, input.tool.diameter.canonical, [size[0], size[1]])
+}
+
+const OverreachSchema = z
+  .object({ xMin: z.number(), xMax: z.number(), yMin: z.number(), yMax: z.number() })
+  .describe('mm the tool reaches past the stock left, right, front, back on the machine')
 
 const failed = (planOperationId: string, e: AppError): OperationOutcome => ({
   planOperationId,
@@ -170,6 +190,7 @@ export const toolpathGet = defineQuery({
     pendingApply: z
       .boolean()
       .describe("The plan's inputs have changes not applied yet: regenerated on Apply"),
+    overreach: OverreachSchema.nullable().describe('Of the current toolpath; null when stale'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.toolpath.get'
@@ -201,11 +222,17 @@ export const toolpathGet = defineQuery({
       [args.planOperationId],
       ctx.services.region2d,
     )
-    const hash = inputs.isOk() ? inputs.unwrap()[0]?.inputHash : undefined
-    const current = hash === undefined ? undefined : cache.unwrap().get(hash)
+    const input = inputs.isOk() ? inputs.unwrap()[0] : undefined
+    const current = input === undefined ? undefined : cache.unwrap().get(input.inputHash)
     const pendingApply = planPendingApply(plan, ctx.apply?.pending() ?? [])
-    if (current !== undefined) return Ok({ toolpath: current, stale: false, pendingApply })
+    if (input !== undefined && current !== undefined)
+      return Ok({
+        toolpath: current,
+        stale: false,
+        pendingApply,
+        overreach: inputOverreach(input, current),
+      })
     const last = cache.unwrap().last(args.planId, args.planOperationId)
-    return Ok({ toolpath: last?.toolpath ?? null, stale: true, pendingApply })
+    return Ok({ toolpath: last?.toolpath ?? null, stale: true, pendingApply, overreach: null })
   },
 })

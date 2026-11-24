@@ -96,6 +96,8 @@ The agent test of 2026-11-23 (TG #232) exported a bottom and a top setup whose h
 (Work zero G54 X0 Y0: front-left corner of the top face)
 (That corner sits front left on the machine)
 (Z0 on the top face: the stock surface facing up)
+(Tool reaches past stock: left 7, right 7, front 1, back 1 mm)
+(Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: …)
 ```
@@ -105,6 +107,7 @@ The agent test of 2026-11-23 (TG #232) exported a bottom and a top setup whose h
 - **Faces:** the part faces up, towards the operator (−Y) and on the right (+X), as the run-mode setup-change picture names them ([plan-v0.2.md § Implementation (task E2)](../modes/plan-v0.2.md#implementation-task-e2)).
 - **From setup 1** (setups 2 and later): the move from setup 1's orientation, from the two setups' machine axes (`R = A_k · A_1ᵀ`, rows of `setupFrame`). First the side that comes up: none, `flip about X` (the up face goes down) or `tip its front|back|right|left side up` (sides as they sat in setup 1, front = towards the operator); then the rest as a turn about the spindle axis: `turn 90 deg CCW`, `turn 180 deg`, `turn 90 deg CW` (seen from above). A flip about X followed by a half turn is written `flip about Y`; no change is `same orientation`. A test checks every pair of directions and rotations: the described moves, applied in order, give the second setup's orientation.
 - **Work zero:** the part corner at G54 X0 Y0, named by the faces that meet there besides the up face (`setupCorner`, the setup panel's corner name, now in core): on the machine it is always the front-left corner of the up face. Z0 is on the up face. When the user may choose the setup zero (alignment proposal, Q61), these lines follow that choice.
+- **Tool reach past the stock** (hardening DF59, interim until workholding): how far the tool reaches beyond each side of the stock outline on the machine, from the moves below the stock top of this program's toolpaths (`setupOverreach`, [plan-v0.2.md § Tool reach past the stock](../modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim)): `Tool reaches past stock:` with the sides that reach (left = X−, right = X+, front = Y−, back = Y+), each rounded up to 0.1 mm (0.01 in), then `Keep clamps clear of those sides, below clearance Z <h> <unit>`. Within the outline: `Tool stays within the stock outline` and `Keep clamps below clearance Z <h> <unit>`. A line longer than 70 bytes (four sides with large values) is split into an X line and a Y line. Absent without `overreach` in the header data (post unit tests).
 - **GRBL-safe:** each a comment line through `commentLine` (printable ASCII, no `()`, `;` or realtime characters, at most 70 bytes); the words are fixed English like the other header comments. Programs without `setup` (post unit tests) keep `(Setup: name)`.
 - **Goldens:** every exit-criteria program and the per-setup goldens gained these lines; nothing below the header changed.
 

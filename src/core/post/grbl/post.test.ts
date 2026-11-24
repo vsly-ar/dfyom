@@ -482,6 +482,46 @@ describe('postGrbl', () => {
     }
   })
 
+  // docs/architecture/grbl.md#setup-header-hardening-df58 (DF59 reach lines)
+  it('writes how far the tool reaches past the stock, rounded up, and the clamp note', () => {
+    const base = {
+      number: 1,
+      count: 1,
+      up: 'top',
+      front: 'front',
+      right: 'right',
+      corner: 'front left',
+      stock: [100, 50, 20] as Vec3,
+    }
+    const reach = (
+      overreach: { xMin: number; xMax: number; yMin: number; yMax: number },
+      units: 'mm' | 'in' = 'mm',
+    ) =>
+      expectOk(postGrbl(program([tool(), spin()], { setup: { ...base, overreach }, units }), OPTS))
+        .split('\n')
+        .filter((l) => /Tool (reaches|stays)|clamps/.test(l))
+    expect(reach({ xMin: 0, xMax: 0, yMin: 0, yMax: 0 })).toEqual([
+      '(Tool stays within the stock outline)',
+      '(Keep clamps below clearance Z 10 mm)',
+    ])
+    expect(reach({ xMin: 4.2426, xMax: 4.2, yMin: 0, yMax: 0 })).toEqual([
+      '(Tool reaches past stock: left 4.3, right 4.2 mm)',
+      '(Keep clamps clear of those sides, below clearance Z 10 mm)',
+    ])
+    expect(reach({ xMin: 0, xMax: 0, yMin: 0, yMax: 25.4 }, 'in')).toEqual([
+      '(Tool reaches past stock: back 1 in)',
+      '(Keep clamps clear of those sides, below clearance Z 0.3937 in)',
+    ])
+    // four long sides do not fit one line: an X line and a Y line
+    const long = reach({ xMin: 123.41, xMax: 123.41, yMin: 123.41, yMax: 123.41 })
+    expect(long).toEqual([
+      '(Tool reaches past stock: left 123.5, right 123.5 mm)',
+      '(Tool reaches past stock: front 123.5, back 123.5 mm)',
+      '(Keep clamps clear of those sides, below clearance Z 10 mm)',
+    ])
+    for (const line of long) expect(line.length).toBeLessThanOrEqual(70)
+  })
+
   it('tool change: M5, retract, marker, M0, retract in the new WCS, spindle; forgets the position', () => {
     const lines = expectOk(
       postGrblLines(

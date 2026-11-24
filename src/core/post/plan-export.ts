@@ -17,8 +17,9 @@ import { setupHeader } from '../plan/setup-header'
 import { chooseSetup } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
-import { cacheOf, ensureToolpath } from '../toolpath/generate'
+import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
+import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { machineKeyOf } from '../run/machine-key'
 
@@ -119,6 +120,7 @@ export async function exportPlan(
     })
   const total = all.length
   const operations: ExportOperation[] = []
+  const reaches: Overreach[] = []
   const regenerated: string[] = []
   const part = plan.dto.design.part
   for (const [i, input] of all.entries()) {
@@ -150,6 +152,7 @@ export async function exportPlan(
       if (text !== undefined) positions[id] = text
     }
     const toolpath = tp.unwrap().toolpath
+    reaches.push(inputOverreach(input, toolpath))
     // a plan operation of one design operation: its passes name it (joined ones already do)
     const only = ids.length === 1 ? ids[0]! : undefined
     operations.push({
@@ -172,11 +175,16 @@ export async function exportPlan(
       setup: {
         name: setup.name,
         clearanceHeight: all[0]!.setup.clearanceHeight,
-        header: setupHeader(plan.setups, setupIndex, {
-          length: plan.stock.length.canonical,
-          width: plan.stock.width.canonical,
-          thickness: plan.stock.thickness.canonical,
-        }),
+        header: setupHeader(
+          plan.setups,
+          setupIndex,
+          {
+            length: plan.stock.length.canonical,
+            width: plan.stock.width.canonical,
+            thickness: plan.stock.thickness.canonical,
+          },
+          maxOverreach(reaches),
+        ),
       },
       operations,
       machine: plan.machine,

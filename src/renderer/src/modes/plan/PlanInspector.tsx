@@ -121,6 +121,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         plan={plan}
         setup={setup}
         warnings={data?.warnings ?? []}
+        toolpaths={data?.toolpaths ?? {}}
       />
     )
   return op === undefined ? (

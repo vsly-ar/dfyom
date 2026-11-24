@@ -321,6 +321,53 @@ describe('Setup panel', () => {
     await expectNoAxeViolations()
   })
 
+  // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+  it('shows how far the tool reaches past the stock and keeps clamps below the clearance', async () => {
+    const t = await renderSetups()
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Setup' })
+    // toolpaths without a reach (outdated or none): not known yet
+    expect(within(insp).getByText('Past the stock')).toBeInTheDocument()
+    expect(
+      within(insp).getByText('Generate toolpaths to see where the tool leaves the stock.'),
+    ).toBeInTheDocument()
+    expect(
+      within(insp).getByLabelText('Clearance height', { selector: 'input' }),
+    ).toHaveAccessibleDescription(
+      'Keep clamps lower than 10 mm above the stock top; clamps are not modelled yet.',
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('names the sides the tool reaches past, rounded up, once every toolpath is current', async () => {
+    const t = await renderSetups()
+    t.bridge.handle('plan.toolpath.get', () =>
+      ok({
+        toolpath,
+        stale: false,
+        overreach: { xMin: 4.2426, xMax: 4.2426, yMin: 0, yMax: 0 },
+      }),
+    )
+    // a revision re-reads the toolpaths
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    const name = await within(insp).findByLabelText('Setup name', { selector: 'input' })
+    await t.user.clear(name)
+    await t.user.type(name, 'Datum{Enter}')
+    expect(
+      await within(insp).findByText('Left 4.3 mm, right 4.3 mm; keep clamps clear of these sides.'),
+    ).toBeInTheDocument()
+    t.bridge.handle('plan.toolpath.get', () =>
+      ok({ toolpath, stale: false, overreach: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 } }),
+    )
+    await t.user.clear(name)
+    await t.user.type(name, 'Bottom{Enter}')
+    expect(
+      await within(insp).findByText('The tool stays within the stock outline.'),
+    ).toBeInTheDocument()
+  })
+
   it('exports the window’s setup and previews only its toolpaths, placed by its WCS', async () => {
     // drill feeds entered, so the top setup has no errors (as Plan.test.tsx)
     const t = await renderSetups(async (s, planId) => {
