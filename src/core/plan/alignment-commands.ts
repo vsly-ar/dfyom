@@ -13,6 +13,7 @@ import type { UnitSystem } from '../project/document'
 import { defineCommand } from '../commands/define'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { ProjectDoc } from '../project/document'
+import { planFlipAxes } from './aids'
 import { alignmentFindings, setupAlignment, setupZero } from './alignment'
 import {
   ALIGNMENT_POINTS_MAX,
@@ -25,6 +26,8 @@ import { findPlanDTO, loadPlanDTO, type LoadedPlan } from './plan'
 import { PlanIdSchema, PlanRecordIdSchema, type PlanDTO } from './plan.dto'
 import { unknownSetup } from './setups'
 import { checkAllowed } from './status'
+
+const Xy = z.tuple([z.number(), z.number()])
 
 /** A setup's zero and points as `plan.warning.list` and `plan_get` show them (mm). */
 export const SetupAlignmentSchema = z.object({
@@ -40,21 +43,52 @@ export const SetupAlignmentSchema = z.object({
         .tuple([z.number(), z.number()])
         .nullable()
         .describe('Expected X, Y in the WCS (mm); null = source missing'),
+      oneAxis: z
+        .enum(['x', 'y'])
+        .optional()
+        .describe('A mark on a side face: it checks this axis only (Q108)'),
     }),
   ),
+  flipAxes: z
+    .array(
+      z.object({
+        from: Xy,
+        to: Xy,
+        otherSetupId: z.string().describe('The setup on the other side of the flip'),
+      }),
+    )
+    .optional()
+    .describe('Flip axes of registration holes, in the setup frame (mm; Q106)'),
 })
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000 || 0
 
-/** The view of every setup that has a zero or points (empty for a plain plan). */
+/** The view of every setup that has a zero, points or a flip axis (empty for a plain plan). */
 export function alignmentView(
   plan: LoadedPlan,
   port?: Region2dPort,
 ): z.output<typeof SetupAlignmentSchema>[] {
+  const axes = planFlipAxes(plan)
+  const xy = (p: readonly [number, number]): [number, number] => [r3(p[0]), r3(p[1])]
+  const axesOf = (id: string) => [
+    ...axes
+      .filter((x) => x.setupId === id)
+      .map((x) => ({ from: xy(x.axis.from), to: xy(x.axis.to), otherSetupId: x.laterSetupId })),
+    ...axes
+      .filter((x) => x.laterSetupId === id)
+      .map((x) => ({
+        from: xy(x.axis.later.from),
+        to: xy(x.axis.later.to),
+        otherSetupId: x.setupId,
+      })),
+  ]
   return plan.setups
-    .filter((s) => s.zero !== undefined || (s.alignment?.length ?? 0) > 0)
+    .filter(
+      (s) => s.zero !== undefined || (s.alignment?.length ?? 0) > 0 || axesOf(s.id).length > 0,
+    )
     .map((s) => {
       const a = setupAlignment(plan, s, port)
+      const flips = axesOf(s.id)
       return {
         setupId: s.id,
         zero: [r3(a.zero[0]), r3(a.zero[1])],
@@ -64,7 +98,9 @@ export function alignmentView(
           name: p.name,
           kind: p.kind,
           wcs: p.wcs === undefined ? null : [r3(p.wcs[0]), r3(p.wcs[1])],
+          ...(p.oneAxis === undefined ? {} : { oneAxis: p.oneAxis }),
         })),
+        ...(flips.length === 0 ? {} : { flipAxes: flips }),
       }
     })
 }

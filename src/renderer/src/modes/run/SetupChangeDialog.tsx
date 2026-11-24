@@ -3,7 +3,9 @@
 // steps (turn and clamp the stock, set the work zero at the front-left corner of the new top or
 // where the setup moved it, DF78 N7; start), the zero to set and the part corner it is (M7), jog
 // and work-zero controls inside, "Start setup n" as the only primary action and the run dialogs'
-// Stop. It never continues by itself; "Close (start later)" puts it off to the inspector.
+// Stop. It never continues by itself; "Close (start later)" puts it off to the inspector. A setup
+// with alignment points aligns in the docked Run panel (AlignmentPanel, Q107 assumed): the prompt
+// says so with "Align in the Run panel" and keeps "Start setup n" disabled until it is confirmed.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
 import { useId } from 'react'
@@ -20,7 +22,7 @@ import { useRun, useRunStore } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
-import { AlignmentStep, stepOf } from './AlignmentStep'
+import { stepOf } from './AlignmentStep'
 import styles from './Run.module.css'
 
 const m = runMessages.setupChange
@@ -156,13 +158,28 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           {runMessages.dro.units[units]}
         </dd>
       </dl>
-      <AlignmentStep
-        setupId={info.setup.id}
-        points={points}
-        gate={gates.jog}
-        reasonId={ids.jog}
-        units={units}
-      />
+      {points === 0 ? null : (
+        // Q107 (assumed): the step is docked in the Run inspector, beside the DRO and the jog pad
+        <section className={styles['alignHandover']} aria-label={m.align.title}>
+          <h3 className={styles['alignTitle']}>
+            <Icon name="pick" /> {m.align.title}
+          </h3>
+          {aligned ? (
+            <p className={styles['alignDone']} role="status">
+              <Icon name="success" /> {m.align.handoverDone}
+            </p>
+          ) : (
+            <>
+              <p className={styles['hint']}>{m.align.handover(points)}</p>
+              <div className={styles['buttons']}>
+                <Button icon={<Icon name="pick" />} onClick={() => a.showAlignPanel()}>
+                  {m.align.openPanel}
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
       {startGate === null ? null : (
         <p id={ids.start} className={styles['why']}>
           {startGate}
@@ -195,6 +212,7 @@ export function SetupPicture({
   zeroText,
   points = [],
   current,
+  compact = false,
 }: {
   orientation: SetupOrientation
   /** DF78 (N7): the work zero from the front-left corner of the top (mm); the ring is drawn there. */
@@ -209,6 +227,8 @@ export function SetupPicture({
   }[]
   /** The alignment step's current entry (`'zero'` or a point id): highlighted. */
   current?: string | undefined
+  /** In the alignment panel (Q107): narrower, without the faces legend. */
+  compact?: boolean
 }): React.JSX.Element {
   const [X, Y, Z] = orientation.size
   const corners: P3[] = [
@@ -239,7 +259,7 @@ export function SetupPicture({
   const label = (d: keyof typeof DIRECTION_LABEL) => DIRECTION_LABEL[d]
   const ring = at([zero[0], zero[1], 0]).split(',').map(Number) as [number, number]
   return (
-    <figure className={styles['setupPicture']}>
+    <figure className={styles['setupPicture']} data-compact={compact || undefined}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
@@ -307,7 +327,7 @@ export function SetupPicture({
           {m.zeroLabel}
         </text>
       </svg>
-      <figcaption>
+      <figcaption hidden={compact}>
         <dl className={styles['facts']}>
           <dt>{m.faces.up}</dt>
           <dd>{label(orientation.up)}</dd>

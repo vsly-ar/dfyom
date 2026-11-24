@@ -434,9 +434,10 @@ export function rebuildPlan(
     list.splice(at, 0, p)
   }
   for (const s of setups) s.operations = repairOrder(s.operations, part.unwrap())
-  // a setup left without design operations is removed, with its aids (S20); a plan keeps at
+  // an empty setup is removed; one left with only alignment aids is kept with them, never
+  // dropped silently (S20, DF78 known gap closed: `plan.aid` info `onlyAids`); a plan keeps at
   // least one setup
-  const used = setups.filter((s) => s.operations.some((p) => !isAid(p)))
+  const used = setups.filter((s) => s.operations.length > 0)
   plan.setups = used.length > 0 ? used : setups.slice(0, 1)
   pruneSnapshots(plan)
   // the design fits the design's stock; the plan's own stock copy may differ

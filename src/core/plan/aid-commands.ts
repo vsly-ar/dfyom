@@ -11,7 +11,7 @@ import { fieldContext } from '../design/operation'
 import { Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
-import { isAid, nextAidName, suggestHoles, suggestMarks } from './aids'
+import { flipPartner, isAid, nextAidName, suggestHoles, suggestMarks } from './aids'
 import { alignmentFindings } from './alignment'
 import { loaded, nextPointIds } from './alignment-commands'
 import {
@@ -237,7 +237,9 @@ export const planAidSet = defineCommand({
     place: z
       .enum(['marks', 'holes'])
       .optional()
-      .describe('Add two: line marks across opposite edges, or holes at opposite corners'),
+      .describe(
+        'Add two: line marks across opposite edges, or holes on the flip axis to the later flipped setup (else at opposite corners)',
+      ),
     forSetupId: PlanRecordIdSchema.optional().describe('Later setup that aligns on the new aids'),
   }),
   result: z.object({
@@ -277,8 +279,12 @@ export const planAidSet = defineCommand({
           where,
           issues: [{ path: ['planOperationId'], rule: 'notAnAid', message: 'no such aid' }],
         })
-      if (args.aid === undefined) setup.operations = setup.operations.filter((o) => o.id !== op.id)
-      else {
+      if (args.aid === undefined) {
+        setup.operations = setup.operations.filter((o) => o.id !== op.id)
+        // the last aid of a setup that held only aids (S20): the empty setup goes, as on a move
+        if (setup.operations.length === 0 && target.setups.length > 1)
+          target.setups = target.setups.filter((s) => s.id !== setup.id)
+      } else {
         const old = op.aid
         const next = applyAidArg(old, args.aid, () => old.name, units, where)
         if (next.isErr()) return next
@@ -333,7 +339,9 @@ export const planAidSet = defineCommand({
       } else if (args.place === 'holes') {
         const d = parsed(args.aid?.diameter, AID.holeDiameter)
         if (d.isErr()) return Err(d.unwrapErr().withContext(where))
-        for (const c of suggestHoles(plan, setupDto, d.unwrap(), port)) {
+        // on the flip axis to the later setup that turns the stock over (S25, Q106 assumed)
+        const flip = flipPartner(plan, setupDto, args.forSetupId)
+        for (const c of suggestHoles(plan, setupDto, d.unwrap(), port, flip?.axis)) {
           const a = applyAidArg(
             undefined,
             {

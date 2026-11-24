@@ -82,6 +82,11 @@ export interface RunState {
    */
   readonly setupChange: string | undefined
   readonly setupChangeOpen: boolean
+  /**
+   * DF78 (Q107, assumed): bumped when the setup-change prompt hands over to the docked alignment
+   * panel, which then takes the focus.
+   */
+  readonly alignFocus: number
   /** Time scale chosen before connecting; while connected the status has the live one. */
   readonly timeScale: TimeScale
   /** The connect choice (per window). */
@@ -128,6 +133,8 @@ export interface RunState {
   setMachine(machineId: string | undefined): void
   setSetup(setupId: string | undefined): void
   setSetupChangeOpen(open: boolean): void
+  /** Closes the setup-change prompt and focuses the alignment panel (Q107). */
+  showAlignPanel(): void
   setTimeScale(scale: TimeScale): void
   setConnectTo(to: ConnectTo): void
   setPort(path: string | undefined): void
@@ -286,6 +293,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setupId: undefined,
       setupChange: undefined,
       setupChangeOpen: false,
+      alignFocus: 0,
       timeScale: 1,
       connectTo: 'virtual',
       portPath: undefined,
@@ -319,6 +327,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           s.setupId === setupId ? {} : { setupId, setupChange: undefined, setupChangeOpen: false },
         ),
       setSetupChangeOpen: (setupChangeOpen) => set({ setupChangeOpen }),
+      showAlignPanel: () => set((s) => ({ setupChangeOpen: false, alignFocus: s.alignFocus + 1 })),
       setTimeScale: (timeScale) => {
         set({ timeScale })
         if (get().status.connection.state === 'open')

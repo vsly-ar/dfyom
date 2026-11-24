@@ -5,7 +5,10 @@
 // marker scales in (`--motion-base`; none under reduced motion). The points themselves are not
 // pickable; while the inspector's "Pick in the viewport" is on, the valid sources are drawn as
 // pick targets (`AlignmentTargets`, alignment.md S22): a hollow ring in `--aid` with a button at
-// its centre (keyboard reachable, named after the source); a click adds that point. Props only.
+// its centre (keyboard reachable, named after the source); a click adds that point. The flip axis
+// of registration holes (Q106, assumed; `FlipAxes`) is a long-dash `--aid` line across the stock,
+// 6 mm past it at both ends, with a small chip naming the other setup at its far end; it draws
+// itself in from the middle (`--motion-slow`; none under reduced motion). Props only.
 // Doc: docs/modes/alignment.md#plan-ui, docs/conventions/ui.md#design-and-plan-controls-v02
 import { Html, Line } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
@@ -192,6 +195,101 @@ export function AlignmentTargets({
             />
           </Html>
         </group>
+      ))}
+    </group>
+  )
+}
+
+/** A flip axis of registration holes (`RunScene.flipAxes`, Q106), in work coordinates (mm). */
+export interface FlipAxisLine {
+  readonly key: string
+  readonly from: readonly [number, number]
+  readonly to: readonly [number, number]
+  /** "Flip axis with Bottom" */
+  readonly label: string
+}
+
+/** How far the axis runs past the stock outline (mm). */
+const AXIS_PAST = 6
+/** `--motion-slow` (tokens.css), the draw-in. */
+const DRAW_IN_MS = 280
+
+function AxisLine({
+  axis,
+  palette,
+  reducedMotion,
+}: {
+  axis: FlipAxisLine
+  palette: Palette
+  reducedMotion: boolean
+}): React.JSX.Element {
+  const invalidate = useThree((s) => s.invalidate)
+  const group = useRef<Group>(null)
+  const born = useRef<number | null>(null)
+  const c = useMemo(() => colour(palette.aid), [palette])
+  const [a, b] = [axis.from, axis.to]
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+  const dx = (b[0] - a[0]) / len
+  const dy = (b[1] - a[1]) / len
+  const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const
+  const half = len / 2 + AXIS_PAST
+  // drawn about its middle, so the draw-in scales it out from there
+  const points = useMemo(
+    (): [number, number, number][] => [
+      [-dx * half, -dy * half, 0],
+      [dx * half, dy * half, 0],
+    ],
+    [dx, dy, half],
+  )
+  useFrame(() => {
+    const g = group.current
+    if (g === null) return
+    if (reducedMotion) return g.scale.setScalar(1)
+    const now = performance.now()
+    born.current ??= now
+    const t = Math.min(1, (now - born.current) / DRAW_IN_MS)
+    g.scale.setScalar(0.05 + 0.95 * (1 - (1 - t) ** 3))
+    if (t < 1) invalidate()
+  })
+  return (
+    <group position={[mid[0], mid[1], 0.03]}>
+      <group ref={group}>
+        <Line
+          points={points}
+          color={c}
+          lineWidth={1.5}
+          dashed
+          dashSize={4}
+          gapSize={1.5}
+          depthTest={false}
+          renderOrder={6}
+          raycast={noRaycast}
+        />
+      </group>
+      <group position={[dx * half, dy * half, 0]}>
+        <Html zIndexRange={[18, 10]} className={styles['zSpotAnchor']}>
+          <span className={styles['flipAxisChip']} data-flip-axis={axis.key} aria-hidden="true">
+            {axis.label}
+          </span>
+        </Html>
+      </group>
+    </group>
+  )
+}
+
+export function FlipAxes({
+  axes,
+  palette,
+  reducedMotion = false,
+}: {
+  axes: readonly FlipAxisLine[]
+  palette: Palette
+  reducedMotion?: boolean
+}): React.JSX.Element {
+  return (
+    <group raycast={noRaycast}>
+      {axes.map((x) => (
+        <AxisLine key={x.key} axis={x} palette={palette} reducedMotion={reducedMotion} />
       ))}
     </group>
   )

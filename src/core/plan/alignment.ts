@@ -56,7 +56,24 @@ export interface AlignmentPosition {
   readonly notYetCut: boolean
   /** The pointer cannot sight it from above (rule `notReachable`). */
   readonly reachable: boolean
+  /**
+   * A witness mark on a side wall of this setup (Q108, assumed): usable as an edge point that
+   * checks this axis only, along the wall (info `sideMark`).
+   */
+  readonly oneAxis?: 'x' | 'y'
 }
+
+/**
+ * Whether a source is a spot witness mark (a line mark across an edge is an edge point by design,
+ * S15: its notch is what the later setup sees).
+ */
+const isSpotMarkSource = (plan: Pick<LoadedPlan, 'dto'>, source: AlignmentSourceDTO): boolean =>
+  'aid' in source &&
+  plan.dto.setups.some((s) =>
+    s.operations.some(
+      (o) => o.id === source.aid && o.aid?.kind === 'witnessMark' && !('from' in o.aid),
+    ),
+  )
 
 /** A setup's zero and points. */
 export interface SetupAlignment {
@@ -282,11 +299,20 @@ function placePoints(
         Math.abs(point[0] - L) <= ON_EPS ||
         Math.abs(point[1]) <= ON_EPS ||
         Math.abs(point[1] - W) <= ON_EPS)
+    // Q108 (assumed): a spot witness mark on a face that is a side wall here checks one axis,
+    // along the wall (a wall at X 0 or X L checks Y); on two walls (a vertical stock edge) no note
+    let oneAxis: 'x' | 'y' | undefined
+    if (point !== undefined && !onTop && onOutline && isSpotMarkSource(plan, p.source)) {
+      const onX = Math.abs(point[0]) <= ON_EPS || Math.abs(point[0] - L) <= ON_EPS
+      const onY = Math.abs(point[1]) <= ON_EPS || Math.abs(point[1] - W) <= ON_EPS
+      if (onX !== onY) oneAxis = onX ? 'y' : 'x'
+    }
     return {
       id: p.id,
       name: p.name ?? defaultPointName(plan, p.source),
-      kind: kindOf(plan, p.source),
+      kind: oneAxis === undefined ? kindOf(plan, p.source) : 'edge',
       source: p.source,
+      ...(oneAxis === undefined ? {} : { oneAxis }),
       ...(point === undefined ? {} : { frame: point }),
       notYetCut: at.operationIndex !== undefined && at.operationIndex >= firstIndex,
       reachable: point === undefined || onTop || onOutline,
@@ -432,6 +458,14 @@ export function alignmentFindings(plan: LoadedPlan, port?: Region2dPort): PlanWa
           message: `${p.name} cannot be seen from above in ${setup.name}: pick a point on the up face, the stock's outline or a through hole`,
           params,
         })
+      else if (p.oneAxis !== undefined)
+        out.push({
+          ...base,
+          severity: 'info',
+          rule: 'sideMark',
+          message: `${p.name} is on a side of the stock in ${setup.name}: it checks ${p.oneAxis.toUpperCase()} only (along that side); lower the pointer beside the side to sight it`,
+          params: { ...params, axis: p.oneAxis },
+        })
     }
     const machine = plan.machine.isSome() ? plan.machine.unwrap() : undefined
     const placed = a.points.flatMap((p) => (p.wcs === undefined ? [] : [p.wcs]))
@@ -473,6 +507,16 @@ export function alignmentFindings(plan: LoadedPlan, port?: Region2dPort): PlanWa
         rule: 'markLast',
         message: `Cut the witness marks last in ${setup.name}: the V-bit stays in for the next setup's alignment (one tool change less)`,
         params: { setupId: setup.id, planOperationId: lastMark.id, count: marks.length },
+      })
+    // S20: a rebuild keeps a setup left with only aids (never drops them silently): say so
+    if (setup.operations.length > 0 && setup.operations.every((o) => isAid(o)))
+      out.push({
+        code: 'plan.aid',
+        field: 'operations',
+        severity: 'info',
+        rule: 'onlyAids',
+        message: `${setup.name} cuts only alignment aids now (the design has nothing left on this side): keep it to cut them, or remove the aids and the setup goes with the last one`,
+        params: { setupId: setup.id, count: setup.operations.length },
       })
     const sameOrientation =
       setupDirection(setup) === setupDirection(first) &&

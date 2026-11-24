@@ -90,6 +90,14 @@ export interface SetupAlignmentView {
     readonly kind: 'point' | 'hole' | 'edge'
     /** Expected X, Y in the WCS (mm); null = its source is missing. */
     readonly wcs: readonly [number, number] | null
+    /** A witness mark on a side wall: it checks this axis only (Q108). */
+    readonly oneAxis?: 'x' | 'y'
+  }[]
+  /** Flip axes of registration holes, in the setup frame (mm; Q106). */
+  readonly flipAxes?: readonly {
+    readonly from: readonly [number, number]
+    readonly to: readonly [number, number]
+    readonly otherSetupId: string
   }[]
 }
 

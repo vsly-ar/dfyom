@@ -40,6 +40,13 @@ import { NameField } from './PlanInspector'
 
 const m = planMessages.setup
 
+/** Whether `later` turns the stock over against `setup` (opposite up faces: a flip axis, Q106). */
+const flips = (setup: SetupDTO, later: SetupDTO): boolean => {
+  const a = setup.direction ?? '+z'
+  const b = later.direction ?? '+z'
+  return a[1] === b[1] && a[0] !== b[0]
+}
+
 export function AlignmentFields({
   plan,
   setup,
@@ -360,6 +367,9 @@ export function AlignmentFields({
           <p className={styles['muted']}>
             {next === undefined ? m.aidsNone : m.aidsHint(next.name)}
           </p>
+          {next !== undefined && flips(setup, next) ? (
+            <p className={styles['muted']}>{m.aidsFlipHint(next.name)}</p>
+          ) : null}
           {next === undefined ? null : (
             <div className={styles['alignActions']}>
               <Button size="sm" variant="default" onClick={() => void placeAids('marks')}>
