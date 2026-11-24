@@ -83,6 +83,14 @@ import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
+import { alignmentFindings } from './alignment'
+import {
+  alignmentView,
+  applySetupZero,
+  planAlignmentSet,
+  SetupAlignmentSchema,
+  SetupZeroArgSchema,
+} from './alignment-commands'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -672,7 +680,7 @@ const setupUpdate = defineCommand({
   kind: 'document',
   name: 'plan.setup.update',
   summary:
-    'Rename or rotate a setup, or change its safe heights (clearance above the stock top, retract above on).',
+    'Rename or rotate a setup, move its work zero, or change its safe heights (clearance above the stock top, retract above on).',
   title: () => 'Update setup',
   machine: false,
   args: z.object({
@@ -681,9 +689,12 @@ const setupUpdate = defineCommand({
     rotation: z.literal(SETUP_ROTATIONS).optional().describe('Degrees about the spindle axis'),
     clearanceHeight: Src.optional().describe('Up from the stock top; > retractHeight'),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
+    zero: SetupZeroArgSchema.optional().describe(
+      'Work zero: { at: [x, y] } from the front-left corner of the up face (negative valid) or { point: alignment point id }; null = that corner',
+    ),
   }),
   result: Empty,
-  run(draft, args) {
+  run(draft, args, ctx) {
     const where = 'plan.setup.update'
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
@@ -716,6 +727,18 @@ const setupUpdate = defineCommand({
     // 0° is stored as absent (v0.1 records)
     if (args.rotation === 0) delete target.rotation
     else if (args.rotation !== undefined) target.rotation = args.rotation
+    // alignment phase 1: docs/modes/alignment.md#setup-work-zero-q61
+    if (args.zero !== undefined) {
+      const z = applySetupZero(
+        draft,
+        args.planId,
+        args.setupId,
+        args.zero,
+        where,
+        ctx.services.region2d,
+      )
+      if (z.isErr()) return z
+    }
     return Ok({})
   },
 })
@@ -1671,6 +1694,9 @@ const warningList = defineQuery({
     zRefs: z
       .array(ZRefRunSchema)
       .describe('Z reference and touch-off spot per tool run (DF69); empty without geometry'),
+    alignment: z
+      .array(SetupAlignmentSchema)
+      .describe('Work zero and alignment points of each setup that has either (alignment phase 1)'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1685,6 +1711,7 @@ const warningList = defineQuery({
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
           ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
+          ...alignmentFindings(loaded.unwrap(), ctx.services.region2d),
         ]
       : [
           {
@@ -1735,6 +1762,7 @@ const warningList = defineQuery({
           candidates: r.candidates.map(candidateDTO),
           outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
+      alignment: loaded.isOk() ? alignmentView(loaded.unwrap(), ctx.services.region2d) : [],
     })
   },
 })
@@ -1754,6 +1782,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   setupSplit,
   setupMerge,
   setupMove,
+  planAlignmentSet,
   operationUpdate,
   operationMove,
   toolAssign,

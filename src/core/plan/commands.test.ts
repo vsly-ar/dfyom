@@ -49,6 +49,7 @@ describe('plan commands: registry', () => {
       'plan.setup.split',
       'plan.setup.merge',
       'plan.setup.move',
+      'plan.alignment.set',
       'plan.operation.update',
       'plan.operation.move',
       'plan.tool.assign',

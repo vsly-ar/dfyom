@@ -53,8 +53,9 @@ export type GeneratorRequest = (
   | { readonly kind: 'chamfer'; readonly inputs: readonly ChamferInput[] }
 ) & {
   /**
-   * The setup's quarter turn (v0.2 task C3): the inputs are in the face frame, the toolpath is
-   * turned into the setup's WCS after generation. Absent = the face frame is the WCS.
+   * The setup's quarter turn (v0.2 task C3) and work zero (alignment phase 1): the inputs are in
+   * the face frame, the toolpath is turned and shifted into the setup's WCS after generation.
+   * Absent = the face frame is the WCS.
    */
   readonly wcs?: SetupWcs
 }
@@ -62,7 +63,11 @@ export type GeneratorRequest = (
 const one = <S extends z.ZodType>(s: S) => z.array(s).length(1).readonly()
 
 const wcs = z
-  .object({ rotation: z.union([z.literal(90), z.literal(180), z.literal(270)]), size: Vec2Schema })
+  .object({
+    rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+    size: Vec2Schema,
+    zero: Vec2Schema.exactOptional(),
+  })
   .exactOptional()
 
 export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminatedUnion('kind', [

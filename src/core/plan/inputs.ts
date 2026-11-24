@@ -26,6 +26,8 @@ import { loadPlan, setupOf } from './plan'
 import { planMaterialBands, planThroughDepths } from './through'
 import type { MaterialBand, MaterialCover } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
+import { setupZero } from './alignment'
+import type { Vec2 } from '../geometry/model'
 import type { ResolvedStrategy } from './strategy'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
@@ -43,6 +45,11 @@ export interface PlanOperationInput {
     readonly direction: Direction
     /** Quarter turn about machine +Z; turns the toolpaths and moves the work zero (task C3). */
     readonly rotation: SetupRotation
+    /**
+     * The work zero in the setup frame (mm; alignment phase 1): the toolpaths are shifted by it.
+     * Absent = the front-left corner of the up face (byte-identical toolpaths).
+     */
+    readonly zero?: Vec2
     readonly workOffset: 'G54'
     readonly clearanceHeight: number
     readonly retractHeight: number
@@ -128,10 +135,13 @@ export function planOperationInputs(
   let previous: string | undefined
   plan.operations.forEach((op, index) => {
     const own = setupOf(plan, op.id)
+    const zero = setupZero(plan, own, port)
+    const moved = zero[0] !== 0 || zero[1] !== 0
     const setup = {
       id: own.id,
       direction: setupDirection(own),
       rotation: setupRotation(own),
+      ...(moved ? { zero } : {}),
       workOffset: own.workOffset,
       clearanceHeight: length(own.clearanceHeight),
       retractHeight: length(own.retractHeight),
@@ -146,7 +156,13 @@ export function planOperationInputs(
       // the Z reference (DF69) moves only the exported program, never the toolpath
       planOperation: { ...op, zRef: undefined },
       snapshots: used,
-      setup: { ...own, operations: undefined },
+      // S5: the resolved zero, not the points (docs/modes/alignment.md#implementation-slice-1)
+      setup: {
+        ...own,
+        operations: undefined,
+        alignment: undefined,
+        zero: moved ? zero : undefined,
+      },
       // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")
       units: plan.units,
     })

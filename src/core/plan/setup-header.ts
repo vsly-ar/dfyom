@@ -137,13 +137,15 @@ export function setupMotion(
 /**
  * The header's setup instructions for `setups[index]` (machining order): its number, the part
  * faces up, in front and on the right, the move from setup 1, the work-zero corner and the stock;
- * with `overreach` the tool's reach past the stock (DF59).
+ * with `overreach` the tool's reach past the stock (DF59); with `alignment` the moved zero and
+ * the alignment points (alignment phase 1, docs/modes/alignment.md#export).
  */
 export function setupHeader(
   setups: readonly Pick<SetupDTO, 'direction' | 'rotation'>[],
   index: number,
   stock: StockSize,
   overreach?: Overreach,
+  alignment?: Pick<SetupHeader, 'zero' | 'zeroOn' | 'alignment'>,
 ): SetupHeader {
   const setup = setups[index]!
   const o = setupOrientation(setupDirection(setup), setupRotation(setup), stock)
@@ -157,5 +159,12 @@ export function setupHeader(
     corner: setupCorner(setup, stock),
     stock: o.size,
     ...(overreach === undefined ? {} : { overreach }),
+    ...(alignment?.zero === undefined || (alignment.zero[0] === 0 && alignment.zero[1] === 0)
+      ? {}
+      : { zero: alignment.zero }),
+    ...(alignment?.zeroOn === undefined ? {} : { zeroOn: alignment.zeroOn }),
+    ...(alignment?.alignment === undefined || alignment.alignment.length === 0
+      ? {}
+      : { alignment: alignment.alignment }),
   }
 }

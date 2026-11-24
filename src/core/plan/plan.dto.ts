@@ -13,6 +13,7 @@ import {
 import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
+import { ALIGNMENT_POINTS_MAX, AlignmentPointDtoSchema, SetupZeroDtoSchema } from './alignment.dto'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
@@ -191,6 +192,15 @@ export const SetupDtoSchema = z.object({
   clearanceHeight: length().describe('Up from the stock top'),
   retractHeight: length().describe("Up from the operation's `on` surface"),
   operations: z.array(PlanOperationDtoSchema).describe('Machining order'),
+  // alignment phase 1 (DF78): docs/modes/alignment.md#setup-work-zero-q61
+  zero: SetupZeroDtoSchema.optional().describe(
+    'Work zero X/Y; absent = front-left corner of the top',
+  ),
+  alignment: z
+    .array(AlignmentPointDtoSchema)
+    .max(ALIGNMENT_POINTS_MAX)
+    .optional()
+    .describe('Alignment points in cycle order (after the zero)'),
 })
 export type SetupDTO = z.output<typeof SetupDtoSchema>
 

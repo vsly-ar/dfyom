@@ -10,8 +10,11 @@ import { defineCommand } from '../commands/define'
 import type { JobProgress, Services } from '../commands/context'
 import { PlanWarningSchema } from '../plan/checks'
 import { planOperationInputs } from '../plan/inputs'
-import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
-import { loadPlan } from '../plan/plan'
+import { PlanIdSchema, PlanRecordIdSchema, type SetupDTO } from '../plan/plan.dto'
+import { loadPlan, type LoadedPlan } from '../plan/plan'
+import { setupAlignment, setupAlignmentErrors } from '../plan/alignment'
+import type { Region2dPort } from '../geometry/2d/port'
+import type { SetupHeader } from './program'
 import { planOperationLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
 import { chooseSetup, setupStockSize } from '../plan/setups'
@@ -157,6 +160,20 @@ export async function exportPlan(
         params: f.params,
       })),
     })
+  // alignment phase 1: the setup's alignment errors block its program like a plan finding
+  const alignErrors = setupAlignmentErrors(plan, setup.id, services.region2d)
+  const firstAlign = alignErrors[0]
+  if (firstAlign !== undefined)
+    return fail('plan.check', firstAlign.message, {
+      where,
+      data: { planId },
+      issues: alignErrors.map((f) => ({
+        path: [setup.id, 'alignment'],
+        rule: f.rule,
+        message: f.message,
+        params: f.params,
+      })),
+    })
   const total = all.length
   const operations: ExportOperation[] = []
   const reaches: Overreach[] = []
@@ -231,6 +248,7 @@ export async function exportPlan(
             thickness: plan.stock.thickness.canonical,
           },
           maxOverreach(reaches),
+          headerAlignment(plan, setup, services.region2d),
         ),
       },
       operations,
@@ -247,6 +265,23 @@ export async function exportPlan(
       softLimitChecked: opts.workZero !== undefined,
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/** The header's zero and alignment points (alignment phase 1, docs/modes/alignment.md#export). */
+function headerAlignment(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  port: Region2dPort | undefined,
+): Pick<SetupHeader, 'zero' | 'zeroOn' | 'alignment'> {
+  const a = setupAlignment(plan, setup, port)
+  const zeroOn = a.points.find((p) => p.id === a.zeroPoint)?.name
+  return {
+    zero: a.zero,
+    ...(zeroOn === undefined ? {} : { zeroOn }),
+    alignment: a.points.flatMap((p) =>
+      p.wcs === undefined ? [] : [{ name: p.name, at: [p.wcs[0], p.wcs[1]] as const }],
+    ),
+  }
 }
 
 /** The program's view of a tool run's Z reference (DF69); none without one. */
