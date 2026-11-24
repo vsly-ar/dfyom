@@ -125,6 +125,7 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   // v0.4 TB1 (design-v0.4.md § Tabs relocate off free sides)
   'dfm.tabsRelocated': (p) =>
     `${num(p['moved'])} of ${num(p['count'])} tabs moved off sides where the slot leaves no stock beyond the cut.`,
+  'design.split': (p, L, name) => splitText(p, L, name),
   'dfm.tabsNoHold': (p) =>
     Array.isArray(p['indices'])
       ? `${num(p['count']) - num(p['held'])} of ${num(p['count'])} tabs lie where the slot leaves no stock beyond the cut, so they hold nothing. Move them to a side with stock.`
@@ -178,6 +179,57 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['stepped'] === 1
       ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
       : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
+}
+
+/** Why a split cuts a feature (`params.reason` of `design.split` rule `cutsFeature`). */
+const CUTS: Readonly<Record<string, string>> = {
+  line: 'A split line crosses it: it goes to the piece holding its centre and the other piece misses its part.',
+  on: 'It starts on a face a piece does not have, so that piece leaves it out.',
+  open: 'It is an open path crossed by a split line, so the piece leaves it out.',
+  fillet: 'A split level cuts its floor fillet, which neither piece can make.',
+  cone: 'A split level cuts its cone, which neither piece can make.',
+  sideFace: 'It is on a side face: pieces do not take side-face operations yet.',
+}
+
+/**
+ * `design.split` by its rule (split parts 4a, docs/modes/split-parts.md#dfm-near-a-split); lengths
+ * in the project units, pieces by number.
+ */
+function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: DfmNames): string {
+  const op = typeof p['operationId'] === 'string' ? name.item(p['operationId']) : 'An operation'
+  const size = (v: unknown) =>
+    Array.isArray(v) ? (v as number[]).map((x) => L(x)).join(' × ') : '?'
+  const piece = `Piece ${num(p['piece'])}`
+  switch (p['rule']) {
+    case 'noOutline':
+      return 'The part has no through outline profile, so the pieces are cut along the stock edges. Add the outline first.'
+    case 'cutsFeature':
+      return `${op}: ${CUTS[String(p['reason'])] ?? 'a split cuts it.'}`
+    case 'featureNear': {
+      const at = [
+        ...((p['nearX'] as number[] | undefined) ?? []).map((x) => `the line at X ${L(x)}`),
+        ...((p['nearY'] as number[] | undefined) ?? []).map((y) => `the line at Y ${L(y)}`),
+        ...((p['nearZ'] as number[] | undefined) ?? []).map((z) => `the level at Z ${L(z)}`),
+      ]
+      return `${op} lies within ${L(p['limit'])} of ${at.length > 0 ? list(at) : 'a split'}: a thin wall at the joint. Move the split.`
+    }
+    case 'thinJoint': {
+      const where =
+        typeof p['level'] === 'number'
+          ? `the level at Z ${L(p['level'])}`
+          : `the line at ${String(p['axis']).toUpperCase()} ${L(p['at'])}`
+      return `The glue face at ${where} is ${L(p['width'])} wide at its narrowest, less than ${L(p['limit'])}: a weak butt joint. Move the split.`
+    }
+    case 'sliver':
+      return `${piece} is a sliver: ${L(p['narrow'])} at its narrowest, ${Math.round(num(p['share']) * 1000) / 10} % of the part. Move or remove a split.`
+    case 'noStock':
+      return `${piece}: its blank ${size(p['blank'])} fits no library stock; ${String(p['nearest'])} is ${L(p['short'])} short. It uses its own blank.`
+    case 'outsideTravel':
+      return `${piece}: its blank ${size(p['blank'])} is larger than the travel of ${list(((p['machines'] as string[] | undefined) ?? []).map(String))}. Add a split.`
+    case 'fitsWhole':
+      return `The whole part (${size(p['size'])} with margins) fits ${String(p['stock'])} and the machine: the split may be unnecessary.`
+  }
+  return 'A split finding on this part.'
 }
 
 /** Hole feature size fields in `dfm.holeCustomSize`. */

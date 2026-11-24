@@ -23,6 +23,7 @@ import {
   clonesFollowHook,
 } from '../design/clones/commands'
 import { HOLE_COMMANDS } from '../design/hole-commands'
+import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -82,6 +83,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...FEATURE_COMMANDS,
   ...HOLE_COMMANDS,
   ...CLONES_COMMANDS,
+  ...SPLIT_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
@@ -130,7 +132,7 @@ export const MACHINE_SCOPE_QUERIES: readonly AnyQueryDef[] = [jobGet, jobList, .
  * follow an edited source in the same command (`design.clonesFollow`, v0.4 F5). The draft
  * auto-rebuild moved behind Apply in v0.2 P2 (`plan.draftFollow`).
  */
-export const APP_HOOKS: readonly DocumentHook[] = [clonesFollowHook]
+export const APP_HOOKS: readonly DocumentHook[] = [clonesFollowHook, splitFollowHook]
 
 /**
  * Apply hooks of the app, in this order (docs/architecture/apply.md#apply-hooks): the tool
@@ -140,6 +142,7 @@ export const APP_HOOKS: readonly DocumentHook[] = [clonesFollowHook]
 export const APPLY_HOOKS: readonly ApplyHook[] = [
   designToolAutoChoice,
   clonesFollowApply,
+  splitFollowApply,
   planDraftFollow,
 ]
 
