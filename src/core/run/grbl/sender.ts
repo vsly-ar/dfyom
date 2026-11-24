@@ -366,6 +366,8 @@ export class GrblSender {
   private run_: ActiveRun | undefined
 
   private latest: SenderStatus | undefined
+  /** Status reports that said Hold (a command's reply timeout waits on through a hold, DF82). */
+  private holdReports = 0
   private wco: Vec3 = ZERO
   private pollsWritten = 0
   private reportsSeen = 0
@@ -758,12 +760,22 @@ export class GrblSender {
     return new Promise((resolve) => {
       const cmd: PendingCommand = { line, replies: [], resolve, settled: false }
       const ms = timeoutMs ?? (line === '$H' ? 600_000 : (this.opts.commandTimeoutMs ?? 10_000))
-      cmd.cancelTimeout = this.clock.schedule(this.clock.now() + ms, () => {
-        cmd.cancelTimeout = undefined
-        if (cmd.settled) return
-        this.log.warn({ command: line, ms }, 'no reply to a command')
-        this.connectionLost(`no reply to ${line}`)
-      })
+      const arm = (): (() => void) => {
+        const holds = this.holdReports
+        return this.clock.schedule(this.clock.now() + ms, () => {
+          cmd.cancelTimeout = undefined
+          if (cmd.settled) return
+          // a feed hold (a paused Probe Z, DF82) keeps the reply back on purpose: wait on, a
+          // whole timeout again after the last report of a hold
+          if (this.holdReports > holds) {
+            cmd.cancelTimeout = arm()
+            return
+          }
+          this.log.warn({ command: line, ms }, 'no reply to a command')
+          this.connectionLost(`no reply to ${line}`)
+        })
+      }
+      cmd.cancelTimeout = arm()
       this.commands.push(cmd)
       this.fill()
     })
@@ -929,6 +941,7 @@ export class GrblSender {
 
   private onStatusReport(report: StatusReport): void {
     this.reportsSeen++
+    if (report.state === 'Hold') this.holdReports++
     this.pollOutstandingSince = undefined
     const p = positions(report, this.wco, this.inches)
     if (report.wco !== undefined && p !== undefined) {

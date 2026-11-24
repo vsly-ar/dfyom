@@ -52,6 +52,15 @@ describe('JobIndicator', () => {
     expect(h.onCancel).toHaveBeenCalledWith('j2')
   })
 
+  it('offers no Pause for a job that refuses it (homing, DF82); Cancel stays', async () => {
+    const jobs: JobView[] = [{ id: 'h1', label: 'Home', state: 'running', pausable: false }]
+    const { user } = renderUi(<JobIndicator jobs={jobs} delayMs={0} {...handlers()} />)
+    await user.click(await screen.findByRole('button', { name: 'Home' }))
+    await screen.findByRole('list', { name: 'Jobs' })
+    expect(screen.queryByRole('button', { name: 'Pause Home' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Cancel Home' })).toBeInTheDocument()
+  })
+
   it('disappears at once when the jobs end', async () => {
     const { rerender } = renderUi(<JobIndicator jobs={JOBS} delayMs={0} {...handlers()} />)
     expect(await screen.findByRole('button', { name: /2 jobs/ })).toBeInTheDocument()

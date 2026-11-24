@@ -96,6 +96,7 @@ interface JobInfo {
   readonly jobId: string
   readonly name: string
   readonly state: 'running' | 'paused' | 'finished'
+  readonly pausable?: false
   readonly progress?: { readonly done: number; readonly total?: number; readonly label?: string }
 }
 
@@ -149,6 +150,7 @@ export function createJobsFeed(
           id: j.jobId,
           label: m.jobs.labels[j.name] ?? j.name,
           state: j.state === 'paused' ? 'paused' : 'running',
+          ...(j.pausable === false ? { pausable: false } : {}),
           progress: j.progress,
         }))
       for (const l of [...listeners]) l()

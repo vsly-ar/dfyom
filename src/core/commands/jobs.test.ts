@@ -237,6 +237,126 @@ describe('jobs', () => {
   })
 })
 
+// Pause policies (hardening DF82): docs/architecture/commands.md#pausing-a-job
+describe('job pause policies', () => {
+  /** A job with `policy`; `hold`/`resume` count the handler calls, `release` ends it. */
+  function policySetup(pause: 'refuse' | 'handled', holdFails = false) {
+    let release: () => void = () => {}
+    let registered = false
+    const calls: string[] = []
+    const job = defineCommand({
+      kind: 'job',
+      name: 'run.test.cycle',
+      summary: 'A machine-like cycle (test job).',
+      title: () => 'Cycle',
+      machine: false,
+      pause:
+        pause === 'refuse' ? { kind: 'refuse', message: 'cannot pause this' } : { kind: 'handled' },
+      args: z.object({ register: z.boolean() }),
+      result: z.null(),
+      async run(_doc, args, ctx) {
+        const off = args.register
+          ? ctx.onPause({
+              hold: () => {
+                calls.push('hold')
+                return Promise.resolve(
+                  holdFails ? fail('run.state', 'no hold') : Ok<void>(undefined),
+                )
+              },
+              resume: () => {
+                calls.push('resume')
+                return Promise.resolve(Ok<void>(undefined))
+              },
+            })
+          : undefined
+        registered = args.register
+        await new Promise<void>((r) => (release = r))
+        off?.()
+        return Ok(null)
+      },
+    })
+    const registry = expectOk(createRegistry({ commands: [job], queries: [] }))
+    const d = createDispatcher({
+      registry,
+      doc: newProjectDoc({ name: 'P', unitSystem: 'mm' }),
+      ids: fakeIds(),
+      clock: fakeClock(0),
+    })
+    const events: ActionEvent[] = []
+    d.log.subscribe({}, (e) => events.push(e))
+    const start = async (register = true) => {
+      const { jobId } = expectOk(await d.dispatch('run.test.cycle', { register }, ui)).value as {
+        jobId: string
+      }
+      while (registered !== register) await settle()
+      return d.job(jobId).unwrap()
+    }
+    return { d, events, calls, start, release: () => release() }
+  }
+
+  it('refuse: job.pause fails job.notPausable, the job runs on; job.list marks it', async () => {
+    const t = policySetup('refuse')
+    const job = await t.start()
+    const e = expectErrCode(
+      await t.d.dispatch('job.pause', { jobId: job.id }, ui),
+      'job.notPausable',
+    )
+    expect(e.message).toBe('cannot pause this')
+    expect(job.state).toBe('running')
+    expect(job.pausable).toBe(false)
+    const list = expectOk(t.d.query('job.list', {}, ui)).value as { jobs: { pausable?: false }[] }
+    expect(list.jobs[0]?.pausable).toBe(false)
+    expect(t.events.map(shape)).not.toContain('job:paused')
+    t.release()
+    expectOk(await job.result)
+  })
+
+  it('handled: paused only after the handler holds; resume calls it before running', async () => {
+    const t = policySetup('handled')
+    const job = await t.start()
+    expect(job.pausable).toBe(true)
+    expect((await t.d.dispatch('job.pause', { jobId: job.id }, ui)).unwrap().value).toEqual({
+      state: 'paused',
+    })
+    expect(t.calls).toEqual(['hold'])
+    expect(job.state).toBe('paused')
+    expect((await t.d.dispatch('job.resume', { jobId: job.id }, ui)).unwrap().value).toEqual({
+      state: 'running',
+    })
+    expect(t.calls).toEqual(['hold', 'resume'])
+    t.release()
+    expectOk(await job.result)
+    // the dispatch event first, then the lifecycle event, as for every job
+    expect(t.events.map(shape)).toEqual([
+      'run.test.cycle',
+      'job:started',
+      'job.pause',
+      'job:paused',
+      'job.resume',
+      'job:resumed',
+      'job:finished',
+    ])
+  })
+
+  it('handled: a failed hold fails job.pause and leaves the job running', async () => {
+    const t = policySetup('handled', true)
+    const job = await t.start()
+    expectErrCode(await t.d.dispatch('job.pause', { jobId: job.id }, ui), 'run.state')
+    expect(job.state).toBe('running')
+    t.release()
+    expectOk(await job.result)
+  })
+
+  it('handled: with nothing to hold right now, job.pause fails job.notPausable', async () => {
+    const t = policySetup('handled')
+    const job = await t.start(false)
+    expectErrCode(await t.d.dispatch('job.pause', { jobId: job.id }, ui), 'job.notPausable')
+    expect(job.state).toBe('running')
+    t.release()
+    expectOk(await job.result)
+  })
+})
+
 describe('job.get and job.list', () => {
   const info = (d: ReturnType<typeof setup>['d'], jobId: string) =>
     expectOk(d.query('job.get', { jobId }, agentSource())).value

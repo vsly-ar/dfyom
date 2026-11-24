@@ -181,6 +181,9 @@ function modalRestore(words: readonly string[], inches: boolean): string[] {
   return lines
 }
 
+/** Machine time a manual feed hold may take to report `Hold:0` (as the sender's stop, 5 s). */
+const FEED_HOLD_MS = 5000
+
 const fmt = (v: number) => {
   const s = v.toFixed(3).replace(/\.?0+$/, '')
   return s === '-0' ? '0' : s
@@ -535,9 +538,40 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return c.sender.realtime(REALTIME.reset)
       case 'probeZ':
         return probeZ(c, action)
+      case 'feedHold':
+      case 'cycleStart':
+        // a run's own hold goes through jobControl; a probe at a tool change is a manual cycle
+        if (jobBusy) return stateError('a run holds and resumes with job.pause/job.resume', state)
+        if (action.kind === 'feedHold') return feedHold(c)
+        if (!state.startsWith('Hold')) return stateError(`nothing is held (state ${state})`, state)
+        return c.sender.realtime(REALTIME.resume)
       case 'override':
         return override(c, action)
     }
+  }
+
+  /**
+   * Feed hold of a manual cycle (Probe Z, hardening DF82): `!`, then Ok once a report taken after
+   * it says `Hold:0` (motion has stopped). GRBL ignores a hold while homing: refused. A cycle
+   * that ends instead (Idle, Alarm) fails `run.state`. Doc: docs/modes/run.md#1-emergency-stop-stop-and-reset
+   */
+  async function feedHold(c: Connection): Promise<AppResult<void>> {
+    const state = machineState(c)
+    if (state.startsWith('Home') || state === 'Alarm')
+      return stateError(`cannot hold in state ${state}`, state)
+    const sent = c.sender.realtime(REALTIME.hold)
+    if (sent.isErr()) return sent
+    // machine time, as the sender's controlled stop waits for Hold:0
+    const deadline = c.clock.now() + FEED_HOLD_MS
+    while (c.clock.now() < deadline) {
+      const s = await c.sender.freshStatus()
+      status.now()
+      if (s?.state === 'Hold:0') return Ok(undefined)
+      if (s !== undefined && !s.state.startsWith('Hold') && !s.state.startsWith('Run'))
+        return stateError(`the controller did not hold (state ${s.state})`, s.state)
+      await new Promise<void>((resolve) => c.clock.schedule(c.clock.now() + 50, resolve))
+    }
+    return stateError('the controller did not report the hold', machineState(c))
   }
 
   /** After a probe alarm: the modal state the probe changed, once GRBL takes gCode again. */

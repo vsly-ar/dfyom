@@ -189,6 +189,13 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     values: Vec3Schema.exactOptional(),
   }),
   z.object({ kind: z.literal('reset') }),
+  /**
+   * Feed hold (`!`) of a manual cycle (Probe Z, hardening DF82); answers once the controller
+   * reports `Hold:0`. A run holds through `job.pause` (jobControl). Not during homing.
+   */
+  z.object({ kind: z.literal('feedHold') }),
+  /** Cycle start (`~`) after `feedHold`. */
+  z.object({ kind: z.literal('cycleStart') }),
   /** Z touch plate (M4): G38.2 down, G54 Z at the contact minus the plate, retract. */
   z.object({
     kind: z.literal('probeZ'),

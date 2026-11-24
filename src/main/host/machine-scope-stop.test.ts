@@ -85,7 +85,20 @@ async function setup() {
     expect(Date.now() - t0).toBeLessThan(5_000)
     await reach(/^(Alarm|Idle)/)
   }
-  return { host, free, win, agentFree, agent, key, value, status, homing, probing, expectStopped }
+  return {
+    host,
+    free,
+    win,
+    agentFree,
+    agent,
+    key,
+    value,
+    status,
+    reach,
+    homing,
+    probing,
+    expectStopped,
+  }
 }
 
 describe('stop across scopes (DF80)', { timeout: 90_000 }, () => {
@@ -137,13 +150,57 @@ describe('stop across scopes (DF80)', { timeout: 90_000 }, () => {
         }
       })
 
-  it('job.pause of a machine-scope job reaches it from a bound session', async () => {
+  // DF82: a job state never claims paused while the machine moves
+  // (docs/modes/run.md#1-emergency-stop-stop-and-reset)
+  it('job.pause of a homing job is refused (job.notPausable), from any session; Stop still works', async () => {
     const t = await setup()
     const jobId = await t.homing(t.free)
-    expect((await t.agent.call('job.pause', { jobId })).result.isOk()).toBe(true)
-    expect(await t.value(t.free, 'job.get', { jobId })).toMatchObject({ state: 'paused' })
+    for (const s of [t.free, t.agent]) {
+      const e = expectErrCode((await s.call('job.pause', { jobId })).result, 'job.notPausable')
+      expect(e.message).toMatch(/Homing can't be paused; use Stop/)
+    }
+    expect(await t.value(t.free, 'job.get', { jobId })).toMatchObject({
+      state: 'running',
+      pausable: false,
+    })
+    expect((await t.status()).state).toMatch(/^Home/)
     expectOk((await t.agent.call('job.abort', { jobId })).result)
     await t.expectStopped(t.agent, jobId)
+  })
+
+  it('job.pause of a Probe Z job holds the machine (Hold:0) from a bound session; resume finishes the probe', async () => {
+    const t = await setup()
+    const jobId = await t.probing(t.free)
+    const paused = expectOk((await t.agent.call('job.pause', { jobId })).result)
+    expect(paused.value).toEqual({ state: 'paused' })
+    // paused only once the controller reports the hold complete
+    expect((await t.status()).state).toBe('Hold:0')
+    expect(await t.value(t.free, 'job.get', { jobId })).toMatchObject({ state: 'paused' })
+    const z = (await t.status()).mpos[2]
+    await sleep(300)
+    expect((await t.status()).mpos[2]).toBe(z)
+    expect((await t.status()).state).toBe('Hold:0')
+    const resumed = expectOk((await t.agent.call('job.resume', { jobId })).result)
+    expect(resumed.value).toEqual({ state: 'running' })
+    await t.reach(/^Run/)
+    await t.value(t.free, 'run.timeScale.set', { scale: 'max' })
+    const waited = (await t.value(t.free, 'job.wait', { jobId, timeoutSeconds: 30 })) as {
+      state: string
+      outcome?: { ok: boolean; value?: { contact: number[] } }
+    }
+    expect(waited).toMatchObject({ state: 'finished', outcome: { ok: true } })
+    // the probe went on from where it held: the contact is below the held position
+    expect(waited.outcome?.value?.contact[2]).toBeLessThan(z)
+    await t.reach(/^Idle/)
+  })
+
+  it('job.abort of a held Probe Z job stops it with a reset', async () => {
+    const t = await setup()
+    const jobId = await t.probing(t.free)
+    expectOk((await t.free.call('job.pause', { jobId })).result)
+    expect((await t.status()).state).toBe('Hold:0')
+    expectOk((await t.agent.call('job.abort', { jobId })).result)
+    await t.expectStopped(t.free, jobId)
   })
 
   for (const cycle of ['homing', 'probing'] as const)
