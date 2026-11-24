@@ -140,8 +140,38 @@ describe('an unexpected controller reset (DF87)', () => {
     r.t.reply("\r\nGrbl 1.1f ['$' for help]\r\n")
     const e = expectErrCode(await drive(r.clock, p), 'machine.reset')
     expect(e.message).toContain('restarted')
-    expect(r.events).toContainEqual({ kind: 'reset', expected: false })
+    // the next report says Idle: GRBL kept the position (a soft reset while idle)
+    await until(r.clock, () => r.events.some((x) => x.kind === 'reset'))
+    expect(r.events).toContainEqual({ kind: 'reset', expected: false, positionLost: false })
     expect(r.s.isConnected).toBe(true)
+  })
+
+  it('a banner followed by Alarm: position lost (DF87 follow-up)', async () => {
+    const r = await controller('queue')
+    const w0 = r.t.onWrite
+    r.t.onWrite = (w: string) =>
+      w === '?' ? r.t.reply('<Alarm|MPos:0.000,0.000,0.000|FS:0,0>\r\n') : w0?.(w)
+    r.t.reply("\r\nGrbl 1.1f ['$' for help]\r\n[MSG:'$H'|'$X' to unlock]\r\n")
+    await until(r.clock, () => r.events.some((x) => x.kind === 'reset'))
+    expect(r.events).toContainEqual({ kind: 'reset', expected: false, positionLost: true })
+  })
+
+  it('a banner with no report after it: position lost', async () => {
+    const r = await controller('queue')
+    const w0 = r.t.onWrite
+    r.t.onWrite = (w: string) => (w === '?' ? undefined : w0?.(w))
+    r.t.reply("\r\nGrbl 1.1f ['$' for help]\r\n")
+    await until(r.clock, () => r.events.some((x) => x.kind === 'reset'), 5000)
+    expect(r.events).toContainEqual({ kind: 'reset', expected: false, positionLost: true })
+  })
+
+  it('commands wait while the banner is checked, then go out', async () => {
+    const r = await controller('queue')
+    r.t.reply("\r\nGrbl 1.1f ['$' for help]\r\n")
+    await until(r.clock, () => false, 0)
+    const p = r.s.command('$#')
+    expectOk(await drive(r.clock, p))
+    expect(r.events).toContainEqual({ kind: 'reset', expected: false, positionLost: false })
   })
 })
 

@@ -128,20 +128,80 @@ describe('machine host: serial target (loopback)', { timeout: 30_000 }, () => {
       )
     })
 
-  it('a controller that resets on its own is no longer homed (M2)', async () => {
+  it('a controller that resets on its own while idle keeps homed: GRBL kept the position (M2, DF87 follow-up)', async () => {
     const h = harness()
     expectOk(await h.connect())
     expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
     expect(h.of('status').at(-1)?.status.homed).toBe(true)
-    // a power glitch or USB reset: a banner DFYOM did not ask for
+    // a reset DFYOM did not send, while Idle: the banner, then Idle
     h.ports.opened[0]!.emulator.receive(Uint8Array.of(0x18))
+    expect(
+      await h.pump(() =>
+        h
+          .of('event')
+          .some(
+            (e) =>
+              e.kind === 'reset' &&
+              e.data['expected'] === false &&
+              e.data['positionLost'] === false,
+          ),
+      ),
+    ).toBe(true)
+    expect(h.of('status').at(-1)?.status.homed).toBe(true)
+  })
+
+  it('a controller that resets on its own during motion is no longer homed (M2)', async () => {
+    const h = harness()
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', by: [-1, 0, 0], feed: 500, continuous: true },
+      }),
+    )
+    const emu = h.ports.opened[0]!.emulator
+    expect(await h.pump(() => emu.status().state === 'Jog')).toBe(true)
+    // ALARM:3, Alarm, then the banner
+    emu.receive(Uint8Array.of(0x18))
     expect(
       await h.pump(
         () =>
-          h.of('event').some((e) => e.kind === 'reset' && e.data['expected'] === false) &&
+          h.of('event').some((e) => e.kind === 'reset' && e.data['positionLost'] === true) &&
           h.of('status').at(-1)?.status.homed === false,
       ),
     ).toBe(true)
+  })
+
+  it('a fork that prints its banner when $H ends: homed, with the position (DF87 follow-up)', async () => {
+    const h = harness({ emulator: { bannerAfterHoming: true, settings: { ...FAST, 27: 3 } } })
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    expect(await h.pump(() => h.of('event').some((e) => e.kind === 'reset'))).toBe(true)
+    expect(h.of('event').find((e) => e.kind === 'reset')?.data).toEqual({
+      expected: false,
+      positionLost: false,
+    })
+    await h.pump(() => false, 500)
+    const last = h.of('status').at(-1)!.status
+    expect(last).toMatchObject({ state: 'Idle', homed: true })
+    expect(last.mpos).toEqual([-3, -3, -3])
+    expect(h.of('event').filter((e) => e.kind === 'connectionLost')).toEqual([])
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [-1, 0, 0], feed: 500 } }),
+    )
+  })
+
+  it('a banner after $H followed by Alarm: machine.reset, not homed (DF87 follow-up)', async () => {
+    const h = harness({ emulator: { bannerAfterHoming: 'alarm' } })
+    expectOk(await h.connect())
+    const r = await h.request({ type: 'machine', action: { kind: 'home' } })
+    expectErrCode(r, 'machine.reset')
+    expect(h.of('event').find((e) => e.kind === 'reset')?.data).toEqual({
+      expected: false,
+      positionLost: true,
+    })
+    expect(await h.pump(() => h.of('status').at(-1)?.status.homed === false)).toBe(true)
   })
 
   it('a continuous jog goes to the travel edge until cancelled (M3)', async () => {

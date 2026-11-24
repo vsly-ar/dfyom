@@ -56,6 +56,12 @@ export interface EmulatorOptions {
    */
   readonly silentHoming?: boolean | 'drop'
   /**
+   * As a GRBL fork that prints its banner when `$H` ends, right after the `ok` (DF87 follow-up,
+   * docs/architecture/grbl.md#banner): `true` stays Idle with the homed position; `'alarm'` goes to
+   * Alarm with it (a controller that really restarted and lost its position).
+   */
+  readonly bannerAfterHoming?: boolean | 'alarm'
+  /**
    * Simulated touch plate: its top in MPos Z (the probe input is closed while the tool tip is at
    * or below it); absent = no plate, a probe finds nothing (docs/architecture/grbl.md#probing).
    */
@@ -210,6 +216,7 @@ export class GrblEmulator {
     position: Vec3,
     private readonly silentHoming: boolean | 'drop' = false,
     probePlate: number | undefined = undefined,
+    private readonly bannerAfterHoming: boolean | 'alarm' = false,
   ) {
     this.plate = probePlate
     const s = settings
@@ -240,6 +247,7 @@ export class GrblEmulator {
           options.position ?? zero,
           options.silentHoming ?? false,
           options.probePlate,
+          options.bannerAfterHoming ?? false,
         ),
       ),
     )
@@ -811,7 +819,13 @@ export class GrblEmulator {
         this.reportAfterHoming = false
         this.statusReport()
       }
-      return this.run()
+      this.run()
+      if (this.bannerAfterHoming !== false) {
+        if (this.bannerAfterHoming === 'alarm') this.state = 'Alarm'
+        this.banner()
+        this.noteState()
+      }
+      return
     }
     if (this.restoreEndsAt !== undefined && this.restoreEndsAt <= t) {
       this.restoreEndsAt = undefined

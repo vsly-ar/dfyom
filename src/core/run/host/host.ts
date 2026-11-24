@@ -104,6 +104,8 @@ interface Connection {
   readonly clock: ScaledClock
   readonly sender: GrblSender
   homed: boolean
+  /** `reset` events with the position lost so far (a homing they overlap does not hold). */
+  positionResets?: number
   workZero: Vec3
   /**
    * DF69: the level (mm, setup frame, ≤ 0) of the surface G54 Z was last set on: the run's
@@ -473,26 +475,55 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
    * `$H`; homed on its `ok`, posted at once (DF87). Reading G54 afterwards is bookkeeping: a
    * failure there is logged and does not undo the homing, unless the controller restarted or the
    * connection ended meanwhile (then homed is false or the connection gone, and the error says so).
+   * A banner right after `$H` (a GRBL fork that prints it at the end of the cycle) drops the
+   * bookkeeping command in flight: once the sender has checked the state, it is sent again while
+   * still homed (DF87 follow-up, docs/modes/run-machine.md#homing-on-a-real-controller).
    */
   async function home(c: Connection): Promise<AppResult<void>> {
     c.jogEnd = undefined
+    const resets = c.positionResets ?? 0
     const r = await c.sender.command('$H')
     if (r.isErr()) {
       log.warn({ err: r.unwrapErr().toJSON() }, 'homing failed')
       return Err(r.unwrapErr())
     }
+    // a banner at the end of `$H` already checked and found Alarm: the homing did not hold
+    if ((c.positionResets ?? 0) !== resets) return lostAfterHoming()
     c.homed = true
     c.alarm = undefined
     log.info('homing done')
     status.now()
-    const restored = await restoreModes(c)
+    const restored = await againAfterBanner(c, () => restoreModes(c))
     if (restored.isErr()) return restored
-    const read = await readWorkZero(c)
+    const read = await againAfterBanner(c, () => readWorkZero(c))
     if (read.isErr()) {
       log.warn({ err: read.unwrapErr().toJSON() }, 'work zero not read after homing')
       if (!c.homed || conn !== c) return Err(read.unwrapErr())
     }
+    // a banner meanwhile followed by Alarm: the homing did not hold
+    await c.sender.bannerChecked()
+    if (!c.homed && conn === c) return lostAfterHoming()
     return Ok(undefined)
+  }
+
+  function lostAfterHoming(): AppResult<never> {
+    log.warn('the controller restarted after homing: position lost')
+    return fail('machine.reset', 'the controller restarted by itself after homing', {
+      where: 'machineHost.home',
+    })
+  }
+
+  /** `f` again once if it failed on a banner we did not cause and the position was kept. */
+  async function againAfterBanner<T>(
+    c: Connection,
+    f: () => Promise<AppResult<T>>,
+  ): Promise<AppResult<T>> {
+    const r = await f()
+    if (r.isOk() || r.unwrapErr().code !== 'machine.reset' || conn !== c) return r
+    await c.sender.bannerChecked()
+    if (!c.homed || conn !== c) return r
+    log.info('command sent again after a banner (position kept)')
+    return f()
   }
 
   const machineState = (c: Connection) => c.sender.status?.state ?? 'Unknown'
@@ -674,11 +705,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   /** After a probe alarm: the modal state the probe changed, once GRBL takes gCode again. */
   async function restoreModes(c: Connection): Promise<AppResult<void>> {
     const lines = c.restoreModes
-    c.restoreModes = undefined
     for (const l of lines ?? []) {
       const r = await c.sender.command(l)
       if (r.isErr()) return Err(r.unwrapErr())
     }
+    // kept until all were sent (modal lines: sending them again is harmless)
+    if (c.restoreModes === lines) c.restoreModes = undefined
     return Ok(undefined)
   }
 
@@ -1114,10 +1146,18 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         break
       case 'reset':
         c.jogEnd = undefined
-        // a controller that restarted on its own (power glitch, USB reset) lost its position:
-        // home again before a run (docs/modes/run-machine.md#real-machine-run-rules)
-        if (!e.expected) c.homed = false
-        post({ type: 'event', kind: 'reset', data: { expected: e.expected } })
+        // a controller that restarted on its own into Alarm (power glitch, USB reset) lost its
+        // position: home again before a run; a banner followed by Idle kept it (DF87 follow-up,
+        // docs/modes/run-machine.md#real-machine-run-rules)
+        if (e.positionLost) {
+          c.homed = false
+          c.positionResets = (c.positionResets ?? 0) + 1
+        }
+        post({
+          type: 'event',
+          kind: 'reset',
+          data: { expected: e.expected, positionLost: e.positionLost },
+        })
         // GRBL keeps G54 over a reset; read it again anyway (docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check)
         if (c.job === undefined || c.job.phase === 'stopping')
           void timers.setTimeout(() => {
