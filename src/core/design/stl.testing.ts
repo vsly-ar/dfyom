@@ -18,6 +18,19 @@ export function enclosureStl(): Uint8Array {
   return new Uint8Array(proc.getBuiltinModule('node:fs').readFileSync(ENCLOSURE_STL))
 }
 
+/**
+ * The black-box test's full enclosure body (DF60 Q71; binary STL, 77 112 triangles, 249.5 ×
+ * 177.1 × 60.52 mm, centred in x/y, bottom at z = 0, cavity open upwards; 3.9 MB, kept as is so
+ * its facets are the real export's).
+ */
+export const ENCLOSURE_FULL_STL = new URL('./__fixtures__/enclosure-wood-full.stl', import.meta.url)
+export const ENCLOSURE_FULL_TRIANGLES = 77_112
+
+export function enclosureFullStl(): Uint8Array {
+  const proc = (globalThis as unknown as { process: NodeProcess }).process
+  return new Uint8Array(proc.getBuiltinModule('node:fs').readFileSync(ENCLOSURE_FULL_STL))
+}
+
 export function binaryStl(soup: Soup, header = 'binary test'): Uint8Array {
   const n = soup.length / 9
   const out = new Uint8Array(84 + 50 * n)

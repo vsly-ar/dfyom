@@ -104,6 +104,10 @@ describe('agent tools', () => {
     expect(tool(tools, 'design.part.list')).toMatchObject({
       annotations: { readOnlyHint: true, idempotentHint: true },
     })
+    // an async query (ADR 0021) is a read-only tool like any query
+    expect(tool(tools, 'design.reference.find')).toMatchObject({
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    })
     expect(tool(tools, 'design.pocket.add')).toMatchObject({
       annotations: { destructiveHint: false },
       description: expect.stringMatching(/ Undoable\.$/),

@@ -238,6 +238,16 @@ interface QueryDef<S extends z.ZodType, R> {
 - Every query result carries the `revision` it read (`query(name, rawArgs, source): AppResult<{ value, revision }>`), so an agent can pass it as `expectedRevision`. A successful query records the source's read revision ([Stale writes](#stale-writes)).
 - The UI may call the same query functions directly on its replica.
 
+### Async queries
+
+Added with hardening DF60 ([ADR 0021](../decisions/0021-async-queries.md), [reference-tools.md](../modes/reference-tools.md)): a query whose answer needs the compute worker (the reference mesh it keeps per asset) is an **async query**, `AsyncQueryDef` with `async: true` and `run(…): AsyncAppResult<R>`, defined with `defineAsyncQuery` (`define.ts`).
+
+- `Dispatcher.queryAsync(name, rawArgs, source)` runs any query, sync ones included; `query()` refuses an async one (`internal.unexpected`, "use queryAsync"). The session route (MCP, CLI, GUI windows) always calls `queryAsync`, so agents see one kind of query; the session's `peek()` (sync queries the result shaper reads for its summaries) stays on `query()`.
+- It reads the snapshot committed **when it starts** and never enters the queue, so edits and other queries go on while it waits; the outcome names that start `revision`, and the source's read baseline is recorded at it (conservative: an edit made meanwhile by another source still counts as unseen, [Stale writes](#stale-writes)).
+- Still side-effect free: no history, no action-log event, no document change; `readsDocument` as for queries. A stray throw becomes `internal.unexpected` (`tryAsync`), worker failures come back as their `AppError`.
+- Not a job: no `jobId`, no progress, no pause or abort. Work that may take seconds or should be cancellable stays a `job` ([below](#long-running-commands-jobs)); an async query is for reads in the interactive budget (tens to a few hundred ms).
+- Tools: one MCP tool like any query (`readOnlyHint`, `idempotentHint`); `tools.ts` and `json-schema.ts` take `AnyQueryDef`.
+
 ## Long-running commands (jobs)
 
 - `dispatch` of a `job` returns `{ jobId }` once started; the queue is released immediately.

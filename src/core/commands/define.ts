@@ -204,9 +204,31 @@ export interface QueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
    * library queries read app data and set `false`.
    */
   readonly readsDocument?: boolean
+  /** Synchronous (the default); `AsyncQueryDef` sets `true`. */
+  readonly async?: false
   /** Side-effect free; reads the latest committed snapshot. */
   run(doc: ProjectDoc, args: z.output<S>, ctx: QueryContext): AppResult<R>
 }
+
+/**
+ * An **async query** (ADR 0021, DF60): side-effect free like a query, but its `run` may await
+ * worker tasks and files through `ctx.services` (the reference queries read the mesh the worker
+ * keeps). It reads the snapshot committed when it starts and never enters the project queue, so
+ * edits go on meanwhile; its result names the revision it read. Dispatched with
+ * `Dispatcher.queryAsync`; agents call it like any query (one call, read-only).
+ * Doc: docs/architecture/commands.md#async-queries
+ */
+export interface AsyncQueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
+  readonly name: string
+  readonly summary: string
+  readonly args: S
+  readonly result: z.ZodType<R>
+  readonly readsDocument?: boolean
+  readonly async: true
+  run(doc: ProjectDoc, args: z.output<S>, ctx: QueryContext): AsyncAppResult<R>
+}
+
+export type AnyQueryDef = QueryDef | AsyncQueryDef
 
 /** Identity helpers that infer the arg/result types of a definition. */
 export function defineCommand<S extends z.ZodType, R>(
@@ -219,5 +241,11 @@ export function defineCommand(def: AnyCommand): AnyCommand {
 }
 
 export function defineQuery<S extends z.ZodType, R>(def: QueryDef<S, R>): QueryDef<S, R> {
+  return def
+}
+
+export function defineAsyncQuery<S extends z.ZodType, R>(
+  def: AsyncQueryDef<S, R>,
+): AsyncQueryDef<S, R> {
   return def
 }

@@ -109,3 +109,44 @@ export function svgShapeItems(s: SvgShape, units: UnitSystem): AppResult<ShapeIt
   const all = collect(items)
   return all.isErr() ? Err(all.unwrapErr().withContext('svgShapeItems', { shape: s.name })) : all
 }
+
+/**
+ * The items of a shape made from a reference section (DF60 `design.shape.import { from }`): a
+ * fitted circle becomes a `circle` item, any other loop a closed `path`; `op` as given, in order.
+ */
+export function sectionShapeItems(
+  loops: readonly {
+    readonly loop: { readonly elements: readonly Element[] }
+    readonly op: 'add' | 'subtract'
+    readonly circle?: { readonly centre: Vec2; readonly diameter: number }
+  }[],
+  units: UnitSystem,
+): AppResult<ShapeItem<Quantity>[]> {
+  if (loops.length > SHAPE_ITEMS_MAX)
+    return fail('input.malformed', `more than ${SHAPE_ITEMS_MAX} loops in one shape`, {
+      issues: [
+        {
+          path: ['split'],
+          rule: 'sectionLimit',
+          message: `a shape holds at most ${SHAPE_ITEMS_MAX} items; try split: loop`,
+          params: { limit: SHAPE_ITEMS_MAX, actual: loops.length },
+        },
+      ],
+    })
+  const q = quantities(units)
+  return collect(
+    loops.map((l) =>
+      l.circle !== undefined
+        ? toQuantities(
+            {
+              kind: 'circle',
+              op: l.op,
+              center: [round(l.circle.centre[0]), round(l.circle.centre[1])],
+              diameter: round(l.circle.diameter),
+            },
+            q,
+          )
+        : toQuantities(pathItem(l.loop.elements, l.op, true), q),
+    ),
+  )
+}
