@@ -185,6 +185,20 @@ export const planMessages = {
     pointMoveDown: 'Move down',
     pointRemove: 'Remove',
     pointRemoveZero: 'The work zero is on it: move the zero first',
+    pointGroupAids: 'Alignment aids cut before this setup',
+    // S22: picking points in the viewport
+    pickStart: 'Pick in viewport',
+    pickStop: 'Done picking',
+    pickHint: 'Click a ring in the viewport to add that point. Esc ends picking.',
+    pickTarget: (name: string, x: string, y: string) => `Add ${name} (X ${x}  Y ${y})`,
+    // S18: alignment aids cut in this setup for the next one
+    aidsTitle: 'Alignment aids',
+    markLastFix: 'Move to end',
+    aidsHint: (next: string) =>
+      `Cut in this setup so ${next} can line up on them; each also becomes one of its points.`,
+    aidsNone: 'This is the last setup: aids are cut for a later one.',
+    aidMarks: 'Add witness marks',
+    aidHoles: 'Add registration holes',
     clearanceHeight: 'Clearance height',
     /** DF59: the note on the clearance field while the setup has no workholding, with its value. */
     clampNote: (height: string) =>
@@ -412,6 +426,28 @@ export const planMessages = {
     regenerated: (n: number) => `${plural(n, 'toolpath was', 'toolpaths were')} generated first.`,
   },
 
+  // DF78 S13: an alignment aid's inspector group (docs/modes/alignment.md#alignment-aids)
+  aid: {
+    title: 'Alignment aid',
+    kind: { witnessMark: 'witness mark', registrationHole: 'registration hole' } as Record<
+      string,
+      string
+    >,
+    hint: (kind: string, setup: string) =>
+      `A ${kind} cut in ${setup} so a later setup can line up on it; not part of the design. Positions from the front-left corner of the up face.`,
+    name: 'Name',
+    at: 'Mark',
+    from: 'Line start',
+    to: 'Line end',
+    center: 'Centre',
+    diameter: 'Hole diameter',
+    diameterHint: 'Dowel size + 0.2 mm, e.g. 6.2 mm for a 6 mm dowel.',
+    spoilboardDepth: 'Into the spoilboard',
+    spoilboardDepthHint: 'Below the stock, at most 15 mm.',
+    markDiameter: 'Mark width',
+    markHint: 'At the face; the V-bit cuts it at the depth its angle needs.',
+    remove: 'Remove aid',
+  },
   inspector: {
     plan: 'Plan',
     name: 'Plan name',
@@ -671,6 +707,12 @@ export function findingText(
       if (w.rule !== 'outsideTravel' || typeof x !== 'number' || typeof y !== 'number')
         return sentence(w.message)
       return `The work zero and alignment points span X ${lengthText(x, units)} × Y ${lengthText(y, units)}, more than the machine travel.`
+    }
+    case 'plan.aid': {
+      // DF78 S17: the depth into the table in project units; the other rules carry no length
+      const depth = p['depth']
+      if (w.rule !== 'noBase' || typeof depth !== 'number') return sentence(w.message)
+      return `Add a spoilboard to ${String(p['setup'])}: ${String(p['aid'])} goes ${lengthText(depth, units)} into the table.`
     }
     case 'plan.designToolReplaced':
       return `The design’s tool, the ${tool}, ${check}: ${String(p['tool'])} is used instead.`

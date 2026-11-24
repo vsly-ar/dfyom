@@ -15,7 +15,7 @@ import { loadPlan, type LoadedPlan } from '../plan/plan'
 import { setupAlignment, setupAlignmentErrors } from '../plan/alignment'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { SetupHeader } from './program'
-import { planOperationLabel, positionComment } from '../plan/labels'
+import { aidName, planOpLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
 import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
@@ -219,7 +219,7 @@ export async function exportPlan(
     const id = input.planOperationId
     const ids = input.operations.map((o) => o.id)
     // progress names the operation, never its id (DF43: "Export: Pocket 1: pass 2/4")
-    const label = planOperationLabel(part, ids)
+    const label = planOpLabel(part, { designOperationIds: ids, ...aidName(plan.dto, id) })
     opts.progress?.({ done: i, total, label })
     const tp = await ensureToolpath(
       cache.unwrap(),

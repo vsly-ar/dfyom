@@ -69,7 +69,13 @@ const m = planMessages
  * A plan operation's row icon: its first design operation's, as the design navigator shows it
  * (DF44: a countersink or chamfer never reads as a facing, a counterbore never as a pocket).
  */
-export function planOperationIcon(plan: PlanDTO, designOperationIds: readonly string[]): IconName {
+export function planOperationIcon(
+  plan: PlanDTO,
+  designOperationIds: readonly string[],
+  aid?: { readonly kind: string } | undefined,
+): IconName {
+  // alignment aids (S13): a witness mark is a V-bit's, a registration hole a drill's
+  if (aid !== undefined) return aid.kind === 'witnessMark' ? 'chamfer-mill' : 'drill'
   const part = plan.design.part
   const op = part.operations.find((o) => o.id === designOperationIds[0])
   return op === undefined ? 'facing' : partOperationIcon(part, op)
@@ -159,7 +165,7 @@ export function SetupList({
   const operationTo = async (id: string, step: { toIndex: number; toSetupId?: string }) => {
     const r = await call('plan.operation.move', { planId: plan.id, planOperationId: id, ...step })
     if (!r.ok) return false
-    const name = planOperationName(plan, planOperationOf(plan, id)?.designOperationIds ?? [])
+    const name = planOperationName(plan, planOperationOf(plan, id) ?? { designOperationIds: [] })
     const target = plan.setups.find((s) =>
       step.toSetupId === undefined
         ? s.operations.some((o) => o.id === id)
@@ -482,7 +488,7 @@ function OperationRow({
   onSplit: () => void
   onMoveTo: (setup: SetupDTO) => void
 }): React.JSX.Element {
-  const name = planOperationName(plan, op.designOperationIds)
+  const name = planOperationName(plan, op)
   const findings = findingsOf(data?.warnings ?? [], op.id)
   const errors = findings.filter(isError).length
   const warnings = findings.filter(isWarning).length
@@ -530,6 +536,7 @@ function OperationRow({
         className={styles['op']}
         data-row-menu={canMove ? '' : undefined}
         data-selected={selected ? '' : undefined}
+        data-aid={op.aid === undefined ? undefined : op.aid.kind}
       >
         {canMove && setup.operations.length > 1 ? (
           <RowGrip grip={reorder.gripProps(index)} />
@@ -543,7 +550,7 @@ function OperationRow({
           onClick={onSelect}
           onKeyDown={onKeyDown}
         >
-          <Icon name={planOperationIcon(plan, op.designOperationIds)} />
+          <Icon name={planOperationIcon(plan, op.designOperationIds, op.aid)} />
           <span className={styles['opText']}>
             <span className={styles['opName']} title={name}>
               <NameWords name={name} />

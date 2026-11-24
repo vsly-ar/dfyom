@@ -5,7 +5,8 @@
 // reference, three faces, a program per setup run in turn); and the v0.3 flow
 // (exit-criteria.v03.fixture.ts: SVG shapes, Shape Editor commands, shape operations, two setups,
 // the deviation check); and the v0.4 flow (exit-criteria.v04.fixture.ts: the enclosure lid with
-// holes, Clones and countersink chamfers). Also checks the CI criterion.
+// holes, Clones and countersink chamfers); and the alignment phase 1 flow
+// (exit-criteria.alignment.fixture.ts, DF78). Also checks the CI criterion.
 // Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria,
 // docs/plans/v0.3.md#exit-criteria, docs/plans/v0.4.md#exit-criteria,
 // docs/architecture/llm-api.md#testing,
@@ -22,13 +23,16 @@ import { type CallResult, exitCriteriaFlow } from './exit-criteria.fixture'
 import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
 import { exitCriteriaV03Flow } from './exit-criteria.v03.fixture'
 import { CALL_BUDGET, exitCriteriaV04Flow } from './exit-criteria.v04.fixture'
+import { exitCriteriaAlignmentFlow } from './exit-criteria.alignment.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
 // the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
 const dirV02 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v02-'))
 const dirV03 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v03-'))
 const dirV04 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v04-'))
+const dirAlign = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-align-'))
 afterAll(() => {
+  rmSync(dirAlign, { recursive: true, force: true })
   rmSync(dir, { recursive: true, force: true })
   rmSync(dirV02, { recursive: true, force: true })
   rmSync(dirV03, { recursive: true, force: true })
@@ -156,6 +160,19 @@ describe('exit criteria headless: dfyom mcp, v0.4', { timeout: 180_000 }, () => 
     expect(stderr.join('')).toBe('')
     expect(stats.calls - stats.polls).toBeLessThanOrEqual(CALL_BUDGET.calls)
     expect(stats.largest.bytes, stats.largest.name).toBeLessThanOrEqual(CALL_BUDGET.resultBytes)
+  })
+})
+
+// hardening DF78: docs/modes/alignment.md#implementation-slice-2
+describe('exit criteria headless: dfyom mcp, alignment phase 1', { timeout: 180_000 }, () => {
+  it('cuts aids in the Top, aligns the flipped Bottom on them and runs both setups', async () => {
+    const { client, call, stderr } = await connect(dirAlign)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['plan_aid_set', 'plan_alignment_set', 'run_align_goto']),
+    )
+    await exitCriteriaAlignmentFlow(call, dirAlign)
+    await client.close()
+    expect(stderr.join('')).toBe('')
   })
 })
 

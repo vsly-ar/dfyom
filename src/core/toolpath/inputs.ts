@@ -221,7 +221,19 @@ export function toGeneratorInputs(
   if (geometry.isErr()) return Err(geometry.unwrapErr().withContext(WHERE, { planOperationId: id }))
   const { byId, stock: partStock } = geometry.unwrap()
   const ops: OperationGeometry[] = []
-  for (const op of input.operations) {
+  // alignment aids (S14) carry their own geometry: a registration hole is a through drilling
+  // on the stock face, a witness mark has its own generator (below)
+  const aid = input.aid
+  if (aid?.kind === 'hole')
+    ops.push({
+      kind: 'drilling',
+      id: input.operations[0]?.id ?? id,
+      onZ: 0,
+      center: aid.center,
+      diameter: aid.diameter,
+      bottom: { kind: 'through' },
+    })
+  for (const op of aid === undefined ? input.operations : []) {
     const g = byId.get(op.id)
     if (g === undefined || g.kind !== input.kind)
       return fail('internal.unexpected', `operation ${op.id} is not a ${input.kind} of the part`, {
@@ -310,6 +322,25 @@ export function toGeneratorInputs(
           data: { planOperationId: id, operations: ops.length },
         })
   }
+  if (aid?.kind === 'mark')
+    return cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map(
+      (c): GeneratorRequest => ({
+        kind: 'mark',
+        ...turned,
+        inputs: [
+          {
+            ...base,
+            cutting: {
+              spindleSpeed: c.spindleSpeed,
+              feedRate: c.feedRate,
+              plungeRate: c.plungeRate,
+            },
+            operation: { id, from: aid.from, to: aid.to, depth: aid.depth },
+            strategy: {},
+          },
+        ],
+      }),
+    )
   switch (s.kind) {
     case 'facing':
       return single('facing').andThen((operation) =>

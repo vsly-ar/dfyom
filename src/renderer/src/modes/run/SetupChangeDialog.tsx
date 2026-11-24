@@ -94,7 +94,13 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
       }
     >
       {placed ? (
-        <SetupPicture orientation={placed.orientation} zero={placed.zero} zeroText={zeroText} />
+        <SetupPicture
+          orientation={placed.orientation}
+          zero={placed.zero}
+          zeroText={zeroText}
+          points={placed.points}
+          current={stepOf(status.alignment, planId, info.setup.id)?.current}
+        />
       ) : null}
       <ol className={styles['steps']}>
         {m.steps(up, zeroText).map((s) => (
@@ -187,11 +193,22 @@ export function SetupPicture({
   orientation,
   zero = [0, 0],
   zeroText,
+  points = [],
+  current,
 }: {
   orientation: SetupOrientation
   /** DF78 (N7): the work zero from the front-left corner of the top (mm); the ring is drawn there. */
   zero?: readonly [number, number]
   zeroText?: string | undefined
+  /** DF78: alignment points on the top (setup frame, mm), drawn as numbered diamonds. */
+  points?: readonly {
+    readonly id: string
+    readonly name: string
+    readonly n: number
+    readonly at: readonly [number, number]
+  }[]
+  /** The alignment step's current entry (`'zero'` or a point id): highlighted. */
+  current?: string | undefined
 }): React.JSX.Element {
   const [X, Y, Z] = orientation.size
   const corners: P3[] = [
@@ -204,6 +221,7 @@ export function SetupPicture({
     [X, Y, -Z],
     // the zero may lie off the stock: keep it in the picture
     [zero[0], zero[1], 0],
+    ...points.map((p): P3 => [p.at[0], p.at[1], 0]),
   ]
   const flat = corners.map(iso)
   const minX = Math.min(...flat.map((p) => p[0]))
@@ -259,7 +277,31 @@ export function SetupPicture({
             [0, Y, 0],
           ])}
         />
-        <circle className={styles['workZeroRing']} cx={ring[0]} cy={ring[1]} r={6} />
+        {points.map((p) => {
+          const [cx, cy] = at([p.at[0], p.at[1], 0]).split(',').map(Number) as [number, number]
+          const r = p.id === current ? 5.5 : 4
+          return (
+            <g
+              key={p.id}
+              className={styles['alignMarker']}
+              data-align-point={p.id}
+              data-current={p.id === current ? '' : undefined}
+            >
+              <title>{p.name}</title>
+              <polygon points={`${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy} ${cx},${cy - r}`} />
+              <text x={cx + r + 2} y={cy - r - 1}>
+                {p.n}
+              </text>
+            </g>
+          )
+        })}
+        <circle
+          className={styles['workZeroRing']}
+          data-current={current === 'zero' ? '' : undefined}
+          cx={ring[0]}
+          cy={ring[1]}
+          r={current === 'zero' ? 7.5 : 6}
+        />
         <circle className={styles['workZeroDot']} cx={ring[0]} cy={ring[1]} r={2.2} />
         <text className={styles['workZeroLabel']} x={ring[0] - 8} y={ring[1] - 10}>
           {m.zeroLabel}

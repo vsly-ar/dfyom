@@ -14,7 +14,12 @@ import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
 import { RETRACTIONS } from '../toolpath/links'
-import { ALIGNMENT_POINTS_MAX, AlignmentPointDtoSchema, SetupZeroDtoSchema } from './alignment.dto'
+import {
+  AidDtoSchema,
+  ALIGNMENT_POINTS_MAX,
+  AlignmentPointDtoSchema,
+  SetupZeroDtoSchema,
+} from './alignment.dto'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
@@ -136,39 +141,56 @@ export const ZRefDtoSchema = z.object({
 })
 export type ZRefDTO = z.output<typeof ZRefDtoSchema>
 
-export const PlanOperationDtoSchema = z.object({
-  id: PlanRecordIdSchema.describe('Plan operation id'),
-  designOperationIds: z
-    .array(OperationIdSchema)
-    .min(1)
-    .describe('Operations of the design snapshot it machines (drillings may share one)'),
-  tool: z.string().min(1).optional().describe("Id of the tool copy in the plan's snapshots"),
-  toolSource: z
-    .enum(TOOL_SOURCES)
-    .optional()
-    .describe(
-      'design: resolved from the design tool field (re-resolved when it changes); plan: plan.tool.assign (kept)',
+export const PlanOperationDtoSchema = z
+  .object({
+    id: PlanRecordIdSchema.describe('Plan operation id'),
+    designOperationIds: z
+      .array(OperationIdSchema)
+      .describe(
+        'Operations of the design snapshot it machines (drillings may share one); empty for an aid',
+      ),
+    // alignment phase 1 (S13): an alignment aid, a plan operation without a design operation
+    source: z.literal('aid').optional().describe('aid: an alignment aid (no design operation)'),
+    aid: AidDtoSchema.optional().describe("The aid's parameters (source 'aid' only)"),
+    tool: z.string().min(1).optional().describe("Id of the tool copy in the plan's snapshots"),
+    toolSource: z
+      .enum(TOOL_SOURCES)
+      .optional()
+      .describe(
+        'design: resolved from the design tool field (re-resolved when it changes); plan: plan.tool.assign (kept)',
+      ),
+    designToolChanged: z
+      .literal(true)
+      .optional()
+      .describe("A rebuild kept this plan-assigned tool although the design's tool field changed"),
+    stickout: length().optional().describe("Default: the tool's stickout, else its flute length"),
+    presetName: z.string().min(1).max(PRESET_NAME_MAX).optional().describe('Default: by material'),
+    auto: z
+      .literal(true)
+      .optional()
+      .describe('Auto mode chosen: feeds from the calculator (excludes presetName)'),
+    locked: z
+      .array(z.enum(FEED_FIELDS))
+      .optional()
+      .describe('Locked feeds fields (auto mode only): the other recommendations follow them'),
+    overrides: OverridesDtoSchema,
+    strategy: StrategyDtoSchema,
+    zRef: ZRefDtoSchema.optional().describe(
+      'Z reference of the tool run this operation starts; absent = the default rule',
     ),
-  designToolChanged: z
-    .literal(true)
-    .optional()
-    .describe("A rebuild kept this plan-assigned tool although the design's tool field changed"),
-  stickout: length().optional().describe("Default: the tool's stickout, else its flute length"),
-  presetName: z.string().min(1).max(PRESET_NAME_MAX).optional().describe('Default: by material'),
-  auto: z
-    .literal(true)
-    .optional()
-    .describe('Auto mode chosen: feeds from the calculator (excludes presetName)'),
-  locked: z
-    .array(z.enum(FEED_FIELDS))
-    .optional()
-    .describe('Locked feeds fields (auto mode only): the other recommendations follow them'),
-  overrides: OverridesDtoSchema,
-  strategy: StrategyDtoSchema,
-  zRef: ZRefDtoSchema.optional().describe(
-    'Z reference of the tool run this operation starts; absent = the default rule',
-  ),
-})
+  })
+  .superRefine((op, ctx) => {
+    // an aid has parameters and no design operation; every other plan operation has one or more
+    const aid = op.source === 'aid'
+    if (aid !== (op.aid !== undefined))
+      ctx.addIssue({ code: 'custom', path: ['aid'], message: "an aid needs source 'aid' and aid" })
+    if (aid ? op.designOperationIds.length > 0 : op.designOperationIds.length === 0)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['designOperationIds'],
+        message: aid ? 'an aid machines no design operation' : 'at least one design operation',
+      })
+  })
 export type PlanOperationDTO = z.output<typeof PlanOperationDtoSchema>
 
 /** Setup rotations about the spindle axis, degrees (docs/modes/plan-v0.2.md#setups-from-face-directions). */

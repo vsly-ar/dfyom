@@ -63,6 +63,7 @@ import { usePlanCommand, usePlanData, usePlanState, usePlanStore } from './plan-
 import styles from './Plan.module.css'
 import { StrategyGroup } from './StrategyGroup'
 import { ZRefFields } from './ZRefFields'
+import { AidFields } from './AidFields'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
 
 const m = planMessages
@@ -96,7 +97,7 @@ export function planWarningView(
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
     text: findingText(w, units, findingNames(plan)),
-    ...(op === undefined ? {} : { subject: planOperationName(plan, op.designOperationIds) }),
+    ...(op === undefined ? {} : { subject: planOperationName(plan, op) }),
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
 }
@@ -326,7 +327,7 @@ function OperationInspector({
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
   const suggestions = useSuggestions(plan.id, op.id)
   const readOnly = !editable(plan)
-  const name = planOperationName(plan, op.designOperationIds)
+  const name = planOperationName(plan, op)
   const kind = view?.kind
   const fields = kind === undefined ? [] : feedFields(kind)
 
@@ -430,7 +431,10 @@ function OperationInspector({
   return (
     <div className={styles['inspector']}>
       {/* the design operations' ids (as the design inspector shows them), not the internal plan id */}
-      <PanelHeader title={name} itemId={op.designOperationIds.join(', ')} />
+      <PanelHeader
+        title={name}
+        itemId={op.aid === undefined ? op.designOperationIds.join(', ') : planMessages.aid.title}
+      />
       <div className={styles['fields']}>
         {readOnly ? <p className={styles['muted']}>{m.readOnly(plan.status)}</p> : null}
         {failed ? <ErrorMessage error={failed} message={t.commandFailed} /> : null}
@@ -446,6 +450,18 @@ function OperationInspector({
             <WarningList labels={planWarningLabels} items={checks} />
           </section>
         ) : null}
+
+        {op.aid === undefined ? null : (
+          <AidFields
+            plan={plan}
+            op={op}
+            aid={op.aid}
+            units={units}
+            readOnly={readOnly}
+            findings={findings}
+            onSet={(aid) => void send('plan.aid.set', aid === undefined ? {} : { aid })}
+          />
+        )}
 
         <section className={styles['group']} aria-label={t.groups.tool}>
           <h3 className={styles['groupTitle']}>{t.groups.tool}</h3>
@@ -560,9 +576,10 @@ function OperationInspector({
           />
         </section>
 
-        <PlanCopyGroup doc={doc} plan={plan} op={op} />
+        {op.aid === undefined ? <PlanCopyGroup doc={doc} plan={plan} op={op} /> : null}
 
-        {current !== null && view !== undefined ? (
+        {/* a witness mark's strategy is fixed (one plunge or line at its depth, S14) */}
+        {current !== null && view !== undefined && op.aid?.kind !== 'witnessMark' ? (
           <StrategyGroup
             plan={plan}
             op={op}

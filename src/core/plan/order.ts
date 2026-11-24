@@ -110,7 +110,13 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
     }
     return {
       op: p,
-      rank: RANK[ops[0]?.kind ?? 'profile'],
+      // alignment aids: holes with the drillings, marks after everything (alignment.md § Order)
+      rank:
+        p.aid !== undefined
+          ? p.aid.kind === 'registrationHole'
+            ? RANK.drilling
+            : RANK.profile + 1
+          : RANK[ops[0]?.kind ?? 'profile'],
       designIndex: Math.min(...p.designOperationIds.map((d) => index.get(d) ?? Infinity)),
       deps: new Set([...deps, ...edgeDeps]),
       edgeDeps,

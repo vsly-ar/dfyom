@@ -27,6 +27,7 @@ import type {
   Toolpath,
   ToolpathTool,
 } from './model'
+import type { MarkInput } from './mark'
 import type { RegionPocketInput } from './region-pocket'
 import type { RegionProfileInput } from './region-profile'
 
@@ -247,4 +248,12 @@ export const ChamferInputSchema: z.ZodType<ChamferInput> = z.object({
     rampAngle: z.number(),
     direction: Direction,
   }),
+})
+
+/** A witness mark (alignment aid, S14): a spot (`from` = `to`) or a line at `depth`, face frame. */
+export const MarkInputSchema: z.ZodType<MarkInput> = z.object({
+  ...base,
+  cutting: DrillCuttingSchema,
+  operation: z.object({ id: z.string(), from: Vec2Schema, to: Vec2Schema, depth: z.number() }),
+  strategy: z.object({}).strict() as unknown as z.ZodType<Record<string, never>>,
 })

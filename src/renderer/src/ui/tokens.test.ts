@@ -76,6 +76,8 @@ const SEMANTIC = [
   ...['feed', 'rapid', 'plunge', 'tool', 'axis-x', 'axis-y', 'axis-z', 'hover', 'outdated'].map(
     (s) => `--vp-${s}`,
   ),
+  // alignment aids (alignment.md S13): their rows' edge and icon, the viewport's pick targets
+  '--aid',
   '--shadow-1',
   '--shadow-2',
   '--shadow-3',
@@ -205,6 +207,8 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--vp-plunge', '--bg-viewport', 'mark', 'plunges'],
   ['--vp-plunge', '--vp-part', 'mark', 'plunges over the part'],
   ['--vp-tool', '--bg-viewport', 'mark', 'tool marker'],
+  ['--aid', '--bg-viewport', 'mark', 'alignment pick target'],
+  ['--aid', '--bg-chrome', 'mark', 'alignment aid row icon'],
   ['--vp-axis-x', '--bg-viewport', 'mark', 'X axis'],
   ['--vp-axis-y', '--bg-viewport', 'mark', 'Y axis'],
   ['--vp-axis-z', '--bg-viewport', 'mark', 'Z axis'],

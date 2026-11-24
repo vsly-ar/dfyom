@@ -26,6 +26,7 @@ import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
 import {
   toolpathLines,
   type AlignmentMarker,
+  type AlignmentTarget,
   type Box,
   type RunScene,
   type ViewportMesh,
@@ -41,6 +42,7 @@ import {
   editedOperations,
   planPart,
   planStockSize,
+  pointsWithAdded,
   setupPlacement,
   setupZeroOf,
 } from './model'
@@ -75,6 +77,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const last = usePlanState((s) => s.lastSelection)
   const preview = usePlanState((s) => s.zRefPreview)
   const focusedPoint = usePlanState((s) => s.alignmentPoint)
+  const picking = usePlanState((s) => s.pickingAlignment)
   const openItem = usePlanState((s) => s.workholdingItem)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
@@ -157,6 +160,30 @@ export function usePlanScene(mode: AppMode): RunScene | null {
           ],
     )
   }, [info, data?.warnings, focusedPoint])
+  // S22: while picking, the setup's valid sources are targets; a click adds that point
+  const targets = useMemo((): AlignmentTarget[] => {
+    if (plan === undefined || setup === undefined || picking !== setup.id) return []
+    const zero = setupZeroOf(setup, info)
+    const sources = data?.alignmentSources.find((a) => a.setupId === setup.id)?.sources ?? []
+    return sources.map((src) => {
+      const at: P = [src.at[0] - zero[0], src.at[1] - zero[1]]
+      return {
+        key: JSON.stringify(src.source),
+        at,
+        label: planMessages.setup.pickTarget(
+          src.name,
+          lengthSource(at[0], units),
+          lengthSource(at[1], units),
+        ),
+        onPick: () =>
+          void call('plan.alignment.set', {
+            planId: plan.id,
+            setupId: setup.id,
+            points: pointsWithAdded(setup, src.source),
+          }),
+      }
+    })
+  }, [plan, setup, picking, info, data?.alignmentSources, units, call])
   return useMemo(() => {
     if (data === undefined || plan === undefined || setup === undefined || doc === undefined)
       return null
@@ -200,9 +227,10 @@ export function usePlanScene(mode: AppMode): RunScene | null {
         : { frame: setupPlacement(setup, stock, setupZeroOf(setup, info)) }),
       ...(zRef === undefined ? {} : { zRef }),
       ...(alignment.length === 0 ? {} : { alignment }),
+      ...(targets.length === 0 ? {} : { alignmentTargets: targets }),
       ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef, info, alignment, openItem])
+  }, [data, plan, setup, doc, zRef, info, alignment, targets, openItem])
 }
 
 /** The plan's part as the plan scene draws it. */

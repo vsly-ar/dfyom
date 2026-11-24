@@ -186,6 +186,15 @@
   transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
+/* alignment aids (alignment.md S13): an `--aid` edge and icon, so they read as not part of the design */
+.op[data-aid] {
+  border-left-color: color-mix(in oklab, var(--aid) 70%, transparent);
+}
+
+.op[data-aid] svg {
+  color: var(--aid);
+}
+
 .op:hover {
   background: var(--bg-hover);
 }

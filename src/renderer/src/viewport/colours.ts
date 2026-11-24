@@ -33,11 +33,14 @@ export const PALETTE_TOKENS = {
   tool: '--vp-tool',
   /** Plunges in the toolpath preview (task 3.7); falls back to `--vp-feed` if the token is missing. */
   plunge: '--vp-plunge',
+  /** Alignment aids and pickable alignment sources (DF78); falls back to `--vp-tool`. */
+  aid: '--aid',
 } as const
 
 /** Tokens that may be missing: they take another palette entry instead of `FALLBACK`. */
 const OPTIONAL: Partial<Record<keyof typeof PALETTE_TOKENS, keyof typeof PALETTE_TOKENS>> = {
   plunge: 'feed',
+  aid: 'tool',
 }
 
 export type PaletteKey = keyof typeof PALETTE_TOKENS
