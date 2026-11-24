@@ -198,10 +198,10 @@ export interface RunState {
   continueWait(): Promise<void>
 }
 
-/** One override change (docs/modes/run-machine.md#overrides-m6). */
+/** One override change (docs/modes/run-machine.md#overrides-m6): a step or a target % (DF85). */
 export interface OverrideChange {
-  readonly feed?: 'reset' | '+10' | '-10'
-  readonly spindle?: 'reset' | '+10' | '-10'
+  readonly feed?: 'reset' | '+10' | '-10' | number
+  readonly spindle?: 'reset' | '+10' | '-10' | number
   readonly rapid?: 100 | 50 | 25
 }
 

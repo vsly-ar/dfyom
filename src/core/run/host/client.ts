@@ -29,6 +29,7 @@ import {
   type RunStatus,
 } from '../service'
 import type { SerialPortInfo } from '../serial'
+import { programmedRates, type ProgrammedRates } from '../override'
 import { reconcileStep, type AlignmentStep } from '../alignment'
 import {
   ControllerInfoSchema,
@@ -89,6 +90,8 @@ interface Job {
   done: number
   /** Waiting at a tool change (last phase). */
   atToolChange: boolean
+  /** The program's modal F (mm/min) and S (rpm, 0 = off) after each line (DF85). */
+  readonly rates: ReturnType<typeof programmedRates>
 }
 
 /** Phases that say where a run is (the end phases keep the last of these). */
@@ -120,6 +123,16 @@ export function stoppedOperation(
   atToolChange: boolean,
 ): string | undefined {
   return operationAt(about, atToolChange ? done + 1 : Math.max(1, done - PLANNER_LINES))
+}
+
+/**
+ * The programmed F and S of the last acknowledged line (DF85): what the override scales next.
+ * Absent before the first line.
+ */
+function programmedAt(job: Job, line: number): { programmed?: ProgrammedRates } {
+  const i = Math.min(line - 1, job.rates.feed.length) - 1
+  if (i < 0) return {}
+  return { programmed: { feed: job.rates.feed[i] ?? 0, spindle: job.rates.spindle[i] ?? 0 } }
 }
 
 const WHERE = 'MachineClient'
@@ -203,7 +216,14 @@ export class MachineClient implements MachineService {
       },
       ...(job === undefined || this.job?.jobId !== job.jobId
         ? {}
-        : { job: { ...job, startedAt: this.job.startedAt, ...this.aboutJob(this.job, job.line) } }),
+        : {
+            job: {
+              ...job,
+              startedAt: this.job.startedAt,
+              ...this.aboutJob(this.job, job.line),
+              ...programmedAt(this.job, job.line),
+            },
+          }),
       ...last,
       ...(this.step === undefined ? {} : { alignment: structuredClone(this.step) }),
     }
@@ -237,6 +257,8 @@ export class MachineClient implements MachineService {
       setupId: about.plan.setupId,
       outcome: r.isOk() ? 'done' : r.unwrapErr().code === 'op.aborted' ? 'stopped' : 'failed',
       ...(op === undefined ? {} : { planOperationId: op }),
+      ...(about.planHash === undefined ? {} : { planHash: about.planHash }),
+      ...(about.order === undefined ? {} : { operations: [...about.order] }),
     }
   }
 
@@ -308,6 +330,7 @@ export class MachineClient implements MachineService {
       action.kind === 'reset' ||
       action.kind === 'jogCancel' ||
       action.kind === 'override' ||
+      action.kind === 'overrideTo' ||
       action.kind === 'feedHold' ||
       action.kind === 'cycleStart'
     if (this.reserved !== undefined && !passes)
@@ -356,6 +379,7 @@ export class MachineClient implements MachineService {
       about,
       done: 0,
       atToolChange: false,
+      rates: programmedRates(program.lines),
     }
     this.job = job
     // a new run replaces the record of the last one

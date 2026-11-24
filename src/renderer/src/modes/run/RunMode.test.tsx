@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { planSetup } from '../../../../core/plan/plan.fixture'
 import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
+import { runPlanHash } from '../../../../core/run/plan-hash'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
@@ -719,6 +720,73 @@ describe('Run mode', () => {
       { planId: plan.id, setupId: setup.id, from: ops[1]!.id },
     ])
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('"Resume from…" after the plan was edited: the stopped operation by id, the change said (DF85)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const plan = t.plan()
+    const setup = plan.setups[0]!
+    const ids = setup.operations.map((o) => o.id)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const stopped = (over: object) =>
+      t.machine.push({
+        state: 'Idle',
+        lastRun: {
+          jobId: 'run-0',
+          planId: plan.id,
+          setupId: setup.id,
+          outcome: 'stopped',
+          planOperationId: ids[1]!,
+          ...over,
+        },
+      })
+    // the plan as the run had it: no notes
+    stopped({ planHash: runPlanHash(plan, setup.id), operations: ids })
+    await t.user.click(await within(inspector).findByRole('button', { name: 'Resume from…' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Resume run?' })
+    expect(within(dialog).queryByText(/The plan changed since the stop/)).toBeNull()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // edited and in another order since: the stopped operation is still preselected by id
+    stopped({ planHash: 'another', operations: [...ids].reverse() })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Resume from…' }))
+    dialog = await screen.findByRole('dialog', { name: 'Resume run?' })
+    expect(
+      within(dialog).getByText(
+        'The plan changed since the stop: the resumed program is exported from the current plan.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        'The operations were reordered since the stop. Check where to resume.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Resume at' })).toHaveTextContent(
+      /\(stopped here\)/,
+    )
+    await expectNoAxeViolations()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // the stopped operation was removed: said, and the first one offered
+    stopped({ planHash: 'another', operations: ids, planOperationId: 'planOp-gone' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Resume from…' }))
+    dialog = await screen.findByRole('dialog', { name: 'Resume run?' })
+    expect(
+      within(dialog).getByText(
+        'The operation the run stopped in is no longer in this setup. Choose where to resume.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Resume at' })).not.toHaveTextContent(
+      /stopped here/,
+    )
+    await t.user.click(within(dialog).getByRole('button', { name: 'Resume run' }))
+    expect(t.callsOf('run.job.start').at(-1)).toEqual({
+      planId: plan.id,
+      setupId: setup.id,
+      from: ids[0],
+    })
   })
 
   it('the failure dialog offers "Resume from…" after a failed run (M5)', async () => {

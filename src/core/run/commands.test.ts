@@ -13,6 +13,7 @@ import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
 import { checkNoRunJob, prepareWorkZero } from './commands'
 import { machineKeyOf } from './machine-key'
+import { runPlanHash } from './plan-hash'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
 import type { MachineService, RunStatus } from './service'
@@ -312,6 +313,21 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().overrides?.feed).toBe(110)
     expectErrCode(await t.run('run.override.set', { rapid: 75 }), 'input.malformed')
     expectErrCode(await t.run('run.override.set', {}), 'input.malformed')
+    // DF85: a target percent, reached in coarse and fine steps and read back from `Ov`
+    for (const [feed, spindle] of [
+      [137, 63],
+      [200, 10],
+      [10, 199],
+      [100, 100],
+    ] as const) {
+      const to = expectOk(await t.run('run.override.set', { feed, spindle })) as {
+        overrides?: { feed: number; spindle: number }
+      }
+      expect(to.overrides).toMatchObject({ feed, spindle })
+    }
+    const out = await t.run('run.override.set', { feed: 201 })
+    expect(expectErrCode(out, 'input.malformed').issues[0]?.rule).toBe('overrideRange')
+    expectErrCode(await t.run('run.override.set', { spindle: 9 }), 'input.malformed')
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {
@@ -632,6 +648,8 @@ describe('run commands', { timeout: 60_000 }, () => {
       setupId: t.s.plan(t.planId).setups[0]!.id,
       outcome: 'stopped',
       planOperationId: stoppedIn,
+      planHash: runPlanHash(t.s.plan(t.planId), t.s.plan(t.planId).setups[0]!.id),
+      operations: ops.map((o) => o.id),
     })
     // not an operation of the setup
     const bad = await t.job('run.job.start', { planId: t.planId, from: 'nope' })
@@ -662,6 +680,91 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(summary.lines).toBeLessThan(full.lines)
     expect(t.status().lastRun).toMatchObject({ jobId: resumed.jobId, outcome: 'done' })
     expect(t.status().lastRun?.planOperationId).toBeUndefined()
+  })
+
+  it('a run stopped, the plan edited and finalized again, resumes from the current plan (DF85)', async () => {
+    const programs: string[][] = []
+    const t = await setup({
+      wrap: (c) =>
+        new Proxy(c, {
+          get: (target, key) => {
+            if (key === 'startJob')
+              return async (...a: Parameters<MachineClient['startJob']>) => {
+                programs.push([...a[1].lines])
+                return target.startJob(...a)
+              }
+            const v = Reflect.get(target, key) as unknown
+            return typeof v === 'function' ? (v as () => unknown).bind(target) : v
+          },
+        }),
+    })
+    const plan = () => t.d.doc.plans[t.planId]!
+    const setupId = plan().setups[0]!.id
+    for (const status of ['settledDesign', 'finalized'])
+      expectOk(await t.run('plan.status.set', { planId: t.planId, status }, ui))
+    expectOk(await t.open({ prepare: true }))
+    const first = await t.job('run.job.start', { planId: t.planId })
+    // stop at the first tool change that waits
+    for (;;) {
+      expect(await waitFor(() => /toolChange|programPause/.test(t.status().job?.phase ?? ''))).toBe(
+        true,
+      )
+      if (t.status().job?.phase === 'toolChange') break
+      expectOk(await t.run('run.job.continue', {}))
+      await waitFor(() => t.status().job?.phase === 'streaming')
+    }
+    const stoppedIn = t.status().job!.planOperationId!
+    expectOk(await t.run('job.abort', { jobId: first.jobId }))
+    expectErrCode(await first.result, 'op.aborted')
+    expect(await waitFor(() => t.status().job === undefined)).toBe(true)
+    const last = t.status().lastRun!
+    expect(last.planHash).toBe(runPlanHash(plan(), setupId))
+    // finalized is read-only: back to Settled design, fix the stopped operation's feeds,
+    // finalize again
+    expectErrCode(
+      await t.run(
+        'plan.operation.update',
+        {
+          planId: t.planId,
+          planOperationId: stoppedIn,
+          overrides: { feedRate: '137', plungeRate: '137' },
+        },
+        ui,
+      ),
+      'plan.status',
+    )
+    expectOk(await t.run('plan.status.set', { planId: t.planId, status: 'settledDesign' }, ui))
+    expectOk(
+      await t.run(
+        'plan.operation.update',
+        {
+          planId: t.planId,
+          planOperationId: stoppedIn,
+          overrides: { feedRate: '137', plungeRate: '137' },
+        },
+        ui,
+      ),
+    )
+    expectOk(await t.run('plan.status.set', { planId: t.planId, status: 'finalized' }, ui))
+    // the stopped operation keeps its id; the plan's hash says it changed
+    expect(plan().setups[0]!.operations.some((o) => o.id === stoppedIn)).toBe(true)
+    expect(runPlanHash(plan(), setupId)).not.toBe(last.planHash)
+    // status changes alone do not count as a change
+    const hashNow = runPlanHash(plan(), setupId)
+    expectOk(await t.run('plan.status.set', { planId: t.planId, status: 'settledDesign' }, ui))
+    expect(runPlanHash(plan(), setupId)).toBe(hashNow)
+    expectOk(await t.run('plan.status.set', { planId: t.planId, status: 'finalized' }, ui))
+    // the resume is exported from the plan as it is now: the stopped operation at F137
+    const resumed = await t.job('run.job.start', { planId: t.planId, from: stoppedIn })
+    expect(await waitFor(() => t.status().job?.phase === 'toolChange')).toBe(true)
+    const program = programs.at(-1)!
+    expect(programs.length).toBe(2)
+    expect(program.some((l) => /F137\b/.test(l))).toBe(true)
+    expect(programs[0]!.some((l) => /F137\b/.test(l))).toBe(false)
+    expectOk(await t.run('job.abort', { jobId: resumed.jobId }))
+    expectErrCode(await resumed.result, 'op.aborted')
+    expect(await waitFor(() => t.status().lastRun?.jobId === resumed.jobId)).toBe(true)
+    expect(t.status().lastRun?.planHash).toBe(runPlanHash(plan(), setupId))
   })
 
   it('the host exiting fails the job with machine.connection and closes the connection', async () => {
@@ -851,6 +954,13 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
         overrides?: { feed: number }
       },
     ).toMatchObject({ overrides: { feed: 90 } })
+    // DF85: a target through the loopback serial line, an agent's refused
+    expectErrCode(await t.run('run.override.set', { feed: 120 }), 'permission.denied')
+    expect(
+      expectOk(await t.run('run.override.set', { feed: 153 }, ui)) as {
+        overrides?: { feed: number }
+      },
+    ).toMatchObject({ overrides: { feed: 153 } })
     // a real machine runs finalized plans only
     const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
       jobId: string

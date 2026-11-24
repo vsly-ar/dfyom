@@ -50,6 +50,13 @@ export const LastRunSchema = z.object({
   outcome: z.enum(['done', 'stopped', 'failed']),
   /** The earliest operation GRBL may still have been executing when the run ended. */
   planOperationId: z.string().exactOptional(),
+  /**
+   * DF85: `planHash` of the plan and setup as the run exported them, and the operations the run
+   * had in machining order; a resume compares them with the plan as it is now
+   * (docs/modes/run-machine.md#section-resume-m5).
+   */
+  planHash: z.string().exactOptional(),
+  operations: z.array(z.string()).readonly().exactOptional(),
 })
 export type LastRun = z.output<typeof LastRunSchema>
 
@@ -84,6 +91,11 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
       plan: RunPlanSchema.exactOptional(),
       /** The operation of the line being acknowledged (M7). */
       planOperationId: z.string().exactOptional(),
+      /**
+       * DF85: the programmed feed (mm/min) and spindle speed (rpm, 0 = off) of the last
+       * acknowledged line, which the overrides scale (docs/modes/run-machine.md#overrides-m6).
+       */
+      programmed: z.object({ feed: z.number(), spindle: z.number() }).exactOptional(),
     })
     .exactOptional(),
   /** The run that ended last; kept until the next run starts, across connections (M5). */
@@ -123,6 +135,9 @@ export interface JobAbout {
   readonly plan: RunPlan
   /** The first line (1-based) of each plan operation in the program streamed. */
   readonly operations: readonly { readonly planOperationId: string; readonly fromLine: number }[]
+  /** DF85: `runPlanHash` of the plan and setup exported, and the setup's operations in order. */
+  readonly planHash?: string
+  readonly order?: readonly string[]
 }
 
 export interface RunningJob {

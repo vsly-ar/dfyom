@@ -274,6 +274,20 @@ export const runMessages = {
     percent: (v: number) => `${Math.round(v)} %`,
     unknown: '–',
     hint: 'Overrides apply until reset or the program ends.',
+    /** DF85: the slider per row. */
+    sliderLabel: (what: string) => `${what} override`,
+    /** The effective value next to the percent while a run streams. */
+    effectiveFeed: (value: string, units: string) => `F ${value} ${units}`,
+    effectiveSpindle: (rpm: number) => `S ${rpm.toFixed(0)} rpm`,
+    spindleOff: 'Spindle off',
+    valueText: (pct: number, effective: string | undefined) =>
+      effective === undefined ? `${pct} %` : `${pct} %, ${effective}`,
+    capFeed: (max: number, value: string, units: string) =>
+      `Up to ${max} %: the machine's max feed is ${value} ${units}.`,
+    capSpindle: (max: number, rpm: number) =>
+      `Up to ${max} %: the machine's max spindle speed is ${rpm.toFixed(0)} rpm.`,
+    noSpindleManual: 'The spindle speed is set by hand on this machine: no spindle override.',
+    noSpindleLaser: 'Laser mode is on ($32=1): no spindle override.',
   },
 
   unlockConfirm: {
@@ -377,6 +391,12 @@ export const runMessages = {
       'The run waits at the tool first: check or change it and set Z zero, then continue. The spindle starts and the machine moves to the operation’s start at the clearance height.',
     resume: 'Resume run',
     resumeMachine: 'Resume on the machine',
+    /** DF85: the plan was edited since the stop. */
+    planChanged:
+      'The plan changed since the stop: the resumed program is exported from the current plan.',
+    stoppedRemoved:
+      'The operation the run stopped in is no longer in this setup. Choose where to resume.',
+    reordered: 'The operations were reordered since the stop. Check where to resume.',
   },
 
   toolChange: {

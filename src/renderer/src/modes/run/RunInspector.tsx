@@ -13,7 +13,7 @@ import { Icon, Button, EmptyState, PanelHeader, Progress } from '../../ui'
 import { useShell } from '../../shell/ShellContext'
 import { AlignmentPanel } from './AlignmentPanel'
 import { Dro } from './Dro'
-import { OverridesSection } from './OverridesSection'
+import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { activeJob, isConnected, runGates } from './machine-state'
@@ -57,6 +57,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const showProgress = job !== undefined || (jobId !== undefined && progress !== undefined)
   const plan = planId === undefined || doc === undefined ? undefined : doc.plans[planId]
   const units = useRunUnits(doc)
+  const overrideMachine = useMachineOverrideLimits(doc)
   const resumable = setupChange === undefined && canResume(status.lastRun, plan, setupId)
 
   return (
@@ -167,7 +168,12 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
         </section>
 
         {isConnected(status) ? (
-          <OverridesSection status={status} onChange={(c) => void a.override(c)} />
+          <OverridesSection
+            status={status}
+            onChange={(c) => a.override(c)}
+            machine={overrideMachine}
+            units={units}
+          />
         ) : null}
 
         {isConnected(status) ? (

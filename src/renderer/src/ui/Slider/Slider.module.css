@@ -1,0 +1,89 @@
+/* Slider. Doc: docs/conventions/ui.md#components. A 4 px track, the accent fill up to the thumb,
+   a hatched segment past the reachable limit, 1 px ticks; the thumb grows on hover and press. */
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 24px; /* pointer target (WCAG 2.2) */
+  touch-action: none;
+  user-select: none;
+}
+
+.track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  box-shadow: inset 0 0 0 1px var(--border-control);
+  overflow: hidden;
+}
+
+.range {
+  position: absolute;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--motion-fast) var(--ease-standard);
+}
+
+.root:active .range {
+  transition: none;
+}
+
+.beyond {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(-45deg, var(--border-control) 0 2px, transparent 2px 4px);
+  opacity: 0.6;
+}
+
+.mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--text-muted);
+}
+
+.thumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-border);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  cursor: grab;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.thumb:hover {
+  transform: scale(1.15);
+}
+
+.thumb:active {
+  cursor: grabbing;
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.root[data-disabled] {
+  opacity: 0.5;
+}
+
+.root[data-disabled] .thumb {
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .range,
+  .thumb {
+    transition: none;
+  }
+}
