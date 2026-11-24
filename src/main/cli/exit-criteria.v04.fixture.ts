@@ -116,6 +116,9 @@ const MACHINE = {
   spindle: { control: 'manual', maxSpeed: '24000' },
   programUnits: 'mm',
   toolChanger: 'none',
+  // the Z headroom fields (DF68): the checks run and find enough headroom
+  noseToTable: '115',
+  spoilboardThickness: '10',
 }
 
 /** `first` and `pattern` with `%` replaced by each of `ns`, space-separated (plan rows). */
@@ -526,7 +529,12 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   const target = join(dir, 'lid.nc')
   const exported = (await ok<ExportResult>('plan.export', { planId, setupId: setup.id, target }))
     .value
-  expect(exported).toMatchObject({ setupId: setup.id, softLimitChecked: true, regenerated: [] })
+  expect(exported).toMatchObject({
+    setupId: setup.id,
+    softLimitChecked: true,
+    warnings: [],
+    regenerated: [],
+  })
   const program = readFileSync(target, 'utf8')
   await expect(program).toMatchFileSnapshot(GOLDEN_V04)
   expect(program.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)

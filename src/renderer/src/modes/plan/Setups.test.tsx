@@ -7,6 +7,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { CallReply } from '../../../../shared/preload-api'
@@ -58,10 +59,22 @@ const toolpath = {
   stats: { cutLength: 1, rapidLength: 0, estimatedSeconds: 1 },
 }
 
-async function renderSetups(setup?: (s: PlanSetup, planId: string) => Promise<void>) {
+async function renderSetups(
+  setup?: (s: PlanSetup, planId: string) => Promise<void>,
+  /** Extra machine values (library command input) for the plan's machine, e.g. DF68's. */
+  machineExtra?: object,
+) {
   const s = await planSetup()
   await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
-  const planId = await s.create({ machineLibraryItemId: s.machineId })
+  const machineId =
+    machineExtra === undefined
+      ? s.machineId
+      : (
+          (await s.run('library.machine.add', {
+            values: { ...libraryInput(machineValues()), ...machineExtra },
+          })) as { id: string }
+        ).id
+  const planId = await s.create({ machineLibraryItemId: machineId })
   await setup?.(s, planId)
   const bridge = createFakeBridge()
   bridge.bind(s.d)
@@ -338,6 +351,47 @@ describe('Setup panel', () => {
       'Keep clamps lower than 10 mm above the stock top; clamps are not modelled yet.',
     )
     await expectNoAxeViolations()
+  })
+
+  // DF68: docs/architecture/grbl.md#z-headroom-hardening-df68
+  it('shows the Z headroom: what to enter, too little for a tool, or enough', async () => {
+    const headroom = async (t: Awaited<ReturnType<typeof renderSetups>>) => {
+      await t.user.click(t.setupRows()[0]!)
+      const insp = t.inspector()
+      await within(insp).findByRole('heading', { name: 'Setup' })
+      expect(within(insp).getByText('Z headroom')).toBeInTheDocument()
+      return insp
+    }
+    const plain = await headroom(await renderSetups())
+    expect(
+      within(plain).getByText(
+        'Not checked: enter the spindle nose to table distance and the spoilboard thickness (0 if none) in the machine.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+  })
+
+  it('names the tool that hits the Z+ limit in the setup checks (DF68)', async () => {
+    const t = await renderSetups(undefined, { noseToTable: '40', spoilboardThickness: '5' })
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    expect(
+      await within(insp).findByText('Too little for a tool: see the setup checks.'),
+    ).toBeInTheDocument()
+    const checks = within(insp).getByRole('region', { name: 'Setup checks' })
+    expect(
+      within(checks).getAllByText(/would hit the Z\+ limit: lower the clearance height/).length,
+    ).toBeGreaterThan(0)
+    await expectNoAxeViolations()
+  })
+
+  it('says the Z headroom is enough on a machine with room (DF68)', async () => {
+    const t = await renderSetups(undefined, { noseToTable: '120', spoilboardThickness: '5' })
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    expect(
+      await within(insp).findByText('Enough above the clearance height for every tool.'),
+    ).toBeInTheDocument()
   })
 
   it('names the sides the tool reaches past, rounded up, once every toolpath is current', async () => {

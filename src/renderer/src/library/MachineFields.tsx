@@ -1,6 +1,6 @@
 // The machine form, shared by the Library window's editor (`full`: adds acceleration, motion
 // planning `$11`/`$12`, steps per mm and notes)
-// and the quick "New machine…" dialog (`quick`: the v0.1 fields). GRBL controller and manual tool
+// and the quick "New machine…" dialog (`quick`: the v0.1 fields and the Z height of DF68). GRBL controller and manual tool
 // change are fixed values (library.md#machine). Doc: docs/conventions/ui-library-window.md#layout, L4
 import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
@@ -31,6 +31,8 @@ export const MACHINE_FIELDS: readonly string[] = [
   'homingCorner',
   'pullOff',
   'softLimits',
+  'noseToTable',
+  'spoilboardThickness',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -139,6 +141,27 @@ export function MachineFields({
       />
       <Group title={m.travel}>{axes('travel', 'length', m.travelAxis)}</Group>
       <Group title={m.maxFeed}>{axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}</Group>
+      {/* DF68: the Z headroom estimate's distances, in both variants (a safety check) */}
+      <Group title={m.zHeight}>
+        {q(
+          'noseToTable',
+          m.noseToTable,
+          'length',
+          values.noseToTable,
+          'clearance',
+          (noseToTable) => set({ noseToTable }),
+          { optional: true, note: m.noseToTableNote },
+        )}
+        {q(
+          'spoilboardThickness',
+          m.spoilboardThickness,
+          'length',
+          values.spoilboardThickness,
+          'depth',
+          (spoilboardThickness) => set({ spoilboardThickness }),
+          { optional: true, note: m.spoilboardThicknessNote },
+        )}
+      </Group>
       {full ? (
         <Group title={m.homing}>
           <Field

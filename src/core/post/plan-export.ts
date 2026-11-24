@@ -14,7 +14,7 @@ import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { loadPlan } from '../plan/plan'
 import { planOperationLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
-import { chooseSetup } from '../plan/setups'
+import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
@@ -164,6 +164,7 @@ export async function exportPlan(
               passes: toolpath.passes.map((p) => ({ ...p, operationId: p.operationId ?? only })),
             },
       tool: { name: input.tool.name, diameter: input.tool.diameter.canonical },
+      stickout: input.stickout,
       label,
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
     })
@@ -174,7 +175,9 @@ export async function exportPlan(
       name: plan.dto.name,
       setup: {
         name: setup.name,
+        id: setup.id,
         clearanceHeight: all[0]!.setup.clearanceHeight,
+        stockThickness: setupStockSize(plan.stock, setup).z[1],
         header: setupHeader(
           plan.setups,
           setupIndex,

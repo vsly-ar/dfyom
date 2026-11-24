@@ -329,7 +329,7 @@ describe('machine checks per setup', () => {
     const right = s.plan(planId).setups[1]!.id
     const travel = () =>
       warnings(s, planId)
-        .filter((w) => w.code === 'plan.machine')
+        .filter((w) => w.code === 'plan.machine' && w.rule === 'travel')
         .map((w) => [w.params['setupId'], w.params['axis'], w.message])
     expect(travel()).toEqual([[right, 'z', 'stock length + clearance height exceeds the Z travel']])
     const bottom = s.plan(planId).setups[0]!.id

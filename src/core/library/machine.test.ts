@@ -96,6 +96,25 @@ describe('Machine', () => {
     expectErrCode(load({ ...machineValues(), homingCorner: 'topRight' }), 'input.malformed')
   })
 
+  it('round-trips the Z headroom fields; the spoilboard is ≥ 0 and below the nose (DF68)', () => {
+    const full = { ...machineValues(), noseToTable: len('120'), spoilboardThickness: len('0') }
+    const m = expectOk(load(full))
+    expect(m.noseToTable.unwrap().canonical).toBe(120)
+    expect(m.spoilboardThickness.unwrap().canonical).toBe(0)
+    expect(m.toDTO()).toEqual(full)
+    const plain = expectOk(load(machineValues()))
+    expect([plain.noseToTable.isNone(), plain.spoilboardThickness.isNone()]).toEqual([true, true])
+    expect(
+      issues({ ...machineValues(), noseToTable: len('0'), spoilboardThickness: len('-1') }),
+    ).toEqual([
+      ['noseToTable', 'positive'],
+      ['spoilboardThickness', 'nonNegative'],
+    ])
+    expect(
+      issues({ ...machineValues(), noseToTable: len('20'), spoilboardThickness: len('20') }),
+    ).toEqual([['spoilboardThickness', 'lessThanNoseToTable']])
+  })
+
   it('spindle power must be > 0; rigidity must be a preset', () => {
     const spindle = { control: 'gcode', maxSpeed: rpm('24000'), power: watt('0') }
     expect(issues({ ...machineValues(), spindle })).toEqual([['spindle.power', 'positive']])

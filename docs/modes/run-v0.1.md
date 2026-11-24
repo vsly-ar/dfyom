@@ -197,6 +197,7 @@ While the job exports the program (step 2 of the [run job](#run-job)) progress i
 - The host reads G54 with `$#` after connect, after `$H`, after every `run.workZero.set` and after a reset; `homed` is true after a successful `$H` in this connection (or a virtual machine started with `homing: false`), false after `ALARM:2/3/6`.
 - **`plan.export`** (built in 2.9/2.11 without it, `softLimitChecked: false`) passes `workZero` = G54 when a connection is open, `homed`, and the connected machine equals the plan's machine copy; its result states whether the soft-limit check ran (`softLimitChecked`). Otherwise it exports without it, as today ([grbl.md](../architecture/grbl.md#export-checks)). Closes the known issue "export soft-limit check needs the work zero".
 - `run.job.start` always runs the check (step 3 of the [run job](#run-job)).
+- **Z headroom (DF68):** without a live work zero the export estimates the tool tip's machine Z from the machine's measured Z height instead ([grbl.md § Z headroom](../architecture/grbl.md#z-headroom-hardening-df68)); with one, this soft-limit check is authoritative for Z up to the first pausing tool change, and the estimate still covers the later tools.
 
 ### Logging
 
