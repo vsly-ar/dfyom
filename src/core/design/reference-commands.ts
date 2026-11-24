@@ -26,13 +26,14 @@ import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { stlParse } from '../workers/tasks'
-import { loadPart, type LoadedPart } from './load'
+import { loadPart, partGeometryInput, type LoadedPart } from './load'
 import { fieldContext, type FieldKind } from './operation'
 import { PartIdSchema } from './part.dto'
 import {
   AnchorSchema,
   exceedsStock,
   FIT_AXES,
+  ghostMatrix,
   FIT_Z,
   fitPosition,
   fitScale,
@@ -70,7 +71,16 @@ import {
   storedPlacement as placementOf,
   targetReference,
   fittedSection,
+  referenceCompareOf,
 } from './reference-find'
+import {
+  COMPARE_LIMIT,
+  COMPARE_PIECES_MAX,
+  COMPARE_THRESHOLD_MM,
+  cornerRadii,
+  isCornerFillet,
+  operationDirections,
+} from './reference-compare'
 import type { FittedLoop } from './reference-section'
 import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
 import type { Vec3 } from '../geometry/model'
@@ -1097,10 +1107,155 @@ const referenceFind = defineAsyncQuery({
   },
 })
 
+// ── compare (DF60 P4) ──────────────────────────────────────────────────────────────────────
+
+const V3 = z.tuple([z.number(), z.number(), z.number()])
+/** Surfaces named per region. */
+export const COMPARE_SURFACES_SHOWN = 3
+
+const CompareRegionSchema = z.object({
+  kind: z.enum(['missing', 'extra']),
+  volume: z.number(),
+  maxDev: z.number(),
+  at: V3,
+  bounds: z.tuple([V3, V3]),
+  surfaces: z.array(z.string()),
+  operationIds: z.array(z.string()),
+  cause: z.literal('cornerRadius').optional(),
+})
+
+/**
+ * The design against its reference (DF60 P4, docs/modes/reference-tools.md#3-compare): a job,
+ * since a large reference takes a second or two and the overlay (P5) cancels a stale run.
+ */
+const referenceCompare = defineCommand({
+  kind: 'job',
+  name: 'design.reference.compare',
+  summary:
+    'Compare the evaluated part with its reference (part frame, mm): missing (cut away) and extra (left) material as regions over threshold, with the surfaces and operations they touch.',
+  title: () => 'Compare with reference',
+  machine: false,
+  args: z.object({
+    partId: PartIdSchema,
+    referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
+    source: z.object({ kind: z.literal('part') }).describe('part: the evaluated design'),
+    threshold: z.number().min(0.001).max(10).optional().describe('mm, default 0.1'),
+    limit: z.number().int().min(1).max(COMPARE_PIECES_MAX).optional().describe('default 10'),
+  }),
+  result: z.object({
+    method: z.enum(['boolean', 'heightmap']),
+    threshold: z.number(),
+    stats: z.object({
+      missingVolume: z.number(),
+      extraVolume: z.number(),
+      maxMissing: z.number(),
+      maxExtra: z.number(),
+      referenceVolume: z.number(),
+      partVolume: z.number(),
+    }),
+    regions: z.array(CompareRegionSchema),
+    more: z.number().int().optional(),
+    below: z.object({ count: z.number().int(), volume: z.number() }),
+    offcuts: z.object({ count: z.number().int(), volume: z.number() }).optional(),
+    note: z.string().optional(),
+    evaluation: z.string().describe('Input hash of the evaluation compared; stale after an edit'),
+  }),
+  async run(doc, args, ctx) {
+    const where = 'design.reference.compare'
+    const evaluations = ctx.services.evaluations
+    if (evaluations === undefined)
+      return fail('internal.unexpected', 'no evaluation service configured', { where })
+    const loaded = loadPart(doc, args.partId, where)
+    if (loaded.isErr()) return loaded
+    const l = loaded.unwrap()
+    const found = targetReference(doc, args.partId, args.referenceId, where)
+    if (found.isErr()) return found
+    const ref = found.unwrap()
+    const p = placementOf(ref, where)
+    if (p.isErr()) return p
+    const input = partGeometryInput(doc, args.partId, ctx.services.region2d)
+    if (input.isErr()) return Err(input.unwrapErr().withContext(where))
+    const state = await evaluations.evaluate(args.partId, ctx.signal)
+    if (state.isErr()) return state
+    const { status, evaluation, inputHash, error } = state.unwrap()
+    if (status !== 'done' || evaluation === undefined)
+      return error !== undefined
+        ? Err(error.withContext(where, { partId: args.partId }))
+        : fail('geometry.evaluation', `${args.partId}: the part has no evaluation`, { where })
+    const threshold = args.threshold ?? COMPARE_THRESHOLD_MM
+    const ops = input.unwrap().operations
+    const raw = await referenceCompareOf(
+      ctx,
+      ref,
+      {
+        matrix: ghostMatrix(ref.asset.bounds, p.unwrap()),
+        part: {
+          positions: evaluation.positions,
+          indices: evaluation.indices,
+          triangleSurface: evaluation.triangleSurface,
+        },
+        threshold,
+        stock: stockSize(l),
+        directions: operationDirections(ops),
+      },
+      { signal: ctx.signal, progress: ctx.progress, pause: ctx.pause },
+      where,
+    )
+    if (raw.isErr()) return raw
+    const r = raw.unwrap()
+    const limit = args.limit ?? COMPARE_LIMIT
+    const surfaceId = (i: number) => evaluation.surfaces[i]
+    const radii = cornerRadii(ops)
+    const opIds = new Set(l.part.operations.map((o) => o.id))
+    const regions = r.pieces.slice(0, limit).map((x) => {
+      const surfaces = x.surfaces
+        .map((s) => surfaceId(s.index))
+        .filter((s): s is string => s !== undefined)
+      const operationIds = [
+        ...new Set(surfaces.map((s) => s.split('.')[0]!).filter((o) => opIds.has(o))),
+      ]
+      return {
+        kind: x.kind,
+        volume: r3(x.volume),
+        maxDev: r3(x.maxDev),
+        at: x.at.map(r3) as [number, number, number],
+        bounds: x.bounds.map((b) => b.map(r3)) as [Vec3Tuple, Vec3Tuple],
+        surfaces: surfaces.slice(0, COMPARE_SURFACES_SHOWN),
+        operationIds,
+        ...(isCornerFillet(x, surfaceId, radii) ? { cause: 'cornerRadius' as const } : {}),
+      }
+    })
+    const more = r.pieces.length - regions.length + (r.more ?? 0)
+    return Ok({
+      method: r.method,
+      threshold,
+      stats: {
+        missingVolume: r3(r.stats.missingVolume),
+        extraVolume: r3(r.stats.extraVolume),
+        maxMissing: r3(r.stats.maxMissing),
+        maxExtra: r3(r.stats.maxExtra),
+        referenceVolume: r3(r.stats.referenceVolume),
+        partVolume: r3(r.stats.partVolume),
+      },
+      regions,
+      ...(more > 0 ? { more } : {}),
+      below: { count: r.below.count, volume: r3(r.below.volume) },
+      ...(r.offcuts === undefined
+        ? {}
+        : { offcuts: { count: r.offcuts.count, volume: r3(r.offcuts.volume) } }),
+      ...(r.fallback === undefined ? {} : { note: `Height maps: ${r.fallback}` }),
+      evaluation: inputHash ?? '',
+    })
+  },
+})
+
+type Vec3Tuple = [number, number, number]
+
 export const REFERENCE_COMMANDS: readonly AnyCommand[] = [
   referenceImport as AnyCommand,
   referenceUpdate,
   referenceRemove,
+  referenceCompare,
 ]
 
 export const REFERENCE_QUERIES: readonly AnyQueryDef[] = [referenceList, referenceFind]

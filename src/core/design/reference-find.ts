@@ -11,6 +11,7 @@
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
 import type { QueryContext } from '../commands/context'
+import type { WorkerControl } from '../commands/jobs'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import {
@@ -29,7 +30,14 @@ import { Tool } from '../library/tool'
 import { isEndMillType } from '../library/tool.dto'
 import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
-import { referenceHoles, referenceLevels, referenceSection } from '../workers/tasks'
+import {
+  referenceCompare,
+  referenceHoles,
+  referenceLevels,
+  referenceSection,
+  type CompareInput,
+} from '../workers/tasks'
+import type { CompareRaw } from './reference-compare'
 import type { LoadedPart } from './load'
 import type { HoleOptions, MeshHoles } from './mesh-holes'
 import type { LevelOptions, MeshLevels } from './mesh-levels'
@@ -269,6 +277,27 @@ export async function referenceHolesOf(
     { signal: new AbortController().signal, progress: NO_PROGRESS },
   )
   return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId: view.ref.id })) : r
+}
+
+/**
+ * The design against the reference (DF60 P4): the worker's pieces for the evaluated part mesh;
+ * `matrix` takes the STL to the part frame; `control` is the compare job's (abort, pause, progress).
+ */
+export async function referenceCompareOf(
+  ctx: Pick<QueryContext, 'services'>,
+  ref: ReferenceDTO,
+  input: Omit<CompareInput, 'path' | 'triangles'>,
+  control: WorkerControl,
+  where: string,
+): AsyncAppResult<CompareRaw> {
+  const path = assetPath(ctx, ref, where)
+  if (path.isErr()) return path
+  const r = await ctx.services.workers.run(
+    referenceCompare,
+    { path: path.unwrap(), triangles: ref.asset.triangles, ...input },
+    control,
+  )
+  return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId: ref.id })) : r
 }
 
 /**

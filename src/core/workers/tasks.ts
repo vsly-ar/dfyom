@@ -12,6 +12,17 @@ import {
   type MeshLevels,
 } from '../design/mesh-levels'
 import { meshHoles, MeshHolesSchema, type HoleOptions, type MeshHoles } from '../design/mesh-holes'
+import {
+  compareBoolean,
+  compareHeightmap,
+  CompareRawSchema,
+  isClosed,
+  transformSoup,
+  weldSoup,
+  type CompareMesh,
+  type CompareRaw,
+} from '../design/reference-compare'
+import { DIRECTIONS, type Direction, type StockSize } from '../geometry/face'
 import { FEATURE_EDGE_DEG, featureEdges, meshSection, sectionChains } from '../design/mesh-section'
 import {
   fitSection,
@@ -352,6 +363,68 @@ export const referenceHoles: WorkerTask<HolesInput, MeshHoles> = {
   },
 }
 
+/** A Uint32Array from any realm (see `FLOAT32`). */
+const UINT32 = z.custom<Uint32Array>(
+  (v) => Object.prototype.toString.call(v) === '[object Uint32Array]',
+  'expected a Uint32Array',
+)
+
+export interface CompareInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the part frame (mm). */
+  readonly matrix: readonly number[]
+  readonly part: CompareMesh
+  readonly threshold: number
+  readonly stock: StockSize
+  /** Faces the design's operations use, for the height maps. */
+  readonly directions: readonly Direction[]
+}
+
+/**
+ * The design against its reference (DF60 P4, docs/modes/reference-tools.md#method-rt-f): the
+ * kept reference mesh placed in the part frame and the evaluated part mesh; booleans when the
+ * welded reference is closed and the library takes it, else height maps. Only the regions'
+ * summaries leave the worker.
+ */
+export const referenceCompare: WorkerTask<CompareInput, CompareRaw> = {
+  name: 'reference.compare',
+  lane: 'geometry',
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    part: z.object({ positions: FLOAT32, indices: UINT32, triangleSurface: UINT32 }),
+    threshold: z.number().positive(),
+    stock: z.object({
+      length: z.number().positive(),
+      width: z.number().positive(),
+      thickness: z.number().positive(),
+    }),
+    directions: z.array(z.enum(DIRECTIONS)),
+  }),
+  output: CompareRawSchema,
+  timeoutMs: 120_000,
+  async run(input, ctl) {
+    const read = await referencePositions(input.path, input.triangles, ctl, 'reference.compare')
+    if (read.isErr()) return read
+    const placed = transformSoup(read.unwrap(), input.matrix)
+    const opts = { threshold: input.threshold, stock: input.stock, directions: input.directions }
+    const welded = weldSoup(placed)
+    if (!isClosed(welded))
+      return compareHeightmap(placed, input.part, opts, ctl.steps, 'the reference mesh is open')
+    const kernel = await ctl.solids()
+    if (kernel.isErr()) return Err(kernel.unwrapErr())
+    const r = compareBoolean(kernel.unwrap(), welded, input.part, input.threshold, ctl.steps)
+    if (r.isOk() || r.unwrapErr().code !== 'geometry.evaluation') return r
+    return compareHeightmap(
+      placed,
+      input.part,
+      opts,
+      ctl.steps,
+      `the solid library refused the meshes (${r.unwrapErr().message})`,
+    )
+  },
+}
+
 export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   geometryEvaluate,
   toolpathGenerate,
@@ -360,5 +433,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   referenceSection,
   referenceLevels,
   referenceHoles,
+  referenceCompare,
   svgImportTask,
 ]
