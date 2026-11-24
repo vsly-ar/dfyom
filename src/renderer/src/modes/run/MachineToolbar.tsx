@@ -1,12 +1,13 @@
 // The machine group of the main toolbar, in every mode while a connection is open: the machine
-// state badge, the "Virtual machine · 10×" chip, Feed hold while streaming, Resume while held, and
+// state badge, the "Virtual machine · 10×" chip, Feed hold while streaming, Resume while held (a run,
+// or this window's Probe Z, DF82; disabled while decelerating), and
 // the Stop control (never confirmed, above every overlay). `Escape` holds the feed whenever a job
 // streams, wherever the focus is. Also mounts the run dialogs, so waits and failures show in any
 // mode. Doc: docs/conventions/ui.md#run-mode-safety-ui
 import { useEffect } from 'react'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, MachineStateBadge, Tooltip } from '../../ui'
-import { activeJob, machineView } from './machine-state'
+import { activeJob, isHolding, machineView } from './machine-state'
 import { useRun, useRunStore } from './run-store'
 import { RunDialogs } from './RunDialogs'
 import { RunStop } from './RunStop'
@@ -19,7 +20,13 @@ export function MachineToolbar(): React.JSX.Element {
   const status = useRun((s) => s.status)
   const job = activeJob(status)
   const streaming = job?.phase === 'streaming'
-  const held = job?.phase === 'held'
+  // Resume: a held run, or this window's Probe Z held without one (DF82); disabled while the
+  // machine still decelerates (Hold:1: a cycle start then would be lost)
+  const probeHeld = useRun((s) => s.probeJobId !== undefined)
+  const held =
+    job?.phase === 'held' ||
+    (probeHeld && job?.phase !== 'streaming' && status.state.startsWith('Hold'))
+  const holding = isHolding(status)
 
   // Escape = feed hold while streaming (decision 11); it also closes the top overlay, so no
   // preventDefault. Capture phase: a focused control cannot swallow it.
@@ -68,6 +75,7 @@ export function MachineToolbar(): React.JSX.Element {
               size="lg"
               variant="primary"
               icon={<Icon name="play" />}
+              disabled={holding}
               onClick={() => void store.getState().resume()}
             >
               {m.resume}

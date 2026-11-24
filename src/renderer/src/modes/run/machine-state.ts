@@ -57,6 +57,7 @@ export function machineView(
   if (job?.phase === 'programPause') return { state: 'hold', label: m.state.paused }
   if (job?.phase === 'stopping') return { state: 'moving', label: m.state.stopping }
   if (st.startsWith('Door')) return { state: 'hold', label: m.state.door }
+  if (isHolding(s)) return { state: 'hold', label: m.state.holding }
   if (st.startsWith('Hold') || job?.phase === 'held') return { state: 'hold', label: m.state.hold }
   if (st.startsWith('Home')) return { state: 'moving', label: m.state.homing }
   if (st.startsWith('Run') || job?.phase === 'streaming')
@@ -66,6 +67,15 @@ export function machineView(
       ? { state: 'action', label: m.state.setupChange }
       : { state: 'idle', label: m.state.idle }
   return { state: 'idle', label: m.state.other(st) }
+}
+
+/**
+ * A feed hold still decelerating: `Hold:1`, or the run's hold sent and no report since (`Run`).
+ * `job.pause` answers once it is `Hold:0` (DF82, docs/modes/run.md#1-emergency-stop-stop-and-reset);
+ * a cycle start before then would be lost, so Resume waits.
+ */
+export function isHolding(s: RunStatus): boolean {
+  return s.state === 'Hold:1' || (activeJob(s)?.phase === 'held' && s.state.startsWith('Run'))
 }
 
 /** `null` = allowed; otherwise the reason shown next to the disabled control. */

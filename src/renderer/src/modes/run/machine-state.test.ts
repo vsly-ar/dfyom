@@ -42,6 +42,10 @@ describe('machineView', () => {
     [open({ state: 'Jog' }), 'moving', 'Jogging'],
     [open({ state: 'Run', ...job('streaming') }), 'moving', 'Running'],
     [open({ state: 'Hold:0', ...job('held') }), 'hold', 'Feed hold'],
+    // DF82: still decelerating after the hold (the job is not paused yet)
+    [open({ state: 'Hold:1', ...job('held') }), 'hold', 'Holding…'],
+    [open({ state: 'Run', ...job('held') }), 'hold', 'Holding…'],
+    [open({ state: 'Hold:1' }), 'hold', 'Holding…'],
     [open({ state: 'Hold:0', ...job('programPause') }), 'hold', 'Paused by program'],
     [open({ ...job('toolChange', { toolChange: { n: 2, name: 'x' } }) }), 'action', 'Tool change'],
     [open({ state: 'Jog', ...job('toolChange') }), 'moving', 'Jogging'],
