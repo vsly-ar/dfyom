@@ -1,5 +1,6 @@
 // "Tool changes" of the setup inspector (hardening DF66): the setup's tool runs in machining order
-// (tool with Ø and type, its plan operations, the estimated time) and the count of tool changes,
+// (tool with Ø and type, its plan operations, the estimated time less its lowered links' savings,
+// DF64 L3) and the count of tool changes,
 // the one at the setup start included unless the tool stays in the spindle from the setup before
 // (DF65). In editable plans a run reorders as a block like the plan lists (`ui/Reorder`: grip
 // drag, Alt+↑/↓ on the focused row, ↑/↓ between rows), one `plan.operation.move { count }` each;
@@ -13,7 +14,12 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { ToolType } from '../../../../core/library/tool.dto'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
-import { carriedTool, setupToolChanges, toolRuns } from '../../../../core/plan/tool-runs'
+import {
+  carriedTool,
+  runLinkSavings,
+  setupToolChanges,
+  toolRuns,
+} from '../../../../core/plan/tool-runs'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
@@ -28,6 +34,7 @@ import {
   usePlanCommand,
   usePlanState,
   usePlanStore,
+  type LoweredLinkView,
   type ZRefCandidateView,
   type ZRefRunView,
 } from './plan-store'
@@ -60,10 +67,15 @@ function toolFacts(plan: PlanDTO, snapshotId: string | undefined, units: UnitSys
   }
 }
 
-/** The run's estimated seconds, or undefined while a toolpath is missing or outdated. */
+/**
+ * The run's estimated seconds, or undefined while a toolpath is missing or outdated: its
+ * toolpaths' estimates less what its lowered links save (DF64 L3, as `plan_get`'s tool runs).
+ */
 function runSeconds(
   ops: readonly PlanOperationDTO[],
+  setup: SetupDTO,
   toolpaths: Readonly<Record<string, ToolpathEntry>>,
+  lowered: readonly LoweredLinkView[],
 ): number | undefined {
   let sum = 0
   for (const op of ops) {
@@ -72,12 +84,15 @@ function runSeconds(
       return undefined
     sum += e.toolpath.stats.estimatedSeconds
   }
-  return sum
+  const indices = ops.map((o) => setup.operations.findIndex((x) => x.id === o.id))
+  return Math.max(0, sum - runLinkSavings(lowered, indices))
 }
 
 /** "Facing 1 floor · −0.5 mm" (a typographic minus, as the plan lists write levels). */
 const zValue = (c: ZRefCandidateView, units: UnitSystem): string =>
   m.zValue(c.label, lengthSource(c.level, units).replace(/^-/, '−'))
+
+const NO_LINKS: readonly LoweredLinkView[] = []
 
 const SEVERITY_RANK: Readonly<Record<string, number>> = { error: 3, warning: 2, info: 1 }
 
@@ -228,6 +243,9 @@ export function ToolChanges({
   const store = usePlanStore()
   const zRefs = usePlanState((s) => s.data?.zRefs)
   const warnings = usePlanState((s) => s.data?.warnings)
+  const lowered = usePlanState(
+    (s) => s.data?.links.find((l) => l.setupId === setup.id)?.links?.lowered,
+  )
   const canZ = allows(plan, 'plan.operation.update')
 
   /** Run `from` to run position `to` (after the move): one block move; false: refused. */
@@ -295,7 +313,7 @@ export function ToolChanges({
       >
         {runs.map((run, i) => {
           const tool = toolFacts(plan, run.tool, units)
-          const seconds = runSeconds(run.operations, toolpaths)
+          const seconds = runSeconds(run.operations, setup, toolpaths, lowered ?? NO_LINKS)
           const names = run.operations.map((o) => planOperationName(plan, o.designOperationIds))
           const isCarried = i === 0 && carried !== undefined && before !== undefined
           return (

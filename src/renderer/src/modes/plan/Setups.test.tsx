@@ -17,7 +17,7 @@ import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 import type { PlanOperationDTO } from '../../../../core/plan/plan.dto'
-import type { RunScene } from '../../viewport'
+import { SEGMENT, type RunScene } from '../../viewport'
 import { planStockSize } from './model'
 import { usePlanScene } from './usePlanScene'
 
@@ -505,6 +505,54 @@ describe('Setup panel', () => {
     expect(
       await within(insp).findByText('The tool stays within the stock outline.'),
     ).toBeInTheDocument()
+  })
+
+  // DF64 L3: docs/modes/safe-links.md#where-it-runs
+  it('draws the lowered links between operations as rapids once every toolpath is current', async () => {
+    const t = await renderSetups()
+    const top = t.plan().setups[1]!
+    expect(top.operations.length).toBeGreaterThan(1)
+    // the link into the second operation: up and across low instead of its approach from 5 mm
+    const lowered = [
+      {
+        index: 1,
+        trim: 1,
+        tail: [
+          [10, 0, 2],
+          [0, 0, 2],
+        ],
+        head: [],
+        savedSeconds: 0.5,
+      },
+    ]
+    t.bridge.handle('plan.warning.list', () =>
+      ok({
+        warnings: [],
+        zRefs: [],
+        links: [
+          {
+            setupId: top.id,
+            links: { count: 1, low: 1, atClearance: 0, seconds: 0.1, savedSeconds: 0.5, lowered },
+          },
+        ],
+      }),
+    )
+    await t.user.click(t.setupRows()[1]!)
+    const insp = t.inspector()
+    const name = await within(insp).findByLabelText('Setup name', { selector: 'input' })
+    // a revision re-reads the plan
+    await t.user.clear(name)
+    await t.user.type(name, 'Datum{Enter}')
+    const at = (i: number) => [...probe.scene!.lines!.positions.slice(6 * i + 3, 6 * i + 6)]
+    await waitFor(() => expect(at(1)).toEqual([0, 0, 2]))
+    const lines = probe.scene!.lines!
+    expect([lines.kind[0], lines.kind[1]]).toEqual([SEGMENT.rapid, SEGMENT.rapid])
+    expect(lines.segments).toBe(2 * top.operations.length - 1)
+    // an outdated toolpath: drawn as generated (the links belong to the current ones)
+    t.bridge.handle('plan.toolpath.get', () => ok({ toolpath, stale: true }))
+    await t.user.clear(name)
+    await t.user.type(name, 'Top{Enter}')
+    await waitFor(() => expect(at(0)).toEqual([10, 0, -1]))
   })
 
   it('exports the window’s setup and previews only its toolpaths, placed by its WCS', async () => {

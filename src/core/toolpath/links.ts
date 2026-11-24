@@ -106,6 +106,20 @@ export interface Link {
    * height: the time with a clamp height of 0 (s).
    */
   readonly withClampSeconds?: number
+  /** How a lowered link rewrites the two toolpaths (low links only). */
+  readonly edit?: LinkEdit
+}
+
+/**
+ * A lowered link as moves (safe-links.md#where-it-runs): the earlier toolpath's last move (its
+ * rapid up to the clearance height) becomes `tail` (up to the level, across), the later
+ * toolpath's first `trim` moves (its approach from the clearance height) become `head` (down to
+ * the entry). Every point is a rapid's end, in the toolpaths' frame.
+ */
+export interface LinkEdit {
+  readonly trim: number
+  readonly tail: readonly Vec3[]
+  readonly head: readonly Vec3[]
 }
 
 /** A link rapid that passes lower than the field allows (a bug; it blocks the export). */
@@ -365,10 +379,13 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
           const seconds = (z: number) =>
             rapidSeconds([exit, [exit[0], exit[1], z], [entry[0], entry[1], z], entry], s.rates)
           if (level < clearance - EPS) {
-            link = { ...full, level, floor, low: true, seconds: seconds(level) }
             const legs = linkMoves(exit, entry, level)
-            out[i - 1] = withTail(out[i - 1]!, 1, legs.tail)
-            out[i] = withHead(out[i]!, trim, legs.head)
+            const edit: LinkEdit = {
+              trim,
+              tail: legs.tail.map(moveEnd),
+              head: legs.head.map(moveEnd),
+            }
+            link = { ...full, level, floor, low: true, seconds: seconds(level), edit }
             collisions.push(...guard(field, i, exit, [...legs.tail, ...legs.head], r, s))
           } else if (s.clampHeight !== undefined || s.obstacles !== undefined)
             link = { ...full, floor }
@@ -388,7 +405,10 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
   }
   const low = links.filter((l) => l.low).length
   return {
-    toolpaths: out,
+    toolpaths: linkedToolpaths(
+      out,
+      links.flatMap((l) => (l.edit === undefined ? [] : [{ index: l.index, ...l.edit }])),
+    ),
     links,
     summary: {
       count: links.length,
@@ -402,6 +422,26 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
       : {}),
     collisions,
   }
+}
+
+/**
+ * The toolpaths with their lowered links applied, in link order (the exported moves; the plan and
+ * run scenes draw these, DF64 L3). An edit whose toolpaths are missing is skipped.
+ */
+export function linkedToolpaths(
+  toolpaths: readonly Toolpath[],
+  edits: readonly ({ readonly index: number } & LinkEdit)[],
+): Toolpath[] {
+  const out = [...toolpaths]
+  const rapids = (ps: readonly Vec3[]): Move[] => ps.map((to) => ({ kind: 'rapid', to }))
+  for (const e of edits) {
+    const before = out[e.index - 1]
+    const after = out[e.index]
+    if (before === undefined || after === undefined) continue
+    out[e.index - 1] = withTail(before, 1, rapids(e.tail))
+    out[e.index] = withHead(after, e.trim, rapids(e.head))
+  }
+  return out
 }
 
 /** Up at the exit (the earlier toolpath's tail), across and down (the later one's head). */

@@ -9,7 +9,9 @@
 // reference surface and touch-off spot (`RunScene.zRef`, z-spot.ts picks the run); dragging the
 // spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
 // on release; the dropped spot is held until the plan re-reads it. DF78: the frame's origin is
-// the setup's work zero, and its alignment points are drawn (`RunScene.alignment`).
+// the setup's work zero, and its alignment points are drawn (`RunScene.alignment`). DF64 L3: with
+// every toolpath current, the exported moves: the lowered links between operations as rapids
+// (`linkedToolpaths` with `plan.warning.list`'s lowered links, docs/modes/safe-links.md#where-it-runs).
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
 // docs/modes/z-reference.md#implementation-notes-df69. The setup's workholding (items, the open
 // item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary).
@@ -18,6 +20,7 @@ import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
+import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
 import {
@@ -162,9 +165,16 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       const entry = data.toolpaths[o.id]
       return entry?.toolpath ? [entry] : []
     })
-    const toolpaths = drawn.map((e) => e.toolpath as Toolpath)
     // outdated (stale, or the plan waits for Apply): dimmed until regenerated (P3)
     const outdated = drawn.map((e) => e.stale || e.pendingApply === true || data.pendingApply)
+    // DF64 L3: the exported moves, the lowered links between operations as rapids, once every
+    // toolpath of the setup is current (the links are computed from exactly those)
+    const lowered = data.links.find((l) => l.setupId === setup.id)?.links?.lowered ?? []
+    const generated = drawn.map((e) => e.toolpath as Toolpath)
+    const toolpaths =
+      lowered.length > 0 && drawn.length === setup.operations.length && !outdated.some(Boolean)
+        ? linkedToolpaths(generated, lowered)
+        : generated
     const stock = planStockSize(doc, plan)
     // workholding.md#ui-summary: the setup's items, the open item's keep-out, collision hits
     const planStock = planPart(doc, plan).loaded?.stock

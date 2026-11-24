@@ -9,7 +9,7 @@
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
-import { setupToolChanges, toolRuns } from '../plan/tool-runs'
+import { runLinkSavings, setupToolChanges, toolRuns } from '../plan/tool-runs'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
 import type { UnitSystem } from '../project/document'
@@ -269,8 +269,17 @@ export class ResultShaper {
       zRefOf.set(r['planOperationId'] as string, (r['zRef'] as Obj | null) ?? null)
     // DF64: the links summary per setup (null until its toolpaths are current)
     const linksOf = new Map<string, Obj | null>()
-    for (const r of (warningList?.['links'] as Obj[] | undefined) ?? [])
-      linksOf.set(r['setupId'] as string, (r['links'] as Obj | null) ?? null)
+    // DF64 L3: the lowered links' moves are for the scenes; their savings time the tool runs
+    const loweredOf = new Map<string, { index: number; savedSeconds: number }[]>()
+    for (const r of (warningList?.['links'] as Obj[] | undefined) ?? []) {
+      const l = isObj(r['links']) ? r['links'] : null
+      linksOf.set(r['setupId'] as string, l === null ? null : withoutLowered(l))
+      if (l !== null && Array.isArray(l['lowered']))
+        loweredOf.set(
+          r['setupId'] as string,
+          l['lowered'] as { index: number; savedSeconds: number }[],
+        )
+    }
     // DF78: the work zero and alignment points of each setup that has either
     const alignmentOf = new Map<string, Obj>()
     for (const a of (warningList?.['alignment'] as Obj[] | undefined) ?? [])
@@ -348,12 +357,24 @@ export class ResultShaper {
       else if (planSeconds !== null) planSeconds += setupSeconds
       // DF66: the tool runs and the tool changes the operator makes (setup start included)
       const secondsOf = new Map(operations.map((o) => [o.id, o.seconds]))
+      const indexOf = new Map(operations.map((o, i) => [o.id, i]))
+      const lowered = loweredOf.get(s['id'] as string) ?? []
       const toolRunList = toolRuns(rawSetups[si]?.operations ?? []).map((r) => {
         let seconds: number | null = 0
         for (const o of r.operations) {
           const t = secondsOf.get(o.id) ?? null
           seconds = t === null || seconds === null ? null : seconds + t
         }
+        // DF64: as the setup's time, minus what its links save (safe-links.md#where-it-runs)
+        if (seconds !== null)
+          seconds = Math.max(
+            0,
+            seconds -
+              runLinkSavings(
+                lowered,
+                r.operations.map((o) => indexOf.get(o.id) ?? -1),
+              ),
+          )
         const z = zRefOf.get(r.operations[0]!.id)
         const at = z?.['at'] as [number, number] | undefined
         return {
@@ -598,11 +619,24 @@ function findingNext(f: Obj): string | undefined {
  * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69),
  * without the inspector's alignment sources (DF78).
  */
+/** A setup's links summary without the lowered links' moves (DF64 L3: for the scenes only). */
+function withoutLowered(links: Obj): Obj {
+  const { lowered: _lowered, ...rest } = links
+  return rest
+}
+
 function withFindingNext(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
   const { alignmentSources: _sources, ...rest } = value
   return {
     ...rest,
+    ...(Array.isArray(value['links'])
+      ? {
+          links: value['links'].map((r: unknown) =>
+            isObj(r) && isObj(r['links']) ? { ...r, links: withoutLowered(r['links']) } : r,
+          ),
+        }
+      : {}),
     ...(Array.isArray(value['zRefs'])
       ? {
           zRefs: value['zRefs'].map((r: unknown) => {

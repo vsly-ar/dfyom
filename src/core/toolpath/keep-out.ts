@@ -44,9 +44,15 @@ export interface Unmachined {
   readonly bounds: readonly [Vec2, Vec2]
 }
 
-/** A footprint as a counter-clockwise loop in the face frame, grown by `grow` (circles exactly). */
+/**
+ * A footprint as a counter-clockwise loop in the face frame, grown by `grow` (circles exactly).
+ * Footprints are in the setup frame: turned by the rotation, never shifted by a moved work zero
+ * (DF78, docs/modes/alignment.md#frames), so only the turn is undone.
+ */
 function footprintLoop(f: Footprint, wcs: SetupWcs | undefined, grow: number): Loop {
-  const p = (q: Vec2): Vec2 => (wcs === undefined ? [q[0], q[1]] : fromWcs(q, wcs))
+  const turned: SetupWcs | undefined =
+    wcs === undefined ? undefined : { rotation: wcs.rotation, size: wcs.size }
+  const p = (q: Vec2): Vec2 => (turned === undefined ? [q[0], q[1]] : fromWcs(q, turned))
   if (f.kind === 'circle') {
     const c = p(f.center)
     const r = f.radius + grow

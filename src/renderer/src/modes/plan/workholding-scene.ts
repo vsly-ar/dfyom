@@ -1,6 +1,6 @@
 // The plan scene's workholding overlay (workholding.md#ui-summary): the setup's prisms as solids
 // (an open-ended prism stands on the table: −T), the open item's keep-out halo (footprints grown
-// by the margin at its top + margin) and the first hit of each collision finding. Pure.
+// by the margin at its top + margin) and the first hit of each collision finding (WCS). Pure.
 import type { PlanWarning } from '../../../../core/plan/checks'
 import { footprintOutline } from '../../../../core/plan/workholding/obstacles'
 import type { SetupWorkholding } from '../../../../core/plan/workholding/setup'
@@ -45,8 +45,9 @@ export function workholdingOverlay(
 }
 
 /**
- * The overlay in the WCS of a setup whose work zero is moved (DF78): items and collision hits are
- * in the setup frame, the scene's frame has its origin at the zero (docs/modes/alignment.md#frames).
+ * The overlay in the WCS of a setup whose work zero is moved (DF78): the items are in the setup
+ * frame, the scene's frame has its origin at the zero (docs/modes/alignment.md#frames). Collision
+ * hits come in the WCS already (the findings' x/y, S12) and stay.
  */
 export function shiftOverlay(
   o: WorkholdingOverlay | undefined,
@@ -61,6 +62,5 @@ export function shiftOverlay(
     ...(o.halo === undefined
       ? {}
       : { halo: { ...o.halo, outlines: o.halo.outlines.map((l) => l.map(at)) } }),
-    hits: o.hits.map((h) => [h[0] - zx, h[1] - zy, h[2]] as const),
   }
 }

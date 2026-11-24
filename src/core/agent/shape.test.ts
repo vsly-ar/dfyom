@@ -566,6 +566,49 @@ describe('plan.get', () => {
     expect(run('inch')).toMatchObject({ zero: [-1, 2] })
   })
 
+  // DF64 L3: docs/modes/safe-links.md#where-it-runs
+  it('times setups and tool runs with the links and keeps the lowered moves out', () => {
+    const tool = (id: string, d: string) => ({
+      id,
+      designOperationIds: [d],
+      tool: 'snap-tool',
+      overrides: {},
+      strategy: {},
+    })
+    const one = {
+      ...plan,
+      setups: [{ ...plan.setups[0]!, operations: [tool('op1', 'pocket1'), tool('op2', 'drill1')] }],
+    }
+    const lowered = [{ index: 1, trim: 2, tail: [[0, 0, 2]], head: [[5, 5, 0]], savedSeconds: 4 }]
+    const links = { count: 1, low: 1, atClearance: 0, seconds: 1, savedSeconds: 4, lowered }
+    const key = 'plan.warning.list {"planId":"plan-1"}'
+    const withLinks = {
+      ...peeks,
+      [key]: { ...peeks[key], links: [{ setupId: 's1', links }] },
+      'plan.toolpath.get {"planId":"plan-1","planOperationId":"op2"}': {
+        toolpath: { stats: { estimatedSeconds: 10 } },
+        stale: false,
+        overreach: null,
+      },
+    }
+    const shaper = new ResultShaper(fakeSession(withLinks))
+    const r = shaper.shape(call('plan.get', { plan: one }), { planId: 'plan-1' }, SUMMARY)
+    const setup = (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups[0]!
+    const { lowered: _l, ...summary } = links
+    expect(setup['links']).toEqual(summary)
+    expect(setup['seconds']).toBe(36)
+    expect(setup['toolRuns']).toEqual([
+      { tool: '6 mm end mill', operations: ['op1', 'op2'], seconds: 36 },
+    ])
+    const full = shaper.shape(
+      call('plan.warning.list', { warnings: [], links: [{ setupId: 's1', links }] }),
+      { planId: 'plan-1' },
+      { ...SUMMARY, detail: 'full' },
+    )
+    expect(valueOf(full)).toMatchObject({ links: [{ setupId: 's1', links: summary }] })
+    expect(JSON.stringify(valueOf(full))).not.toContain('lowered')
+  })
+
   it('plan.warning.list detail "full" leaves the viewport outline out of the Z references', () => {
     const outline = { patch: [], spotArea: [], clearance: 4, grid: 1 }
     const value = {

@@ -43,3 +43,19 @@ export function setupToolChanges(setups: Setups, index: number): number {
   const runs = toolRuns(setups[index]?.operations ?? []).length
   return carriedTool(setups, index) === undefined ? runs : runs - 1
 }
+
+/**
+ * The time a tool run's links save (s): the lowered links into its operations after the first
+ * (`indices`: the run's positions in the setup). A run's time is its toolpaths' estimates minus
+ * this, as the setup's is minus the summary's `savedSeconds` (one source: the links summary of
+ * `plan.warning.list`, DF64 L3, docs/modes/safe-links.md#where-it-runs).
+ */
+export function runLinkSavings(
+  lowered: readonly { readonly index: number; readonly savedSeconds: number }[],
+  indices: readonly number[],
+): number {
+  const own = new Set(indices)
+  let saved = 0
+  for (const l of lowered) if (own.has(l.index) && own.has(l.index - 1)) saved += l.savedSeconds
+  return saved
+}

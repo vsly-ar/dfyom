@@ -24,7 +24,6 @@ import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
-import { turnToolpath } from '../toolpath/wcs'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
 import { commentLine } from './grbl/format'
@@ -302,20 +301,11 @@ export async function exportPlan(
   // the export guard (WH-E): the final moves, links included, against the setup's workholding
   // the items are in the setup frame, the moves in the WCS: a moved work zero is added back
   // (docs/modes/alignment.md S12, as workholdingFindings does)
-  const [zx, zy] = all[0]!.setup.zero ?? [0, 0]
-  const checked = all.map((input, i) => {
-    const tp = operations[i]!.toolpath
-    return {
-      input,
-      toolpath:
-        zx === 0 && zy === 0
-          ? tp
-          : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] }),
-    }
-  })
+  const zero = all[0]!.setup.zero ?? [0, 0]
+  const checked = all.map((input, i) => ({ input, toolpath: operations[i]!.toolpath }))
   const guard = [
     ...staticWorkholdingFindings(plan, setup.id),
-    ...moveFindings(plan, setup, checkOperations(checked)),
+    ...moveFindings(plan, setup, checkOperations(checked, zero), zero),
   ].filter((f) => f.severity === 'error')
   const firstHit = guard[0]
   if (firstHit !== undefined)

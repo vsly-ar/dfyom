@@ -8,7 +8,13 @@ import { createInProcessWorkers } from '../commands/jobs'
 import { uiSource } from '../commands/testing'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { exportPlan, withoutAppVersion } from '../post/plan-export'
-import { createToolpathCache } from '../toolpath/cache'
+import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
+import { linkedToolpaths } from '../toolpath/links'
+import type { Toolpath } from '../toolpath/model'
+import { planOperationInputs } from './inputs'
+import { loadPlan } from './plan'
+import { currentSetupLinks, type LoweredLinkDTO } from './setup-links'
+import { runLinkSavings } from './tool-runs'
 import type { PlanWarning } from './checks'
 import { expectUndoRedo, planSetup, type PlanSetup } from './plan.fixture'
 
@@ -18,7 +24,12 @@ const ui = uiSource()
 const circle = (x: string, y: string) => ({ kind: 'circle', center: [x, y], diameter: '16' })
 
 /** A faced 100 × 60 × 20 block with two pockets on its floor, all with the 6 mm flat: one tool run. */
-async function onePlan(): Promise<{ s: PlanSetup; planId: string; setupId: string }> {
+async function onePlan(): Promise<{
+  s: PlanSetup
+  planId: string
+  setupId: string
+  toolpaths: ToolpathCache
+}> {
   const toolpaths = createToolpathCache()
   const s = await planSetup({
     part: false,
@@ -49,7 +60,7 @@ async function onePlan(): Promise<{ s: PlanSetup; planId: string; setupId: strin
   const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
     .value as { jobId: string }
   expectOk(await s.d.job(jobId).unwrap().result)
-  return { s, planId, setupId: s.plan(planId).setups[0]!.id }
+  return { s, planId, setupId: s.plan(planId).setups[0]!.id, toolpaths }
 }
 
 interface LinksRow {
@@ -60,6 +71,7 @@ interface LinksRow {
     atClearance: number
     seconds: number | null
     savedSeconds: number | null
+    lowered: LoweredLinkDTO[]
   } | null
 }
 const list = (s: PlanSetup, planId: string) =>
@@ -202,6 +214,36 @@ describe('plan.warning.list links', () => {
     expect(levels(moved.text)).toEqual(levels(corner.text))
     // the moves are in the WCS: left of the moved zero
     expect(moved.text).toMatch(/ X-\d/)
+  })
+})
+
+// DF64 L3: the scenes draw the exported moves; the tool runs' times subtract the links' savings
+describe('lowered links for the scenes', () => {
+  it('rebuild the linked toolpaths from the generated ones and time the tool runs', async () => {
+    const { s, planId, setupId, toolpaths } = await onePlan()
+    await s.run('plan.setup.update', { planId, setupId, clampHeight: '0' })
+    const row = list(s, planId).links[0]!.links!
+    expect(row.lowered.map((l) => l.index)).toEqual([1, 2])
+    const generated = s.plan(planId).setups[0]!.operations.map(
+      (o) =>
+        (
+          s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as {
+            toolpath: Toolpath
+          }
+        ).toolpath,
+    )
+    const plan = expectOk(loadPlan(s.d.doc, planId, 'test'))
+    const inputs = expectOk(planOperationInputs(s.d.doc, planId, undefined, region2d))
+    const links = currentSetupLinks(inputs, toolpaths, plan.setups[0]!, plan.stock, plan.machine)!
+    // the same moves the export writes, from the generated toolpaths and the lowered links
+    expect(linkedToolpaths(generated, row.lowered)).toEqual(links.toolpaths)
+    expect(linkedToolpaths(generated, [])).toEqual(generated)
+    const saved = row.lowered.reduce((t, l) => t + l.savedSeconds, 0)
+    expect(saved).toBeCloseTo(row.savedSeconds!, 1)
+    // one tool run: it saves what the setup saves; a run of one operation saves nothing
+    expect(runLinkSavings(row.lowered, [0, 1, 2])).toBeCloseTo(saved, 9)
+    expect(runLinkSavings(row.lowered, [2])).toBe(0)
+    expect(runLinkSavings(row.lowered, [1, 2])).toBeCloseTo(row.lowered[1]!.savedSeconds, 9)
   })
 })
 
