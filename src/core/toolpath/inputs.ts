@@ -9,6 +9,7 @@ import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
+import { openReach, opensStock, openRegion } from '../geometry/open-sides'
 import { pocketRegion, profileChain } from '../geometry/outline'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
@@ -212,14 +213,13 @@ export function toGeneratorInputs(
         },
       )
     // generators stay top-down: the operation as read in its face frame, without the direction;
-    // a through profile cuts the material the plan's earlier setups left (DF50: the plan's setup
-    // order, not the design's default one)
+    // a through profile (DF50) or hole (DF61) cuts the material the plan's earlier setups left
+    // (the plan's setup order, not the design's default one)
     const { direction: _, ...local } = g
-    if (local.kind === 'profile') {
+    if (local.kind === 'profile' || local.kind === 'drilling') {
       const { throughDepth: __, ...rest } = local
-      ops.push(
-        input.throughDepth === undefined ? rest : { ...rest, throughDepth: input.throughDepth },
-      )
+      const t = input.throughDepths?.get(op.id)
+      ops.push(t === undefined ? rest : { ...rest, throughDepth: t })
     } else ops.push(local)
   }
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
@@ -247,6 +247,8 @@ export function toGeneratorInputs(
     stock,
     ...(maxFeedRate === undefined ? {} : { maxFeedRate }),
   }
+  // the material earlier cuts left (DF61): milled cuts skip the passes wholly in air
+  const material = input.material === undefined ? {} : { material: input.material }
   const s = input.strategy
   const milling = (): AppResult<CuttingParams> =>
     cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover'], id)
@@ -270,6 +272,7 @@ export function toGeneratorInputs(
           inputs: [
             {
               ...base,
+              ...material,
               cutting: c,
               operation,
               strategy: {
@@ -284,7 +287,7 @@ export function toGeneratorInputs(
       )
     case 'pocket':
       return single('pocket').andThen((op) =>
-        milling().map((c): GeneratorRequest => {
+        milling().andThen((c): AppResult<GeneratorRequest> => {
           const strategy = {
             entry: s.entry,
             helixDiameter: s.helixDiameter,
@@ -293,19 +296,37 @@ export function toGeneratorInputs(
             finishStepdown: s.finishStepdown,
             direction: s.direction,
           }
+          const placed = pocketRegion(op)
+          // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
+          // tool runs past the edge there
+          if (region2d !== undefined && opensStock(region2d, placed.region, stock))
+            return openRegion(
+              region2d,
+              placed.region,
+              stock,
+              openReach(tool.diameter / 2, s.finishAllowance),
+            ).map((region) => ({
+              kind: 'regionPocket',
+              ...turned,
+              inputs: [
+                { ...base, ...material, cutting: c, operation: { ...placed, region }, strategy },
+              ],
+            }))
           // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2
           // output); general shapes go to the region generator in the face frame (T1 wiring)
-          return isAnalyticOperation(op)
-            ? {
-                kind: 'pocket',
-                ...turned,
-                inputs: [{ ...base, cutting: c, operation: op, strategy }],
-              }
-            : {
-                kind: 'regionPocket',
-                ...turned,
-                inputs: [{ ...base, cutting: c, operation: pocketRegion(op), strategy }],
-              }
+          return Ok(
+            isAnalyticOperation(op)
+              ? {
+                  kind: 'pocket',
+                  ...turned,
+                  inputs: [{ ...base, ...material, cutting: c, operation: op, strategy }],
+                }
+              : {
+                  kind: 'regionPocket',
+                  ...turned,
+                  inputs: [{ ...base, ...material, cutting: c, operation: placed, strategy }],
+                },
+          )
         }),
       )
     case 'profile':
@@ -322,7 +343,7 @@ export function toGeneratorInputs(
             return {
               kind: 'profile',
               ...turned,
-              inputs: [{ ...base, cutting: c, operation: op, strategy }],
+              inputs: [{ ...base, ...material, cutting: c, operation: op, strategy }],
             }
           return {
             kind: 'regionProfile',
@@ -330,6 +351,7 @@ export function toGeneratorInputs(
             inputs: [
               {
                 ...base,
+                ...material,
                 cutting: c,
                 operation: regionProfileOperation(op, stock),
                 // no plan parameter yet: the documented default 0.5 D (plan-v0.3.md § Profile)

@@ -16,7 +16,7 @@ import { checkChain } from '../geometry/2d/wire'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { GeneratorInput, ProfileStrategy, Toolpath, ToolpathTool } from './model'
 import {
@@ -348,10 +348,11 @@ export function generateRegionProfile(
   const canRamp = (segs: readonly Seg[], drop: number) =>
     st.entry === 'ramp' && drop > EPSILON && segsLength(segs) >= tool.diameter - EPSILON
 
-  const zs = levels(op.onZ, bottom, cutting.stepdown)
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const zs = cutLevels(op.onZ, bottom, cutting.stepdown, input.material)
   const finishing = passes.finish.length > 0
   const pass = passSteps(steps, zs.length + (finishing ? 1 : 0))
-  let previous = op.onZ
+  let previous = cutTop(op.onZ, bottom, input.material)
   let fromStart = true
   for (const [k, z] of zs.entries()) {
     const s = pass(k)

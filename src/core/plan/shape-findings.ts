@@ -10,6 +10,10 @@ import { isGeneralShape, type Operation } from '../design/operation'
 import type { Region2dPort } from '../geometry/2d/port'
 import { isAnalyticOperation, type OperationGeometry } from '../geometry/model'
 import { pocketRegion } from '../geometry/outline'
+import { localStock } from '../geometry/face'
+import { openReach, openRegion, opensStock } from '../geometry/open-sides'
+import type { Region } from '../geometry/2d/model'
+import { Ok, type AppResult } from '../../shared/result'
 import { toolpathTool } from '../toolpath/inputs'
 import { clearingStep, stepoverClamped } from '../toolpath/region-pocket'
 import { profileStep, profileStepClamped } from '../toolpath/region-profile'
@@ -74,7 +78,19 @@ export function shapeFindings(plan: LoadedPlan, port: Region2dPort): PlanWarning
         }
       }
       if (g.kind !== 'pocket') continue
-      const rest = findRestMaterial(port, pocketRegion(g).region, tool.diameter / 2)
+      // a pocket on the stock edge is cut as its open region (DF61): its rest inside the stock
+      const R = tool.diameter / 2
+      const face = localStock(g.direction ?? '+z', geometry.unwrap().stock)
+      const own = pocketRegion(g).region
+      const inFace = (p: readonly number[]) =>
+        p[0]! >= 0 && p[0]! <= face.length && p[1]! >= 0 && p[1]! <= face.width
+      const open = opensStock(port, own, face)
+      const region: AppResult<Region> = open
+        ? openRegion(port, own, face, openReach(R, 0))
+        : Ok(own)
+      const rest = region
+        .andThen((region) => findRestMaterial(port, region, R))
+        .map((pieces) => (open ? pieces.filter((p) => inFace(p.at)) : pieces))
       if (rest.isErr()) continue
       for (const piece of rest.unwrap())
         out.push({

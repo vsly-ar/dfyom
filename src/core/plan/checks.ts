@@ -103,8 +103,9 @@ export interface ToolCheckInput {
   readonly part: Part
   readonly stock: Stock
   /**
-   * Through depth (mm) by design operation id of the through profiles over material an earlier
-   * setup cleared (DF50, `planThroughDepths`); the others cut the stock thickness.
+   * Through depth (mm) by design operation id of the through profiles (DF50) and through holes
+   * (DF61) over material an earlier setup cleared (`planThroughDepths`); the others cut the
+   * stock thickness.
    */
   readonly throughDepths?: ReadonlyMap<string, number>
   readonly tool: Tool
@@ -196,8 +197,11 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       }
       case 'drilling': {
         const hole = op.diameter.canonical
-        const depth = holeDepth(op, part.operations, stock)
         const through = op.bottom === 'through'
+        // a through hole over material an earlier setup cleared: what is left below `on` (DF61)
+        const left = through ? i.throughDepths?.get(op.id) : undefined
+        const depth =
+          left === undefined ? holeDepth(op, part.operations, stock) : left - belowTop(table, op.on)
         const breakthrough = through && i.strategy.kind === 'drilling' ? i.strategy.breakthrough : 0
         const fromTop = belowTop(table, op.on) + depth + breakthrough
         if (tool.type === 'drill') {

@@ -126,9 +126,12 @@ export function generateDrilling(
   const ok = issues.result('generateDrilling', input.planOperationId).andThen(() => steps.step())
   if (ok.isErr()) return Err(ok.unwrapErr())
 
-  // z where the hole reaches its full diameter
+  // z where the hole reaches its full diameter; a through hole ends on the material an earlier
+  // setup left under it (DF61), else the far stock face
   const full =
-    op.bottom.kind === 'through' ? -stock.thickness - st.breakthrough : op.onZ - op.bottom.depth
+    op.bottom.kind === 'through'
+      ? -(op.throughDepth ?? stock.thickness) - st.breakthrough
+      : op.onZ - op.bottom.depth
   const retract = op.onZ + heights.retractHeight
   const at = (p: Vec2, z: number): Vec3 => [p[0], p[1], z]
   const c = op.center

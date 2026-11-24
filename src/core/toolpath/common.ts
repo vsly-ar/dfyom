@@ -5,6 +5,7 @@
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../shared/result'
 import type { Steps } from '../workers/steps'
+import type { MaterialBand } from '../geometry/through-depth'
 import type { GeneratorInput, Pass, Toolpath } from './model'
 import { toolpathStats } from './stats'
 
@@ -94,6 +95,38 @@ export function levels(top: number, bottom: number, stepdown: number): number[] 
   if (depth <= 1e-9) return []
   const n = Math.max(1, Math.ceil(depth / stepdown - 1e-9))
   return Array.from({ length: n }, (_, k) => (k === n - 1 ? bottom : top - (depth * (k + 1)) / n))
+}
+
+/** Where `cutLevels` starts: `top`, or the material's top below it (not below `bottom`). */
+export function cutTop(top: number, bottom: number, material?: MaterialBand): number {
+  return material?.top === undefined ? top : Math.max(bottom, Math.min(top, material.top))
+}
+
+/**
+ * Levels of a milled cut from `top` down to `bottom` (`levels`) over the material earlier cuts
+ * left (DF61, `GeneratorInput.material`): they start at the material's top when it lies below
+ * `top` (equal steps from there, so the passes above it, wholly in air, are gone), and a level
+ * whose slab (from the level above down to it) lies wholly below the material's bottom is
+ * skipped. The floor stays the operation's; at least one level is kept.
+ * Doc: docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
+ */
+export function cutLevels(
+  top: number,
+  bottom: number,
+  stepdown: number,
+  material?: MaterialBand,
+): number[] {
+  const start = cutTop(top, bottom, material)
+  const zs = levels(start, bottom, stepdown)
+  const below = material?.bottom
+  if (below === undefined) return zs.length > 0 || start >= top ? zs : [bottom]
+  const out: number[] = []
+  let above = start
+  for (const z of zs) {
+    if (above > below + 1e-9) out.push(z)
+    above = z
+  }
+  return out.length > 0 || zs.length === 0 ? out : [zs[0]!]
 }
 
 /**

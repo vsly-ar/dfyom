@@ -12,6 +12,7 @@ import type {
   Vec2,
   Vec3,
 } from '../geometry/model'
+import type { MaterialBand } from '../geometry/through-depth'
 
 export type { Vec2, Vec3 }
 
@@ -210,6 +211,12 @@ export interface GeneratorInput<Op, Strategy, Cutting = CuttingParams> {
   readonly stock: StockGeometry
   readonly operation: Op
   readonly strategy: Strategy
+  /**
+   * The material earlier cuts left over the operation's region (DF61, z in the face frame):
+   * milling generators start their levels at `top` and skip the levels wholly below `bottom`
+   * (`cutLevels`). Absent = from the start level to the floor.
+   */
+  readonly material?: MaterialBand
   /** Without a machine copy rapids are not timed (`estimatedSeconds` covers feed moves only). */
   readonly maxFeedRate?: AxisRates
 }

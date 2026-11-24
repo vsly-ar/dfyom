@@ -23,7 +23,8 @@ import type { ResolvedFeeds } from './feeds'
 import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { loadPlan, setupOf } from './plan'
-import { planThroughDepths } from './through'
+import { planMaterialBands, planThroughDepths } from './through'
+import type { MaterialBand } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
 
@@ -55,10 +56,17 @@ export interface PlanOperationInput {
   readonly strategy: ResolvedStrategy
   readonly machine: Option<Machine>
   /**
-   * A through profile over material an earlier setup of the plan cleared from the opposite face:
-   * the material it cuts (mm; DF50, `planThroughDepths`). Absent = the stock extent.
+   * Through profiles (DF50) and through holes (DF61) over material an earlier setup of the plan
+   * cleared from the opposite face: the material each cuts (mm) by design operation id
+   * (`planThroughDepths`). Absent or not listed = the stock extent.
    */
-  readonly throughDepth?: number
+  readonly throughDepths?: ReadonlyMap<string, number>
+  /**
+   * The material earlier cuts of the plan left over the region of a facing, pocket or profile
+   * (DF61, `planMaterialBands`): its toolpath skips the passes that lie wholly in air. Absent =
+   * the raw stock from the cut's start level to its floor.
+   */
+  readonly material?: MaterialBand
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -138,8 +146,17 @@ export function planOperationInputs(
     previous = op.id
     if (!wanted(op.id)) return
     const e = evaluateOperation(plan, op)
-    const throughDepth =
-      e.kind === 'profile' ? planThroughDepths(plan, port).get(e.ops[0]?.id ?? '') : undefined
+    const through = planThroughDepths(plan, port)
+    const throughDepths = new Map<string, number>()
+    for (const o of e.ops) {
+      const d = through.get(o.id)
+      if (d !== undefined) throughDepths.set(o.id, d)
+    }
+    // facings, pockets and profiles machine one design operation each
+    const material =
+      e.kind === 'facing' || e.kind === 'pocket' || e.kind === 'profile'
+        ? planMaterialBands(plan, port).get(e.ops[0]?.id ?? '')
+        : undefined
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
     out.push({
@@ -156,7 +173,8 @@ export function planOperationInputs(
       feeds: e.feeds.unwrap(),
       strategy: e.strategy,
       machine: plan.machine,
-      ...(throughDepth === undefined ? {} : { throughDepth }),
+      ...(throughDepths.size === 0 ? {} : { throughDepths }),
+      ...(material === undefined ? {} : { material }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       inputHash: chain,
     })

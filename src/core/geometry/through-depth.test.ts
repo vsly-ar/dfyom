@@ -1,12 +1,14 @@
-// Through depths after earlier setups (hardening DF50): opposite facings and pockets that clear
-// a through profile's whole slot reduce the material it cuts.
-// Spec: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups
+// Through depths after earlier setups (hardening DF50, drillings DF61): opposite facings and
+// pockets that clear a through profile's whole slot or a through hole reduce the material it cuts;
+// material bands (DF61): what earlier cuts left over a later cut's region.
+// Spec: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
+// docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
 import { describe, expect, it } from 'vitest'
 import { hole, rect } from './2d/testing/fixtures'
 import { nodeRegion2d } from './2d/testing/node-wasm'
 import type { OperationGeometry, StockGeometry } from './model'
 import { reachDepth } from './tool-fit'
-import { throughDepths, withThroughDepths } from './through-depth'
+import { materialBands, throughDepths, withThroughDepths } from './through-depth'
 
 const port = nodeRegion2d()
 // the enclosure test's stock and outline, scaled to round numbers
@@ -138,5 +140,146 @@ describe('throughDepths', () => {
     ])
     // cleared again when the depth no longer applies
     expect(withThroughDepths(ops, new Map())[1]).not.toHaveProperty('throughDepth')
+  })
+})
+
+/** A top (+z) through drilling of Ø`d` at `[x, y]`. */
+const throughHole = (
+  id: string,
+  x: number,
+  y: number,
+  d = 5,
+): Extract<OperationGeometry, { kind: 'drilling' }> => ({
+  kind: 'drilling',
+  id,
+  onZ: 0,
+  center: [x, y],
+  diameter: d,
+  bottom: { kind: 'through' },
+})
+
+describe('throughDepths of through drillings (DF61)', () => {
+  it('a hole over the bottom relief cuts the material left; partly covered: the full extent', () => {
+    const relief = bottomPocket('pocket1', 158, 108)
+    const inside = throughHole('drill1', 100, 50)
+    // the relief spans X 46…204: a hole at X 45 overlaps its wall
+    const edge = throughHole('drill2', 45, 50)
+    expect(depths([relief, inside, edge])).toEqual(new Map([['drill1', 33]]))
+    // blind holes are not through cuts
+    const blind: OperationGeometry = { ...inside, bottom: { kind: 'flat', depth: 5 } }
+    expect(depths([relief, blind])).toEqual(new Map())
+  })
+
+  it('tool reach and the geometry read it', () => {
+    const ops = [bottomPocket('pocket1', 158, 108), throughHole('drill1', 100, 50)]
+    const hole1 = withThroughDepths(ops, depths(ops))[1]!
+    expect(hole1).toMatchObject({ throughDepth: 33 })
+    expect(reachDepth(hole1 as Exclude<OperationGeometry, { kind: 'facing' }>, STOCK)).toEqual([
+      33,
+      'on',
+    ])
+  })
+})
+
+describe('throughDepths with blind profiles as removals (DF61)', () => {
+  it('a bottom step whose slot covers the outline slot clears its depth', () => {
+    // the step along the same loop, a wider slot: from the bottom face 9.5 deep
+    const step: OperationGeometry = {
+      ...outline,
+      id: 'profile2',
+      direction: '-z',
+      slotWidth: 9,
+      depth: 9.5,
+    }
+    expect(depths([step, outline]).get('profile1')).toBeCloseTo(30.5, 9)
+    // a narrower step leaves part of the slot: nothing counts
+    expect(depths([{ ...step, slotWidth: 5 }, outline])).toEqual(new Map())
+  })
+})
+
+describe('materialBands (DF61)', () => {
+  const inOrder = (a: OperationGeometry, b: OperationGeometry, ops: OperationGeometry[]) =>
+    ops.indexOf(a) < ops.indexOf(b)
+  const bands = (ops: OperationGeometry[], p: typeof port | undefined = port) =>
+    materialBands(ops, STOCK, p, (a, b) => inOrder(a, b, ops))
+  const facing = (depth: number, direction: '+z' | '-z' = '+z'): OperationGeometry => ({
+    kind: 'facing',
+    id: `facing${direction}`,
+    direction,
+    depth,
+  })
+  const topPocket = (
+    onZ: number,
+    depth: number,
+  ): Extract<OperationGeometry, { kind: 'pocket' }> => ({
+    kind: 'pocket',
+    id: 'pocket9',
+    onZ,
+    shape: {
+      center: [125, 50],
+      contour: { kind: 'rectangle', length: 60, width: 40, cornerRadius: 0 },
+    },
+    depth,
+    floorRadius: 0,
+  })
+
+  it('an earlier facing above a pocket starting on the stock face: top at its floor', () => {
+    const ops = [facing(2), topPocket(0, 5)]
+    expect(bands(ops)).toEqual(new Map([['pocket9', { top: -2 }]]))
+    // also without the port (a facing covers the whole face)
+    expect(bands(ops, undefined)).toEqual(new Map([['pocket9', { top: -2 }]]))
+    // on the facing floor already: nothing to skip
+    expect(bands([facing(2), topPocket(-2, 3)])).toEqual(new Map())
+    // the facing runs later: nothing
+    expect(bands([topPocket(0, 5), facing(2)])).toEqual(new Map())
+  })
+
+  it('a step below an earlier facing, and a second facing', () => {
+    const step: OperationGeometry = { ...outline, id: 'profile2', depth: 6 }
+    const f1 = facing(1.5)
+    const f2: OperationGeometry = { ...facing(2), id: 'facing2' }
+    expect(bands([f1, step, f2])).toEqual(
+      new Map([
+        ['profile2', { top: -1.5 }],
+        ['facing2', { top: -1.5 }],
+      ]),
+    )
+  })
+
+  it('a through profile under a facing gets a top, never a bottom', () => {
+    expect(bands([facing(1), facing(5, '-z'), outline])).toEqual(
+      new Map([['profile1', { top: -1 }]]),
+    )
+  })
+
+  it('an earlier pocket covers a later one only over its whole region', () => {
+    const big: OperationGeometry = { ...topPocket(0, 4), id: 'pocket8' }
+    const wide: OperationGeometry = {
+      ...topPocket(0, 3),
+      id: 'pocket8',
+      shape: {
+        center: [125, 50],
+        contour: { kind: 'rectangle', length: 80, width: 50, cornerRadius: 0 },
+      },
+    }
+    expect(bands([wide, topPocket(0, 6)])).toEqual(new Map([['pocket9', { top: -3 }]]))
+    // the same size: covers (shared walls); a smaller one does not
+    expect(bands([big, topPocket(0, 6)])).toEqual(new Map([['pocket9', { top: -4 }]]))
+    const small: OperationGeometry = {
+      ...wide,
+      shape: {
+        center: [125, 50],
+        contour: { kind: 'rectangle', length: 50, width: 30, cornerRadius: 0 },
+      },
+    }
+    expect(bands([small, topPocket(0, 6)])).toEqual(new Map())
+  })
+
+  it('opposite cuts below a blind pocket: bottom where the material ends', () => {
+    // a 36 deep top pocket over the bottom relief (7 deep): material from 0 down to −33
+    const relief = bottomPocket('pocket1', 158, 108)
+    expect(bands([relief, topPocket(0, 36)])).toEqual(new Map([['pocket9', { bottom: -33 }]]))
+    // a floor above the relief: nothing
+    expect(bands([relief, topPocket(0, 30)])).toEqual(new Map())
   })
 })

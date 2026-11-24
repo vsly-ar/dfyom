@@ -21,7 +21,8 @@ import {
 import type { Region2dPort } from './2d/port'
 import { findRestMaterial, type RestPiece } from './2d/rest-material'
 import type { OperationGeometry, StockGeometry, Vec2 } from './model'
-import { profileChain, shapeOutline } from './outline'
+import { ON_EDGE, openReach, openRegion, opensStock } from './open-sides'
+import { pocketRegion, profileChain, shapeOutline } from './outline'
 
 /**
  * A vertex is a sharp corner when its elements turn by more than this (rad, 5°): a smaller kink
@@ -137,14 +138,76 @@ const byGeometry = new WeakMap<OperationGeometry, ShapeMeasure | null>()
  * or drilling). Analytic contours are measured too (callers keep their v0.1 rules for them).
  * A port failure leaves the affected answer at its harmless side (fits, no rest material): the
  * region already resolved and normalised, so it is a library fault the evaluation reports.
+ * With `face` (the local stock of the operation's direction) a pocket that reaches the stock edge
+ * is measured with its open sides (DF61, `openMeasure`).
  */
-export function shapeMeasure(port: Region2dPort, op: OperationGeometry): ShapeMeasure | undefined {
+export function shapeMeasure(
+  port: Region2dPort,
+  op: OperationGeometry,
+  face?: Pick<StockGeometry, 'length' | 'width'>,
+): ShapeMeasure | undefined {
   if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
+  let m: ShapeMeasure | undefined
   const known = byGeometry.get(op)
-  if (known !== undefined) return known ?? undefined
-  const m = measureOf(port, op)
-  byGeometry.set(op, m ?? null)
-  return m
+  if (known !== undefined) m = known ?? undefined
+  else {
+    m = measureOf(port, op)
+    byGeometry.set(op, m ?? null)
+  }
+  if (m === undefined || face === undefined || op.kind !== 'pocket') return m
+  let byFace = openByGeometry.get(op)
+  if (byFace === undefined) openByGeometry.set(op, (byFace = new Map()))
+  const key = `${face.length}×${face.width}`
+  if (!byFace.has(key)) {
+    const placed = pocketRegion(op).region
+    byFace.set(key, opensStock(port, placed, face) ? openMeasure(port, m, op, face) : m)
+  }
+  return byFace.get(key)
+}
+
+const openByGeometry = new WeakMap<OperationGeometry, Map<string, ShapeMeasure>>()
+
+/**
+ * The measures of a pocket with open sides (DF61): the tool enters from beyond the stock edge,
+ * so every tool fits (`fits` true, `narrowest` Infinity, as for an outside profile), and the rest
+ * material is what the tool leaves of the open region (`openRegion` with `openReach`) inside the
+ * stock face. Corners on the stock edge or beyond it are dropped (the tool reaches them from
+ * outside; DF53's `openCorner` already drops those far enough outside); bounds stay the shape's.
+ */
+function openMeasure(
+  port: Region2dPort,
+  base: ShapeMeasure,
+  op: Extract<OperationGeometry, { kind: 'pocket' }>,
+  face: Pick<StockGeometry, 'length' | 'width'>,
+): ShapeMeasure {
+  const restMemo = new Map<number, readonly RestPiece[]>()
+  const [cu, cv] = op.shape.center
+  const inFace = (p: Vec2) => p[0] >= 0 && p[0] <= face.length && p[1] >= 0 && p[1] <= face.width
+  // a corner on the stock edge (or beyond it) is reached from outside the stock
+  const inside = (c: InsideCorner) => {
+    const u = c.at[0] + cu
+    const v = c.at[1] + cv
+    return Math.min(u, v, face.length - u, face.width - v) > ON_EDGE
+  }
+  const corners = base.corners.filter(inside)
+  return {
+    ...base,
+    corners,
+    smallestCornerRadius: corners.reduce((m, c) => Math.min(m, c.radius), Infinity),
+    fits: () => true,
+    narrowest: () => Infinity,
+    rest(r: number) {
+      const known = restMemo.get(r)
+      if (known !== undefined) return known
+      const pieces = openRegion(port, pocketRegion(op).region, face, openReach(r, 0))
+        .andThen((open) => findRestMaterial(port, open, r))
+        .unwrapOr([])
+        .filter((p) => inFace(p.at))
+        .map((p): RestPiece => ({ area: p.area, at: [p.at[0] - cu, p.at[1] - cv] }))
+      restMemo.set(r, pieces)
+      return pieces
+    },
+  }
 }
 
 function measureOf(
