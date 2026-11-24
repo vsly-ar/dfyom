@@ -96,8 +96,8 @@ const Src = z.string().min(1).max(256)
  */
 export const SetupZeroArgSchema = z
   .union([
-    z.object({ at: z.tuple([Src, Src]).describe('X, Y from the corner') }).strict(),
-    z.object({ point: PlanRecordIdSchema.describe('Alignment point id of this setup') }).strict(),
+    z.object({ at: z.tuple([Src, Src]) }).strict(),
+    z.object({ point: PlanRecordIdSchema }).strict(),
   ])
   .nullable()
 export type SetupZeroArg = z.output<typeof SetupZeroArgSchema>
@@ -172,8 +172,8 @@ export function applySetupZero(
 }
 
 const PointInputSchema = z.object({
-  id: PlanRecordIdSchema.optional().describe('Keep this existing point; absent = a new one'),
-  name: z.string().min(1).max(80).optional().describe('Absent = named after the source'),
+  id: PlanRecordIdSchema.optional().describe('Existing point; absent = new'),
+  name: z.string().min(1).max(80).optional(),
   source: AlignmentSourceDtoSchema,
 })
 
@@ -181,7 +181,7 @@ export const planAlignmentSet = defineCommand({
   kind: 'document',
   name: 'plan.alignment.set',
   summary:
-    "Set a setup's alignment points, the whole list in cycle order (after the work zero): stock corner ('top front left'), stock edge ('top front', t 0..1), or a hole or outline vertex of an earlier plan operation. Returns their WCS X/Y and findings.",
+    "Set a setup's alignment points (whole list, cycle order): stock corner, stock edge, or a hole or vertex of an earlier plan operation. Returns WCS X/Y and findings.",
   title: () => 'Set alignment points',
   machine: false,
   args: z.object({

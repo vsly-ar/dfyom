@@ -43,6 +43,16 @@ export const ALIGNMENT_POINTS_MAX = 16
 export const ZERO_LIMIT_MM = 10_000
 
 const AlignmentIdSchema = z.string().regex(RECORD_ID_PATTERN)
+
+/** A string out of `values`, validated but listed only by example (keeps tools/list small). */
+function oneOf<T extends string>(values: readonly T[], example: string) {
+  return z
+    .string()
+    .refine((v): v is T => (values as readonly string[]).includes(v), {
+      message: `one of ${values.join(', ')}`,
+    })
+    .describe(example)
+}
 const index = z.int().min(0).max(9999)
 
 /**
@@ -50,23 +60,24 @@ const index = z.int().min(0).max(9999)
  * outline vertex of a plan operation cut before the setup.
  */
 export const AlignmentSourceDtoSchema = z.union([
-  z.object({ corner: z.enum(STOCK_CORNERS) }).strict(),
+  // free strings checked by refine: the enums cost ≈ 0.5 K of tools/list (llm-api.md budget)
+  z.object({ corner: oneOf(STOCK_CORNERS, "e.g. 'top front left'") }).strict(),
   z
     .object({
-      edge: z.enum(STOCK_EDGES),
-      t: z.number().min(0).max(1).optional().describe('0…1 along the edge; default 0.5'),
+      edge: oneOf(STOCK_EDGES, "e.g. 'top front', 'front left'"),
+      t: z.number().min(0).max(1).optional().describe('0..1, default 0.5'),
     })
     .strict(),
   z
     .object({
-      operation: AlignmentIdSchema.describe('Plan operation id'),
-      hole: index.describe('Its n-th hole centre (0 = first)'),
+      operation: AlignmentIdSchema,
+      hole: index.describe('0-based'),
     })
     .strict(),
   z
     .object({
-      operation: AlignmentIdSchema.describe('Plan operation id'),
-      vertex: index.describe('Its n-th outline vertex (0 = first)'),
+      operation: AlignmentIdSchema,
+      vertex: index.describe('0-based'),
     })
     .strict(),
 ])

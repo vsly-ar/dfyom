@@ -304,6 +304,10 @@ export function createPlan(
   return Ok(plan)
 }
 
+/** The default clearance height (plan.setup.update's `auto` restores it, WH-C). */
+export const defaultClearance = (units: UnitSystem): LengthDTO =>
+  defaultLength(SAFE_HEIGHTS.clearanceHeight[units], units)
+
 function safeHeights(units: UnitSystem): Pick<SetupDTO, 'clearanceHeight' | 'retractHeight'> {
   return {
     clearanceHeight: defaultLength(SAFE_HEIGHTS.clearanceHeight[units], units),

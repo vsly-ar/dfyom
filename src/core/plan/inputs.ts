@@ -29,6 +29,8 @@ import { hashJson } from './snapshot'
 import { setupZero } from './alignment'
 import type { Vec2 } from '../geometry/model'
 import type { ResolvedStrategy } from './strategy'
+import type { KeepOut } from '../toolpath/keep-out'
+import { setupWorkholding } from './workholding/setup'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
 export interface PlanOperationInput {
@@ -81,6 +83,12 @@ export interface PlanOperationInput {
    * listed = from its `on` level.
    */
   readonly materials?: ReadonlyMap<string, MaterialBand>
+  /**
+   * The setup's workholding as zones a facing or pocket keeps out of (WH-D, footprints in the
+   * WCS); absent for other kinds and setups without obstacles.
+   * Doc: docs/modes/workholding.md#keep-out-in-toolpaths
+   */
+  readonly keepOut?: KeepOut
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -137,13 +145,15 @@ export function planOperationInputs(
     const own = setupOf(plan, op.id)
     const zero = setupZero(plan, own, port)
     const moved = zero[0] !== 0 || zero[1] !== 0
+    // the clearance height follows the workholding unless the user set it (WH-C)
+    const holding = setupWorkholding(own, plan.stock)
     const setup = {
       id: own.id,
       direction: setupDirection(own),
       rotation: setupRotation(own),
       ...(moved ? { zero } : {}),
       workOffset: own.workOffset,
-      clearanceHeight: length(own.clearanceHeight),
+      clearanceHeight: holding.clearance,
       retractHeight: length(own.retractHeight),
     }
     const used = plan.dto.snapshots.filter(
@@ -156,12 +166,18 @@ export function planOperationInputs(
       // the Z reference (DF69) moves only the exported program, never the toolpath
       planOperation: { ...op, zRef: undefined },
       snapshots: used,
-      // S5: the resolved zero, not the points (docs/modes/alignment.md#implementation-slice-1)
+      // S5: the resolved zero, not the points (docs/modes/alignment.md#implementation-slice-1);
+      // workholding enters through the clearance height and region operations' own hash only, so
+      // moving a clamp regenerates facings and pockets, not every operation (WH-D)
       setup: {
         ...own,
         operations: undefined,
         alignment: undefined,
         zero: moved ? zero : undefined,
+        workholding: undefined,
+        workholdingMargin: undefined,
+        clearanceHeightSet: undefined,
+        ...(holding.clearanceFrom === undefined ? {} : { clearance: holding.clearance }),
       },
       // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")
       units: plan.units,
@@ -187,6 +203,17 @@ export function planOperationInputs(
         const m = planMaterialBands(plan, port).get(o.id)
         if (m !== undefined) materials.set(o.id, m)
       }
+    const keepOut: KeepOut | undefined =
+      (e.kind === 'facing' || e.kind === 'pocket') && holding.prisms.length > 0
+        ? {
+            zones: holding.prisms.map((p) => ({
+              itemId: p.itemId,
+              footprint: p.footprint,
+              zMax: p.zMax,
+            })),
+            margin: holding.margin,
+          }
+        : undefined
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
     out.push({
@@ -207,7 +234,9 @@ export function planOperationInputs(
       ...(material === undefined ? {} : { material }),
       ...(materials.size === 0 ? {} : { materials }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
-      inputHash: chain,
+      ...(keepOut === undefined ? {} : { keepOut }),
+      // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
+      inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })
   })
   return Ok(out)

@@ -1,6 +1,6 @@
 # Workholding: clamps, vises and screws per setup
 
-Status: accepted (proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F2; the v0.4 follow-up milestone (after v0.4, before v0.5); the user answered Q37–Q40 on 2026-11-24, TG #270 "ok", every recommendation taken) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [plan.md § Setups](plan.md#setups), [plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions), [plan-v0.1.md § Safe heights](plan-v0.1.md#setup-orientation-work-zero-safe-heights) · Program: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md)
+Status: implemented (hardening DF59, 2026-11-24; accepted Q37–Q40) except what [Implementation notes](#implementation-notes-df59) defers: the hops inside an operation come with DF64's link pass (proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F2; the user answered Q37–Q40 on 2026-11-24, TG #270 "ok", every recommendation taken) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [plan.md § Setups](plan.md#setups), [plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions), [plan-v0.1.md § Safe heights](plan-v0.1.md#setup-orientation-work-zero-safe-heights) · Program: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md)
 
 Today DFYOM has no idea what holds the stock. In the black-box test the bottom program rapided **through a toe clamp at Z1** (retract 2 mm above the face), and nothing flagged it; the agent had to subtract keep-out rectangles from its own design shapes, raise the retract height everywhere and check the G-code with its own script. This doc gives every setup a list of **workholding items** that become obstacles: toolpaths keep out of them, links go up and over them, the clearance height follows them, and a collision check over every move blocks the export when something still hits.
 
@@ -81,7 +81,7 @@ Cutting moves are feed moves below Z0 + margin; none may enter a keep-out zone b
 
 ## Program and Run
 
-- The exported header lists the setup's workholding and the work zero, as comments the operator reads at the machine: `(WCS G54: X0 Y0 = front-left corner of the Top face, Z0 = Top face)`, `(Workholding: Toe clamp 1 vMin X45 grip 10 top Z25)`, one line per item ([grbl.md](../architecture/grbl.md) header).
+- The exported header lists the setup's workholding after the work zero lines, as comments the operator reads at the machine: one line per item, `(Workholding: Toe clamp 1: front X45 grip 10 top Z25)` (the item's summary in the program's units), then `(Every move checked: 2 mm clear of the workholding)`; with items, DF59's "Keep clamps …" lines are left out ([grbl.md § Header](../architecture/grbl.md)).
 - The setup-change dialog ([ui.md § Setup change](../conventions/ui.md)) draws the items in its picture and lists them ("Place 4 toe clamps: …"); the virtual machine does not check them (Plan already did).
 
 ## Commands and queries
@@ -110,6 +110,37 @@ Rules go to a [ui.md](../conventions/ui.md) amendment (plan task 1.6):
 - `obstacles` per kind (prisms, margins, rotations, every edge); `linkAroundWorkholding` (a link across one clamp hops once, across two hops to the higher top, no hop when the link clears); keep-out islands (coverage oracle: no cut inside the zone, leftover area equals `unmachined`).
 - `checkWorkholding` against the black-box test's case: the bottom program of the enclosure with retract 2 mm and the four clamps (pads 30 × 10 at x 30–60 / 190–220, y 0–10 / 190–200, 25 mm tall) reports the rapid at Z1 across the clamp at x 188–222; after the post-pass, none.
 - An **independent G-code oracle** in tests (parses the exported program, true G2/G3 arcs, like the test agent's `clampcheck`) confirms the minimum distance ≥ margin, so the check is never verified only by itself.
+
+## Implementation notes (DF59)
+
+Built in hardening DF59 (2026-11-24). Code: `src/core/plan/workholding/` (`items.ts` model, defaults, invariants and summaries; `obstacles.ts` prisms, distances, the derived clearance and the link interface; `setup.ts` the memoised per-setup view; `check.ts` the collision check; `findings.ts` the findings; `commands.ts` `plan.workholding.set`), `src/core/toolpath/keep-out.ts` (keep-out regions), the export guard in `src/core/post/plan-export.ts`, the header in `src/core/post/grbl/post.ts`; UI in `src/renderer/src/modes/plan/Workholding.tsx`, `workholding-scene.ts` and `src/renderer/src/viewport/WorkholdingLayer.tsx`.
+
+- **Storage.** `setup.workholding?: WorkholdingItem[]`, `setup.workholdingMargin?: length` and `setup.clearanceHeightSet?: true` (the user set the clearance height; `plan.setup.update { clearanceHeight: 'auto' }` clears it and restores the default). Optional fields, no `schemaVersion` change. Item params are plain quantities (no formulas over stock faces yet). Ids `wh<n>` are unique per plan; a split setup starts without items.
+- **Toe clamp position.** `at` is the clamp's centre along the edge, in the setup frame's coordinate along that edge (X for the front and back edges, Y for left and right; default the middle). Moving a clamp to another edge without an `at` re-centres it. Summaries name the edge and that coordinate: `front X125 grip 10 top Z12`.
+- **Clearance (WH-C).** `effectiveClearance`: not set by the user, the setup's clearance height is max(stored, highest item top + margin), rounded up to 0.1 mm, and the inspector says where it comes from ("From Toe clamp 2 + 2 mm."). Set by the user below that, `plan.workholding.clearanceLow` (error, field `setup.clearanceHeight`). Every reader of the clearance (inputs, machine and Z headroom checks, header) uses `setupWorkholding(setup, stock).clearance`.
+- **Keep-out (WH-D).** Facing and pocket inputs carry `keepOut` (the setup's prisms in the WCS and the margin) when the setup has items; the zones a pass reaches below (`deepest < zMax + margin`) are grown by the margin (2D port offset; the generator keeps the tool radius off them) and subtracted from the region; the facing then runs as a region pocket (ramp entry, one finish pass at depth). `plan.workholding.unmachined` (warning) is the region ∩ (footprint ⊕ margin) per item, in mm² with its bounds. The toolpath cache key adds `keepOut` only when present, so plans without items keep their keys.
+- **Collision check (WH-E/F).** `checkWorkholding` walks every move of the setup's toolpaths in order (drill cycles expanded with their rapid to the retract plane, arcs split into chords with 0.001 mm sagitta at the arc's lowest Z) with a tool of radius max(cutting Ø, shank Ø) / 2; a move part below `zMax + margin` closer than the margin (0.01 mm tolerance) is a collision: kind `cut` (feed), `link` (a rapid with both ends at or above the clearance height) or `rapid`. The first collision per (operation, item, kind) is reported, with `params { setupId, itemId, kind, moveIndex, x, y, lowestZ, gap }`. `plan.workholding.close` (warning) is limited to rapids and links under 2 × margin (feed moves beside a clamp are the keep-out's job). A fixture-plate `base` makes a cut below −T `plan.workholding.breakthrough` (error).
+- **Where errors block.** Workholding findings are listed by `plan.warning.list` but kept out of `planFindings`, so they do not block toolpath generation; `plan.export` (and with it `run.job.start`, which exports) runs the static and move checks of the exported setup on the final moves and fails with `plan.check`, the first error's message and every error as an issue (`rule` = finding code).
+- **In-operation rapids are not lifted here.** A rapid on the retract plane across a clamp is reported (`collision`, kind `rapid`, "raise the retract height above Z… or move the item") instead of rewritten as a hop: the hops are DF64's link pass (below). The user's case does not need one: the keep-out leaves the facing's links clear of the clamps (the exported program is checked by an independent G-code oracle in `user-case.test.ts`).
+- **Agent API.** `plan.workholding.set` (2.26 K of `tools/list`; one flat item schema with every kind's params and one description, parameters that are not the kind's are refused with rule `notForKind`; an item with an `id` merges with the stored item; `copyFrom` copies another setup's list with new ids; an empty list removes the field). Result: items with `summary`, `bounds` and `top`, the clearance height in project units and this setup's static findings.
+
+### Obstacle interface for DF64's link pass
+
+`setupWorkholding(setup, stock).obstacles` is a `WorkholdingObstacles` (`obstacles.ts`): `{ prisms, margin, floorAlong(a, b, radius) }`. `floorAlong` returns the highest `zMax + margin` over the prisms whose footprint comes within `radius + margin` of the XY segment a→b, or −∞ when none does: a link (or a hop's horizontal leg) at or above it passes every item. DF64's `planLinks` uses it as the floor outside the cleared footprint in place of `clampHeight` ([safe-links.md § Clamps](safe-links.md#clamps)); the rewritten moves then go through the same `checkWorkholding` at export.
+
+### `clampHeight` superseded by items
+
+[safe-links.md](safe-links.md) (DF64) adds an optional per-setup `clampHeight`. When a setup has workholding items, the items are the floor and `clampHeight` is ignored (derived: the highest item top); it stays the fallback for a setup without items. This doc does not change DF64's code; DF64 reads `setupWorkholding(…).prisms.length > 0` to choose.
+
+### Deferred
+
+| Item                                                            | Why / where                                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Hops inside an operation and between operations                 | DF64's link pass, through the interface above                                  |
+| `plan.workholding.inPart`, `partLoose`, held pieces (`surface`) | Need the part solid per setup and the loose-piece rules; next workholding step |
+| Formulas in item params (`stock.length / 2`)                    | Plain quantities for now                                                       |
+| Toe clamp drag in the viewport, the setup-change dialog list    | UI follow-up; the inspector edits every param                                  |
+| Items in the Run scene                                          | With the setup-change picture                                                  |
 
 ## Not yet
 

@@ -7,12 +7,12 @@ import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import type { JobDirectory, Services } from '../commands/context'
-import { Quantity } from '../quantity/quantity'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
 import { setupStockSize } from '../plan/setups'
 import { setupZero } from '../plan/alignment'
 import type { Region2dPort } from '../geometry/2d/port'
+import { setupWorkholding } from '../plan/workholding/setup'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
@@ -60,7 +60,8 @@ export function prepareWorkZero(
     return fail('post.noMachine', 'the plan has no machine', { where, data: { planId } })
   const machine = plan.machine.unwrap()
   const first = plan.setups[0]!
-  const clearanceMm = Quantity.fromDTO(first.clearanceHeight).mapOr(0, (q) => q.canonical)
+  // the clearance the program uses (it follows the workholding, workholding.md)
+  const clearanceMm = setupWorkholding(first, plan.stock).clearance
   const size = setupStockSize(plan.stock, first)
   const zero = setupZero(plan, first, port)
   return Ok([

@@ -28,6 +28,15 @@ import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
 import { commentLine } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
+import type { PlanOperationInput } from '../plan/inputs'
+import type { Toolpath } from '../toolpath/model'
+import {
+  checkOperations,
+  moveFindings,
+  staticWorkholdingFindings,
+} from '../plan/workholding/findings'
+import { itemSummary } from '../plan/workholding/items'
+import { setupWorkholding } from '../plan/workholding/setup'
 
 /** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
@@ -202,6 +211,7 @@ export async function exportPlan(
   const operations: ExportOperation[] = []
   const reaches: Overreach[] = []
   const regenerated: string[] = []
+  const checked: { input: PlanOperationInput; toolpath: Toolpath }[] = []
   const part = plan.dto.design.part
   for (const [i, input] of all.entries()) {
     const id = input.planOperationId
@@ -232,6 +242,7 @@ export async function exportPlan(
       if (text !== undefined) positions[id] = text
     }
     const toolpath = tp.unwrap().toolpath
+    checked.push({ input, toolpath })
     reaches.push(inputOverreach(input, toolpath))
     // a plan operation of one design operation: its passes name it (joined ones already do)
     const only = ids.length === 1 ? ids[0]! : undefined
@@ -255,6 +266,25 @@ export async function exportPlan(
     })
   }
   opts.progress?.({ done: total, total })
+  // the export guard (WH-E): the final moves against the setup's workholding
+  const guard = [
+    ...staticWorkholdingFindings(plan, setup.id),
+    ...moveFindings(plan, setup, checkOperations(checked)),
+  ].filter((f) => f.severity === 'error')
+  const firstHit = guard[0]
+  if (firstHit !== undefined)
+    return fail('plan.check', firstHit.message, {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: guard.map((f) => ({
+        path: [f.planOperationId ?? setup.id, ...(f.field === undefined ? [] : [f.field])],
+        rule: f.code,
+        message: f.message,
+        params: f.params,
+      })),
+    })
+  const holding = setupWorkholding(setup, plan.stock)
+  const programUnits = plan.machine.unwrap().programUnits
   const exported = exportGrbl(
     {
       name: plan.dto.name,
@@ -273,6 +303,12 @@ export async function exportPlan(
           },
           maxOverreach(reaches),
           headerAlignment(plan, setup, services.region2d),
+          holding.items.length === 0
+            ? undefined
+            : {
+                items: holding.items.map((i) => `${i.name}: ${itemSummary(i, programUnits)}`),
+                margin: holding.margin,
+              },
         ),
       },
       operations,

@@ -10,7 +10,7 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand } from '../commands/define'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
-import { Quantity } from '../quantity/quantity'
+import { setupWorkholding } from '../plan/workholding/setup'
 import {
   alignmentEntries,
   AlignmentStepSchema,
@@ -52,8 +52,8 @@ function stepFor(
       data: { setupId },
       issues: [{ path: ['setupId'], rule: 'noAlignment', message: 'the setup has no points' }],
     })
-  const q = Quantity.fromDTO(setup.clearanceHeight)
-  const clearance = q.isOk() && q.unwrap().kind === 'length' ? q.unwrap().canonical : 10
+  // the clearance the program uses: it follows the workholding (workholding.md#links-and-safe-heights)
+  const clearance = setupWorkholding(setup, plan.stock).clearance
   const kept = m.alignmentStep()
   if (kept !== undefined && kept.planId === planId && kept.setupId === setupId)
     return Ok({ step: kept, clearance })
@@ -65,7 +65,7 @@ export const runAlignGoto = defineCommand({
   kind: 'effect',
   name: ALIGN_GOTO,
   summary:
-    'Alignment step: jog the pointer (spindle off) at the clearance height to the work zero or a point.',
+    'Alignment step: jog the pointer (spindle off) at clearance height to the zero or a point.',
   title: () => 'Go to alignment point',
   machine: true,
   args: z.object({
@@ -74,8 +74,8 @@ export const runAlignGoto = defineCommand({
     to: z.string().min(1).describe("'zero', a point id, 'next', 'previous'"),
   }),
   result: z.object({
-    current: z.string().describe('The entry the pointer moves to'),
-    target: z.tuple([z.number(), z.number()]).describe('Its WCS X, Y (mm)'),
+    current: z.string(),
+    target: z.tuple([z.number(), z.number()]),
   }),
   async run(doc, args, ctx) {
     const where = ALIGN_GOTO
@@ -110,12 +110,12 @@ export const runAlignGoto = defineCommand({
 export const runAlignTick = defineCommand({
   kind: 'effect',
   name: ALIGN_TICK,
-  summary: 'Alignment step: tick an entry (pointer at it) or untick it, and/or confirm.',
+  summary: 'Alignment step: tick or untick an entry (pointer at it), and/or confirm.',
   title: () => 'Check alignment point',
   machine: true,
   args: z
     .object({
-      entry: z.string().min(1).optional().describe("'zero' or an alignment point id"),
+      entry: z.string().min(1).optional().describe("'zero' or a point id"),
       ticked: z.boolean().optional(),
       confirm: z.literal(true).optional(),
       skipUnticked: z.literal(true).optional(),

@@ -139,6 +139,11 @@ export interface PlanState {
   readonly zRefPreview: string | undefined
   /** DF78: the alignment point focused in the setup inspector (drawn larger in the viewport). */
   readonly alignmentPoint: string | undefined
+  /**
+   * The workholding item open in the setup inspector (workholding.md#ui-summary): the viewport
+   * shows its keep-out zone.
+   */
+  readonly workholdingItem: { readonly setupId: string; readonly itemId: string } | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -154,6 +159,8 @@ export interface PlanState {
   previewZRef(planOperationId: string | undefined): void
   /** Marks an alignment point in the viewport; undefined: none. */
   focusAlignmentPoint(id: string | undefined): void
+  /** Opens a workholding item in the setup inspector; undefined closes it. */
+  selectWorkholding(item: { readonly setupId: string; readonly itemId: string } | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
@@ -200,6 +207,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     findingsRequest: undefined,
     zRefPreview: undefined,
     alignmentPoint: undefined,
+    workholdingItem: undefined,
     exported: undefined,
     choose: (planId) =>
       set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
@@ -211,6 +219,11 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     },
     previewZRef: (zRefPreview) => {
       if (get().zRefPreview !== zRefPreview) set({ zRefPreview })
+    },
+    selectWorkholding: (workholdingItem) => {
+      const was = get().workholdingItem
+      if (was?.setupId !== workholdingItem?.setupId || was?.itemId !== workholdingItem?.itemId)
+        set({ workholdingItem })
     },
     want(next, planId) {
       const t = `${next}:${round}`

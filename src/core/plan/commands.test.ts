@@ -53,6 +53,7 @@ describe('plan commands: registry', () => {
       'plan.operation.update',
       'plan.operation.move',
       'plan.tool.assign',
+      'plan.workholding.set',
     ])
     expect(PLAN_QUERIES.map((q) => q.name)).toEqual([
       'plan.list',

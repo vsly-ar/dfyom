@@ -389,6 +389,16 @@ export const ICON_SET = {
       { d: 'M1.5 7.5L8 10.5l6.5-3', a: true },
     ],
   },
+  clamp: {
+    label: 'Workholding',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [1.5, 9.5, 7, 5, 0.5] },
+      { d: 'M10.5 2.5v12M13.5 8.5v6' },
+      { d: 'M5 6.5h9v2H5z', a: true },
+    ],
+  },
   reference: {
     label: 'Reference model',
     group: 'cnc',

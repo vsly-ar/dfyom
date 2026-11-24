@@ -41,6 +41,7 @@ import {
 } from './schemas'
 import { toolpathStats } from './stats'
 import { turnToolpath, type SetupWcs } from './wcs'
+import type { Unmachined } from './keep-out'
 import { Vec2Schema } from '../geometry/schemas'
 
 export type GeneratorRequest = (
@@ -58,6 +59,11 @@ export type GeneratorRequest = (
    * Absent = the face frame is the WCS.
    */
   readonly wcs?: SetupWcs
+  /**
+   * Material a facing or pocket leaves under workholding (WH-D, face frame), for the
+   * `plan.workholding.unmachined` finding; host side only (the worker ignores it).
+   */
+  readonly unmachined?: readonly Unmachined[]
 }
 
 const one = <S extends z.ZodType>(s: S) => z.array(s).length(1).readonly()

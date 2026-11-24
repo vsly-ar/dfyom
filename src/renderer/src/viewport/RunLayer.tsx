@@ -3,7 +3,8 @@
 // dimmed towards the background), the tool marker at the work position (`wpos`)
 // and the work zero marker at the WCS origin, all in the setup's WCS, placed on the part by the
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
-// reference and touch-off spot (DF69, ZRefLayer.tsx). Props only.
+// reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
+// (WorkholdingLayer.tsx, workholding.md). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -12,6 +13,7 @@ import type { Placement } from '../../../core/geometry/model'
 import { MIX, mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
 import { AlignmentLayer, type AlignmentMarker } from './AlignmentLayer'
+import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 
 /** What the run scene shows (`Viewport` prop `run`). */
@@ -44,6 +46,11 @@ export interface RunScene {
   readonly zRef?: ZRefOverlay | undefined
   /** The setup's alignment points (plan scene, DF78), in work coordinates; absent: none. */
   readonly alignment?: readonly AlignmentMarker[] | undefined
+  /**
+   * The setup's workholding items, the open item's keep-out zone and collision hits (plan scene,
+   * workholding.md#ui-summary), in work coordinates; absent: none.
+   */
+  readonly workholding?: WorkholdingOverlay | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -186,6 +193,9 @@ export function RunLayer({
             <meshBasicMaterial color={travelColour} />
           </mesh>
         </group>
+      ) : null}
+      {run.workholding ? (
+        <WorkholdingLayer workholding={run.workholding} palette={palette} />
       ) : null}
       {run.zRef ? (
         <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />

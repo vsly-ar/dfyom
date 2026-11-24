@@ -228,7 +228,18 @@ class Writer {
     else if (refs.some((z) => z !== undefined && !z.top))
       this.comment(`Z0 on the ${h.up} face for tool 1, later tools: see each tool change`)
     else this.comment(`Z0 on the ${h.up} face: the stock surface facing up`)
-    if (h.overreach !== undefined) this.reachComments(h.overreach)
+    if (h.overreach !== undefined) this.reachComments(h.overreach, h.workholding === undefined)
+    if (h.workholding !== undefined) this.workholdingComments(h.workholding)
+  }
+
+  /**
+   * The setup's workholding, one line per item, and the checked margin (WH-E): they replace
+   * DF59's clamp note. Doc: docs/modes/workholding.md#program-and-run
+   */
+  private workholdingComments(w: NonNullable<SetupHeader['workholding']>): void {
+    for (const line of w.items) this.comment(`Workholding: ${line}`)
+    const margin = formatNumber(Math.round(w.margin * this.units.perMm * 1000) / 1000, 3)
+    this.comment(`Every move checked: ${margin} ${this.p.units} clear of the workholding`)
   }
 
   /**
@@ -255,7 +266,7 @@ class Writer {
   /**
    * The tool's reach past the stock sides and the clamp note (DF59): docs/architecture/grbl.md#setup-header-hardening-df58.
    */
-  private reachComments(o: NonNullable<SetupHeader['overreach']>): void {
+  private reachComments(o: NonNullable<SetupHeader['overreach']>, clampNote = true): void {
     const unit = this.p.units
     // rounded up: the tool reaches at most this far
     const step = unit === 'in' ? 100 : 10
@@ -274,7 +285,7 @@ class Writer {
     ])
     if (x.length + y.length === 0) {
       this.comment('Tool stays within the stock outline')
-      this.comment(`Keep clamps below ${clearance}`)
+      if (clampNote) this.comment(`Keep clamps below ${clearance}`)
       return
     }
     const line = (parts: readonly string[]) =>
@@ -285,7 +296,7 @@ class Writer {
       this.comment(line(x))
       this.comment(line(y))
     }
-    this.comment(`Keep clamps clear of those sides, below ${clearance}`)
+    if (clampNote) this.comment(`Keep clamps clear of those sides, below ${clearance}`)
   }
 
   private modes(): void {

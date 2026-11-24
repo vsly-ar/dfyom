@@ -186,9 +186,9 @@ export const planMessages = {
     pointRemove: 'Remove',
     pointRemoveZero: 'The work zero is on it: move the zero first',
     clearanceHeight: 'Clearance height',
-    /** DF59 (interim, no clamp model): the note on the clearance field, with its value. */
+    /** DF59: the note on the clearance field while the setup has no workholding, with its value. */
     clampNote: (height: string) =>
-      `Keep clamps lower than ${height} above the stock top; clamps are not modelled yet.`,
+      `Keep clamps lower than ${height} above the stock top, or add them under Workholding.`,
     /** DF59: how far the tool reaches past the stock sides on the machine. */
     reach: 'Past the stock',
     reachValue: (sides: readonly string[]) =>
@@ -212,6 +212,65 @@ export const planMessages = {
       `Not checked: enter ${missing.join(' and ')} in the machine.`,
     zHeadroomPartly: (missing: readonly string[], short: boolean) =>
       `${short ? 'Too little for a tool: see the setup checks' : 'Enough if there is no spoilboard'}; enter ${missing.join(' and ')} in the machine.`,
+  },
+
+  // workholding per setup (docs/modes/workholding.md#ui-summary, ui.md#workholding)
+  workholding: {
+    title: 'Workholding',
+    count: (n: number) => (n === 0 ? 'None' : plural(n, 'item', 'items')),
+    listLabel: (setup: string) => `Workholding of ${setup}`,
+    empty: 'Nothing holds the stock yet: rapids and cuts are not checked against clamps.',
+    add: 'Add',
+    addMenu: 'Add workholding',
+    kinds: {
+      toeClamp: 'Toe clamp',
+      vise: 'Vise',
+      screw: 'Screw',
+      block: 'Block',
+      spoilboard: 'Spoilboard',
+      fixturePlate: 'Fixture plate',
+      tape: 'Tape',
+      vacuum: 'Vacuum',
+    },
+    kindHints: {
+      toeClamp: 'A toe or strap clamp on one stock edge',
+      vise: 'Machine vise jaws on two stock sides',
+      screw: 'A hold-down screw through the waste',
+      block: 'A fixture block, stop or dowel',
+      spoilboard: 'What the stock sits on; cutting into it is fine',
+      fixturePlate: 'What the stock sits on; cutting into it is an error',
+      tape: 'Double-sided tape under the stock: no obstacle',
+      vacuum: 'A vacuum table under the stock: no obstacle',
+    },
+    item: (name: string) => `Item ${name}`,
+    remove: 'Remove',
+    removeItem: (name: string) => `Remove ${name}`,
+    name: 'Name',
+    edge: 'Edge',
+    edges: { uMin: 'Left', uMax: 'Right', vMin: 'Front', vMax: 'Back' },
+    at: 'Position along the edge',
+    width: 'Width',
+    grip: 'Grip on the stock',
+    reach: 'Reach past the edge',
+    top: 'Top above Z0',
+    axis: 'Jaws close along',
+    protrusion: 'Stock above the jaws',
+    jawLength: 'Jaw length',
+    jawThickness: 'Jaw thickness',
+    soft: 'Soft jaws',
+    centerX: 'Centre X',
+    centerY: 'Centre Y',
+    headDiameter: 'Head diameter',
+    length: 'Length',
+    rotation: 'Rotation',
+    bottom: 'Bottom',
+    type: 'Type',
+    margin: 'Margin',
+    marginHint: 'Kept clear around every item, sideways and above.',
+    /** The derived clearance height's note: "From Toe clamp 2 + 2 mm." */
+    clearanceFrom: (item: string, margin: string) => `From ${item} + ${margin}.`,
+    clearanceAuto: 'Follow the workholding',
+    clearanceAutoHint: 'Use the highest item + the margin, at least the default.',
   },
 
   // the setup's tool runs (hardening DF66): docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
@@ -650,6 +709,9 @@ export function findingText(
         return sentence(w.message)
       return `The tool (${lengthText(diameter, units)}) is too wide for the ${target}: it is ${lengthText(width, units)} at its narrowest.`
     }
+    case 'plan.workholding.none':
+      // the core's text names the agent tool; the app names the inspector section
+      return `No workholding in ${names.setup(String(p['setupId']))}: rapids and cuts are not checked against clamps. Add what holds the stock under Workholding in the setup.`
     case 'plan.machine': {
       // DF68: the Z headroom in the document's units
       const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : undefined)

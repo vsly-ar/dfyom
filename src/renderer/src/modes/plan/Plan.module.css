@@ -821,3 +821,9 @@
 .alignFinding[data-severity='error'] {
   color: var(--danger-text);
 }
+
+/* workholding.md: "Follow the workholding" under a clearance height the user set */
+.followButton {
+  justify-self: start;
+  margin-top: calc(-1 * var(--space-1));
+}

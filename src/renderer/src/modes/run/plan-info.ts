@@ -12,6 +12,7 @@ import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
+import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { RunStatus } from '../../../../core/run/service'
 import {
@@ -151,9 +152,15 @@ export function setupPlacement(
   }
 }
 
-/** The setup's clearance height (mm above the stock top), if it reads. */
+/**
+ * The setup's clearance height (mm above the stock top) as its program uses it (it follows the
+ * workholding, docs/modes/workholding.md#links-and-safe-heights), if it reads.
+ */
 export function setupClearance(plan: PlanDTO, setupId: string | undefined): number | undefined {
-  const q = Quantity.fromDTO(runSetup(plan, setupId).clearanceHeight)
+  const setup = runSetup(plan, setupId)
+  const loaded = loadPlanDTO(plan, 'mm', 'run UI')
+  if (loaded.isOk()) return setupWorkholding(setup, loaded.unwrap().stock).clearance
+  const q = Quantity.fromDTO(setup.clearanceHeight)
   return q.isOk() && q.unwrap().kind === 'length' ? q.unwrap().canonical : undefined
 }
 
