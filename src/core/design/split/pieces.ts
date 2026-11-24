@@ -575,7 +575,30 @@ function mapOperation(
         if (clipped.unwrap() === undefined) return Ok(undefined)
         shape = clipped.unwrap()!
       }
-      if (base.kind === 'pocket') {
+      if (base.kind === 'pocket' && z.capped) {
+        // a pocket through the piece: a pocket must end above the stock bottom, so it becomes a
+        // through inside profile; its core is waste held by tabs (one tool Ø slot)
+        const fr = mmOf(base.floorRadius)
+        if (
+          fr > 0 &&
+          (r.dir === '+z' ? r.zlo + fr > cell.band.zb + EPS : r.zhi - fr < cell.band.zt - EPS)
+        )
+          c.finding(op, `fillet:${op.id}`, `${op.name}'s floor fillet is cut by a split level`)
+        const { depth: _d, floorRadius: _f, ...rest } = base
+        out = {
+          ...rest,
+          kind: 'profile',
+          on: STOCK_FACE[dir],
+          shape,
+          side: 'inside',
+          slotWidth: L(c.toolDiameter(op)),
+          tabs: {
+            count: { kind: 'scalar', source: '4', defaultUnit: '1', exact: { num: '4', den: '1' } },
+            width: L(DEFAULTS_MM.tabWidth[c.units]),
+            thickness: L(DEFAULTS_MM.tabThickness[c.units]),
+          },
+        }
+      } else if (base.kind === 'pocket') {
         const p: OperationDTO & { kind: 'pocket' } = { ...base, on: on!, shape }
         if (depthChanged) p.depth = L(z.depth)
         const fr = mmOf(base.floorRadius)
@@ -590,7 +613,11 @@ function mapOperation(
         out = p
       } else {
         const p: OperationDTO & { kind: 'profile' } = { ...base, on, shape }
-        if (z.capped) delete p.depth
+        // through the piece: from its stock face (a through profile starts on one)
+        if (z.capped) {
+          delete p.depth
+          p.on = STOCK_FACE[dir]
+        }
         else if (z.fromFace && p.depth !== undefined) p.depth = L(z.depth)
         if (p.tabs.positions !== undefined && shape !== base.shape) {
           const { positions: _, ...tabs } = p.tabs

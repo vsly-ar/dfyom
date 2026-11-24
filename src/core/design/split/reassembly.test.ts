@@ -12,6 +12,8 @@ import type { SolidKernel } from '../../geometry/solid-port'
 import { nodeManifoldSource } from '../../geometry/testing/node-wasm'
 import { designSetup, type DesignSetup } from '../design.fixture'
 import { loadPart, partGeometryInput } from '../load'
+import { toGeometryInput } from '../geometry-input'
+import { shapeRegion } from './layout'
 import { planPieces } from './pieces'
 import { ENCLOSURE_LEVEL, ENCLOSURE_STOCK, enclosureCommands } from './split.fixture'
 
@@ -109,6 +111,12 @@ describe('reassembly: pieces == source', () => {
         const piece = Object.values(s.d.doc.parts).find((p) => p.derivedFrom?.index === plan.n)!
         const off = piece.offset!.map(mm)
         const e = evaluate(s, piece.id)
+        // a pocket through the piece maps to an inside profile: its core is waste (an offcut)
+        const pieceLoaded = expectOk(loadPart(s.d.doc, piece.id, 'test'))
+        const geometry = expectOk(toGeometryInput(pieceLoaded.part, pieceLoaded.stock, region2d))
+        const waste = geometry.operations.flatMap((g) =>
+          g.kind === 'profile' && g.side === 'inside' ? [shapeRegion(g.shape)!] : [],
+        )
         const { bounds, band } = plan.cell
         // the part between its facings: 9.738 below the top, above the bottom
         const zt = Math.min(band.zt, -9.738)
@@ -120,6 +128,7 @@ describe('reassembly: pieces == source', () => {
             zb + (0.002 + 0.996 * random()) * (zt - zb),
           ]
           if (!regionContains(plan.cell.region, [p[0], p[1]])) continue
+          if (waste.some((w) => regionContains(w, [p[0] + off[0]!, p[1] + off[1]!]))) continue
           const want = inside(source, p)
           const got = inside(e, [p[0] + off[0]!, p[1] + off[1]!, p[2] + off[2]!])
           expect([plan.n, p, got]).toEqual([plan.n, p, want])
@@ -128,7 +137,7 @@ describe('reassembly: pieces == source', () => {
         }
       }
       // the sample hit both material and the cavity
-      expect(checked).toBeGreaterThan(100 * planned.pieces.length)
+      expect(checked).toBeGreaterThan(50 * planned.pieces.length)
       expect(solid).toBeGreaterThan(0)
       expect(solid).toBeLessThan(checked)
     },

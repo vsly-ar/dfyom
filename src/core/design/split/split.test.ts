@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../../shared/testing/result'
 import { uiSource } from '../../commands/testing'
 import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
+import { checkPartFits } from '../../plan/validity'
 import { designSetup, type DesignSetup } from '../design.fixture'
 import type { PartDTO } from '../part.dto'
 import { ENCLOSURE_LEVEL, ENCLOSURE_STOCK, enclosureCommands } from './split.fixture'
@@ -33,6 +34,14 @@ const mm = (q: { exact: { num: string; den: string } }) =>
   Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
 
 const rules = (r: SplitResult) => r.findings.map((f) => f.params.rule)
+
+/** Every piece is a valid part on its blank (what a plan checks, `stockFit`). */
+function expectValidPieces(s: DesignSetup): void {
+  for (const p of pieces(s)) {
+    const r = checkPartFits(p, s.d.doc.snapshots[p.stock]!, 'test', region2d)
+    expect(r.isOk() ? 'ok' : r.unwrapErr().issues, p.name).toBe('ok')
+  }
+}
 
 describe('design.split.set (4a)', () => {
   it('splits the enclosure by one level: a tray and a ring, each in its own blank', async () => {
@@ -64,14 +73,20 @@ describe('design.split.set (4a)', () => {
       'drill4',
       'split1_outline',
     ])
-    const through = ring!.operations[1] as typeof cavity
-    expect(through.on).toBe('facing2.floor')
-    expect(mm(through.depth)).toBeCloseTo(30.262, 6)
+    // through the ring: an inside profile (a pocket must end above the stock bottom)
+    expect(ring!.operations[1]).toMatchObject({
+      kind: 'profile',
+      side: 'inside',
+      on: 'stock.top',
+      shape: { kind: 'rectangle' },
+    })
+    expect(ring!.operations[1]).not.toHaveProperty('depth')
     expect(s.d.doc.snapshots[ring!.stock]).toMatchObject({
       kind: 'stock',
       values: { name: 'Blank 259.5 × 187 × 40', material: { class: 'hardwood' } },
     })
     expect(rules(r)).not.toContain('noOutline')
+    expectValidPieces(s)
     // one undo step removes split and pieces
     await s.undo()
     expect(pieces(s)).toEqual([])
@@ -91,6 +106,7 @@ describe('design.split.set (4a)', () => {
       },
     })) as SplitResult
     expect(r.pieces).toHaveLength(8)
+    expectValidPieces(s)
     expect(r.pieces[0]!.blank).toEqual([134.75, 98.5, 40])
     expect(rules(r).filter((x) => x === 'thinJoint')).toHaveLength(3)
     // pieces with a cavity corner get a clipped cavity as their own named shape
@@ -118,15 +134,15 @@ describe('design.split.set (4a)', () => {
   it('pieces are read-only: operation edits fail with derivedPart, renames are kept', async () => {
     const s = await enclosure()
     await s.run('design.split.set', { partId: s.partId, split: { levels: [ENCLOSURE_LEVEL] } })
-    const ring = pieces(s)[1]!
+    const [tray, ring] = pieces(s)
     const e = await s.fail(
       'design.pocket.update',
-      { partId: ring.id, operationId: 'pocket1', depth: '3' },
+      { partId: tray!.id, operationId: 'pocket1', depth: '3' },
       'model.invariant',
     )
     expect(e.issues[0]).toMatchObject({ rule: 'derivedPart' })
-    expect(e.message).toMatch(/Pocket 1 belongs to Bracket · 2; it is derived from Bracket/)
-    await s.run('design.part.update', { partId: ring.id, name: 'Ring' })
+    expect(e.message).toMatch(/Pocket 1 belongs to Bracket · 1; it is derived from Bracket/)
+    await s.run('design.part.update', { partId: ring!.id, name: 'Ring' })
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '50' })
     expect(pieces(s)[1]!.name).toBe('Ring')
     expect(pieces(s)[0]!.name).toBe('Bracket · 1')
