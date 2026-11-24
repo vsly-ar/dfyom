@@ -337,6 +337,8 @@ export class ResultShaper {
           id,
           kind: listed?.['kind'] ?? null,
           designOperationIds: o['designOperationIds'],
+          // an alignment aid (alignment.md S13): its kind, name and setup-frame position
+          ...(isObj(o['aid']) ? { aid: o['aid'] } : {}),
           tool: nameOf(o['tool']),
           feeds,
           seconds,

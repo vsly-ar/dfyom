@@ -6,7 +6,7 @@
 import type { Direction } from '../../../../core/geometry/face'
 import type { Placement, Vec2 } from '../../../../core/geometry/model'
 import { setupAlignment } from '../../../../core/plan/alignment'
-import { planOperationLabel } from '../../../../core/plan/labels'
+import { planOpLabel } from '../../../../core/plan/labels'
 import { loadPlanDTO } from '../../../../core/plan/plan'
 import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
 import { Quantity } from '../../../../core/quantity/quantity'
@@ -89,7 +89,7 @@ export function resumePoints(plan: PlanDTO, setupId: string | undefined): Resume
     numbers.set(key, n)
     return {
       planOperationId: op.id,
-      label: planOperationLabel(plan.design.part, op.designOperationIds),
+      label: planOpLabel(plan.design.part, op),
       tool: n,
       toolName: snapshotName(plan, op.tool) ?? '–',
     }
@@ -122,6 +122,16 @@ export interface SetupPlacement {
   readonly zeroPoint?: string
   /** The part corner at the work zero, e.g. "back left" (M7). */
   readonly corner: string
+  /**
+   * DF78: the setup's alignment points in cycle order, at their expected position in the setup
+   * frame (mm from the front-left corner of the top); a point whose source is missing is left out.
+   */
+  readonly points: readonly {
+    readonly id: string
+    readonly name: string
+    readonly n: number
+    readonly at: Vec2
+  }[]
 }
 
 /** `undefined` when the plan's stock copy does not load. */
@@ -149,6 +159,11 @@ export function setupPlacement(
     zero: a.zero,
     ...(point === undefined ? {} : { zeroPoint: point.name }),
     corner: setupZeroCorner(direction, rotation, stock),
+    points: a.points.flatMap((p, i) =>
+      p.frame === undefined
+        ? []
+        : [{ id: p.id, name: p.name, n: i + 1, at: [p.frame[0], p.frame[1]] as const }],
+    ),
   }
 }
 

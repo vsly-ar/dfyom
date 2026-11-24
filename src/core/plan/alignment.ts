@@ -29,11 +29,13 @@ import {
   type SetupZeroDTO,
 } from './alignment.dto'
 import type { PlanWarning } from './checks'
-import { planOperationLabel } from './labels'
+import { planOpLabel } from './labels'
 import type { LoadedPlan } from './plan'
 import type { SetupDTO } from './plan.dto'
 import { setupCorner } from './setup-header'
 import { setupDirection, setupRotation } from './setups'
+import { aidOf, aidPoint, isAid } from './aids'
+import { setupOf } from './plan'
 
 /** Within this (mm) a point is on the up face or on the stock outline. */
 const ON_EPS = 1e-6
@@ -149,18 +151,30 @@ export function defaultPointName(
     return `${CAP(z!)} ${y}-${x} corner`
   }
   if ('edge' in source) return `${CAP(source.edge)} edge`
+  if ('aid' in source) {
+    const aid = plan.dto.setups.flatMap((s) => s.operations).find((o) => o.id === source.aid)?.aid
+    return aid?.name ?? 'A removed aid'
+  }
   const op = plan.dto.setups.flatMap((s) => s.operations).find((o) => o.id === source.operation)
-  const label =
-    op === undefined
-      ? 'a removed operation'
-      : planOperationLabel(plan.dto.design.part, op.designOperationIds)
+  const label = op === undefined ? 'a removed operation' : planOpLabel(plan.dto.design.part, op)
   return 'hole' in source
     ? `Hole ${source.hole + 1} of ${label}`
     : `Corner ${source.vertex + 1} of ${label}`
 }
 
-const kindOf = (source: AlignmentSourceDTO): AlignmentKind =>
-  'hole' in source ? 'hole' : 'edge' in source ? 'edge' : 'point'
+const kindOf = (
+  plan: Pick<LoadedPlan, 'dto' | 'stock'>,
+  source: AlignmentSourceDTO,
+): AlignmentKind => {
+  if ('aid' in source) {
+    for (const s of plan.dto.setups) {
+      const op = s.operations.find((o) => o.id === source.aid)
+      if (op?.aid !== undefined) return aidPoint(plan, s, op.aid).kind
+    }
+    return 'point'
+  }
+  return 'hole' in source ? 'hole' : 'edge' in source ? 'edge' : 'point'
+}
 
 const geometryMemo = new WeakMap<LoadedPlan, PartGeometryInput | null>()
 
@@ -186,6 +200,19 @@ function locate(plan: LoadedPlan, source: AlignmentSourceDTO, port?: Region2dPor
     const [lo, hi] = AXIS_RANGE(s)[free]!
     c[free] = lo + (source.t ?? 0.5) * (hi - lo)
     return { part: [c[0]!, c[1]!, c[2]!] }
+  }
+  if ('aid' in source) {
+    // S16: an aid's mark tip, line crossing or hole centre, cut in its own setup
+    const operationIndex = plan.operations.findIndex((o) => o.id === source.aid)
+    const op = plan.operations[operationIndex]
+    const own = op === undefined ? undefined : aidOf(op)
+    if (op === undefined || own === undefined) return {}
+    const p = aidPoint(plan, setupOf(plan, op.id), own)
+    return {
+      part: p.part,
+      operationIndex,
+      ...(p.throughAxis === undefined ? {} : { throughAxis: p.throughAxis }),
+    }
   }
   const operationIndex = plan.operations.findIndex((o) => o.id === source.operation)
   const op = plan.operations[operationIndex]
@@ -258,7 +285,7 @@ function placePoints(
     return {
       id: p.id,
       name: p.name ?? defaultPointName(plan, p.source),
-      kind: kindOf(p.source),
+      kind: kindOf(plan, p.source),
       source: p.source,
       ...(point === undefined ? {} : { frame: point }),
       notYetCut: at.operationIndex !== undefined && at.operationIndex >= firstIndex,
@@ -343,6 +370,7 @@ export function alignmentSources(
       for (let hole = 0; hole < holes; hole++) candidates.push({ operation: op.id, hole })
       for (let vertex = 0; vertex < vertices; vertex++)
         candidates.push({ operation: op.id, vertex })
+      if (isAid(op)) candidates.push({ aid: op.id })
     }
   const placed = placePoints(
     plan,
@@ -355,7 +383,7 @@ export function alignmentSources(
     if (out.length >= ALIGNMENT_SOURCES_MAX) break
     if (p.frame === undefined || !p.reachable || p.notYetCut) continue
     // a stock corner or edge below the up face: its top end at the same X/Y is offered instead
-    if (p.frame[2] < -ON_EPS && !('operation' in p.source)) continue
+    if (p.frame[2] < -ON_EPS && !('operation' in p.source) && !('aid' in p.source)) continue
     out.push({ source: p.source, name: p.name, kind: p.kind, frame: [p.frame[0], p.frame[1]] })
   }
   return out
@@ -421,6 +449,31 @@ export function alignmentFindings(plan: LoadedPlan, port?: Region2dPort): PlanWa
           params: { setupId: setup.id, spanX: dx, spanY: dy },
         })
     }
+    // V-bit sequencing (AL-E, S21): marks a later setup uses are best cut last in their setup
+    const used = new Set(
+      plan.setups
+        .slice(i + 1)
+        .flatMap((later) =>
+          (later.alignment ?? []).flatMap((p) => ('aid' in p.source ? [p.source.aid] : [])),
+        ),
+    )
+    const marks = setup.operations.filter((o) => o.aid?.kind === 'witnessMark' && used.has(o.id))
+    const last = setup.operations.at(-1)
+    const lastMark = marks.at(-1)
+    if (
+      lastMark !== undefined &&
+      last !== undefined &&
+      last.id !== lastMark.id &&
+      (last.tool === undefined || last.tool !== lastMark.tool)
+    )
+      out.push({
+        ...base,
+        field: 'operations',
+        severity: 'info',
+        rule: 'markLast',
+        message: `Cut the witness marks last in ${setup.name}: the V-bit stays in for the next setup's alignment (one tool change less)`,
+        params: { setupId: setup.id, planOperationId: lastMark.id, count: marks.length },
+      })
     const sameOrientation =
       setupDirection(setup) === setupDirection(first) &&
       setupRotation(setup) === setupRotation(first)

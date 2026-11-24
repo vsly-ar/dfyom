@@ -314,7 +314,7 @@ export function ToolChanges({
         {runs.map((run, i) => {
           const tool = toolFacts(plan, run.tool, units)
           const seconds = runSeconds(run.operations, setup, toolpaths, lowered ?? NO_LINKS)
-          const names = run.operations.map((o) => planOperationName(plan, o.designOperationIds))
+          const names = run.operations.map((o) => planOperationName(plan, o))
           const isCarried = i === 0 && carried !== undefined && before !== undefined
           return (
             <li

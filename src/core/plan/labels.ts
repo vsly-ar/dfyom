@@ -3,6 +3,7 @@
  * plan's design snapshot (no feature logic in Plan, plan-v0.4.md P-A). Doc:
  * docs/modes/plan-v0.4.md#plan-side
  */
+import type { PlanOperationDTO } from './plan.dto'
 import { instanceOf, stepOf } from '../design/feature'
 import type { PartDTO } from '../design/part.dto'
 
@@ -96,4 +97,30 @@ export function planOperationLabel(part: PartDTO, designOperationIds: readonly s
   }
   if (counts.size === ops.length) return names.join(', ')
   return [...counts].map(([base, n]) => (n === 1 ? base : `${base} × ${n}`)).join(', ')
+}
+
+/**
+ * A plan operation's label: an alignment aid's own name ("Witness mark 1", alignment.md S13),
+ * else `planOperationLabel` of its design operations.
+ */
+export function planOpLabel(
+  part: PartDTO,
+  op: {
+    readonly designOperationIds: readonly string[]
+    readonly aid?: { readonly name: string } | undefined
+  },
+): string {
+  return op.aid?.name ?? planOperationLabel(part, op.designOperationIds)
+}
+
+/** `{ aid }` of the plan operation `id` when it is an alignment aid (for `planOpLabel`). */
+export function aidName(
+  plan: { readonly setups: readonly { readonly operations: readonly PlanOperationDTO[] }[] },
+  id: string,
+): { aid?: { name: string } } {
+  for (const s of plan.setups) {
+    const aid = s.operations.find((o) => o.id === id)?.aid
+    if (aid !== undefined) return { aid: { name: aid.name } }
+  }
+  return {}
 }

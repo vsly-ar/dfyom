@@ -31,6 +31,7 @@ import type { Vec2 } from '../geometry/model'
 import type { ResolvedStrategy } from './strategy'
 import type { KeepOut } from '../toolpath/keep-out'
 import { setupWorkholding } from './workholding/setup'
+import { aidGeometry, type AidGeometry } from './aids'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
 export interface PlanOperationInput {
@@ -89,6 +90,12 @@ export interface PlanOperationInput {
    * Doc: docs/modes/workholding.md#keep-out-in-toolpaths
    */
   readonly keepOut?: KeepOut
+  /**
+   * An alignment aid's geometry in the face frame (S14): a registration hole's centre and Ø (a
+   * through drilling), a witness mark's line or spot at its V-bit depth. Absent for every other.
+   * Doc: docs/modes/alignment.md#implementation-slice-2
+   */
+  readonly aid?: AidGeometry
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -219,6 +226,15 @@ export function planOperationInputs(
         : undefined
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
+    const aid =
+      op.aid === undefined
+        ? undefined
+        : aidGeometry(
+            plan,
+            own,
+            op.aid,
+            e.strategy.kind === 'chamfer' ? e.strategy.cutDepth : undefined,
+          )
     out.push({
       planId,
       planOperationId: op.id,
@@ -238,6 +254,7 @@ export function planOperationInputs(
       ...(materials.size === 0 ? {} : { materials }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       ...(keepOut === undefined ? {} : { keepOut }),
+      ...(aid === undefined ? {} : { aid }),
       // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
       inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })

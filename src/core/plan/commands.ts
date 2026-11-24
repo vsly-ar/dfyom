@@ -97,6 +97,7 @@ import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
 import { alignmentFindings, alignmentSources } from './alignment'
 import { AlignmentSourceDtoSchema } from './alignment.dto'
+import { checkAlignmentOrder, planAidSet } from './aid-commands'
 import {
   alignmentView,
   applySetupZero,
@@ -666,6 +667,9 @@ function writeSetups(
   const next = plainCopy(plan.dto)
   next.setups = plainCopy(setups.filter((x) => x.operations.length > 0))
   if (next.setups.length === 0) next.setups = plainCopy(setups.slice(0, 1))
+  // alignment (S19): an aid stays in its setup's frame, and no point becomes `notYetCut`
+  const aligned = checkAlignmentOrder(plan, next, draft.unitSystem, path, where)
+  if (aligned.isErr()) return aligned
   writePlan(draft, next)
   return Ok(undefined)
 }
@@ -1920,6 +1924,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   setupMerge,
   setupMove,
   planAlignmentSet,
+  planAidSet,
   operationUpdate,
   operationMove,
   toolAssign,

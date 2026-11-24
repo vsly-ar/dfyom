@@ -12,7 +12,7 @@ import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
 import { setupZero } from '../alignment'
 import type { PlanWarning } from '../checks'
 import type { PlanOperationInput } from '../inputs'
-import { planOperationLabel } from '../labels'
+import { aidName, planOpLabel } from '../labels'
 import type { LoadedPlan } from '../plan'
 import type { SetupDTO } from '../plan.dto'
 import { checkWorkholding, type CheckOperation, type Collision } from './check'
@@ -119,9 +119,7 @@ export function moveFindings(
   })
   const label = (id: string) => {
     const op = setup.operations.find((o) => o.id === id)
-    return op === undefined
-      ? 'An operation'
-      : planOperationLabel(plan.dto.design.part, op.designOperationIds)
+    return op === undefined ? 'An operation' : planOpLabel(plan.dto.design.part, op)
   }
   const x = (c: Collision) => c.at[0] - zero[0]
   const y = (c: Collision) => c.at[1] - zero[1]
@@ -212,10 +210,10 @@ export function unmachinedFindings(
       const corners = [u.bounds[0], u.bounds[1]].map((p) => (wcs === undefined ? p : toWcs(p, wcs)))
       const xs = corners.map((p) => p[0])
       const ys = corners.map((p) => p[1])
-      const name = planOperationLabel(
-        plan.dto.design.part,
-        input.operations.map((o) => o.id),
-      )
+      const name = planOpLabel(plan.dto.design.part, {
+        designOperationIds: input.operations.map((o) => o.id),
+        ...aidName(plan.dto, input.planOperationId),
+      })
       out.push({
         code: 'plan.workholding.unmachined',
         severity: 'warning',

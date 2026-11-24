@@ -80,6 +80,8 @@ export const AlignmentSourceDtoSchema = z.union([
       vertex: index.describe('0-based'),
     })
     .strict(),
+  // S16: an alignment aid (a plan operation with `source: 'aid'`) cut before the setup
+  z.object({ aid: AlignmentIdSchema }).strict(),
 ])
 export type AlignmentSourceDTO = z.output<typeof AlignmentSourceDtoSchema>
 
@@ -103,3 +105,64 @@ export const SetupZeroDtoSchema = z.union([
     .strict(),
 ])
 export type SetupZeroDTO = z.output<typeof SetupZeroDtoSchema>
+
+// ── alignment aids (S13, docs/modes/alignment.md#alignment-aids) ─────────────────────────────
+
+/** Aid kinds (docs/modes/alignment.md#alignment-aids). */
+export const AID_KINDS = ['witnessMark', 'registrationHole'] as const
+export type AidKind = (typeof AID_KINDS)[number]
+
+/** Defaults and limits of the aid parameters (mm). */
+export const AID = {
+  markDiameter: 1,
+  markDiameterMax: 10,
+  /** A line mark: this far inside the edge and past it (default 6 mm long). */
+  lineInside: 4,
+  linePast: 2,
+  /** A 6 mm dowel + 0.2 mm. */
+  holeDiameter: 6.2,
+  holeDiameterMax: 50,
+  spoilboardDepth: 10,
+  spoilboardDepthMax: 15,
+  /** A line longer than this is not a mark. */
+  lineMax: 100,
+  nameMax: 80,
+} as const
+
+const xy = z.tuple([coord, coord])
+const name = z.string().min(1).max(AID.nameMax)
+
+/**
+ * An aid's parameters, in the setup frame of its setup (mm): a witness mark is a V-bit spot `at`
+ * or a short line `from` → `to` (across an edge), a registration hole goes through the stock and
+ * `spoilboardDepth` into the base. `name` is given on add ("Witness mark 1") and kept.
+ */
+export const AidDtoSchema = z.union([
+  z
+    .object({
+      kind: z.literal('witnessMark'),
+      name,
+      at: xy,
+      markDiameter: z.number().positive().max(AID.markDiameterMax).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('witnessMark'),
+      name,
+      from: xy,
+      to: xy,
+      markDiameter: z.number().positive().max(AID.markDiameterMax).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('registrationHole'),
+      name,
+      center: xy,
+      diameter: z.number().positive().max(AID.holeDiameterMax),
+      spoilboardDepth: z.number().min(0).max(AID.spoilboardDepthMax).optional(),
+    })
+    .strict(),
+])
+export type AidDTO = z.output<typeof AidDtoSchema>

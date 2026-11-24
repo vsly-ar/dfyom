@@ -9,7 +9,7 @@ import { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Direction, StockSize } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
 import { loadPlanDTO } from '../../../../core/plan/plan'
-import { planOperationLabel } from '../../../../core/plan/labels'
+import { planOpLabel } from '../../../../core/plan/labels'
 import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type {
@@ -192,6 +192,24 @@ export function setupZeroOf(
 }
 
 /**
+ * `plan.alignment.set`'s `points` with a new point from `source` last (no id: the core names it
+ * after its source); the inspector's add menu and viewport picking (S22) send it.
+ */
+export function pointsWithAdded(
+  setup: SetupDTO,
+  source: object,
+): { id?: string; name?: string; source: object }[] {
+  return [
+    ...(setup.alignment ?? []).map((p) => ({
+      id: p.id,
+      ...(p.name === undefined ? {} : { name: p.name }),
+      source: p.source,
+    })),
+    { source },
+  ]
+}
+
+/**
  * The work zero as words (N6): the part corner when it is one ("front left"), else the offset
  * from it or the point it is on; `length` formats mm in the user's units.
  */
@@ -301,8 +319,15 @@ export function defaultPresetName(
 }
 
 /** A plan operation's name: its feature label ("Hole 1 · drill × 6", plan-v0.4.md § Plan side). */
-export function planOperationName(plan: PlanDTO, designOperationIds: readonly string[]): string {
-  return planOperationLabel(plan.design.part, designOperationIds)
+export function planOperationName(
+  plan: PlanDTO,
+  op: {
+    readonly designOperationIds: readonly string[]
+    readonly aid?: { readonly name: string } | undefined
+  },
+): string {
+  // alignment aids carry their own name (alignment.md S13)
+  return planOpLabel(plan.design.part, op)
 }
 
 /** Readable names for the ids in a plan finding's params (DF43: never the id itself). */
@@ -312,7 +337,7 @@ export function findingNames(plan: PlanDTO): FindingNames {
     design: (id) => part.operations.find((o) => o.id === id)?.name ?? m.unknownOperation,
     planOperation: (id) => {
       const op = allPlanOperations(plan).find((o) => o.id === id)
-      return op === undefined ? m.unknownOperation : planOperationName(plan, op.designOperationIds)
+      return op === undefined ? m.unknownOperation : planOperationName(plan, op)
     },
     setup: (id) => plan.setups.find((s) => s.id === id)?.name ?? m.unknownSetup,
   }

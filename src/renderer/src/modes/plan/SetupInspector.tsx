@@ -321,7 +321,25 @@ export function SetupInspector({
             <h3 className={styles['groupTitle']}>{m.findings}</h3>
             <WarningList
               labels={planWarningLabels}
-              items={mine.map((w, i) => planWarningView(w, plan, select, i, units))}
+              items={mine.map((w, i) => {
+                const item = planWarningView(w, plan, select, i, units)
+                // DF78 markLast: "Move to end" moves the setup's last witness mark to the end
+                const mark = w.params['planOperationId']
+                return w.rule === 'markLast' && typeof mark === 'string' && !readOnly
+                  ? {
+                      ...item,
+                      fix: {
+                        label: m.markLastFix,
+                        onApply: () =>
+                          void call('plan.operation.move', {
+                            planId: plan.id,
+                            planOperationId: mark,
+                            toIndex: setup.operations.length - 1,
+                          }),
+                      },
+                    }
+                  : item
+              })}
               empty=""
             />
           </section>

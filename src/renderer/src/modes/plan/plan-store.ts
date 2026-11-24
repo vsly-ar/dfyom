@@ -167,6 +167,11 @@ export interface PlanState {
   /** DF78: the alignment point focused in the setup inspector (drawn larger in the viewport). */
   readonly alignmentPoint: string | undefined
   /**
+   * DF78 S22: the setup whose alignment points are being picked in the viewport (its valid
+   * sources are drawn as targets); undefined: not picking.
+   */
+  readonly pickingAlignment: string | undefined
+  /**
    * The workholding item open in the setup inspector (workholding.md#ui-summary): the viewport
    * shows its keep-out zone.
    */
@@ -186,6 +191,8 @@ export interface PlanState {
   previewZRef(planOperationId: string | undefined): void
   /** Marks an alignment point in the viewport; undefined: none. */
   focusAlignmentPoint(id: string | undefined): void
+  /** Starts (a setup id) or ends (undefined) picking alignment points in the viewport. */
+  pickAlignment(setupId: string | undefined): void
   /** Opens a workholding item in the setup inspector; undefined closes it. */
   selectWorkholding(item: { readonly setupId: string; readonly itemId: string } | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
@@ -234,15 +241,25 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     findingsRequest: undefined,
     zRefPreview: undefined,
     alignmentPoint: undefined,
+    pickingAlignment: undefined,
     workholdingItem: undefined,
     exported: undefined,
     choose: (planId) =>
-      set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
+      set({
+        planId,
+        lastSelection: undefined,
+        generateError: undefined,
+        failures: {},
+        pickingAlignment: undefined,
+      }),
     remember: (lastSelection) => set({ lastSelection }),
     revealFindings: (findingsRequest) => set({ findingsRequest }),
     findingsShown: () => set({ findingsRequest: undefined }),
     focusAlignmentPoint: (alignmentPoint) => {
       if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
+    },
+    pickAlignment: (pickingAlignment) => {
+      if (get().pickingAlignment !== pickingAlignment) set({ pickingAlignment })
     },
     previewZRef: (zRefPreview) => {
       if (get().zRefPreview !== zRefPreview) set({ zRefPreview })

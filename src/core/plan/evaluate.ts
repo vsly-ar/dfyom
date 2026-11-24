@@ -33,7 +33,15 @@ import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from './z-hea
 import { checkPartFits } from './validity'
 import { shapeToolFindings } from './shape-checks'
 import type { Region2dPort } from '../geometry/2d/port'
-import { designOperations, type LoadedPlan } from './plan'
+import { designOperations, setupOf, type LoadedPlan } from './plan'
+import {
+  aidDrilling,
+  aidOf,
+  aidPlacementFindings,
+  markDepthWith,
+  mmLength,
+  spoilboardDepth,
+} from './aids'
 import { setupWorkholding } from './workholding/setup'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
 import {
@@ -89,8 +97,13 @@ export function evaluateOperation(
   data?: readonly MaterialRow[],
   port?: Region2dPort,
 ): OperationEvaluation {
-  const ops = designOperations(plan, op)
-  const kind: OperationKind = ops[0]?.kind ?? 'facing'
+  // alignment aids (S14): a registration hole is a through drilling on the setup's stock face, a
+  // witness mark a V-bit cut fed as a chamfer of its depth
+  const aid = aidOf(op)
+  const setup = aid === undefined ? undefined : setupOf(plan, op.id)
+  const hole = setup === undefined ? undefined : aidDrilling(plan, setup, op)
+  const ops = hole !== undefined ? [hole] : designOperations(plan, op)
+  const kind: OperationKind = aid?.kind === 'witnessMark' ? 'chamfer' : (ops[0]?.kind ?? 'facing')
   const tool: Option<Tool> =
     candidate !== undefined
       ? Some(candidate)
@@ -117,13 +130,29 @@ export function evaluateOperation(
     tool,
     preset,
   }
-  const strategy = resolveStrategy(kind, op.strategy, sctx)
+  const markDepth =
+    aid?.kind === 'witnessMark'
+      ? markDepthWith(aid, tool.isSome() ? tool.unwrap() : undefined)
+      : undefined
+  const strategy: ResolvedStrategy =
+    aid?.kind === 'witnessMark'
+      ? { kind: 'chamfer', entry: 'plunge', rampAngle: 3, cutDepth: markDepth ?? 0 }
+      : resolveStrategy(
+          kind,
+          aid?.kind === 'registrationHole'
+            ? { ...op.strategy, breakthrough: mmLength(spoilboardDepth(aid)) }
+            : op.strategy,
+          sctx,
+        )
   const findings: PlanWarning[] = []
   const push = (
     f: Omit<PlanWarning, 'code' | 'severity' | 'planOperationId'>,
     code: PlanWarning['code'] = 'plan.check',
     severity: PlanWarning['severity'] = 'error',
   ) => findings.push({ ...f, code, severity, planOperationId: op.id })
+  if (setup !== undefined)
+    for (const f of aidPlacementFindings(plan, setup, op, port))
+      findings.push({ ...f, planOperationId: op.id })
   if (tool.isNone()) {
     push({ field: 'tool', rule: 'noTool', message: 'no tool assigned', params: {} })
     return {
@@ -205,6 +234,8 @@ export function evaluateOperation(
     ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
   }))
     push(f)
+  if (aid?.kind === 'witnessMark')
+    for (const f of markToolFindings(t, stickout, markDepth)) push(f, f.code, 'error')
   // DF73, DF75: warnings, never disqualifying (plan-v0.1.md § Reach and rigidity warnings)
   for (const f of rigidityFindings(checkInput)) push(f, 'plan.check', 'warning')
   if (port !== undefined)
@@ -243,6 +274,48 @@ export function evaluateOperation(
     feeds: Some(feeds),
     findings,
   }
+}
+
+/**
+ * The V-bit checks of a witness mark (S14): a pointed chamfer mill (`plan.aid`, rule
+ * `pointedVBit`), its depth within the flute length and the stickout.
+ */
+function markToolFindings(
+  tool: Tool,
+  stickout: number,
+  depth: number | undefined,
+): (Omit<PlanWarning, 'severity' | 'planOperationId'> & { code: PlanWarning['code'] })[] {
+  const tip = tool.tipDiameter.mapOr(0, (q) => q.canonical)
+  if (tool.type !== 'chamferMill' || tip > 1e-9 || depth === undefined)
+    return [
+      {
+        code: 'plan.aid',
+        field: 'tool',
+        rule: 'pointedVBit',
+        message: 'a witness mark needs a pointed V-bit (a chamfer mill without a flat tip)',
+        params: { toolType: tool.type },
+      },
+    ]
+  const out: (Omit<PlanWarning, 'severity' | 'planOperationId'> & { code: PlanWarning['code'] })[] =
+    []
+  const flute = tool.fluteLength.canonical
+  if (depth > flute + 1e-9)
+    out.push({
+      code: 'plan.check',
+      field: 'tool',
+      rule: 'fluteLength',
+      message: 'mark depth must be at most the flute length',
+      params: { depth, fluteLength: flute },
+    })
+  if (depth > stickout + 1e-9)
+    out.push({
+      code: 'plan.check',
+      field: 'stickout',
+      rule: 'reach',
+      message: 'mark depth must be at most the stickout',
+      params: { depth, stickout },
+    })
+  return out
 }
 
 /**

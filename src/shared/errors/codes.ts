@@ -201,6 +201,12 @@ export const ERROR_CODES = {
     userMessage: 'This alignment point or work zero cannot be used here.',
     retryable: false,
   },
+  // Alignment aids (DF78 slice 2): docs/modes/alignment.md#alignment-aids
+  'plan.aid': {
+    severity: 'warn',
+    userMessage: 'This alignment aid cannot be placed or cut like this.',
+    retryable: false,
+  },
   // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
   'plan.check': {
     severity: 'warn',
