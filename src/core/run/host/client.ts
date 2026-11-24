@@ -20,22 +20,28 @@ import type { Vec3 } from '../../toolpath/model'
 import type { RunSummary, SenderProgram } from '../grbl/sender'
 import {
   closedStatus,
+  type JobAbout,
   type JobListener,
+  type LastRun,
   type MachineService,
   type RunningJob,
+  type RunPlan,
   type RunStatus,
 } from '../service'
+import type { SerialPortInfo } from '../serial'
 import {
   ControllerInfoSchema,
   HostMessage,
+  PortListSchema,
   PROTOCOL_VERSION,
   RunSummarySchema,
   type ConnectedInfo,
+  type ConnectTarget,
   type HostStatus,
   type JobControlAction,
   type MachineAction,
   type MainMessage,
-  type VirtualTarget,
+  type TargetKind,
 } from './protocol'
 
 /** A running host process or thread, as main sees it. */
@@ -77,6 +83,42 @@ interface Job {
   readonly listener: JobListener
   readonly startedAt: string
   readonly end: (r: AppResult<RunSummary>) => void
+  readonly about: JobAbout | undefined
+  /** Lines acknowledged (last progress). */
+  done: number
+  /** Waiting at a tool change (last phase). */
+  atToolChange: boolean
+}
+
+/** Phases that say where a run is (the end phases keep the last of these). */
+const WAIT_OR_STREAM: readonly string[] = ['streaming', 'held', 'programPause', 'toolChange']
+
+/**
+ * Motion lines GRBL may hold besides the one moving: its planner plans up to 15 blocks ahead
+ * (docs/modes/run.md#6-lost-connection-disconnect-and-reconnect); one more for margin.
+ */
+export const PLANNER_LINES = 16
+
+/** The plan operation holding 1-based `line`; the first one for a line before it. */
+export function operationAt(about: JobAbout, line: number): string | undefined {
+  let id = about.operations[0]?.planOperationId
+  for (const o of about.operations) {
+    if (o.fromLine > line) break
+    id = o.planOperationId
+  }
+  return id
+}
+
+/**
+ * Where a run that ended stopped (docs/modes/run-machine.md#section-resume-m5): the operation of
+ * the tool change it waited at, else the earliest one GRBL may still have been executing.
+ */
+export function stoppedOperation(
+  about: JobAbout,
+  done: number,
+  atToolChange: boolean,
+): string | undefined {
+  return operationAt(about, atToolChange ? done + 1 : Math.max(1, done - PLANNER_LINES))
 }
 
 const WHERE = 'MachineClient'
@@ -86,11 +128,25 @@ export class MachineClient implements MachineService {
   private readonly pending = new Map<string, (r: AppResult<unknown>) => void>()
   private seq = 0
   private conn:
-    { state: 'connecting' | 'open'; machineKey: string; target?: 'virtual' | undefined } | undefined
+    | {
+        state: 'connecting' | 'open'
+        machineKey: string
+        target?: TargetKind | undefined
+        port?: { path: string; baud: number } | undefined
+        settings?: Readonly<Record<string, number>> | undefined
+      }
+    | undefined
+  /**
+   * The last open connection ended without DFYOM closing it (host reported it lost, or the host
+   * exited): shown until the next connect (docs/modes/run-machine.md#lost-connection-m2).
+   */
+  private lost: { target: TargetKind; port?: { path: string; baud: number } } | undefined
   /** Job that checks and exports before it streams: machine actions wait (run.busy). */
   private reserved: string | undefined
   private hostStatus: HostStatus | undefined
   private job: Job | undefined
+  /** The run that ended last (M5): kept until the next run starts, across connections. */
+  private lastRun: LastRun | undefined
   private timeScale: TimeScale = 1
   private readonly listeners = new Set<(s: RunStatus) => void>()
   private readonly log: Logger
@@ -102,8 +158,12 @@ export class MachineClient implements MachineService {
   }
 
   /** As the host reported it on connect; undefined while connecting or closed. */
-  get target(): 'virtual' | undefined {
+  get target(): TargetKind | undefined {
     return this.conn?.state === 'open' ? this.conn.target : undefined
+  }
+
+  get controllerSettings(): Readonly<Record<string, number>> | undefined {
+    return this.conn?.state === 'open' ? this.conn.settings : undefined
   }
 
   get machineKey(): string | undefined {
@@ -113,8 +173,14 @@ export class MachineClient implements MachineService {
   status(): RunStatus {
     const conn = this.conn
     const h = this.hostStatus
+    const last = this.lastRun === undefined ? {} : { lastRun: { ...this.lastRun } }
     if (conn === undefined || h === undefined) {
-      const s = closedStatus(this.timeScale)
+      const s: RunStatus = { ...closedStatus(this.timeScale), ...last }
+      if (conn === undefined && this.lost !== undefined)
+        s.connection.lost = {
+          target: this.lost.target,
+          ...(this.lost.port === undefined ? {} : { port: { ...this.lost.port } }),
+        }
       return conn === undefined
         ? s
         : {
@@ -129,11 +195,35 @@ export class MachineClient implements MachineService {
       connection: {
         state: conn.state,
         ...(conn.target === undefined ? {} : { target: conn.target }),
+        ...(conn.port === undefined ? {} : { port: { ...conn.port } }),
         timeScale,
       },
       ...(job === undefined || this.job?.jobId !== job.jobId
         ? {}
-        : { job: { ...job, startedAt: this.job.startedAt } }),
+        : { job: { ...job, startedAt: this.job.startedAt, ...this.aboutJob(this.job, job.line) } }),
+      ...last,
+    }
+  }
+
+  /** The plan, setup and current operation of a job (M7). */
+  private aboutJob(job: Job, line: number): { plan?: RunPlan; planOperationId?: string } {
+    const about = job.about
+    if (about === undefined) return {}
+    const op = operationAt(about, Math.max(1, line))
+    return { plan: { ...about.plan }, ...(op === undefined ? {} : { planOperationId: op }) }
+  }
+
+  /** Records how a job ended (M5). */
+  private ended(job: Job, r: AppResult<RunSummary>): void {
+    const about = job.about
+    if (about === undefined) return
+    const op = r.isOk() ? undefined : stoppedOperation(about, job.done, job.atToolChange)
+    this.lastRun = {
+      jobId: job.jobId,
+      planId: about.plan.planId,
+      setupId: about.plan.setupId,
+      outcome: r.isOk() ? 'done' : r.unwrapErr().code === 'op.aborted' ? 'stopped' : 'failed',
+      ...(op === undefined ? {} : { planOperationId: op }),
     }
   }
 
@@ -142,12 +232,15 @@ export class MachineClient implements MachineService {
     return () => this.listeners.delete(listener)
   }
 
-  async connect(target: VirtualTarget): AsyncAppResult<ConnectedInfo> {
+  async connect(target: ConnectTarget): AsyncAppResult<ConnectedInfo> {
     const machineKey = target.machineKey
     if (this.conn !== undefined)
       return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
-    this.conn = { state: 'connecting', machineKey }
-    this.timeScale = target.timeScale
+    // the kind is known from the start, so a connection lost while opening is reported too
+    this.conn = { state: 'connecting', machineKey, target: target.kind }
+    this.lost = undefined
+    // a real controller always runs at 1× (docs/modes/run-machine.md#amendments-to-run-v01md)
+    this.timeScale = target.kind === 'virtual' ? target.timeScale : 1
     this.notify()
     const host = this.spawn()
     const ready = await host.ready
@@ -155,10 +248,25 @@ export class MachineClient implements MachineService {
     const r = await this.request({ type: 'connect', requestId: '', target })
     const info = r.andThen((v) => parseWith(ControllerInfoSchema, v, `${WHERE}.connect`))
     if (info.isErr()) return this.connectFailed(info.unwrapErr())
-    this.conn = { state: 'open', machineKey, target: info.unwrap().target }
-    this.log.info({ target: 'virtual', version: info.unwrap().version }, 'connected')
+    const connected = info.unwrap()
+    this.conn = {
+      state: 'open',
+      machineKey,
+      target: connected.target,
+      ...(connected.port === undefined ? {} : { port: connected.port }),
+      settings: connected.settings,
+    }
+    this.log.info({ target: connected.target, version: connected.version }, 'connected')
     this.notify()
     return info
+  }
+
+  async listPorts(): AsyncAppResult<SerialPortInfo[]> {
+    const host = this.spawn()
+    const ready = await host.ready
+    if (ready.isErr()) return Err(ready.unwrapErr().withContext(`${WHERE}.listPorts`))
+    const r = await this.request({ type: 'listPorts', requestId: '' })
+    return r.andThen((v) => parseWith(PortListSchema, v, `${WHERE}.listPorts`))
   }
 
   async disconnect(): AsyncAppResult<void> {
@@ -180,8 +288,11 @@ export class MachineClient implements MachineService {
 
   async machine(action: MachineAction): AsyncAppResult<unknown> {
     if (this.conn?.state !== 'open') return this.notConnected()
-    // the emergency paths always pass; anything else waits while a job checks its program
-    if (this.reserved !== undefined && action.kind !== 'reset' && action.kind !== 'jogCancel')
+    // the emergency paths and overrides (real-time bytes) always pass; anything else waits while
+    // a job checks its program
+    const passes =
+      action.kind === 'reset' || action.kind === 'jogCancel' || action.kind === 'override'
+    if (this.reserved !== undefined && !passes)
       return fail('run.busy', `job ${this.reserved} is starting`, {
         where: `${WHERE}.machine`,
         data: { jobId: this.reserved },
@@ -207,16 +318,30 @@ export class MachineClient implements MachineService {
     program: SenderProgram,
     listener: JobListener,
     expect: { readonly workZero: Vec3; readonly machineKey: string },
+    about?: JobAbout,
   ): AsyncAppResult<RunningJob> {
     if (this.conn?.state !== 'open' || this.conn.target === undefined) return this.notConnected()
     if (this.job !== undefined || (this.reserved !== undefined && this.reserved !== jobId))
       return fail('run.busy', `job ${this.job?.jobId ?? this.reserved} is running`, {
         where: `${WHERE}.startJob`,
       })
-    let end: (r: AppResult<RunSummary>) => void = () => {}
-    const ended = new Promise<AppResult<RunSummary>>((resolve) => (end = resolve))
-    const job: Job = { jobId, listener, startedAt: new Date(this.now()).toISOString(), end }
+    let resolveEnd: (r: AppResult<RunSummary>) => void = () => {}
+    const ended = new Promise<AppResult<RunSummary>>((resolve) => (resolveEnd = resolve))
+    const job: Job = {
+      jobId,
+      listener,
+      startedAt: new Date(this.now()).toISOString(),
+      end: (r) => {
+        this.ended(job, r)
+        resolveEnd(r)
+      },
+      about,
+      done: 0,
+      atToolChange: false,
+    }
     this.job = job
+    // a new run replaces the record of the last one
+    if (about !== undefined) this.lastRun = undefined
     const r = await this.request({
       type: 'jobStart',
       requestId: '',
@@ -340,10 +465,14 @@ export class MachineClient implements MachineService {
         this.notify()
         return
       case 'progress':
-        if (this.job?.jobId === m.jobId)
+        if (this.job?.jobId === m.jobId) {
+          this.job.done = m.done
           this.job.listener.progress({ done: m.done, total: m.total, label: m.label })
+        }
         return
       case 'phase':
+        if (this.job?.jobId === m.jobId && WAIT_OR_STREAM.includes(m.phase))
+          this.job.atToolChange = m.phase === 'toolChange'
         if (this.job?.jobId === m.jobId)
           this.job.listener.phase({
             phase: m.phase,
@@ -366,6 +495,7 @@ export class MachineClient implements MachineService {
         if (m.kind === 'connectionLost') {
           // the host has dropped the connection: closed here too, and a fresh host next time
           this.log.warn({ ...m.data }, 'machine connection lost')
+          this.markLost()
           host.expectExit = true
           this.conn = undefined
           this.hostStatus = undefined
@@ -390,8 +520,10 @@ export class MachineClient implements MachineService {
       where: WHERE,
       data: { exitCode: code },
     })
-    if (!host.expectExit && this.conn !== undefined)
+    if (!host.expectExit && this.conn !== undefined) {
       this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
+      this.markLost()
+    }
     host.resolveReady(Err(e))
     for (const resolve of this.pending.values()) resolve(Err(e))
     this.pending.clear()
@@ -402,6 +534,12 @@ export class MachineClient implements MachineService {
     this.hostStatus = undefined
     this.reserved = undefined
     this.notify()
+  }
+
+  private markLost(): void {
+    const c = this.conn
+    if (c?.target === undefined) return
+    this.lost = { target: c.target, ...(c.port === undefined ? {} : { port: { ...c.port } }) }
   }
 
   private request(m: MainMessage & { requestId: string }): AsyncAppResult<unknown> {

@@ -34,6 +34,7 @@ export const MACHINE_FIELDS: readonly string[] = [
   'noseToTable',
   'spoilboardThickness',
   'probePlateSize',
+  'probePlateThickness',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -171,6 +172,16 @@ export function MachineFields({
           'width',
           (probePlateSize) => set({ probePlateSize }),
           { optional: true, note: m.probePlateSizeNote },
+        )}
+        {/* M4: Run's "Probe Z" sets Z0 at the contact minus the plate thickness */}
+        {q(
+          'probePlateThickness',
+          m.probePlateThickness,
+          'length',
+          values.probePlateThickness,
+          'depth',
+          (probePlateThickness) => set({ probePlateThickness }),
+          { optional: true, note: m.probePlateThicknessNote },
         )}
       </Group>
       {full ? (

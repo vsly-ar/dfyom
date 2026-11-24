@@ -10,6 +10,8 @@ import {
   runGates,
   stepToMm,
   stopGate,
+  surfaceName,
+  touchOffMoves,
 } from './machine-state'
 
 const open = (patch: Partial<RunStatus> = {}): RunStatus => ({
@@ -63,9 +65,7 @@ describe('machineView', () => {
 
 describe('runGates', () => {
   it('explains every disabled control', () => {
-    expect(runGates(closedStatus(), { planChosen: true }).jog).toBe(
-      'Connect to the virtual machine first.',
-    )
+    expect(runGates(closedStatus(), { planChosen: true }).jog).toBe('Connect to a machine first.')
     const alarm = runGates(open({ state: 'Alarm', homed: false }), { planChosen: true })
     expect(alarm).toMatchObject({ home: null, unlock: null, jog: 'Home the machine first.' })
     expect(alarm.start).toBe('Home the machine first.')
@@ -101,7 +101,7 @@ describe('formatting', () => {
 
 describe('stopGate (DF35)', () => {
   it.each([
-    [closedStatus(), 'Connect to the virtual machine first.'],
+    [closedStatus(), 'Connect to a machine first.'],
     [open(), 'Nothing to stop: the machine is not moving.'],
     [open({ state: 'Alarm' }), 'Nothing to stop: the machine is not moving.'],
     [open({ ...job('done') }), 'Nothing to stop: the machine is not moving.'],
@@ -155,5 +155,43 @@ describe('needs homing and the known position (DF46)', () => {
     expect(positionKnown(closedStatus())).toBe(false)
     expect(positionKnown(open({ homed: false }))).toBe(false)
     expect(positionKnown(open())).toBe(true)
+  })
+})
+
+// docs/modes/z-reference.md#dfyom-run (DF69)
+describe('touchOffMoves', () => {
+  const wz = [-400, -300, -60] as const
+  it('rises to the clearance height of the current zero first, never lowers Z', () => {
+    // Z0 on the stock top: clearance 10 → MPos Z −50
+    expect(touchOffMoves({ mpos: [-10, -10, -58], workZero: [...wz] }, [50, 30], 10)).toEqual([
+      [-10, -10, -50],
+      [-350, -270, -50],
+    ])
+    // Z0 on a floor 0.5 below the top: the top (and the clearance) is 0.5 higher
+    expect(
+      touchOffMoves({ mpos: [-10, -10, -58], workZero: [...wz], zeroLevel: -0.5 }, [50, 30], 10),
+    ).toEqual([
+      [-10, -10, -49.5],
+      [-350, -270, -49.5],
+    ])
+    expect(touchOffMoves({ mpos: [-10, -10, -5], workZero: [...wz] }, [50, 30], 10)).toEqual([
+      [-350, -270, -5],
+    ])
+    // capped at the machine top
+    expect(touchOffMoves({ mpos: [-10, -10, -5], workZero: [-400, -300, -2] }, [0, 0], 10)).toEqual(
+      [
+        [-10, -10, 0],
+        [-400, -300, 0],
+      ],
+    )
+  })
+
+  it('offers nothing at the spot', () => {
+    expect(touchOffMoves({ mpos: [-350, -270, -58], workZero: [...wz] }, [50, 30], 10)).toEqual([])
+  })
+
+  it('names the surface without its level', () => {
+    expect(surfaceName('Facing 1 floor, 0.50 below the stock top')).toBe('Facing 1 floor')
+    expect(surfaceName('Pocket 2 floor')).toBe('Pocket 2 floor')
   })
 })

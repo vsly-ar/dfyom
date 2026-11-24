@@ -73,6 +73,10 @@ export const MachineValuesDtoSchema = z.object({
   probePlateSize: quantityDto('length')
     .optional()
     .describe('Largest extent of the Z touch plate; the touch-off spot leaves room for it'),
+  // Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4)
+  probePlateThickness: quantityDto('length')
+    .optional()
+    .describe('Z touch plate thickness; unset = no plate, Run offers no Probe Z'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

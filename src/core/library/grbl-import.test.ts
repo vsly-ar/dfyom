@@ -50,11 +50,11 @@ describe('machineSettingsDiff', () => {
     expect(d.changes.find((c) => c.setting === '$120')?.together).toEqual(['$120', '$121', '$122'])
     expect(d.changes.find((c) => c.setting === '$111')?.together).toBeUndefined()
     // $110 equals the stored 5000 mm/min
-    expect(d.unchanged).toEqual(['$110'])
+    expect(d.unchanged).toEqual(['$110', '$20', '$23'])
     expect(d.skipped).toEqual([
       { setting: '$31', field: 'spindle.minSpeed', value: 0, rule: 'notPositive' },
     ])
-    expect(d.ignored).toEqual([0, 1, 2, 3, 4, 5, 6, 10, 13, 21, 22, 23, 24, 25, 26, 32])
+    expect(d.ignored).toEqual([0, 1, 2, 3, 4, 5, 6, 10, 13, 21, 22, 24, 25, 26, 32])
   })
 
   it('skips travel without soft limits and the spindle range of a manual spindle', () => {
@@ -95,7 +95,7 @@ describe('machineSettingsDiff', () => {
       travel: { x: qty('length', '16 in'), y: len('800'), z: len('100') },
     }
     const d = machineSettingsDiff(m, settings({ 20: 1, 130: 406.4, 131: 800.0004, 132: 100.001 }))
-    expect(d.unchanged).toEqual(['$130', '$131'])
+    expect(d.unchanged).toEqual(['$130', '$131', '$20'])
     expect(d.changes.map((c) => c.setting)).toEqual(['$132'])
   })
 
@@ -112,9 +112,9 @@ describe('machineSettingsDiff', () => {
     const d = machineSettingsDiff(m, settings({ 110: 5000, 11: 0.02, 100: 40, 101: 40, 102: 400 }))
     const c = d.changes.find((x) => x.setting === '$110')!
     expect([c.from, c.to]).toEqual(['200 in/min', '5000 mm/min'])
-    expect(c.quantity).toMatchObject({ source: '5000 mm/min', defaultUnit: 'in/min' })
-    expect(d.changes.find((x) => x.setting === '$11')!.quantity.source).toBe('0.02 mm')
-    expect(d.changes.find((x) => x.setting === '$100')!.quantity.source).toBe('40')
+    expect(c.stored).toMatchObject({ source: '5000 mm/min', defaultUnit: 'in/min' })
+    expect(d.changes.find((x) => x.setting === '$11')!.stored).toMatchObject({ source: '0.02 mm' })
+    expect(d.changes.find((x) => x.setting === '$100')!.stored).toMatchObject({ source: '40' })
   })
 })
 
@@ -153,5 +153,35 @@ describe('quantityWithUnit', () => {
     expect(quantityWithUnit(qty('length', '1/4 in'))).toBe('1/4 in')
     expect(quantityWithUnit(num('40'), 'steps/mm')).toBe('40 steps/mm')
     expect(quantityWithUnit(num('40'))).toBe('40')
+  })
+})
+
+describe('$20 and $23 (hardening M1)', () => {
+  it('maps $20 to softLimits and $23 bits 0–1 to the homing corner; defaults count as unchanged', () => {
+    const d = machineSettingsDiff(machineValues(), settings({ 20: 1, 23: 0 }))
+    expect(d.unchanged).toEqual(expect.arrayContaining(['$20', '$23']))
+    expect(d.changes).toEqual([])
+    expect(d.ignored).toEqual([])
+    const off = machineSettingsDiff(machineValues(), settings({ 20: 0, 23: 3 }))
+    expect(off.changes.map((c) => [c.setting, c.field, c.from, c.to, c.stored])).toEqual([
+      ['$20', 'softLimits', null, 'off', false],
+      ['$23', 'homingCorner', null, 'frontLeft', 'frontLeft'],
+    ])
+  })
+
+  it('compares with the stored values and skips Z homing down', () => {
+    const m = { ...machineValues(), softLimits: false, homingCorner: 'backLeft' as const }
+    const d = machineSettingsDiff(m, settings({ 20: 1, 23: 6 }))
+    expect(d.changes.map((c) => [c.setting, c.from, c.to])).toEqual([['$20', 'off', 'on']])
+    expect(d.skipped).toEqual([
+      { setting: '$23', field: 'homingCorner', value: 6, rule: 'zHomesDown' },
+    ])
+    expect(machineSettingsDiff(m, settings({ 23: 1 })).unchanged).toEqual(['$23'])
+  })
+
+  it('applies accepted flag changes', () => {
+    const d = machineSettingsDiff(machineValues(), settings({ 20: 0, 23: 2 }))
+    const r = applySettingsChanges(machineValues(), d, ['$20', '$23']).unwrap()
+    expect([r.softLimits, r.homingCorner]).toEqual([false, 'frontRight'])
   })
 })
