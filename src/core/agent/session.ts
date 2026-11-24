@@ -244,6 +244,9 @@ function setupChange(info: unknown): OperatorWait | undefined {
 
 const SESSION_TOOL_NAMES = new Set(SESSION_TOOLS.map((t) => t.name))
 
+/** Job built-ins a bound session sends to the machine scope for its jobs (DF80, `machineScopeJob`). */
+const MACHINE_JOB_BUILTINS = new Set(['job.get', 'job.pause', 'job.resume', 'job.abort'])
+
 function noProject(
   name: string,
   message = 'no project is bound to this session',
@@ -492,6 +495,8 @@ export class AgentSession {
     if (bound.isNone())
       return this.machineScoped(name, rawArgs, opts) ?? noProject(name, this.lostMessage())
     const d = bound.unwrap()
+    const machineJob = this.machineScopeJob(d, name, rawArgs)
+    if (machineJob !== undefined) return machineJob
     if (!isCommand) return d.queryAsync(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
     if (split.isErr()) return split
@@ -531,6 +536,25 @@ export class AgentSession {
     return dispatcher.dispatch(name, split.unwrap().args, this.source, {
       ...(opts.gesture === undefined ? {} : { gesture: opts.gesture }),
     })
+  }
+
+  /**
+   * A bound session's job built-in (`job.get` / `pause` / `resume` / `abort`) on a job its project
+   * does not know but the machine scope does (a homing or probing job started without a project,
+   * DF80): run there, so every stop path reaches it from any scope
+   * (docs/architecture/llm-api.md#machine-scope-df80). Undefined otherwise.
+   */
+  private machineScopeJob(
+    d: Dispatcher,
+    name: string,
+    rawArgs: unknown,
+  ): Promise<AppResult<CommandOutcome>> | undefined {
+    if (!MACHINE_JOB_BUILTINS.has(name)) return undefined
+    const scope = this.host.machineScope
+    const jobId = isPlainObject(rawArgs) ? rawArgs['jobId'] : undefined
+    if (scope === undefined || typeof jobId !== 'string') return undefined
+    if (d.job(jobId).isSome() || scope.dispatcher.job(jobId).isNone()) return undefined
+    return this.machineScoped(name, rawArgs, {})
   }
 
   /**
@@ -648,7 +672,15 @@ export class AgentSession {
     const d = bound.unwrap()
     if (name === 'project.log.list')
       return Ok({ value: logList(d, args as unknown as LogQuery), revision: d.revision })
-    return this.waitJob(d, args as unknown as { jobId: string; timeoutSeconds: number }, opts)
+    const wait = args as unknown as { jobId: string; timeoutSeconds: number }
+    // a machine-scope job (DF80) the bound project does not know: waited for there
+    if (
+      scope !== undefined &&
+      d.job(wait.jobId).isNone() &&
+      scope.dispatcher.job(wait.jobId).isSome()
+    )
+      return this.waitJob(scope.dispatcher, wait, opts)
+    return this.waitJob(d, wait, opts)
   }
 
   private async waitJob(
