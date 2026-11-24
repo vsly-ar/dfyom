@@ -545,7 +545,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await planStart.getByRole('button', { name: 'Create plan' }).click()
   const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
   await expect(setups.getByRole('button', { name: /^Top G54/ })).toBeVisible()
-  await expect(setups.getByRole('button', { name: /^Actions for setup/ })).toHaveCount(1)
+  // one setup (its row's actions are its context menu, DF67)
+  await expect(setups.locator(':scope > li')).toHaveCount(1)
   // tool by tool (plan order v2), as X1 plans it: equal holes and equal countersinks share one
   // plan operation, every clone instance keeps its source's tool, the outline last
   const planned = setups

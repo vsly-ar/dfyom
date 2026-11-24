@@ -8,23 +8,27 @@
 // off into a new setup or move to another setup of the same direction from their menu. Setups, and
 // plan operations within their setup, also reorder by dragging their grip in the row's start gutter
 // (hardening U3, `ui/Reorder`, as the design operation list); every move is announced. ↑/↓ move
-// the focus over every row. Each row's actions sit in its one menu button, in a reserved slot at
-// the row's end (a setup's on its name line), so names, subtitles and status icons stay readable
-// in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
-// selected operation's) is the one previewed and exported. Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
+// the focus over every row. Each row's actions are its context menu (DF67, as the design list's
+// row menu: right-click, Shift+F10 / the Menu key), so rows have no action button and names,
+// subtitles and status icons keep the row's width and never move; clicking an error or warning
+// count selects the operation and focuses its inspector's Checks block. Selecting a setup opens
+// it in the inspector; the selected setup (or the selected operation's) is the one previewed and
+// exported.
+// Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
 // docs/modes/plan-v0.2.md#merge-split-reorder, docs/conventions/ui.md#reordering-lists-d45
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import {
+  ContextMenu,
   DragGrip,
   ErrorMessage,
-  IconButton,
-  Menu,
   Icon,
+  isContextMenuKey,
+  openContextMenu,
   ReorderStatus,
   useReorder,
   type MenuEntry,
@@ -47,7 +51,7 @@ import {
   snapshotName,
   toolpathState,
 } from './model'
-import { usePlanCommand, usePlanState, type PlanData } from './plan-store'
+import { usePlanCommand, usePlanState, usePlanStore, type PlanData } from './plan-store'
 import styles from './Plan.module.css'
 import { findingsOf, useCurrentSetup, usePlanSelection } from './usePlan'
 
@@ -94,6 +98,7 @@ export function SetupList({
   const [selected, select] = usePlanSelection()
   const current = useCurrentSetup(plan)
   const failures = usePlanState((s) => s.failures)
+  const store = usePlanStore()
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const canMove = allows(plan, 'plan.operation.move')
   const several = plan.setups.length > 1
@@ -146,6 +151,13 @@ export function SetupList({
     await operationTo(id, step)
   }
   const onKey = (e: KeyboardEvent, id: string, move: (by: -1 | 1) => void) => {
+    // Shift+F10 / the Menu key: the row's menu, at the row (as the design list, DF16)
+    if (isContextMenuKey(e)) {
+      const el = e.currentTarget.closest('[data-row-menu]')
+      if (el === null) return
+      e.preventDefault()
+      return openContextMenu(el)
+    }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
     const by = e.key === 'ArrowUp' ? -1 : 1
@@ -175,81 +187,77 @@ export function SetupList({
           const isCurrent = several && setup.id === current.id
           return (
             <li key={setup.id} {...setupReorder.itemProps(si)} className={styles['setupItem']}>
-              <div
-                className={`${styles['op']} ${styles['setupRow']}`}
-                data-actions={canMove ? '' : undefined}
-                data-selected={selected === setup.id ? '' : undefined}
-                data-current={isCurrent ? '' : undefined}
+              <RowMenu
+                enabled={canMove}
+                label={m.setup.actions(name)}
+                onClose={() => focus(setup.id)}
+                items={[
+                  ...(several
+                    ? ([
+                        {
+                          label: m.setup.moveUpItem,
+                          icon: <Icon name="arrow-up" />,
+                          shortcut: 'Alt+↑',
+                          disabled: si === 0,
+                          onSelect: () => void moveSetup(setup, -1),
+                        },
+                        {
+                          label: m.setup.moveDownItem,
+                          icon: <Icon name="arrow-down" />,
+                          shortcut: 'Alt+↓',
+                          disabled: si === plan.setups.length - 1,
+                          onSelect: () => void moveSetup(setup, 1),
+                        },
+                        'separator',
+                      ] satisfies MenuEntry[])
+                    : []),
+                  ...(merges.length === 0
+                    ? [{ label: m.setup.noMerge, disabled: true, onSelect: () => {} }]
+                    : merges.map((other) => ({
+                        label: m.setup.merge(other.name),
+                        icon: <Icon name="merge" />,
+                        onSelect: () =>
+                          void call('plan.setup.merge', {
+                            planId: plan.id,
+                            setupIds: [setup.id, other.id],
+                          }),
+                      }))),
+                ]}
               >
-                {canMove && several ? <RowGrip grip={setupReorder.gripProps(si)} /> : null}
-                <button
-                  type="button"
-                  ref={ref(setup.id)}
-                  className={`${styles['opSelect']} ${styles['setupSelect']}`}
-                  aria-pressed={selected === setup.id}
-                  aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                  onClick={() => select(selected === setup.id ? null : setup.id)}
-                  onKeyDown={(e) => onKey(e, setup.id, (by) => void moveSetup(setup, by))}
+                <div
+                  className={`${styles['op']} ${styles['setupRow']}`}
+                  data-row-menu={canMove ? '' : undefined}
+                  data-selected={selected === setup.id ? '' : undefined}
+                  data-current={isCurrent ? '' : undefined}
                 >
-                  <DirectionIcon
-                    direction={directionOfSetup(setup)}
-                    className={styles['dirIcon']}
-                  />
-                  <span className={styles['opText']}>
-                    <span className={styles['setupName']} title={name}>
-                      {several ? `${si + 1}. ${name}` : name}
-                    </span>
-                    <span className={styles['opMeta']}>
-                      <span className={styles['opTool']} title={setupMeta(doc, plan, setup)}>
-                        {setupMeta(doc, plan, setup)}
+                  {canMove && several ? <RowGrip grip={setupReorder.gripProps(si)} /> : null}
+                  <button
+                    type="button"
+                    ref={ref(setup.id)}
+                    className={`${styles['opSelect']} ${styles['setupSelect']}`}
+                    aria-pressed={selected === setup.id}
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                    onClick={() => select(selected === setup.id ? null : setup.id)}
+                    onKeyDown={(e) => onKey(e, setup.id, (by) => void moveSetup(setup, by))}
+                  >
+                    <DirectionIcon
+                      direction={directionOfSetup(setup)}
+                      className={styles['dirIcon']}
+                    />
+                    <span className={styles['opText']}>
+                      <span className={styles['setupName']} title={name}>
+                        {several ? `${si + 1}. ${name}` : name}
+                      </span>
+                      <span className={styles['opMeta']}>
+                        <span className={styles['opTool']} title={setupMeta(doc, plan, setup)}>
+                          {setupMeta(doc, plan, setup)}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  {isCurrent ? <span className={styles['srOnly']}>{m.setup.shown}</span> : null}
-                </button>
-                {canMove ? (
-                  <span className={styles['setupActions']}>
-                    <Menu
-                      label={m.setup.actions(name)}
-                      align="end"
-                      items={[
-                        ...(several
-                          ? ([
-                              {
-                                label: m.setup.moveUpItem,
-                                icon: <Icon name="arrow-up" />,
-                                shortcut: 'Alt+↑',
-                                disabled: si === 0,
-                                onSelect: () => void moveSetup(setup, -1),
-                              },
-                              {
-                                label: m.setup.moveDownItem,
-                                icon: <Icon name="arrow-down" />,
-                                shortcut: 'Alt+↓',
-                                disabled: si === plan.setups.length - 1,
-                                onSelect: () => void moveSetup(setup, 1),
-                              },
-                              'separator',
-                            ] satisfies MenuEntry[])
-                          : []),
-                        ...(merges.length === 0
-                          ? [{ label: m.setup.noMerge, disabled: true, onSelect: () => {} }]
-                          : merges.map((other) => ({
-                              label: m.setup.merge(other.name),
-                              icon: <Icon name="merge" />,
-                              onSelect: () =>
-                                void call('plan.setup.merge', {
-                                  planId: plan.id,
-                                  setupIds: [setup.id, other.id],
-                                }),
-                            }))),
-                      ]}
-                    >
-                      <IconButton label={m.setup.actions(name)} icon={<Icon name="more" />} />
-                    </Menu>
-                  </span>
-                ) : null}
-              </div>
+                    {isCurrent ? <span className={styles['srOnly']}>{m.setup.shown}</span> : null}
+                  </button>
+                </div>
+              </RowMenu>
               <SetupOperations
                 label={several ? m.operations.setupListLabel(name) : m.operations.listLabel}
                 setup={setup}
@@ -269,7 +277,13 @@ export function SetupList({
                     reorder={reorder}
                     index={i}
                     rowRef={ref(op.id)}
+                    onMenuClose={() => focus(op.id)}
                     onSelect={() => select(selected === op.id ? null : op.id)}
+                    onShowFindings={(e) => {
+                      e.stopPropagation()
+                      select(op.id)
+                      store.getState().revealFindings(op.id)
+                    }}
                     onKeyDown={(e) =>
                       onKey(e, op.id, (by) => {
                         // a step within the setup glides; one into a neighbouring setup does not
@@ -311,6 +325,38 @@ export function SetupList({
 function planOperationOf(plan: PlanDTO, id: string): PlanOperationDTO | undefined {
   for (const s of plan.setups) for (const o of s.operations) if (o.id === id) return o
   return undefined
+}
+
+/**
+ * A row's actions as its context menu (DF67, as the design list's DF16): right-click, or
+ * Shift+F10 / the Menu key on the focused row; none in read-only plans. Focus returns to the row.
+ */
+function RowMenu({
+  enabled,
+  label,
+  items,
+  onClose,
+  children,
+}: {
+  enabled: boolean
+  label: string
+  items: readonly MenuEntry[]
+  onClose: () => void
+  children: React.JSX.Element
+}): React.JSX.Element {
+  if (!enabled) return children
+  return (
+    <ContextMenu
+      label={label}
+      items={items}
+      onCloseAutoFocus={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+    >
+      {children}
+    </ContextMenu>
+  )
 }
 
 /** The grip in a row's start gutter (as the design operation list, DF24). */
@@ -365,6 +411,8 @@ function OperationRow({
   index,
   rowRef,
   onSelect,
+  onMenuClose,
+  onShowFindings,
   onKeyDown,
   onMove,
   onSplit,
@@ -382,6 +430,13 @@ function OperationRow({
   index: number
   rowRef: (el: HTMLButtonElement | null) => void
   onSelect: () => void
+  /** The row menu closed: the focus goes back to the row. */
+  onMenuClose: () => void
+  /**
+   * A click on the error or warning count (DF67): select the operation (never off) and focus
+   * its inspector's Checks block. A pointer shortcut inside the row's button, not a tab stop.
+   */
+  onShowFindings: (e: MouseEvent) => void
   onKeyDown: (e: KeyboardEvent) => void
   onMove: (by: -1 | 1) => void
   onSplit: () => void
@@ -424,72 +479,82 @@ function OperationRow({
     })),
   ]
   return (
-    <li
-      {...reorder.itemProps(index)}
-      className={styles['op']}
-      data-actions={canMove ? '' : undefined}
-      data-selected={selected ? '' : undefined}
+    <RowMenu
+      enabled={canMove}
+      label={m.operations.actions(name)}
+      onClose={onMenuClose}
+      items={menu}
     >
-      {canMove && setup.operations.length > 1 ? <RowGrip grip={reorder.gripProps(index)} /> : null}
-      <button
-        type="button"
-        ref={rowRef}
-        className={`${styles['opSelect']} ${styles['planRow']}`}
-        aria-pressed={selected}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-        onClick={onSelect}
-        onKeyDown={onKeyDown}
+      <li
+        {...reorder.itemProps(index)}
+        className={styles['op']}
+        data-row-menu={canMove ? '' : undefined}
+        data-selected={selected ? '' : undefined}
       >
-        <Icon name={planOperationIcon(plan, op.designOperationIds)} />
-        <span className={styles['opText']}>
-          <span className={styles['opName']} title={name}>
-            <NameWords name={name} />
-          </span>
-          <span className={styles['opMeta']}>
-            <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
-          </span>
-        </span>
-        <span className={styles['opStatus']}>
-          {stale !== undefined ? (
-            <span className={styles['opStale']} title={staleText(stale)}>
-              <Icon name="history" />
-              <span className={styles['srOnly']}>{staleText(stale)}</span>
+        {canMove && setup.operations.length > 1 ? (
+          <RowGrip grip={reorder.gripProps(index)} />
+        ) : null}
+        <button
+          type="button"
+          ref={rowRef}
+          className={`${styles['opSelect']} ${styles['planRow']}`}
+          aria-pressed={selected}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          onClick={onSelect}
+          onKeyDown={onKeyDown}
+        >
+          <Icon name={planOperationIcon(plan, op.designOperationIds)} />
+          <span className={styles['opText']}>
+            <span className={styles['opName']} title={name}>
+              <NameWords name={name} />
             </span>
-          ) : null}
-          <span className={styles['opState']} data-state={state} title={m.toolpaths.state[state]}>
-            {state === 'ready' ? (
-              <Icon name="success" />
-            ) : state === 'failed' ? (
-              <Icon name="error" />
-            ) : (
-              <Icon name="not-started" />
-            )}
-            <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
+            <span className={styles['opMeta']}>
+              <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
+            </span>
           </span>
-          {errors > 0 ? (
-            <span className={styles['opFailed']}>
-              <Icon name="error" />
-              <span aria-hidden="true">{errors}</span>
-              <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
+          <span className={styles['opStatus']}>
+            {stale !== undefined ? (
+              <span className={styles['opStale']} title={staleText(stale)}>
+                <Icon name="history" />
+                <span className={styles['srOnly']}>{staleText(stale)}</span>
+              </span>
+            ) : null}
+            <span className={styles['opState']} data-state={state} title={m.toolpaths.state[state]}>
+              {state === 'ready' ? (
+                <Icon name="success" />
+              ) : state === 'failed' ? (
+                <Icon name="error" />
+              ) : (
+                <Icon name="not-started" />
+              )}
+              <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
             </span>
-          ) : null}
-          {warnings > 0 ? (
-            <span className={styles['opBadge']}>
-              <Icon name="warning" />
-              <span aria-hidden="true">{warnings}</span>
-              <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
-            </span>
-          ) : null}
-        </span>
-      </button>
-      {canMove ? (
-        <span className={styles['rowActions']}>
-          <Menu label={m.operations.actions(name)} align="end" items={menu}>
-            <IconButton label={m.operations.actions(name)} icon={<Icon name="more" />} />
-          </Menu>
-        </span>
-      ) : null}
-    </li>
+            {errors > 0 ? (
+              <span
+                className={`${styles['opFailed']} ${styles['opFindings']}`}
+                title={m.operations.findingsTip(m.operations.errors(errors))}
+                onClick={onShowFindings}
+              >
+                <Icon name="error" />
+                <span aria-hidden="true">{errors}</span>
+                <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
+              </span>
+            ) : null}
+            {warnings > 0 ? (
+              <span
+                className={`${styles['opBadge']} ${styles['opFindings']}`}
+                title={m.operations.findingsTip(m.operations.warnings(warnings))}
+                onClick={onShowFindings}
+              >
+                <Icon name="warning" />
+                <span aria-hidden="true">{warnings}</span>
+                <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
+              </span>
+            ) : null}
+          </span>
+        </button>
+      </li>
+    </RowMenu>
   )
 }
 

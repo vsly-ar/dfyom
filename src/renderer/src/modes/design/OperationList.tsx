@@ -7,7 +7,8 @@
 // (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove with an undo toast; a refused
 // move says why under the list and every move is announced. Rows show names, never ids (the
 // name ellipsizes in the row's width; DF25 re-report). The grip sits before the row icon
-// (DF24). Owned and nested rows have no actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk
+// (DF24); a row with a warning badge or failed marker keeps its actions' room at rest, so the
+// markers never move on hover (DF67). Owned and nested rows have no actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk
 // the visible rows, → expands or enters, ← collapses or goes to the parent row. Every row with an
 // applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove): right-click,
 // Shift+F10 / the Menu key, and on top-level rows the actions (…) button.
@@ -375,7 +376,7 @@ function RowMarkers({ failed, count }: { failed: boolean; count: number }): Reac
         </span>
       ) : null}
       {count > 0 ? (
-        <span className={styles['opBadge']}>
+        <span className={styles['opBadge']} title={m.navigator.warnings(count)}>
           <Icon name="warning" />
           <span aria-hidden="true">{count}</span>
           <span className={styles['srOnly']}>{m.navigator.warnings(count)}</span>
@@ -435,6 +436,7 @@ function OperationRow({
         className={styles['op']}
         data-nested={actions === undefined ? '' : undefined}
         data-top={actions !== undefined ? '' : undefined}
+        data-markers={n > 0 || ctx.failedAt === op.id ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
         data-selected={ctx.selected === op.id ? '' : undefined}
       >
@@ -506,6 +508,7 @@ function FeatureRow({
         <div
           className={styles['op']}
           data-top={actions !== undefined ? '' : undefined}
+          data-markers={count > 0 || failed ? '' : undefined}
           data-row-menu={menu.length > 0 ? '' : undefined}
           data-selected={selected === feature.id ? '' : undefined}
         >

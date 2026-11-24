@@ -303,9 +303,12 @@
 
 /* while the actions show, the row's content gives them room: the read-out ellipsizes first and
    the name keeps its words (DF44); at rest the actions take no width */
+/* a row with a warning badge or failed marker keeps that room at rest too, so its markers never
+   move when the actions show and their tooltips stay reachable (DF67) */
 .op[data-top]:hover > .opSelect,
 .op[data-top]:focus-within > .opSelect,
-.op[data-top][data-selected] > .opSelect {
+.op[data-top][data-selected] > .opSelect,
+.op[data-top][data-markers] > .opSelect {
   padding-right: calc(2 * var(--control-md) + 2 * var(--space-1));
 }
 
