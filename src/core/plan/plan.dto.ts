@@ -114,6 +114,25 @@ export type StrategyDTO = z.output<typeof StrategyDtoSchema>
 export const TOOL_SOURCES = ['design', 'plan'] as const
 export type ToolSource = (typeof TOOL_SOURCES)[number]
 
+/**
+ * The Z reference surface and touch-off spot the user chose for the tool run an operation starts
+ * (hardening DF69, docs/modes/z-reference.md#agent-api-compact): `surface` absent = the default
+ * surface with a chosen spot; `at` absent = the surface's default spot.
+ */
+export const ZRefDtoSchema = z.object({
+  surface: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Surface id: the setup's stock face (stock.top) or <operation id>.floor"),
+  at: z
+    .tuple([z.number(), z.number()])
+    .optional()
+    .describe('Touch-off spot X, Y in the setup WCS (mm)'),
+})
+export type ZRefDTO = z.output<typeof ZRefDtoSchema>
+
 export const PlanOperationDtoSchema = z.object({
   id: PlanRecordIdSchema.describe('Plan operation id'),
   designOperationIds: z
@@ -143,6 +162,9 @@ export const PlanOperationDtoSchema = z.object({
     .describe('Locked feeds fields (auto mode only): the other recommendations follow them'),
   overrides: OverridesDtoSchema,
   strategy: StrategyDtoSchema,
+  zRef: ZRefDtoSchema.optional().describe(
+    'Z reference of the tool run this operation starts; absent = the default rule',
+  ),
 })
 export type PlanOperationDTO = z.output<typeof PlanOperationDtoSchema>
 

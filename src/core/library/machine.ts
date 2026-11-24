@@ -69,6 +69,11 @@ export interface MachineProps {
   readonly noseToTable: Option<Quantity>
   /** Spoilboard thickness on the table (length, ≥ 0); None = unknown (Z headroom partly checked). */
   readonly spoilboardThickness: Option<Quantity>
+  /**
+   * Largest extent of the Z touch plate (length); None = unknown, the touch-off spot then leaves
+   * room for the tool only (docs/modes/z-reference.md#touch-off-spot, hardening DF69).
+   */
+  readonly probePlateSize: Option<Quantity>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -99,6 +104,7 @@ export class Machine implements MachineProps {
     readonly softLimits: Option<boolean>,
     readonly noseToTable: Option<Quantity>,
     readonly spoilboardThickness: Option<Quantity>,
+    readonly probePlateSize: Option<Quantity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -130,6 +136,8 @@ export class Machine implements MachineProps {
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
       if (noseToTable.isSome()) checkPositive(c, ['noseToTable'], noseToTable.unwrap(), 'length')
+      if (probePlateSize.isSome())
+        checkPositive(c, ['probePlateSize'], probePlateSize.unwrap(), 'length')
       if (spoilboardThickness.isSome()) {
         const board = spoilboardThickness.unwrap()
         const path = ['spoilboardThickness']
@@ -182,6 +190,7 @@ export class Machine implements MachineProps {
           p.softLimits,
           p.noseToTable,
           p.spoilboardThickness,
+          p.probePlateSize,
         ),
     )
   }
@@ -207,6 +216,7 @@ export class Machine implements MachineProps {
       pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
       noseToTable: optionalQuantityFromDTO(dto.noseToTable, 'noseToTable'),
       spoilboardThickness: optionalQuantityFromDTO(dto.spoilboardThickness, 'spoilboardThickness'),
+      probePlateSize: optionalQuantityFromDTO(dto.probePlateSize, 'probePlateSize'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -232,6 +242,7 @@ export class Machine implements MachineProps {
         softLimits: toOption(dto.softLimits),
         noseToTable: q.noseToTable,
         spoilboardThickness: q.spoilboardThickness,
+        probePlateSize: q.probePlateSize,
       }),
     )
   }
@@ -267,6 +278,7 @@ export class Machine implements MachineProps {
       ...optionalField('softLimits', this.softLimits),
       ...optionalQuantityDTO('noseToTable', this.noseToTable),
       ...optionalQuantityDTO('spoilboardThickness', this.spoilboardThickness),
+      ...optionalQuantityDTO('probePlateSize', this.probePlateSize),
     } as MachineValuesDTO
   }
 

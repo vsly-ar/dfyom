@@ -486,6 +486,136 @@ describe('reference model UI', () => {
     await waitFor(() => expect(ui().referenceOverlay).toBeNull())
   })
 
+  it('Holes list: groups with their pattern, rings on the ghost, Add as Bolt hole / Drilling is one undo step (DF60 P3)', async () => {
+    const { user, bridge, d, ui, importBox } = await renderReference()
+    const countersunk = {
+      count: 4,
+      holes: [
+        [10, 10],
+        [90, 10],
+        [10, 50],
+        [90, 50],
+      ],
+      size: {
+        diameter: 2.447,
+        top: 0,
+        depth: 20,
+        bottom: 'through',
+        mouth: { type: 'countersink', diameter: 4.861, angle: 82.85 },
+      },
+      pattern: { kind: 'grid', origin: [10, 10], pitch: [80, 40], count: [2, 2] },
+      suggest: {
+        command: 'design.hole.add',
+        args: {
+          on: 'stock.top',
+          center: ['10 mm', '10 mm'],
+          type: 'countersink',
+          csDiameter: '4.861 mm',
+          csAngle: '82°',
+          fastener: 'M2',
+          fit: 'normal',
+          diameter: '2.447 mm',
+          bottom: 'through',
+        },
+        clones: { rows: [{ kind: 'grid', cols: 2, rows: 2, du: '80 mm', dv: '40 mm' }] },
+      },
+    }
+    const pins = {
+      count: 2,
+      holes: [
+        [30, 30],
+        [47, 21],
+      ],
+      size: { diameter: 1.2, top: 0, depth: 6, bottom: 'flat' },
+      suggest: {
+        command: 'design.drilling.add',
+        args: {
+          on: 'stock.top',
+          center: ['30 mm', '30 mm'],
+          diameter: '1.2 mm',
+          depth: '6 mm',
+          bottom: 'flat',
+        },
+      },
+      note: 'noTool',
+      smallestTool: 1.588,
+    }
+    const sunken = {
+      count: 1,
+      holes: [[70, 30]],
+      size: {
+        diameter: 3.4,
+        top: 4,
+        depth: 20,
+        bottom: 'through',
+        mouth: { type: 'counterbore', diameter: 6.5, depth: 7.2 },
+      },
+      suggest: {
+        command: 'design.hole.add',
+        args: { on: 'stock.top', center: ['70 mm', '30 mm'] },
+        note: 'belowFace',
+      },
+    }
+    bridge.handle('design.reference.find', async (args) => {
+      if ((args as { kind: string }).kind === 'holes')
+        return {
+          ok: true,
+          value: { kind: 'holes', groups: [countersunk, pins, sunken], holeCount: 7 },
+          revision: 0,
+        }
+      const q = await d.queryAsync('design.reference.find', args, { kind: 'ui', id: 'test' })
+      return { ok: true, ...q.expect('a section or levels read') }
+    })
+    await importBox()
+    const holes = within(inspector()).getByRole('region', { name: 'Holes' })
+    await waitFor(() =>
+      expect(
+        within(holes).getByText('4 × Ø 2.45 mm countersunk Ø 4.86 mm 83°, through, grid 2 × 2'),
+      ).toBeVisible(),
+    )
+    expect(within(holes).getByText('2 × Ø 1.2 mm, 6 mm deep')).toBeVisible()
+    expect(within(holes).getByText('No tool under Ø 1.59 mm')).toBeVisible()
+    // a mouth below the face cannot be added from here: the button says why
+    const below = within(holes).getByRole('button', { name: /^Add as Bolt hole: 1 × Ø 3.4 mm/ })
+    expect(below).toBeDisabled()
+    expect(within(holes).getByText(/The mouth is 4 mm below top/)).toBeVisible()
+    // all seven holes are rings on the ghost
+    await waitFor(() => expect(ui().referenceOverlay?.holes).toHaveLength(7))
+    expect(ui().referenceOverlay?.holes?.[0]).toEqual({ center: [10, 10], diameter: 2.447, top: 0 })
+    await expectNoAxeViolations()
+
+    // the countersunk grid: one Bolt hole and its Clones, one undo step
+    const part = () => Object.values(d.doc.parts)[0]!
+    let undoable = d.history.undoable.length
+    await user.click(within(holes).getByRole('button', { name: /^Add as Bolt hole: 4 ×/ }))
+    await waitFor(() => expect(within(holes).getByText('4 Bolt holes added.')).toBeVisible())
+    expect(d.history.undoable).toHaveLength(undoable + 1)
+    const sent = commandsOf(bridge).slice(-2) as { name: string; args: unknown; gesture?: string }[]
+    expect(sent.map((c) => c.name)).toEqual(['design.hole.add', 'design.clones.add'])
+    expect(sent[0]!.gesture).toBeDefined()
+    expect(sent[1]!.gesture).toBe(sent[0]!.gesture)
+    expect(sent[1]!.args).toMatchObject({
+      source: { featureId: expect.any(String) },
+      rows: [{ kind: 'grid', cols: 2, rows: 2 }],
+    })
+
+    // the pin list: one Drilling per hole at its centre, one undo step
+    undoable = d.history.undoable.length
+    const ops = part().operations.length
+    await user.click(within(holes).getByRole('button', { name: /^Add as Drilling: 2 ×/ }))
+    await waitFor(() => expect(within(holes).getByText('2 drillings added.')).toBeVisible())
+    expect(d.history.undoable).toHaveLength(undoable + 1)
+    expect(part().operations.length).toBe(ops + 2)
+    expect(
+      (commandsOf(bridge).slice(-2) as unknown as { args: unknown }[]).map(
+        (c) => (c.args as { center: string[] }).center,
+      ),
+    ).toEqual([
+      ['30 mm', '30 mm'],
+      ['47 mm', '21 mm'],
+    ])
+  })
+
   it('shows a command error at its field and keeps the record', async () => {
     const { user, refs, importBox } = await renderReference()
     await importBox()

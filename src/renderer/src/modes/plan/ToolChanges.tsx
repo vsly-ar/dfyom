@@ -3,8 +3,12 @@
 // the one at the setup start included unless the tool stays in the spindle from the setup before
 // (DF65). In editable plans a run reorders as a block like the plan lists (`ui/Reorder`: grip
 // drag, Alt+↑/↓ on the focused row, ↑/↓ between rows), one `plan.operation.move { count }` each;
-// a refused move shakes the row back and says why under the list.
-// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+// a refused move shakes the row back and says why under the list. DF69: each run's "Z from" (its
+// Z reference surface and level; a default in the secondary colour, a choice in the primary) opens
+// a menu of the eligible surfaces with "Default" on top (`plan.operation.update { zRef }` on the
+// run's first operation); a `plan.zRef` finding of the run shows its icon beside it.
+// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
+// docs/modes/z-reference.md#ui
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { ToolType } from '../../../../core/library/tool.dto'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
@@ -12,13 +16,19 @@ import { carriedTool, setupToolChanges, toolRuns } from '../../../../core/plan/t
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
+import type { PlanWarning } from '../../../../core/plan/checks'
 import { lengthSource } from '../../messages/dfm'
 import { libraryMessages } from '../../messages/library'
-import { planMessages, sentence } from '../../messages/plan'
-import { DragGrip, Icon, ReorderStatus, useReorder } from '../../ui'
+import { areaText, planMessages, sentence } from '../../messages/plan'
+import { DragGrip, Icon, Menu, ReorderStatus, useReorder, type MenuEntry } from '../../ui'
 import { quantityOf } from '../design/model'
 import { allows, planOperationName, toolpathState, type ToolpathEntry } from './model'
-import { usePlanCommand } from './plan-store'
+import {
+  usePlanCommand,
+  usePlanState,
+  type ZRefCandidateView,
+  type ZRefRunView,
+} from './plan-store'
 import styles from './ToolChanges.module.css'
 
 const m = planMessages.toolChanges
@@ -63,6 +73,108 @@ function runSeconds(
   return sum
 }
 
+/** "Facing 1 floor · −0.5 mm" (a typographic minus, as the plan lists write levels). */
+const zValue = (c: ZRefCandidateView, units: UnitSystem): string =>
+  m.zValue(c.label, lengthSource(c.level, units).replace(/^-/, '−'))
+
+const SEVERITY_RANK: Readonly<Record<string, number>> = { error: 3, warning: 2, info: 1 }
+
+/** DF69: the run's "Z from" with the menu of its eligible surfaces. */
+function ZFrom({
+  planId,
+  run,
+  tool,
+  units,
+  editable,
+  findings,
+  onRefused,
+}: {
+  planId: string
+  run: ZRefRunView
+  tool: string
+  units: UnitSystem
+  editable: boolean
+  findings: readonly PlanWarning[]
+  onRefused: (message: string | undefined) => void
+}): React.JSX.Element {
+  const call = usePlanCommand()
+  const z = run.zRef
+  const value = z === null ? m.zNone : zValue(z, units)
+  const chosen = z?.chosen === true
+  const worst = findings.reduce<PlanWarning | undefined>(
+    (w, f) => ((SEVERITY_RANK[f.severity] ?? 0) > (SEVERITY_RANK[w?.severity ?? ''] ?? 0) ? f : w),
+    undefined,
+  )
+  const choose = async (zRef: { surface: string } | null) => {
+    const r = await call('plan.operation.update', {
+      planId,
+      planOperationId: run.planOperationId,
+      zRef,
+    })
+    onRefused(r.ok ? undefined : m.zRefused(sentence(r.error.message)))
+  }
+  const spot = (c: ZRefCandidateView) =>
+    `(${lengthSource(c.at[0], units)}, ${lengthSource(c.at[1], units)})`
+  const items: MenuEntry[] = [
+    {
+      label: m.zDefault(chosen ? undefined : z === null ? undefined : zValue(z, units)),
+      description: m.zDefaultHint,
+      icon: chosen ? undefined : <Icon name="check" />,
+      onSelect: () => void choose(null),
+    },
+    ...(run.candidates.length > 0
+      ? [
+          {
+            group: m.zSurfaces,
+            items: run.candidates.map((c) => ({
+              label: zValue(c, units),
+              description: m.zCandidate(areaText(c.area, units), spot(c), c.small),
+              icon: chosen && z?.surface === c.surface ? <Icon name="check" /> : undefined,
+              onSelect: () => void choose({ surface: c.surface }),
+            })),
+          },
+        ]
+      : []),
+  ]
+  const icon =
+    worst === undefined ? null : (
+      <span
+        className={styles['zFinding']}
+        data-severity={worst.severity}
+        title={sentence(worst.message)}
+      >
+        <Icon
+          name={
+            worst.severity === 'error' ? 'error' : worst.severity === 'warning' ? 'warning' : 'info'
+          }
+          label={sentence(worst.message)}
+        />
+      </span>
+    )
+  return (
+    <span className={styles['zFrom']}>
+      <span className={styles['zLabel']}>{m.zFrom}</span>
+      {editable && (run.candidates.length > 0 || chosen) ? (
+        <Menu items={items}>
+          <button
+            type="button"
+            className={styles['zValue']}
+            data-chosen={chosen ? '' : undefined}
+            aria-label={m.zButton(tool, value, chosen)}
+          >
+            {value}
+          </button>
+        </Menu>
+      ) : (
+        <span className={styles['zValue']} data-chosen={chosen ? '' : undefined}>
+          {value}
+        </span>
+      )}
+      {icon}
+    </span>
+  )
+}
+
 export function ToolChanges({
   plan,
   setup,
@@ -83,6 +195,9 @@ export function ToolChanges({
   const [announcement, setAnnouncement] = useState('')
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const rows = useRef(new Map<number, HTMLLIElement>())
+  const zRefs = usePlanState((s) => s.data?.zRefs)
+  const warnings = usePlanState((s) => s.data?.warnings)
+  const canZ = allows(plan, 'plan.operation.update')
 
   /** Run `from` to run position `to` (after the move): one block move; false: refused. */
   const runTo = async (from: number, to: number) => {
@@ -131,6 +246,8 @@ export function ToolChanges({
     else rows.current.get(i + by)?.focus()
   }
 
+  const zRun = (id: string) =>
+    zRefs?.find((r) => r.setupId === setup.id && r.planOperationId === id)
   if (runs.length === 0) return null
   const count = setupToolChanges(plan.setups, index)
   return (
@@ -177,6 +294,19 @@ export function ToolChanges({
                   {tool.meta !== '' ? <span className={styles['meta']}>{tool.meta}</span> : null}
                 </span>
                 <span className={styles['ops']}>{names.join(', ')}</span>
+                {zRun(run.operations[0]!.id) === undefined ? null : (
+                  <ZFrom
+                    planId={plan.id}
+                    run={zRun(run.operations[0]!.id)!}
+                    tool={tool.name}
+                    units={units}
+                    editable={canZ}
+                    findings={(warnings ?? []).filter(
+                      (w) => w.code === 'plan.zRef' && w.planOperationId === run.operations[0]!.id,
+                    )}
+                    onRefused={setRefusal}
+                  />
+                )}
                 {isCarried ? (
                   <span className={styles['carried']}>{m.carried(before.name)}</span>
                 ) : null}

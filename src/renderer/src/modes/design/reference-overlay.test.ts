@@ -1,6 +1,6 @@
 // What the Reference panel draws (DF60 P1 follow-ups): the fitted loops as the Shape Editor's
 // backdrop segments (raw segments kept for open meshes), and in the part frame for the viewport
-// with the sharp inside corners and the hovered level's triangles.
+// with the sharp inside corners, the hole rings (P3) and the hovered level's triangles.
 // Spec: docs/modes/reference-tools.md#ui, docs/conventions/ui.md#reference-tools-df60
 import { describe, expect, it } from 'vitest'
 import type { FittedLoop } from '../../../../core/design/reference-section'
@@ -106,6 +106,26 @@ describe('overlayView', () => {
       ghost,
     )
     for (let i = 2; i < v.lines.length; i += 3) expect(v.lines[i]).toBeCloseTo(-19, 9)
+  })
+
+  it('puts the hole rings at their mouths in the part frame (P3)', () => {
+    const v = overlayView(
+      {
+        referenceId: 'r1',
+        direction: '-z',
+        depth: 0,
+        loops: null,
+        hover: null,
+        holes: [{ center: [10, 5], diameter: 3, top: 2 }],
+      },
+      stock,
+      ghost,
+    )
+    // the bottom face: u = x, v = −y, the mouth 2 mm above the bottom (z −20)
+    expect(v.holes).toHaveLength(1)
+    expect(v.holes![0]!.radius).toBe(1.5)
+    const [x, y, z] = v.holes![0]!.at
+    expect([x, y, z].map((c) => Math.round(c * 1e9) / 1e9)).toEqual([10, -5 + 60, -18])
   })
 
   it('highlights the hovered level’s triangles with the ghost’s matrix', () => {

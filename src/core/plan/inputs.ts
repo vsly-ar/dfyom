@@ -143,7 +143,8 @@ export function planOperationInputs(
       previous: chain,
       index,
       part,
-      planOperation: op,
+      // the Z reference (DF69) moves only the exported program, never the toolpath
+      planOperation: { ...op, zRef: undefined },
       snapshots: used,
       setup: { ...own, operations: undefined },
       // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")

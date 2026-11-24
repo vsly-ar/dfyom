@@ -58,11 +58,20 @@ export interface ReferenceOverlayState {
   readonly loops: readonly FittedLoop[] | null
   /** The level row under the pointer or focus. */
   readonly hover: { readonly depth: number; readonly facing: MeshLevel['facing'] } | null
+  /** The Holes list's holes (DF60 P3; face frame, mouth depth below the face), absent: none. */
+  readonly holes?: readonly OverlayHole[]
+}
+
+/** A hole ring: its centre (u, v), diameter and its mouth's depth below the face (mm). */
+export interface OverlayHole {
+  readonly center: readonly [number, number]
+  readonly diameter: number
+  readonly top: number
 }
 
 /**
  * The overlay in the part frame: loops at the section plane, the sharp inside corners with the
- * plane's axes for their rings, and the hovered level's triangles (source units, drawn with the
+ * plane's axes for their rings, the hole rings at their mouths (P3), and the hovered level's triangles (source units, drawn with the
  * ghost's `matrix`); `faceMatrix` maps the STL to the face frame (to find those triangles).
  */
 export function overlayView(
@@ -103,6 +112,10 @@ export function overlayView(
   return {
     lines: Float32Array.from(lines),
     corners,
+    holes: (state.holes ?? []).map((h) => ({
+      at: toPartFrame(frame, [h.center[0], h.center[1], -h.top]),
+      radius: h.diameter / 2,
+    })),
     axes: { u: frame.u, v: frame.v },
     highlight: highlight === null || highlight.positions.length === 0 ? null : highlight,
   }

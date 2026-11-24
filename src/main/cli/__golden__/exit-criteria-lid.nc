@@ -1766,6 +1766,7 @@ Z10
 (Profile 2)
 (Tool change to T2: spindle off, retract)
 M5
+X132 Y53
 (Stop the spindle)
 (DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
 M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
@@ -1868,6 +1869,7 @@ Z10
 (Bolt hole 1 - countersink x 4)
 (Tool change to T3: spindle off, retract)
 M5
+X132 Y53
 (Stop the spindle)
 (DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)
 M0 ;Stop spindle, install T3 Chamfer 90 x, 12 mm chamfer, then zero Z
@@ -1910,6 +1912,7 @@ G0 Z10
 (Profile 1)
 (Tool change to T2: spindle off, retract)
 M5
+X132 Y53
 (Stop the spindle)
 (DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
 M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z

@@ -32,7 +32,13 @@ export const RUN_PHASES = [
   'stopped',
 ] as const
 
-export const ToolChangeSchema = z.object({ n: z.number().int(), name: z.string().max(500) })
+export const ToolChangeSchema = z.object({
+  n: z.number().int(),
+  name: z.string().max(500),
+  /** DF69: the Z reference surface and level when not the top face; `spot` where to touch off. */
+  surface: z.string().max(500).exactOptional(),
+  spot: z.string().max(100).exactOptional(),
+})
 
 export const RunSummarySchema = z.object({
   lines: z.number().int(),

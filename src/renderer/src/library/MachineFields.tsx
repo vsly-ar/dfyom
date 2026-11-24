@@ -33,6 +33,7 @@ export const MACHINE_FIELDS: readonly string[] = [
   'softLimits',
   'noseToTable',
   'spoilboardThickness',
+  'probePlateSize',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -160,6 +161,16 @@ export function MachineFields({
           'depth',
           (spoilboardThickness) => set({ spoilboardThickness }),
           { optional: true, note: m.spoilboardThicknessNote },
+        )}
+        {/* DF69: room for the touch plate at the Z touch-off spot */}
+        {q(
+          'probePlateSize',
+          m.probePlateSize,
+          'length',
+          values.probePlateSize,
+          'width',
+          (probePlateSize) => set({ probePlateSize }),
+          { optional: true, note: m.probePlateSizeNote },
         )}
       </Group>
       {full ? (

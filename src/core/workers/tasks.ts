@@ -11,6 +11,7 @@ import {
   type LevelOptions,
   type MeshLevels,
 } from '../design/mesh-levels'
+import { meshHoles, MeshHolesSchema, type HoleOptions, type MeshHoles } from '../design/mesh-holes'
 import { FEATURE_EDGE_DEG, featureEdges, meshSection, sectionChains } from '../design/mesh-section'
 import {
   fitSection,
@@ -206,6 +207,13 @@ export const stlMesh: WorkerTask<{ path: string; triangles: number }, StlMesh> =
  */
 let keptMesh: { readonly path: string; readonly positions: Float32Array } | undefined
 
+/**
+ * Holes found on the kept mesh by face matrix and options (DF60 P3): a scale change reads the
+ * same faces again (`reference.featureBelowTool`), so they are not cut again. Cleared with the mesh.
+ */
+const keptHoles = new Map<string, MeshHoles>()
+const KEPT_HOLES_MAX = 24
+
 async function referencePositions(
   path: string,
   triangles: number,
@@ -216,6 +224,7 @@ async function referencePositions(
     const read = await readStlPositions(path, triangles, ctl, where)
     if (read.isErr()) return read
     keptMesh = { path, positions: read.unwrap() }
+    keptHoles.clear()
   }
   return Ok(keptMesh.positions)
 }
@@ -307,6 +316,42 @@ export const referenceLevels: WorkerTask<LevelsInput, MeshLevels> = {
   },
 }
 
+export interface HolesInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the face frame (mm), the face at w = 0. */
+  readonly matrix: readonly number[]
+  readonly options: HoleOptions
+}
+
+/** The holes of a stored reference seen from a face (DF60 P3, `meshHoles`). */
+export const referenceHoles: WorkerTask<HolesInput, MeshHoles> = {
+  name: 'reference.holes',
+  lane: 'geometry',
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    options: z.object({
+      maxDiameter: z.number().positive(),
+      limit: z.number().int().positive(),
+    }),
+  }),
+  output: MeshHolesSchema,
+  timeoutMs: 120_000,
+  async run({ path, triangles, matrix, options }, ctl) {
+    const read = await referencePositions(path, triangles, ctl, 'reference.holes')
+    if (read.isErr()) return read
+    const key = JSON.stringify([matrix, options])
+    const kept = keptHoles.get(key)
+    if (kept !== undefined) return Ok(kept)
+    const r = meshHoles(read.unwrap(), matrix, options, ctl.steps)
+    if (r.isOk()) {
+      if (keptHoles.size >= KEPT_HOLES_MAX) keptHoles.clear()
+      keptHoles.set(key, r.unwrap())
+    }
+    return r
+  },
+}
+
 export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   geometryEvaluate,
   toolpathGenerate,
@@ -314,5 +359,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   stlMesh,
   referenceSection,
   referenceLevels,
+  referenceHoles,
   svgImportTask,
 ]

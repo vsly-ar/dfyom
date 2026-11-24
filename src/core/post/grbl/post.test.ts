@@ -196,8 +196,37 @@ const steppedCountersinkOps = (): ExportOperation[] => {
   ]
 }
 
-/** Facing, the two holes, the profile: three tools, the drill at another speed. */
-const multiToolOps = (): ExportOperation[] => [facingOp(), ...drillOps(), profileOp()]
+/**
+ * Facing, the two holes, the profile: three tools, the drill at another speed. Every tool run
+ * touches off on the top face (DF69: the program moves to each spot before the pause).
+ */
+const multiToolOps = (): ExportOperation[] => {
+  const top = (x: number, y: number) =>
+    ({ label: 'the top face', level: 0, at: [x, y], top: true }) as const
+  const [facing, drill1, drill2] = [facingOp(), ...drillOps()]
+  return [
+    { ...facing!, zRef: top(15, 10) },
+    { ...drill1!, zRef: top(20, 15) },
+    drill2!,
+    { ...profileOp(), zRef: top(30, 20) },
+  ]
+}
+
+/**
+ * As `multiToolOps` with the later tools touching off on the 0.5 mm faced floor (DF69): their Z
+ * shifted by +0.5, the instruction lines before each pause.
+ */
+const facedMultiToolOps = (): ExportOperation[] => {
+  const floor = (x: number, y: number) =>
+    ({ label: 'Facing 1 floor', level: -0.5, at: [x, y], top: false }) as const
+  const ops = multiToolOps()
+  return [
+    ops[0]!,
+    { ...ops[1]!, zRef: floor(20, 15) },
+    ops[2]!,
+    { ...ops[3]!, zRef: floor(30, 20) },
+  ]
+}
 
 const program = (blocks: Block[], over: Partial<MachiningProgram> = {}): MachiningProgram => ({
   name: 'P',
@@ -274,13 +303,35 @@ function expectIntendedMotion(p: MachiningProgram, lines: readonly string[]): vo
   const tol = (0.5 * 10 ** -d) / perMm + 1e-9
   const key = (v: Vec3) => v.map((c) => formatNumber(c * perMm, d)).join(' ')
 
-  // Intended: motion blocks with their float start, without those the text cannot show.
+  // Intended: motion blocks with their float start, without those the text cannot show. DF69:
+  // each tool run's Z shifted by −level of its reference, and the rapid to the touch-off spot
+  // (then to the new run's clearance) before a pause.
   const want: { b: Extract<Block, { to: Vec3 }>; from: Vec3 | undefined }[] = []
   let last: string | undefined
   let from: Vec3 | undefined
-  for (const b of p.blocks) {
-    if (b.kind === 'toolChange') last = undefined
-    if (!('to' in b)) continue
+  let level = p.blocks.find((b) => b.kind === 'toolChange')?.zRef?.level ?? 0
+  let first = true
+  for (const raw of p.blocks) {
+    if (raw.kind === 'toolChange') {
+      last = undefined
+      const pauses = !first || (raw.zRef !== undefined && !raw.zRef.top)
+      first = false
+      if (pauses && raw.zRef !== undefined && from !== undefined) {
+        const to: Vec3 = [raw.zRef.at[0], raw.zRef.at[1], from[2]]
+        want.push({ b: { kind: 'rapid', to }, from })
+        from = to
+      }
+      if (pauses && (raw.zRef?.level ?? 0) !== level) {
+        level = raw.zRef?.level ?? 0
+        if (from !== undefined) {
+          const to: Vec3 = [from[0], from[1], p.clearanceZ - level]
+          want.push({ b: { kind: 'rapid', to }, from })
+          from = to
+        }
+      }
+    }
+    if (!('to' in raw)) continue
+    const b = { ...raw, to: [raw.to[0], raw.to[1], raw.to[2] - level] as Vec3 }
     // a full circle (end = start in X and Y) is written although its end is unchanged
     const full =
       b.kind === 'arc' && from !== undefined && b.to[0] === from[0] && b.to[1] === from[1]
@@ -399,12 +450,13 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['drilling-peck-chipBreak', drillOps],
     ['profile-tabs', () => [profileOp()]],
     ['multi-tool', multiToolOps],
+    ['multi-tool-faced', facedMultiToolOps],
     ['chamfer', () => chamferOps()],
     ['chamfer-inch', () => chamferOps(true), testMachine({ programUnits: 'in' })],
     ['countersink-stepped', steppedCountersinkOps],
     [
       'multi-tool-inch-manual-spindle',
-      multiToolOps,
+      facedMultiToolOps,
       testMachine({ programUnits: 'in', spindle: { control: 'manual', maxSpeed: rpm('24000') } }),
     ],
   ]

@@ -503,6 +503,41 @@ describe('plan.get', () => {
     ])
   })
 
+  // DF69: docs/modes/z-reference.md#agent-api-compact
+  it("gives each tool run its Z reference from plan.warning.list's zRefs, in project units", () => {
+    const zRefs = [
+      {
+        setupId: 's1',
+        planOperationId: 'op1',
+        toolNumber: 1,
+        zRef: {
+          surface: 'facing1.floor',
+          label: 'Facing 1 floor',
+          level: -0.5,
+          at: [50.8, 25.4],
+          area: 6000,
+          small: false,
+          top: false,
+          chosen: false,
+          rule: 'facing',
+        },
+        candidates: [],
+      },
+    ]
+    const key = 'plan.warning.list {"planId":"plan-1"}'
+    const withZ = { ...peeks, [key]: { ...peeks[key], zRefs } }
+    const run = (unitSystem: 'mm' | 'inch') => {
+      const shaper = new ResultShaper({ ...fakeSession(withZ), unitSystem: () => unitSystem })
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      const setups = (valueOf(r) as { plan: { setups: { toolRuns: Record<string, unknown>[] }[] } })
+        .plan.setups
+      return setups[0]!.toolRuns.map((t) => t['zRef'])
+    }
+    const z = { surface: 'facing1.floor', label: 'Facing 1 floor', chosen: false }
+    expect(run('mm')).toEqual([{ ...z, level: -0.5, at: [50.8, 25.4] }, undefined])
+    expect(run('inch')).toEqual([{ ...z, level: -0.0197, at: [2, 1] }, undefined])
+  })
+
   it('detail "full" returns the record with compact quantities', () => {
     const shaper = new ResultShaper(fakeSession(peeks))
     const r = shaper.shape(

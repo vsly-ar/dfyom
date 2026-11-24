@@ -43,6 +43,7 @@ import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
 import { planThroughDepth } from './through'
+import { knownSurfaceId, planZReferences, zRefFindings, type ZRefCandidate } from './z-reference'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
 import {
   checkNoNewOrderViolation,
@@ -796,7 +797,7 @@ const operationUpdate = defineCommand({
   kind: 'document',
   name: 'plan.operation.update',
   summary:
-    'Change preset or auto mode, stickout, entered feeds-and-speeds values, their locks, or strategy parameters of a plan operation.',
+    'Change preset or auto mode, stickout, entered feeds-and-speeds values, their locks, strategy parameters, or the Z reference of the tool run a plan operation starts.',
   title: () => 'Update plan operation',
   machine: false,
   args: z.object({
@@ -835,6 +836,21 @@ const operationUpdate = defineCommand({
         'Auto mode only. true locks a field (the other recommendations follow it; pins the shown value when none is entered); false unlocks it and keeps the value',
       ),
     strategy: StrategyArgSchema.optional(),
+    zRef: z
+      .object({
+        surface: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('stock.top or <operation id>.floor'),
+        at: z.tuple([Src, Src]).optional().describe('Touch-off spot X, Y in the setup WCS'),
+      })
+      .nullable()
+      .optional()
+      .describe(
+        "Z reference of the tool run it starts (plan_get toolRuns[].zRef); surface absent = the default surface's spot moved; null = the default",
+      ),
   }),
   result: Empty,
   run(draft, args) {
@@ -959,6 +975,36 @@ const operationUpdate = defineCommand({
       issues.push(
         ...strategyIssues(kind, op.strategy, resolveStrategy(kind, op.strategy, sctx), sctx),
       )
+    }
+    if (args.zRef === null) delete op.zRef
+    else if (args.zRef !== undefined) {
+      // docs/modes/z-reference.md#agent-api-compact: an unknown surface id is refused here, the
+      // rest (eligibility, spot) is reported by the plan.zRef findings
+      const { surface, at } = args.zRef
+      if (surface !== undefined && !knownSurfaceId(plan, surface))
+        issues.push({
+          path: ['zRef', 'surface'],
+          rule: 'unknownSurface',
+          message: "no such surface: the setup's stock face (stock.top …) or <operation id>.floor",
+        })
+      let spot: [number, number] | undefined
+      if (at !== undefined) {
+        const xy = at.map((src, k) =>
+          Quantity.parse(src, fieldContext('length', units)).mapErr((e) =>
+            e.prefixIssues('zRef', 'at', k),
+          ),
+        )
+        const both = collect(xy)
+        if (both.isErr()) return Err(both.unwrapErr().withContext(where))
+        const [x, y] = both.unwrap().map((q) => q.canonical)
+        spot = [x!, y!]
+      }
+      if (surface === undefined && spot === undefined) delete op.zRef
+      else
+        op.zRef = {
+          ...(surface === undefined ? {} : { surface }),
+          ...(spot === undefined ? {} : { at: spot }),
+        }
     }
     if (issues.length > 0) return invalid(issues, where)
     if (args.locks !== undefined) {
@@ -1547,6 +1593,36 @@ const toolSuggest = defineQuery({
 const fieldsParam = (fields: readonly string[]): Record<string, string> =>
   fields.length === 0 ? {} : { fields: fields.join(',') }
 
+const ZRefCandidateSchema = z.object({
+  surface: z.string(),
+  label: z.string(),
+  level: z.number().describe('Setup-frame Z of the surface, mm (≤ 0)'),
+  at: z.tuple([z.number(), z.number()]).describe('Touch-off spot X, Y in the setup WCS, mm'),
+  area: z.number().describe('Flat patch area, mm²'),
+  small: z.boolean().describe('Room for the tool but not the touch plate'),
+  top: z.boolean().describe("The setup's up face"),
+})
+const ZRefRunSchema = z.object({
+  setupId: z.string(),
+  planOperationId: z.string().describe("The tool run's first operation (stores a choice)"),
+  toolNumber: z.number().int(),
+  zRef: ZRefCandidateSchema.extend({
+    chosen: z.boolean(),
+    rule: z.enum(['top', 'facing', 'largest', 'chosen']),
+  }).nullable(),
+  candidates: z.array(ZRefCandidateSchema),
+})
+
+const candidateDTO = (c: ZRefCandidate): z.output<typeof ZRefCandidateSchema> => ({
+  surface: c.surface,
+  label: c.label,
+  level: c.level,
+  at: [c.at[0], c.at[1]],
+  area: c.area,
+  small: c.small,
+  top: c.top,
+})
+
 const warningList = defineQuery({
   name: 'plan.warning.list',
   summary:
@@ -1557,6 +1633,9 @@ const warningList = defineQuery({
     pendingApply: z
       .boolean()
       .describe('Its inputs have changes not applied yet: the checks are outdated until Apply'),
+    zRefs: z
+      .array(ZRefRunSchema)
+      .describe('Z reference and touch-off spot per tool run (DF69); empty without geometry'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1570,6 +1649,7 @@ const warningList = defineQuery({
             ? []
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
+          ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
         ]
       : [
           {
@@ -1603,9 +1683,22 @@ const warningList = defineQuery({
         rule: 'partFits',
         params: fieldsParam(stale.rebuildBlockedFields),
       })
+    const runs = loaded.isOk() ? planZReferences(loaded.unwrap(), ctx.services.region2d) : []
     return Ok({
       warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),
       pendingApply: planPendingApply(dto.unwrap(), ctx.apply?.pending() ?? []),
+      zRefs: runs
+        .filter((r) => r.run >= 0)
+        .map((r) => ({
+          setupId: r.setupId,
+          planOperationId: r.planOperationId,
+          toolNumber: r.toolNumber,
+          zRef:
+            r.zRef === undefined
+              ? null
+              : { ...candidateDTO(r.zRef), chosen: r.zRef.chosen, rule: r.zRef.rule },
+          candidates: r.candidates.map(candidateDTO),
+        })),
     })
   },
 })

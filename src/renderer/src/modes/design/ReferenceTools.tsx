@@ -3,7 +3,9 @@
 // section at a depth with its inside corners (`kind: 'section'`), and "Create shape(s)" with
 // optional rounding of sharp inside corners (`design.shape.import { from }`). The queries run in
 // the compute worker; the rows show the last answer while a new one is read. The face and the
-// depth are per-window view state (the depth is the Shape Editor's section depth too).
+// depth are per-window view state (the depth is the Shape Editor's section depth too). The Holes
+// list (P3, `kind: 'holes'`) groups the round holes by size with their pattern and adds a group as
+// a Bolt hole or Drillings with Clones in one undo step (one gesture id for its commands).
 // Doc: docs/conventions/ui.md#reference-tools-df60, docs/modes/reference-tools.md#ui
 import { useEffect, useMemo, useState } from 'react'
 import { STOCK_FACE, faceFrame, type Direction } from '../../../../core/geometry/face'
@@ -71,6 +73,47 @@ interface FoundSection {
   readonly fit: { readonly elements: number; readonly maxDeviation: number }
   readonly more?: number
 }
+
+/** A hole group of `design.reference.find { kind: 'holes' }` (reference-commands.ts). */
+export interface FoundHoleGroup {
+  readonly count: number
+  readonly holes: readonly (readonly [number, number])[]
+  readonly size: {
+    readonly diameter: number
+    readonly top: number
+    readonly depth: number
+    readonly bottom: 'through' | 'flat' | 'cone'
+    readonly coneAngle?: number
+    readonly mouth?:
+      | { readonly type: 'countersink'; readonly diameter: number; readonly angle: number }
+      | { readonly type: 'counterbore'; readonly diameter: number; readonly depth: number }
+    readonly steps?: readonly { readonly diameter: number; readonly depth: number }[]
+  }
+  readonly pattern?:
+    | { readonly kind: 'grid'; readonly count: readonly [number, number] }
+    | { readonly kind: 'circle'; readonly count: number; readonly pitchDiameter: number }
+  readonly suggest: {
+    readonly command: string
+    readonly args: Record<string, unknown>
+    readonly also?: readonly Record<string, unknown>[]
+    readonly clones?: { readonly rows: readonly object[] }
+    readonly note?: 'belowFace'
+  }
+  readonly note?: 'noTool'
+  readonly smallestTool?: number
+}
+interface FoundHoles {
+  readonly groups: readonly FoundHoleGroup[]
+  readonly holeCount: number
+  readonly more?: number
+}
+
+let gestureCounter = 0
+const newGestureId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `holes-gesture-${++gestureCounter}`
+const mm = (v: number) => `${Math.round(v * 1000) / 1000} mm`
 
 type Answer<T> =
   | { readonly key: string; readonly ok: true; readonly value: T }
@@ -171,6 +214,9 @@ export function ReferenceTools({
   const endMill = useSmallestEndMillRadius()
   const [roundRadius, setRoundRadius] = useState<Quantity | undefined>(undefined)
   const [created, setCreated] = useState<{ n: number } | { error: AppErrorData } | null>(null)
+  const [holesAdded, setHolesAdded] = useState<
+    { n: number; bolt: boolean } | { error: AppErrorData } | null
+  >(null)
   const stock = stockSizeOf(part)
   const face = STOCK_FACE[direction]
   const box = referenceBox(ref)
@@ -204,6 +250,8 @@ export function ReferenceTools({
     depth: depthSource,
     loops,
   })
+  const holes = useFind<FoundHoles>(base, { ...args, kind: 'holes' })
+  const holeGroups = holes.answer?.ok === true ? holes.answer.value.groups : undefined
   // the fitted loops and the hovered level, drawn on the ghost by the viewport (DF60)
   const placement = referencePlacement(ref)
   const sectionKey = base === null ? null : `${base}|${depthSource}`
@@ -229,8 +277,15 @@ export function ReferenceTools({
       depth,
       loops: fitted === null ? null : fitted.filter((l) => keepLoop(l, loops)),
       hover,
+      ...(holeGroups === undefined || holeGroups.length === 0
+        ? {}
+        : {
+            holes: holeGroups.flatMap((g) =>
+              g.holes.map((c) => ({ center: c, diameter: g.size.diameter, top: g.size.top })),
+            ),
+          }),
     })
-  }, [setOverlay, ref.id, direction, depth, fitted, loops, hover])
+  }, [setOverlay, ref.id, direction, depth, fitted, loops, hover, holeGroups])
   useEffect(() => () => setOverlay(null), [setOverlay])
   const radius = roundRadius ?? (endMill !== undefined ? lengthQuantity(endMill, units) : undefined)
 
@@ -249,6 +304,46 @@ export function ReferenceTools({
     setCreated(
       r.ok ? { n: (r.value as { shapeIds: string[] }).shapeIds.length } : { error: r.error },
     )
+  }
+
+  /**
+   * Adds a hole group as suggested: one command per hole of a list, or the first hole and a Clones
+   * of it for a pattern; all with one gesture id, so the click is one undo step.
+   */
+  const addHoles = async (g: FoundHoleGroup) => {
+    const gesture = newGestureId()
+    const s = g.suggest
+    const centres = g.pattern === undefined ? g.holes : g.holes.slice(0, 1)
+    const featureIds: string[] = []
+    const operationIds: string[] = []
+    let n = 0
+    for (const c of centres)
+      for (const a of [s.args, ...(s.also ?? [])]) {
+        const r = await call(
+          s.command,
+          { partId: part.dto.id, ...a, center: [mm(c[0]), mm(c[1])] },
+          { gesture },
+        )
+        if (!r.ok) return setHolesAdded({ error: r.error })
+        const v = r.value as { featureId?: string; operationId?: string }
+        if (v.featureId !== undefined) featureIds.push(v.featureId)
+        if (v.operationId !== undefined) operationIds.push(v.operationId)
+        if (a === s.args) n++
+      }
+    if (s.clones !== undefined) {
+      const r = await call(
+        'design.clones.add',
+        {
+          partId: part.dto.id,
+          source: featureIds[0] !== undefined ? { featureId: featureIds[0] } : { operationIds },
+          rows: s.clones.rows,
+        },
+        { gesture },
+      )
+      if (!r.ok) return setHolesAdded({ error: r.error })
+      n = g.count
+    }
+    setHolesAdded({ n, bolt: s.command === 'design.hole.add' })
   }
 
   const faceName = t.faces[face] ?? face
@@ -424,6 +519,44 @@ export function ReferenceTools({
           <ErrorMessage error={created.error} message={t.createFailed} />
         )}
       </section>
+
+      <section className={styles['group']} aria-label={t.holes} aria-busy={holes.busy}>
+        <h3 className={styles['groupTitle']}>{t.holes}</h3>
+        {holes.answer === null ? (
+          <p className={styles['muted']} role="status">
+            {t.finding}
+          </p>
+        ) : !holes.answer.ok ? (
+          <ErrorMessage error={holes.answer.error} message={t.findFailed} />
+        ) : holes.answer.value.groups.length === 0 ? (
+          <p className={styles['muted']}>{t.noHoles}</p>
+        ) : (
+          <>
+            <ul className={styles['holeList']} aria-label={t.holes}>
+              {holes.answer.value.groups.map((g, i) => (
+                <HoleRow
+                  key={i}
+                  group={g}
+                  units={units}
+                  faceName={faceName}
+                  onAdd={() => void addHoles(g)}
+                />
+              ))}
+            </ul>
+            {holes.answer.value.more ? (
+              <p className={styles['muted']}>{t.holesMore(holes.answer.value.more)}</p>
+            ) : null}
+            <p className={styles['muted']}>{t.holesHint}</p>
+          </>
+        )}
+        {holesAdded === null ? null : 'n' in holesAdded ? (
+          <p className={styles['muted']} role="status">
+            {t.added(holesAdded.n, holesAdded.bolt)}
+          </p>
+        ) : (
+          <ErrorMessage error={holesAdded.error} message={t.addFailed} />
+        )}
+      </section>
     </>
   )
 }
@@ -452,6 +585,93 @@ function LoopRow({ loop: l, units }: { loop: FoundLoop; units: DesignPart['units
           <span className={styles['muted']}>{t.noInsideCorners}</span>
         ) : null}
       </span>
+    </li>
+  )
+}
+
+/** The text of a hole group: count, diameter, mouth, bottom and pattern. */
+export function holeGroupText(g: FoundHoleGroup, units: DesignPart['units']): string {
+  const L = (v: number) => displayLength(v, units)
+  const m = g.size.mouth
+  const s = g.size
+  return t.holeGroup({
+    count: g.count,
+    diameter: L(s.diameter),
+    ...(m !== undefined
+      ? {
+          mouth:
+            m.type === 'countersink'
+              ? t.countersunk(L(m.diameter), `${Math.round(m.angle)}°`)
+              : t.counterbored(L(m.diameter), L(m.depth - s.top)),
+        }
+      : s.steps !== undefined
+        ? { mouth: t.stepped(s.steps.length) }
+        : {}),
+    bottom:
+      s.bottom === 'through'
+        ? t.through
+        : s.bottom === 'cone'
+          ? t.pointed(L(s.depth - s.top), `${Math.round(s.coneAngle ?? 118)}°`)
+          : t.deep(L(s.depth - s.top)),
+    ...(g.pattern === undefined
+      ? {}
+      : {
+          pattern:
+            g.pattern.kind === 'grid'
+              ? t.grid(g.pattern.count[0], g.pattern.count[1])
+              : t.boltCircle(g.pattern.count, L(g.pattern.pitchDiameter)),
+        }),
+  })
+}
+
+function HoleRow({
+  group: g,
+  units,
+  faceName,
+  onAdd,
+}: {
+  group: FoundHoleGroup
+  units: DesignPart['units']
+  faceName: string
+  onAdd: () => void
+}) {
+  const text = holeGroupText(g, units)
+  const bolt = g.suggest.command === 'design.hole.add'
+  const below = g.suggest.note === 'belowFace'
+  const reason = below ? t.belowFace(displayLength(g.size.top, units), faceName) : undefined
+  return (
+    <li className={styles['holeRow']}>
+      <span>{text}</span>
+      <span className={styles['holeActions']}>
+        {g.note === 'noTool' && g.smallestTool !== undefined ? (
+          <span className={styles['cornerChip']} data-sharp="">
+            {t.noToolChip(displayLength(g.smallestTool, units))}
+          </span>
+        ) : null}
+        <Button
+          size="sm"
+          icon={
+            <Icon
+              name={
+                !bolt
+                  ? 'drilling'
+                  : g.size.mouth?.type === 'countersink'
+                    ? 'hole-countersink'
+                    : g.size.mouth?.type === 'counterbore'
+                      ? 'hole-counterbore'
+                      : 'hole-simple'
+              }
+            />
+          }
+          disabled={below}
+          title={reason}
+          aria-label={`${bolt ? t.addBoltHole : t.addDrilling}: ${text}`}
+          onClick={onAdd}
+        >
+          {bolt ? t.addBoltHole : t.addDrilling}
+        </Button>
+      </span>
+      {reason !== undefined ? <span className={styles['muted']}>{reason}</span> : null}
     </li>
   )
 }
