@@ -278,7 +278,7 @@ export function describeTool(t: AgentTool) {
     mcpName: t.mcpName,
     scope: t.scope,
     description: t.description,
-    inputSchema: t.inputSchema,
+    inputSchema: t.fullInputSchema,
     outputSchema: t.outputSchema,
     annotations: t.annotations,
   }

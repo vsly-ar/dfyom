@@ -27,8 +27,8 @@ export const lengthDTO = (q: Quantity): LengthDTO => q.toDTO() as LengthDTO
 
 const length = () => quantityDto('length')
 
-/** Plan ids, setup ids and plan operation ids are file-name safe like part ids. */
-export const PlanIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Plan id')
+/** Plan ids, setup ids and plan operation ids are file-name safe like part ids; no description (the primer names ids once, llm-api.md#schemas). */
+export const PlanIdSchema = z.string().regex(RECORD_ID_PATTERN)
 export const PlanRecordIdSchema = z.string().regex(RECORD_ID_PATTERN)
 
 /** docs/modes/plan-v0.1.md#plan-status */

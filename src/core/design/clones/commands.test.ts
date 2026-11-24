@@ -707,6 +707,20 @@ describe('along rows (F6)', () => {
       'input.malformed',
     )
     expect(bad.issues[0]!.path.slice(0, 2)).toEqual(['rows', 0])
+    // the dispatcher validates the full schema, unknown keys inside a row included
+    const unknown = await s.fail(
+      'design.clones.update',
+      {
+        partId: s.partId,
+        featureId: 'clones1',
+        rows: [{ kind: 'along', shapeId: 'shape1', count: 2, spcing: '5' }],
+      },
+      'input.malformed',
+    )
+    expect(unknown.issues[0]).toMatchObject({
+      path: ['rows', 0, 'spcing'],
+      rule: 'unrecognized_keys',
+    })
     await s.run('design.clones.update', {
       partId: s.partId,
       featureId: 'clones1',

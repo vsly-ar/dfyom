@@ -277,7 +277,7 @@ Added with hardening DF60 ([ADR 0021](../decisions/0021-async-queries.md), [refe
 
 ## JSON Schema for agent tools
 
-- `json-schema.ts` builds one descriptor per command/query: `{ name, description: summary, inputSchema: z.toJSONSchema(def.args, { io: 'input' }), outputSchema: z.toJSONSchema(def.result, { io: 'output' }) }`.
+- `json-schema.ts` builds one descriptor per command/query: `{ name, description: summary, inputSchema: z.toJSONSchema(def.args, { io: 'input' }), listedInputSchema, outputSchema: z.toJSONSchema(def.result, { io: 'output' }) }`. `listedInputSchema` is `inputSchema` with the definition's optional `listedArgs` (top-level arg → a short sketch, `listedAs('array', 'design.shape.add items')`) in place of those args: the `tools/list` form of an arg another tool lists in full ([llm-api.md § Schemas](llm-api.md#schemas)). The dispatcher always parses with `args`, so a sketch never changes what is accepted.
 - Field descriptions come from `.describe()` / `.meta()` on the schema; no hand-written tool schemas.
 - Arg/result schemas must be JSON-representable (no `z.date()`, functions, unrepresentable transforms); a registry test enforces it.
 

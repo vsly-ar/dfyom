@@ -14,6 +14,7 @@ import type { Draft } from 'immer'
 import { z } from 'zod'
 import { Err, fail, None, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import { listedAs } from '../commands/json-schema'
 import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource, reevaluate } from '../expression/quantity'
@@ -73,7 +74,7 @@ import { issueSummary } from '../../shared/errors/app-error'
 
 const PartArg = { partId: PartIdSchema }
 const ShapeArg = { partId: PartIdSchema, shapeId: ShapeIdSchema }
-const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
+const NameArg = z.string().min(1).max(NAME_MAX)
 const ItemsArg = z
   .array(ShapeItemArgSchema)
   .min(1)
@@ -268,6 +269,8 @@ const shapeUpdate = defineCommand({
   title: () => 'Update shape',
   machine: false,
   args: z.object({ ...ShapeArg, name: NameArg.optional(), items: ItemsArg.optional() }),
+  // listed in full on design.shape.add only (tools/list budget, llm-api.md#schemas)
+  listedArgs: { items: listedAs('array', 'design.shape.add items') },
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
     const where = 'design.shape.update'
@@ -325,6 +328,11 @@ const itemUpdate = defineCommand({
     index: z.number().int().min(0).describe('0-based item index'),
     ...ITEM_UPDATE_ARGS,
   }),
+  // a path's segments and fillets are listed in full on design.shape.add only (llm-api.md#schemas)
+  listedArgs: {
+    segments: listedAs('array', 'design.shape.add path items'),
+    fillets: listedAs('array', 'design.shape.add path items'),
+  },
   result: z.object({ warnings: Warnings }),
   run(draft, rawArgs, ctx) {
     const where = 'design.shape.item.update'

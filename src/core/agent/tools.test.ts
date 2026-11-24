@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { expectOk } from '../../shared/testing/result'
+import { parseArgs } from '../commands/args'
 import { toolDescriptor } from '../commands/json-schema'
 import { createAppScopeRegistry, createProjectRegistry } from '../commands/registry'
 import { SESSION_TOOLS } from './session'
@@ -17,8 +18,11 @@ import {
   toMcpName,
   type AgentTool,
   type JsonObject,
-  withHomogeneousTuples,
-  withoutSafeIntBounds,
+  equivalentShortForms,
+  listedAnnotations,
+  withNullableTypes,
+  withoutConstTypes,
+  withoutNoOpKeywords,
   withoutValidationOnlyKeywords,
 } from './tools'
 import { PRIMER } from './primer'
@@ -196,10 +200,8 @@ describe('agent tools', () => {
     const { app, project } = registries()
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const d = expectOk(toolDescriptor(def))
-      for (const s of [d.inputSchema, d.outputSchema]) {
-        const { $schema: _, ...plain } = withHomogeneousTuples(
-          withoutValidationOnlyKeywords(withoutSafeIntBounds(s)),
-        ) as JsonObject
+      for (const s of [d.inputSchema, d.listedInputSchema, d.outputSchema]) {
+        const { $schema: _, ...plain } = equivalentShortForms(s)
         if (JSON.stringify(plain).includes('"$ref"')) continue // recursive: kept as generated
         const compact = compactSchema(s)
         expect(expand(compact, (compact['$defs'] as JsonObject) ?? {}), def.name).toEqual(
@@ -219,5 +221,135 @@ describe('agent tools', () => {
       b: { $ref: '#/$defs/d1', description: 'second' },
       c: { $ref: '#/$defs/d1' },
     })
+  })
+
+  it('compactSchema shares a node only where the $ref is shorter (tools/list budget)', () => {
+    const s = z.object({
+      a: z.string().describe('a'),
+      b: z.string().describe('b'),
+      c: z.string(),
+      d: z.string(),
+    })
+    const compact = compactSchema(z.toJSONSchema(s, { io: 'input' }) as JsonObject)
+    expect(compact['$defs']).toBeUndefined()
+    expect(compact['properties']).toEqual({
+      a: { type: 'string', description: 'a' },
+      b: { type: 'string', description: 'b' },
+      c: { type: 'string' },
+      d: { type: 'string' },
+    })
+  })
+
+  it('writes the equivalent short forms: const without type, nullable type arrays, no allow-all', () => {
+    expect(withoutConstTypes({ type: 'string', const: 'line' })).toEqual({ const: 'line' })
+    expect(withoutConstTypes({ type: 'boolean', const: true })).toEqual({ const: true })
+    expect(withoutConstTypes({ type: 'integer', const: 2 })).toEqual({ const: 2 })
+    // a type the const does not have stays (that schema accepts nothing; keep it as generated)
+    expect(withoutConstTypes({ type: 'string', const: 2 })).toEqual({ type: 'string', const: 2 })
+
+    expect(
+      withNullableTypes({ description: 'd', anyOf: [{ type: 'string' }, { type: 'null' }] }),
+    ).toEqual({ description: 'd', type: ['string', 'null'] })
+    expect(
+      withNullableTypes({ anyOf: [{ type: 'string', enum: ['x', 'y'] }, { type: 'null' }] }),
+    ).toEqual({ type: ['string', 'null'], enum: ['x', 'y', null] })
+    // keywords of the type ignore a null, so they move along
+    expect(
+      withNullableTypes({
+        anyOf: [{ type: 'array', items: { type: 'string' }, maxItems: 4 }, { type: 'null' }],
+      }),
+    ).toEqual({ type: ['array', 'null'], items: { type: 'string' }, maxItems: 4 })
+    // keywords that constrain a null too (const, $ref, unions, …) keep the union
+    for (const branch of [
+      { type: 'string', const: 'x' },
+      { type: 'object', anyOf: [{ required: ['a'] }, { required: ['b'] }] },
+      { type: 'string', description: 'own' },
+    ]) {
+      const kept = { anyOf: [branch, { type: 'null' }] }
+      expect(withNullableTypes(kept)).toEqual(kept)
+    }
+    const clash = { maxItems: 2, anyOf: [{ type: 'array', maxItems: 4 }, { type: 'null' }] }
+    expect(withNullableTypes(clash)).toEqual(clash)
+
+    expect(
+      withoutNoOpKeywords({
+        type: 'object',
+        properties: {
+          a: { type: 'object', properties: {}, additionalProperties: {} },
+          properties: { type: 'string' },
+        },
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: { a: { type: 'object' }, properties: { type: 'string' } },
+    })
+    // the root keeps its (empty) properties
+    expect(withoutNoOpKeywords({ type: 'object', properties: {} })).toEqual({
+      type: 'object',
+      properties: {},
+    })
+  })
+
+  it('lists no idempotent or destructive hint beside readOnlyHint (meaningless per MCP)', () => {
+    expect(listedAnnotations({ readOnlyHint: true, idempotentHint: true })).toEqual({
+      readOnlyHint: true,
+    })
+    expect(listedAnnotations({ destructiveHint: false, idempotentHint: true })).toEqual({
+      destructiveHint: false,
+      idempotentHint: true,
+    })
+    const list = mcpToolList(allTools())
+    expect(list.find((t) => t.name === 'design_part_list')?.annotations).toEqual({
+      readOnlyHint: true,
+    })
+  })
+
+  it('listed sketches ("As <tool> <arg>") only shorten the listing: the full args validate', () => {
+    const { app, project } = registries()
+    const tools = allTools()
+    const sketched = [...app.commands, ...app.queries, ...project.commands, ...project.queries]
+      .filter((def) => def.listedArgs !== undefined)
+      .map((def) => def.name)
+    expect(sketched.sort()).toEqual([
+      'design.clones.preview',
+      'design.clones.update',
+      'design.shape.item.update',
+      'design.shape.update',
+      'library.machine.update',
+      'library.stock.update',
+      'library.tool.update',
+    ])
+    for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
+      if (def.listedArgs === undefined) continue
+      const t = tool(tools, def.name)
+      const defs = (t.inputSchema['$defs'] as JsonObject | undefined) ?? {}
+      const listed = (expand(t.inputSchema, defs) as JsonObject)['properties'] as Record<
+        string,
+        JsonObject
+      >
+      const full = expectOk(toolDescriptor(def)).inputSchema['properties'] as JsonObject
+      for (const key of Object.keys(def.listedArgs)) {
+        // the sketch names the tool that lists the arg in full, and it exists
+        const as = /^As ([a-z.]+[a-zA-Z.]*) /.exec(String(listed[key]?.['description']))
+        expect(as, `${def.name}.${key}`).not.toBeNull()
+        tool(tools, as![1]!)
+        expect(full[key], `${def.name}.${key}`).toBeDefined()
+        // an object the sketch accepts but the full arg refuses is refused, under that key
+        const bogus = { bogusKey: 1 }
+        const value = listed[key]?.['type'] === 'array' ? [bogus] : bogus
+        const parsed = parseArgs(def.args, { [key]: value }, def.name)
+        expect(parsed.isErr(), `${def.name}.${key}`).toBe(true)
+        expect(
+          parsed.unwrapErr().issues.some((i) => i.path[0] === key),
+          `${def.name}.${key}`,
+        ).toBe(true)
+      }
+      // dfyom://schema/{name} serves the full input schema
+      expect(t.fullInputSchema).toEqual(compactSchema(expectOk(toolDescriptor(def)).inputSchema))
+      expect(JSON.stringify(t.fullInputSchema).length).toBeGreaterThan(
+        JSON.stringify(t.inputSchema).length,
+      )
+    }
+    expect(PRIMER).toContain('As <tool> <arg>')
   })
 })

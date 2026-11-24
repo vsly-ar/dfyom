@@ -36,7 +36,17 @@ interface CommandMeta<A> {
    * `draft`). Doc: docs/architecture/apply.md#implicit-apply
    */
   readonly applyFirst?: boolean | ArgsPredicate<A>
+  /**
+   * Short `tools/list` schemas of top-level args another tool lists in full ("As
+   * design.shape.add"): only the listing shows them; the dispatcher always validates with `args`
+   * and `dfyom://schema/{name}` serves the full input schema. Each must accept every value the
+   * full arg accepts. Doc: docs/architecture/llm-api.md#schemas (listed sketches)
+   */
+  readonly listedArgs?: ListedArgs
 }
+
+/** Top-level arg name → its sketch in `tools/list` (`CommandMeta.listedArgs`). */
+export type ListedArgs = Readonly<Record<string, z.ZodType>>
 
 /** A per-args predicate, bivariant like the `run`/`title` methods (see the file comment). */
 type ArgsPredicate<A> = { check(args: A): boolean }['check']
@@ -204,6 +214,8 @@ export interface QueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
    * library queries read app data and set `false`.
    */
   readonly readsDocument?: boolean
+  /** As `CommandMeta.listedArgs`. */
+  readonly listedArgs?: ListedArgs
   /** Synchronous (the default); `AsyncQueryDef` sets `true`. */
   readonly async?: false
   /** Side-effect free; reads the latest committed snapshot. */
@@ -224,6 +236,7 @@ export interface AsyncQueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
   readonly args: S
   readonly result: z.ZodType<R>
   readonly readsDocument?: boolean
+  readonly listedArgs?: ListedArgs
   readonly async: true
   run(doc: ProjectDoc, args: z.output<S>, ctx: QueryContext): AsyncAppResult<R>
 }

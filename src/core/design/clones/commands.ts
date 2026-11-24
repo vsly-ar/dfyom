@@ -31,7 +31,6 @@ import { operationToDTO, recordOf } from '../operation'
 import { baseOf, isFrozenRecord } from '../frozen-memo'
 import { ShapeIdSchema } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
-import { parseWith } from '../../../shared/parse'
 import {
   CLONE_ROW_MAX,
   CLONE_ROWS_MAX,
@@ -83,12 +82,13 @@ const params = {
 }
 
 /**
- * `source` and `rows` as the update and preview tools show them: their full schemas are on
- * design.clones.add only and are checked in `run` (tools/list budget, llm-api.md § Implementation).
+ * `source` and `rows` as the update and preview tools list them (`listedArgs`): their full
+ * schemas are listed on design.clones.add only; both tools validate them in full (tools/list
+ * budget, llm-api.md#schemas).
  */
 const AS_ADD = {
-  source: z.looseObject({}).describe('As design.clones.add'),
-  rows: z.array(z.looseObject({})).max(CLONE_ROWS_MAX).describe('As design.clones.add'),
+  source: z.looseObject({}).describe('As design.clones.add source'),
+  rows: z.array(z.looseObject({})).max(CLONE_ROWS_MAX).describe('As design.clones.add rows'),
 }
 
 function parseRow(f: Fields, r: RowArgs, i: number): CloneRow {
@@ -255,13 +255,14 @@ const UVOut = z.tuple([z.number(), z.number()])
 const clonesPreview = defineQuery({
   name: 'design.clones.preview',
   summary: 'Clone positions, numbers and warnings of a Clones feature or a draft; changes nothing.',
-  // the draft's source and rows are checked in `run`: their full schemas are on design.clones.add
   args: z.object({
     ...PartArg,
     featureId: FeatureIdSchema.optional().describe('Absent: a draft from source and rows'),
-    source: AS_ADD.source.optional(),
-    rows: AS_ADD.rows.optional(),
+    source: params.source.optional(),
+    rows: RowsArg.optional(),
   }),
+  // the draft's source and rows are listed in full on design.clones.add only
+  listedArgs: AS_ADD,
   result: z.object({
     on: z.string(),
     instances: z.array(z.object({ n: z.number(), at: UVOut })).describe('1 = the source'),
@@ -299,13 +300,7 @@ const clonesPreview = defineQuery({
         ],
         where,
       })
-    const given = parseWith(
-      z.object({ source: ClonesSourceSchema.optional(), rows: RowsArg.optional() }),
-      { source: args.source, rows: args.rows },
-      where,
-    )
-    if (given.isErr()) return given
-    const draftArgs = given.unwrap()
+    const draftArgs = args
     const source = draftArgs.source ?? prev?.source
     if (source === undefined || (draftArgs.rows === undefined && prev === undefined))
       return fail('input.malformed', 'a draft needs source and rows', {
