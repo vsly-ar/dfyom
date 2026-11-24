@@ -15,7 +15,7 @@ import { designPart } from './design/model'
 import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
 import { PlanInspector, PlanNavigator, PlanStatus, usePlanPartScene, usePlanScene } from './plan'
-import { RunInspector, RunNavigator, useRunScene } from './run'
+import { JogHotkeys, RunInspector, RunNavigator, useRunScene } from './run'
 
 const m = shellMessages.empty
 
@@ -85,7 +85,13 @@ export function ModeDialogs({
   mode,
   doc,
 }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element | null {
-  return doc === undefined ? null : <PartSetupDialogs doc={doc} active={mode === 'design'} />
+  return (
+    <>
+      {doc === undefined ? null : <PartSetupDialogs doc={doc} active={mode === 'design'} />}
+      {/* DF88: jog hotkeys work in Run mode whichever panels are shown */}
+      {mode === 'run' ? <JogHotkeys doc={doc} /> : null}
+    </>
+  )
 }
 
 export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element {

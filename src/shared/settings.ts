@@ -14,6 +14,13 @@ import { APP_MODES } from '../core/modes'
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
 
+/**
+ * Jog hotkey styles in Run mode (DF88, docs/conventions/ui.md#jog-hotkeys): videogame (WASD,
+ * Shift/Space for Z), gSender's defaults, arrow keys, or none. Custom keys are backlog.
+ */
+export const JOG_KEY_STYLES = ['game', 'gsender', 'arrows', 'off'] as const
+export type JogKeyStyle = (typeof JOG_KEY_STYLES)[number]
+
 /** Panel layout of one panel group: panel id → size in % of the group (react-resizable-panels). */
 export const PanelLayoutSchema = z.record(z.string(), z.number().min(0).max(100))
 export type PanelLayout = z.output<typeof PanelLayoutSchema>
@@ -60,6 +67,15 @@ const fields = {
    * card (docs/conventions/ui.md#plan-start-df29). `null`: none yet. Only plan mode writes it.
    */
   lastMachine: z.string().min(1).nullable(),
+  /** Jog hotkey style in Run mode (DF88, docs/conventions/ui.md#jog-hotkeys). */
+  jogKeys: z.enum(JOG_KEY_STYLES),
+  /**
+   * Library machine ids whose real-machine Home confirmation was turned off with "Don't ask again"
+   * (DF88, docs/conventions/ui.md#jog-position-and-probing-df88); the settings dialog clears it.
+   */
+  skipHomeConfirm: z.array(z.string().min(1)).max(1000),
+  /** Jog feed (mm/min) per library machine id: the jog feed slider's last value (DF88). */
+  jogFeed: z.record(z.string().min(1), z.number().positive().finite()),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -74,6 +90,9 @@ export const AppSettingsSchema = z.object({
   autoApplyDelay: fields.autoApplyDelay.default(10),
   sidePanels: fields.sidePanels.default({}),
   lastMachine: fields.lastMachine.default(null),
+  jogKeys: fields.jogKeys.default('game'),
+  skipHomeConfirm: fields.skipHomeConfirm.default([]),
+  jogFeed: fields.jogFeed.default({}),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -84,7 +103,7 @@ export type AppSettingsPatch = Readonly<z.input<typeof AppSettingsPatchSchema>>
 
 export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 
-/** Applies a validated patch: plain fields replace, `layouts` and `sidePanels` merge by key. */
+/** Applies a validated patch: plain fields replace, `layouts`, `sidePanels` and `jogFeed` merge by key. */
 export function mergeSettings(
   current: AppSettings,
   patch: z.output<typeof AppSettingsPatchSchema>,
@@ -100,5 +119,8 @@ export function mergeSettings(
     autoApplyDelay: patch.autoApplyDelay ?? current.autoApplyDelay,
     sidePanels: { ...current.sidePanels, ...(patch.sidePanels ?? {}) },
     lastMachine: patch.lastMachine === undefined ? current.lastMachine : patch.lastMachine,
+    jogKeys: patch.jogKeys ?? current.jogKeys,
+    skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
+    jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
   }
 }

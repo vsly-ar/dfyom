@@ -181,9 +181,8 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     await expect(alarm).toBeHidden()
     await expect(cell('Machine position X')).toHaveText('-1.000')
 
-    // M3: hold to jog X−, release: the axis moved and stopped
-    await navigator.getByRole('radio', { name: 'Continuous' }).click()
-    await expect(navigator.getByText('Hold to jog; release to stop.')).toBeVisible()
+    // M3, DF88: hold to jog X− (no jog mode: a press held past the delay), release: the axis
+    // moved and stopped
     const jogX = navigator.getByRole('button', { name: 'Jog X−' })
     await jogX.hover()
     await page.mouse.down()
@@ -333,7 +332,7 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
     // contact at MPos Z −60: Z0 is 10 mm (the plate) below, retracted 2 mm above the contact
     await expect(cell('Machine position Z')).toHaveText('-58.000', { timeout: 30_000 })
     await expect(cell('Work position Z')).toHaveText(/^12\.000/)
-    await expect(navigator.getByText(/G54 .* · -70\.000 mm/)).toBeVisible()
+    await expect(inspector.getByText(/G54 .* · -70\.000 mm/)).toBeVisible()
 
     await navigator.getByRole('button', { name: 'Disconnect' }).click()
     await expect(navigator.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled()

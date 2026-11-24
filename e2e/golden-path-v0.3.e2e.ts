@@ -28,6 +28,7 @@ import {
   openPartSetup,
   openReferencePanel,
   test,
+  zeroXyz,
 } from './app.fixture'
 import { withoutAppVersion } from '../src/core/post/plan-export'
 
@@ -714,7 +715,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   const dro = inspector.getByRole('table', { name: 'Position' })
   await expect(dro.getByRole('cell', { name: 'Work position Z' })).toHaveText(/^0\.000/)
 

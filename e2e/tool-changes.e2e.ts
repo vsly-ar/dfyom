@@ -16,7 +16,7 @@
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -303,7 +303,7 @@ test('run: the later tool touches off on the faced floor, moves to its spot and 
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   const zeroZ = async () =>
     (await bridgeCall<{ workZero: number[] }>(page, 'run.status.get')).workZero[2]!
   await expect.poll(zeroZ).toBeLessThan(-40)

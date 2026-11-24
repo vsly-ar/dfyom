@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -318,7 +318,7 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   await inspector.getByRole('button', { name: 'Start run' }).click()
   const preflight = page.getByRole('dialog', { name: 'Start run?' })
   await expect(preflight.getByText('Top (1 of 2)')).toBeVisible()
@@ -378,13 +378,16 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
   await panel.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(current).toHaveAttribute('data-align-entry', 'zero')
   await expect(current.getByRole('checkbox')).toBeEnabled({ timeout: 30_000 })
-  // the stock was nudged: a new X zero (the navigator's jog 10 mm, Zero X) clears every check
+  // the stock was nudged: a new X zero (the navigator's jog 10 mm, the Position table's Set X zero) clears every check
   await navigator.getByRole('radio', { name: '10 mm' }).click()
   await navigator.getByRole('button', { name: 'Jog X+' }).click()
   // (the machine chip reads "Setup change" between the runs: a short wait for the jog to end)
   await expect(current.getByRole('checkbox')).toBeChecked()
   await page.waitForTimeout(500)
-  await navigator.getByRole('button', { name: 'Zero X', exact: true }).click()
+  await inspector
+    .getByRole('table', { name: 'Position' })
+    .getByRole('button', { name: 'Set X zero' })
+    .click()
   await expect(entries.getByRole('checkbox', { checked: true })).toHaveCount(0)
   await panel.getByRole('button', { name: 'Previous', exact: true }).click()
   await panel.getByRole('button', { name: 'Next', exact: true }).click()

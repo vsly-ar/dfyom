@@ -79,8 +79,13 @@ export const projectMessages = {
       fields: 'Fields',
       design: 'Design navigator',
       library: 'Library window',
+      runJog: 'Run: jog (connected, no run going)',
     },
     what: {
+      /** DF88 (docs/conventions/ui.md#jog-hotkeys). */
+      jog: (dir: string) => `Jog ${dir} (tap: one step, hold: until released)`,
+      stopJog: 'Stop jogging',
+      jogOff: 'Jog keys are off (Settings → Jog keys)',
       newProject: 'New project',
       openProject: 'Open project',
       save: 'Save',

@@ -219,6 +219,9 @@ describe('AppShell', () => {
         autoApplyDelay: 10,
         sidePanels: {},
         lastMachine: null,
+        jogKeys: 'game',
+        skipHomeConfirm: [],
+        jogFeed: {},
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

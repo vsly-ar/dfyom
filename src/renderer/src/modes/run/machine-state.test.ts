@@ -3,14 +3,20 @@ import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import {
   actionText,
   canResume,
+  clampJogFeed,
   formatFeed,
   formatLength,
+  formatStep,
+  fromMm,
+  jogFeedRange,
+  jogPresetOf,
+  jogStepMm,
   machineView,
   needsHoming,
   positionKnown,
   runGates,
-  stepToMm,
   stopGate,
+  toMm,
   surfaceName,
   touchOffMoves,
 } from './machine-state'
@@ -122,7 +128,29 @@ describe('formatting', () => {
     expect(formatLength(-0.0001, 'mm')).toBe('0.000')
     expect(formatLength(25.4, 'inch')).toBe('1.0000')
     expect(formatFeed(2540, 'inch')).toBe('100.0')
-    expect(stepToMm('0.1', 'inch')).toBeCloseTo(2.54)
+    expect(toMm(0.1, 'inch')).toBeCloseTo(2.54)
+  })
+})
+
+describe('jog step and feed (DF88)', () => {
+  it('finds the preset of a step in either unit system, else it is custom', () => {
+    expect(jogPresetOf(10, 'mm')).toBe(10)
+    expect(jogPresetOf(2.54, 'inch')).toBe(0.1)
+    expect(jogPresetOf(10, 'inch')).toBeUndefined()
+    expect(jogPresetOf(2.5, 'mm')).toBeUndefined()
+    expect(jogStepMm(undefined, 'mm')).toBe(10)
+    expect(jogStepMm(undefined, 'inch')).toBeCloseTo(2.54)
+    expect(formatStep(fromMm(10, 'inch'))).toBe('0.393701')
+  })
+
+  it('ranges the jog feed in 100 mm/min steps up to the machine limit', () => {
+    const r = jogFeedRange('mm', 4250)
+    expect(r).toEqual({ min: 100, max: 4200, step: 100 })
+    expect(clampJogFeed(2049, r)).toBe(2000)
+    expect(clampJogFeed(9000, r)).toBe(4200)
+    expect(clampJogFeed(0, r)).toBe(100)
+    expect(jogFeedRange('mm', undefined).max).toBe(5000)
+    expect(jogFeedRange('inch', 2540).step).toBeCloseTo(127)
   })
 })
 

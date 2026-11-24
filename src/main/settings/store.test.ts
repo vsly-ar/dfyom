@@ -41,6 +41,9 @@ describe('settings store', () => {
       autoApplyDelay: 10,
       sidePanels: {},
       lastMachine: 'machine-1',
+      jogKeys: 'game',
+      skipHomeConfirm: [],
+      jogFeed: {},
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

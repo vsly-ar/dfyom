@@ -18,7 +18,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, fitReference, launchApp, openReferencePanel, test } from './app.fixture'
+import { expect, fitReference, launchApp, openReferencePanel, test, zeroXyz } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 
@@ -413,7 +413,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   const dro = inspector.getByRole('table', { name: 'Position' })
   await expect(dro.getByRole('cell', { name: 'Work position Z' })).toHaveText(/^0\.000/)
 

@@ -125,6 +125,23 @@ export const shellMessages = {
     autoApplySeconds: (s: number) => `${s} s`,
     autoApplyHint:
       'Pending edits apply by themselves after this long without another edit, as if you pressed Apply; the button shows the countdown. Off: Enter in a field, the shortcut or the button apply.',
+    /** DF88 (docs/conventions/ui.md#jog-hotkeys). */
+    jogKeys: 'Jog keys',
+    jogKeyStyles: {
+      game: 'Videogame (WASD, Shift/Space for Z)',
+      gsender: 'gSender (Shift+arrows, Shift+Page Up/Down)',
+      arrows: "Arrow keys (/ and ' for Z)",
+      off: 'Off',
+    },
+    jogKeysCustom: 'Custom (coming later)',
+    jogKeysHint:
+      'In Run mode, while connected and no run is going: a short press jogs one step, holding jogs until released; Escape stops a jog. Not while typing in a field.',
+    homeConfirm: 'Homing confirmation',
+    homeConfirmReset: 'Ask again for every machine',
+    homeConfirmHint: (n: number) =>
+      n === 0
+        ? 'Homing a real machine asks for confirmation first.'
+        : `Not asked for ${n === 1 ? '1 machine' : `${n} machines`} (“Don’t ask again”).`,
     done: 'Done',
   },
 

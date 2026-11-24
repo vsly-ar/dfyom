@@ -262,6 +262,43 @@ export function machineOverrideLimits(
   )
 }
 
+/** What the machine puts on jogging (DF88, docs/conventions/ui.md#jog-position-and-probing-df88). */
+export interface MachineJog {
+  /** The library machine id: the key of the per-machine jog feed and homing confirmation. */
+  readonly key?: string
+  /** mm/min: the lower of the X and Y max feed rates. */
+  readonly maxFeed?: number
+  /** mm/min: the Z max feed rate. */
+  readonly maxZ?: number
+}
+
+function zMaxOf(values: unknown): number | undefined {
+  if (values === null || typeof values !== 'object') return undefined
+  return positive((values as { maxFeedRate?: { z?: unknown } }).maxFeedRate?.z, 'feedRate')
+}
+
+/**
+ * The jog limits and key of the plan's machine copy (its library machine), else of the chosen
+ * library machine (without a plan).
+ */
+export function machineJog(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): MachineJog {
+  const copy = plan === undefined ? undefined : plan.snapshots.find((x) => x.id === plan.machine)
+  const key = plan === undefined ? machineId : copy?.libraryItemId
+  const lib = machines?.find((x) => x.id === key)
+  const values = copy?.values ?? lib
+  const maxFeed = limitsOf(values)?.maxFeed ?? limitsOf(lib)?.maxFeed
+  const maxZ = zMaxOf(values) ?? zMaxOf(lib)
+  return {
+    ...(key === undefined ? {} : { key }),
+    ...(maxFeed === undefined ? {} : { maxFeed }),
+    ...(maxZ === undefined ? {} : { maxZ }),
+  }
+}
+
 /**
  * How the plan changed since the run that stopped (DF85,
  * docs/modes/run-machine.md#section-resume-m5): `changed` when what the setup's program is
