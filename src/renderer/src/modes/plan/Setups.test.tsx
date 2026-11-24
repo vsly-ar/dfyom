@@ -90,12 +90,10 @@ async function renderSetups(setup?: (s: PlanSetup, planId: string) => Promise<vo
 }
 
 /** Radix menus open from the keyboard in jsdom (as Design.test.tsx). */
-async function openMenu(
-  t: { user: { keyboard: (k: string) => Promise<void> } },
-  trigger: HTMLElement,
-) {
-  trigger.focus()
-  await t.user.keyboard('{Enter}')
+/** Opens a row's context menu from the keyboard (Shift+F10 on the focused row, DF67). */
+async function openMenu(t: { user: { keyboard: (k: string) => Promise<void> } }, row: HTMLElement) {
+  row.focus()
+  await t.user.keyboard('{Shift>}{F10}{/Shift}')
 }
 
 describe('Setup panel', () => {
@@ -131,7 +129,7 @@ describe('Setup panel', () => {
     const [bottom, top] = t.plan().setups
     // the row's only action button is its menu: nothing overlays the name or the subtitle
     expect(within(t.nav()).queryByRole('button', { name: /^Move setup/ })).toBeNull()
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Bottom' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Bottom/ }))
     expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -195,7 +193,7 @@ describe('Setup panel', () => {
     await expectNoAxeViolations(t.nav())
   })
 
-  it('moves an operation from its menu, the row’s only action button', async () => {
+  it('moves an operation from its context menu: right-click or Shift+F10 (DF67)', async () => {
     const t = await renderSetups()
     const top = t.plan().setups[1]!
     const [facing, drilling1, drilling34] = top.operations as [
@@ -205,7 +203,9 @@ describe('Setup panel', () => {
     ]
     // nothing overlays the name or the status icons: no separate move buttons
     expect(within(t.nav()).queryByRole('button', { name: /^Move / })).toBeNull()
-    const triggers = () => within(t.opsOf('Top')).getAllByRole('button', { name: /^Actions for / })
+    // no action button on the row: its menu is the context menu (DF67)
+    expect(within(t.nav()).queryByRole('button', { name: /^Actions for / })).toBeNull()
+    const triggers = () => [...t.opsOf('Top').querySelectorAll<HTMLElement>(':scope > li > button')]
     // the first operation of Top cannot go up (Bottom faces another way)
     await openMenu(t, triggers()[0]!)
     expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
@@ -213,8 +213,8 @@ describe('Setup panel', () => {
       'true',
     )
     await t.user.keyboard('{Escape}')
-    // Drilling 1 down past Drilling 3, Drilling 4
-    await openMenu(t, triggers()[1]!)
+    // Drilling 1 down past Drilling 3, Drilling 4, from a right-click
+    await t.user.pointer({ keys: '[MouseRight]', target: triggers()[1]! })
     await t.user.click(await screen.findByRole('menuitem', { name: /^Move down/ }))
     await waitFor(() =>
       expect(
@@ -236,7 +236,7 @@ describe('Setup panel', () => {
     const last = top.operations.at(-1)!
     const lastName = within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!
     // the last operation of Top into a new setup right after it
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Profile/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!)
     expect(screen.queryByRole('menuitem', { name: 'Move to Bottom' })).toBeNull()
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     await waitFor(() =>
@@ -258,23 +258,23 @@ describe('Setup panel', () => {
       toIndex: top.operations.length - 1,
     })
     // split again, then merge from the setup's menu (Bottom offers no merge)
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Profile/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!)
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     await waitFor(() => expect(t.plan().setups).toHaveLength(3))
     const top2 = t.plan().setups[2]!
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Bottom' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Bottom/ }))
     expect(
       await screen.findByRole('menuitem', { name: 'No other setup of this face to merge with' }),
     ).toHaveAttribute('aria-disabled', 'true')
     await t.user.keyboard('{Escape}')
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Top' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Top(?! 2)/ }))
     await t.user.click(await screen.findByRole('menuitem', { name: 'Merge with Top 2' }))
     await waitFor(() => expect(t.plan().setups.map((s) => s.name)).toEqual(['Bottom', 'Top']))
     expect(t.callsOf('plan.setup.merge')).toEqual([
       { planId: t.planId, setupIds: [top.id, top2.id] },
     ])
     // a split that would break the machining order is refused, with the reason
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Facing/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Facing/ })[0]!)
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     expect(await within(t.nav()).findByText('The change was not applied.')).toBeInTheDocument()
     expect(t.plan().setups).toHaveLength(2)

@@ -2,7 +2,8 @@
 // reference inspector): shown in the right sidebar while the toolbar's "Reference" toggle is
 // pressed. Import / replace / remove the STL, the visibility toggle, "See through stock", the
 // placed size, source unit, scale with its anchor (a scale change keeps the anchor point),
-// rotation, position and the warnings; "Fit to stock…" swaps the body for Fit mode (scale to fit,
+// rotation, position, the Levels and Section rows (DF60, ReferenceTools.tsx) and the warnings;
+// "Fit to stock…" swaps the body for Fit mode (scale to fit,
 // margin, anchor, height, live ghost preview, Apply / Cancel). Every edit is one
 // `design.reference.update` (one undo step); visibility, see-through and the preview are per
 // window view state, never commands.
@@ -46,6 +47,7 @@ import {
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
 import { placeErrors, type FieldError } from './OperationFields'
+import { ReferenceTools } from './ReferenceTools'
 import {
   fitPreview,
   lengthSource,
@@ -475,6 +477,8 @@ function ReferenceBody({
               />
             ))}
           </section>
+
+          <ReferenceTools part={part} reference={ref} />
 
           <section aria-label={t.warnings} className={styles['warnings']}>
             <h3 className={styles['groupTitle']}>{t.warnings}</h3>

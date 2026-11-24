@@ -253,7 +253,7 @@ export function createFakeBridge(
       const d = project?.d ?? app?.d
       if (d === undefined) return NO_PROJECT
       // queries first (as the session routes them); an unknown query is a command
-      const q = d.query(name, args ?? {}, WINDOW_SOURCE)
+      const q = await d.queryAsync(name, args ?? {}, WINDOW_SOURCE)
       if (q.isOk() || q.unwrapErr().code !== 'command.unknown') return toReply(Promise.resolve(q))
       return toReply(
         d.dispatch(name, args ?? {}, WINDOW_SOURCE, gesture === undefined ? {} : { gesture }),

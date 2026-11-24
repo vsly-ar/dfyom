@@ -55,6 +55,11 @@ export interface PlanState {
   /** Plan operations whose toolpath failed in the last generation, with the error. */
   readonly failures: Readonly<Record<string, AppErrorData>>
   readonly exporting: boolean
+  /**
+   * A navigator row's error or warning count was clicked (DF67): the plan operation whose
+   * inspector focuses its Checks block, once (`findingsShown` clears it).
+   */
+  readonly findingsRequest: string | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -62,6 +67,10 @@ export interface PlanState {
     | undefined
   choose(planId: string | undefined): void
   remember(selection: string): void
+  /** Asks the plan operation's inspector to focus its findings (DF67). */
+  revealFindings(planOperationId: string): void
+  /** The inspector focused them. */
+  findingsShown(): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
@@ -105,10 +114,13 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     generateError: undefined,
     failures: {},
     exporting: false,
+    findingsRequest: undefined,
     exported: undefined,
     choose: (planId) =>
       set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
     remember: (lastSelection) => set({ lastSelection }),
+    revealFindings: (findingsRequest) => set({ findingsRequest }),
+    findingsShown: () => set({ findingsRequest: undefined }),
     want(next, planId) {
       const t = `${next}:${round}`
       if (t === tag) return

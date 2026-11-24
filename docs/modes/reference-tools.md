@@ -1,6 +1,6 @@
 # Reference tools: section, levels, holes, compare and fit for a reference model
 
-Status: draft (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24: all recommendations taken; P0 consolidation pending) · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Earlier drafts this builds on: [reference-query.md](reference-query.md) (levels, section, holes) and [deviation.md](deviation.md) (compare), both v0.4 follow-up, awaiting [Q41–Q44](../plans/v0.4-llm-first.md#questions-for-the-user) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented** ([§ Implementation (P1)](#implementation-p1)), P2–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
 
 ## Problem
 
@@ -35,41 +35,45 @@ Four tools, each for the UI and agents through one command layer ([commands.md](
 
 The [reference-only rule](reference-model.md#rule-reference-only) stands for all four: results are read-outs; a shape, depth or hole taken from them is an ordinary literal that never follows the mesh, and no check reads the reference.
 
-## Decisions (proposed)
+## Decisions
 
-| Id   | Decision                                                                                                                                                                                                                                                                                                          |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| RT-A | Adopt [reference-query.md](reference-query.md) RQ-A–RQ-E as the base: one query `design.reference.find` with `kind` (`levels`, `section`, `holes`), section → shape through `design.shape.import { from }`, results in the face frame of a stock face, depths positive into the stock. This doc only adds deltas. |
-| RT-B | A face may be named by a **setup** (`{ setupId }` = that setup's direction face); coordinates stay in the face frame unless `frame: 'setup'` asks for the setup's WCS ([§ Faces and frames](#faces-and-frames), Q73).                                                                                             |
-| RT-C | Fitted sections report **corner radii**: per loop the smallest fitted inside radius, the sharp inside corners with their positions, and the max deviation; the shapes made from them carry real arcs, so `smallestInsideRadius` is the fitted value (Q74).                                                        |
-| RT-D | `levels` returns both sides of the axis in one call by default (floors from the face and from the opposite face), each level with its **visible area** from each side (Q75).                                                                                                                                      |
-| RT-E | `holes` results carry a **suggestion**: the exact args of `design.hole.add` (Bolt hole, when the mouth is a counterbore or countersink or a fastener matches) or `design.drilling.add`, plus a Clones row when equal holes form a grid or circle. Nothing is added by itself (Q76).                               |
-| RT-F | Compare of the **design** uses 3D booleans on the existing `SolidPort` when the reference mesh is closed (missing = reference − part, extra = part − reference, split into pieces), height maps when it is open; [deviation.md](deviation.md)'s height-map method stays for the simulated cut (Q77).              |
-| RT-G | Agent results are **summaries by default** (counts, bounds, radii, worst regions); geometry only through `design.shape.import { from }` or the reserved `detail: "full"` arg ([llm-api.md § Result size](../architecture/llm-api.md#result-size)).                                                                |
-| RT-H | Everything that reads the mesh runs in the compute worker on the mesh it keeps per asset (as `reference.section` does), so the queries are **async queries** ([Q42](../plans/v0.4-llm-first.md#questions-for-the-user) option A; Q72).                                                                            |
+Decided by the user on 2026-11-24 (Q70–Q80, every recommendation). RT-A takes over reference-query.md's RQ-A–RQ-E.
+
+| Id   | Decision                                                                                                                                                                                                                                                                                                                                                              |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RT-A | One query `design.reference.find` with a `kind` union (`levels`, `section`; `holes` with P3): one MCP tool instead of three. Section → shape is `design.shape.import { from }` beside the file path (the same command and import report, no new tool). Results are in the face frame of a stock face, depths positive into the stock, lengths in mm rounded to 0.001. |
+| RT-B | (P2) A face may be named by a **setup** (`{ setupId }` = that setup's direction face); coordinates stay in the face frame unless `frame: 'setup'` asks for the setup's WCS ([§ Faces and frames](#faces-and-frames), Q73).                                                                                                                                            |
+| RT-C | Fitted sections report **corner radii**: per loop the smallest fitted inside radius, the sharp inside corners with their positions, and the max deviation; the shapes made from them carry real arcs, so `smallestInsideRadius` is the fitted value (Q74).                                                                                                            |
+| RT-D | `levels` returns both sides of the axis in one call by default (floors from the face and from the opposite face), each level with its **visible area** from each side (Q75).                                                                                                                                                                                          |
+| RT-E | `holes` results carry a **suggestion**: the exact args of `design.hole.add` (Bolt hole, when the mouth is a counterbore or countersink or a fastener matches) or `design.drilling.add`, plus a Clones row when equal holes form a grid or circle. Nothing is added by itself (Q76).                                                                                   |
+| RT-F | Compare of the **design** uses 3D booleans on the existing `SolidPort` when the reference mesh is closed (missing = reference − part, extra = part − reference, split into pieces), height maps when it is open; [deviation.md](deviation.md)'s height-map method stays for the simulated cut (Q77).                                                                  |
+| RT-G | Agent results are **summaries by default** (counts, bounds, radii, worst regions); geometry only through `design.shape.import { from }` or the reserved `detail: "full"` arg ([llm-api.md § Result size](../architecture/llm-api.md#result-size)).                                                                                                                    |
+| RT-H | Everything that reads the mesh runs in the compute worker on the mesh it keeps per asset (as `reference.section` does), so the queries are **async queries** (Q72, [ADR 0021](../decisions/0021-async-queries.md)): one call that resolves when the worker answers, not a job.                                                                                        |
 
 ## Faces and frames
 
-- `face` is a stock face target (`stock.top`, `stock.bottom`, `stock.left`, …; default `stock.top`), as in [RQ-C](reference-query.md#decisions), or `{ setupId }` of the part's plan: the face of that setup's direction ([plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions)). Operation surfaces are refused (rule `stockFaceOnly`).
-- Results are in that face's [face frame](design-v0.2.md#face-frame) (what `design.*.add` takes, so no conversion). With `frame: 'setup'` (only with `{ setupId }`) point results are also given in the setup's WCS (`setupFrame(direction, rotation, stock)` in `src/core/toolpath/wcs.ts`: rotation and work zero applied) under `wcs: [x, y]`, for reading against a program. Shapes are always made in the face frame (shapes live on faces, not setups).
+- `face` is a stock face target (`stock.top`, `stock.bottom`, `stock.side[0]`–`stock.side[3]`; default `stock.top`), or (P2) `{ setupId }` of the part's plan: the face of that setup's direction ([plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions)). Operation surfaces are refused (rule `stockFaceOnly`).
+- The **face frame** puts w = 0 at the stock face and the stock below it (`faceFrame(direction, stock)`; the section plane is w = −depth). Results are in that face's [face frame](design-v0.2.md#face-frame) (what `design.*.add` takes, so no conversion). With `frame: 'setup'` (only with `{ setupId }`) point results are also given in the setup's WCS (`setupFrame(direction, rotation, stock)` in `src/core/toolpath/wcs.ts`: rotation and work zero applied) under `wcs: [x, y]`, for reading against a program. Shapes are always made in the face frame (shapes live on faces, not setups).
 - Depths are from the stock face at the stock level (0 = the face, positive into the stock). After a [facing or an earlier setup](plan-v0.2.md#material-removed-by-earlier-setups) the stock face is still the datum: the query reads the reference, not the remaining stock.
 
 ## 1. Section and levels
 
 ### Levels
 
-`design.reference.find { kind: 'levels', face?, sides?: 'both' | 'face', minArea?: 1 mm², limit?: 32 }` – as [reference-query.md § levels](reference-query.md#levels-depth-levels), with:
+`design.reference.find { partId, referenceId?, face?, kind: 'levels', sides?: 'both' | 'face', minArea?: 1 (mm²), limit?: 32 }`:
+
+- The mesh's triangles whose normal lies within 0.5° of the face's axis (±n), grouped into **levels** by height; each level's `depth` is below the face at the stock level (0 = the stock face; negative above it, when the reference sticks out), `area` in mm², `bounds` in the face frame. Levels under `minArea` are dropped; at most `limit` (largest areas win, `more: n` when cut), sorted by depth.
 
 - **Both sides by default** (`sides: 'both'`): one pass over the triangles gives the levels facing the face (floors machinable from it) and those facing away (floors machinable from the opposite face). Result `{ face, opposite, levels: [{ depth, facing: 'face' | 'opposite', area, visibleArea, bounds }], more? }`; `depth` always from `face`, and for `opposite` levels also `depthFromOpposite`.
 - **`visibleArea`**: the part of the level seen from its side (a ray from the level towards that stock face meets no triangle), sampled on a 0.25 mm grid. A level with `visibleArea` 0 is an undercut for 2.5D work; the UI greys it.
-- Levels closer than 0.005 mm join (as RQ); the flat test uses the triangles' normals within 0.5° of the axis.
+- Levels closer than 0.005 mm join; the flat test uses the triangles' normals within 0.5° of the axis.
 - Size: ≤ 32 levels ≈ 2.5 KB.
 
 Black-box case: one call from `stock.top` returns the rim (0), the cavity floor (56.33 unscaled), and from the opposite side the part bottom and the two bottom steps (1.77, 4.19 from the bottom), which took the agent a histogram script.
 
 ### Section
 
-`design.reference.find { kind: 'section', face?, depth, tolerance?: 0.01 mm, cornerAngle?: 15°, loops?: 'all' | 'outer' | 'holes' }` – as [reference-query.md § section](reference-query.md#section-a-cut-at-a-depth) (chaining, region orientation by nesting, fitting to lines and arcs, circles detected), with the result **summarised** (RT-G):
+`design.reference.find { partId, referenceId?, face?, kind: 'section', depth, tolerance?: 0.01 (mm), cornerAngle?: 15 (deg), loops?: 'all' | 'outer' | 'holes' }` – `depth` is a length as written (`"12.5"`, `"20 mm"`); `tolerance`, `cornerAngle` and `minArea` are plain numbers in mm, degrees and mm² (read-outs, not document values). The mesh is cut by the plane at `depth`, the segments chained into loops, oriented by nesting (outer loops counter-clockwise, holes clockwise) and fitted to lines and arcs ([§ Fitting](#fitting)); the result is **summarised** (RT-G):
 
 ```
 { face, depth, tolerance,
@@ -78,34 +82,52 @@ Black-box case: one call from `stock.top` returns the rim (0), the cavity floor 
   fit: { elements, maxDeviation } }
 ```
 
-- `corners.minInsideRadius`: the smallest radius of a fitted arc at a concave turn of the loop (the region's inside corners, where a tool must fit; [glossary: inside corner radius](../glossary.md)); `sharp`: the concave corners kept as corners (the mesh turns by more than `cornerAngle` there), at most 8 positions per loop plus `sharpCount`. A loop with sharp inside corners will need a fillet or a smaller tool; this is the number the black-box agent never had.
-- `detail: "full"` adds each loop's shape `item` (size guard 5000 elements, as RQ).
+- `circle`: when every point of the loop lies within `tolerance` of one circle (a hole or a boss).
+- `corners.minInsideRadius`: the smallest radius of a fitted arc at a concave turn of the material (the region's inside corners, where a tool must fit; [glossary: inside corner radius](../glossary.md)); `sharp`: the concave corners kept as corners (the mesh turns by more than `cornerAngle` there), at most 8 positions per loop plus `sharpCount`. A loop with sharp inside corners will need a fillet or a smaller tool; this is the number the black-box agent never had.
+- `detail: "full"` (reserved, not in P1) would add each loop's shape `item`; geometry goes into shapes through `from`. Size guard: at most 5000 elements in a section → shape, else `input.malformed`, rule `sectionLimit`, with a hint to raise `tolerance` or narrow `loops`.
 - A plane that misses the mesh gives `loops: []` and a note; an open mesh may give `open: true` loops, which section → shape skips with a note.
 
 ### Section to shape
 
-`design.shape.import { partId, from: { referenceId?, face?, depth, tolerance?, loops?, roundInside? }, name?, split? }` – as [reference-query.md § Section to shape](reference-query.md#section-to-shape) (import report, `placeAt`, names "Section 12.5 mm"), plus:
+`design.shape.import { partId, from: { referenceId?, face?, depth, tolerance?, loops?, roundInside? }, name?, split? }` – `from` and `path` are exclusive (rule `pathOrFrom`). The section is computed and fitted as above, then made into shapes as an SVG import's are ([design-v0.3.md § SVG import](design-v0.3.md#svg-import)): `split: 'file'` (the default for a section) makes one shape with its holes, `split: 'loop'` one shape per outer loop with its holes; names default to "Section 12.5 mm" (+ " 2", …); a loop that is a circle becomes a `circle` item, any other loop a closed `path` of lines and arcs. One undo step; a plane that misses the mesh is refused (rule `emptySection`), open loops are skipped and counted (`skippedOpen`).
 
-- **`roundInside`** (a length, optional, Q74): every sharp inside corner gets a tangent fillet of that radius (2D offset in and out by the radius on the region, `Region2dPort.offset`), so the shape is toolable at once; the import report lists how many corners were rounded and the largest material change (≤ the radius × (√2 − 1) at a 90° corner). Default off: the section is what the mesh is.
-- The report adds the per-shape `minInsideRadius` and `sharpCount`, so the agent knows before adding the pocket whether a tool will fit (the existing [tool-fit check](../architecture/geometry.md) then names the tool).
+- The shapes are in the face frame, so a pocket or profile on that face with the `named` shape at anchor `min`/`min` and `center` at the shape's own min corner lands where the reference is; the result returns that placement per shape (`placeAt: { center, anchor }`), so the agent does not compute it.
+
+- **`roundInside`** (a length, optional, Q74): every sharp inside corner gets a tangent fillet of that radius (2D offset in and out by the radius on the region, `Region2dPort.offset`), so the shape is toolable at once: a material shape is closed (offset −r, then +r), a cavity's shape opened (+r, then −r). The result's `section.rounded` gives how many corners were rounded and the largest material change (`maxChange`, the distance from a sharp corner to the new boundary: (√2 − 1) × r at a 90° corner). Default off: the section is what the mesh is.
+- The result's `section.shapes` gives per shape `minInsideRadius` (pocket sense: the same reading as `design.shape.get`'s `smallestInsideRadius`) and `sharpCount`, so the agent knows before adding the pocket whether a tool will fit (the existing [tool-fit check](../architecture/geometry.md) then names the tool).
 - Shapes are made at the depth's **section of the placed reference** (scale and rotation applied), so nothing is scaled by hand.
 
 ### Fitting
 
 - **Pipeline:** `meshSection` segments → chain into loops (ends welded within 1e-4 mm) → orient and nest (`Region2dPort.normalise`) → split at corners (turn > `cornerAngle`) → each run fitted to lines and tangent arcs within `tolerance` → circle test (every point within `tolerance` of one circle) → shape items.
-- **Fitter:** the test-only `fitLoop` (corners, lines, G1 cubic chains) feeding the existing biarc fitter `fitCurve` already reproduces the enclosure sections within 0.05 mm (the SVG fixture). Phase 1 promotes it to `src/core/geometry/2d/fit-polyline.ts` and measures it against [spike S8](../plans/v0.4-llm-first.md)'s targets (≤ 300 elements per enclosure loop at 0.01 mm, ≤ 0.02 mm from the section, no element under 0.05 mm); fitting arcs to the points directly (least-squares arc runs) replaces it only if S8 shows the cubic detour misses those targets.
+- **Fitter (S8 outcome):** direct G1 **biarcs on the section's vertices** (`fitPolyline` in `src/core/geometry/2d/fit-polyline.ts`) replaced the planned detour through the test-only `fitLoop` (cubic chains) and `fitCurve`: the vertices already lie on the surface, so tangents are estimated from them and each span between corners is covered by biarcs, split until every vertex is within `tolerance`. Two refinements make faceted CAD shapes come out exact: a biarc half that turns less than 1° becomes a line when the points still fit, and a vertex next to a chord at least 3 × longer than its other chord takes that long chord's direction (a straight side meeting a fillet), so a faceted r 4 rounded rectangle fits to four lines and four r 4 arcs.
+- **S8 measured** on the full enclosure body (`enclosure-wood-full.stl`, 77 112 triangles, `stock.top` frame without scale, tolerance 0.01 mm): every loop within 0.0100 mm; chaining + fitting 6–12 ms per section (38 ms at z 2 with the four foot holes).
+
+  | Height          | Outline elements  | Cavity elements | Elements < 0.05 mm |
+  | --------------- | ----------------- | --------------- | ------------------ |
+  | z 20 (mid-wall) | 78                | 61              | 0                  |
+  | z 50            | 192               | 63              | 3                  |
+  | z 2             | 237 (+ 4 circles) | –               | 2                  |
+  | z 40            | 360               | 315             | 57                 |
+  | z 5             | 384               | 289             | 92                 |
+  | z 59            | 510               | –               | 63                 |
+
+  The ≤ 300 elements target holds mid-wall and at plain heights; heights that cut through slots, ribs and the lid lip exceed it, and there the "no element under 0.05 mm" target is missed (shortest 0.001 mm), since short facets between nearly tangent runs survive as their own elements. Accepted for P1 (the shapes are correct within the tolerance and `sectionLimit` still guards size); merging slivers into their neighbours is a follow-up ([§ Not yet](#not-yet)).
+
 - **Radii from facets:** an STL fillet of radius r is a fan of chords; the fitted arc's radius is within `tolerance` of r when the chord count is ≥ 3, so `minInsideRadius` is meaningful. A 90° corner exported sharp stays a corner (reported `sharp`), never a tiny arc.
 
 ### UI
 
-In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8) (a ui.md amendment specifies the visuals; existing tokens only):
+In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8), visuals in [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) (existing tokens only). P1 ships the rows below except the parts marked later:
 
-- **Levels** list: two groups "From top" / "From bottom" (the face and its opposite; a face picker for side faces), each row depth, area, visible area; an undercut row greyed. Hovering a row highlights the level's faces on the ghost; choosing one sets the section depth.
-- **Section**: face picker, depth field (quantity; `stock.top.z - 10` style formulas as in placement), tolerance; the fitted loops draw over the ghost and in the Shape Editor backdrop (replacing today's raw segments), sharp inside corners marked with the warning token and their radius as a chip ("r 0", "r 3.98"). "Create shape" (one shape, holes kept) and "Create shapes" (one per outer loop) send `design.shape.import { from }`; "Round sharp inside corners to …" offers the smallest library end mill radius as its default.
+- **Levels** list: two groups "From top" / "From bottom" (the face and its opposite; a face picker for side faces), each row depth, area, visible area; an undercut row greyed. Choosing one sets the section depth just inside the level (0.01 mm past it, so the cut has the floor's outline, not the face itself). Hovering a row to highlight the level's faces on the ghost: later.
+- **Section**: face picker, depth field (quantity; `stock.top.z - 10` style formulas as in placement), the loops filter (the tolerance stays at its 0.01 mm default; a field for it later); the loops listed with their size and inside corners as chips (sharp ones with the warning token) ("r 0", "r 3.98"). "Create shape" (one shape, holes kept) and "Create shapes" (one per outer loop) send `design.shape.import { from }`; "Round sharp inside corners to …" offers the smallest library end mill radius as its default. Drawing the fitted loops over the ghost and in the Shape Editor backdrop (instead of the raw segments): later.
 
 ## 2. Features (holes)
 
-`design.reference.find { kind: 'holes', face?, maxDiameter?: 50 mm, limit?: 64 }` – detection as [reference-query.md § holes](reference-query.md#holes-circular-holes-along-the-faces-axis) (circle slices between levels, stacked by centre; `bottom` `through` / `flat` / `cone`; `mouth` countersink or counterbore; holes along the face normal only), with:
+`design.reference.find { kind: 'holes', face?, maxDiameter?: 50 mm, limit?: 64 }` (P3):
+
+- **Detection:** a section at the middle of every gap between consecutive levels (and just under the face); a `hole` loop that is a circle (within 0.02 mm) is a hole slice; slices whose centres agree within 0.05 mm stack into one hole: `{ center: [u, v], diameter, depth, bottom, mouth?, steps }` with `bottom` `through` (it reaches the opposite stock face), `flat` or `cone` (`coneAngle` from the bottom's triangles), `mouth` `{ type: 'countersink', diameter, angle }` or `{ type: 'counterbore', diameter, depth }` when the top slices widen, `steps` the diameter per depth band otherwise. Only holes whose axis is the face normal (the others show from the face they open on); circular bosses (circle loops with role `outer`) are not holes.
 
 - **Grouping:** holes with equal size and mouth (within 0.02 mm) are one group: `{ count, holes: [[u, v], …], size: { diameter, depth, bottom, mouth? }, pattern? }`. `pattern` is `{ kind: 'grid', origin, pitch: [du, dv], count: [nu, nv] }` or `{ kind: 'circle', center, pitchDiameter, count, startAngle }` when every centre fits within 0.02 mm, else absent (a list).
 - **Suggestion per group** (`suggest`), never applied by itself:
@@ -152,56 +174,89 @@ In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8) 
 
 DF5's fit already does what the agent needed (`fit: { scaleTo, margin, anchor, z }`, [§ Fit to stock](reference-model.md#fit-to-stock)); the manual work in the test was rescaling its own slices, which [section → shape](#section-to-shape) removes since it reads the placed reference. Left to add:
 
-- **Result fields:** `design.reference.import` and `.update` return `scale` (as written), `placed` (the box in the part frame) and `facingDepth`, as `list` does, so a fit needs no follow-up `list` (the test made two).
-- **Small-feature check after a scale change** (phase 3, needs `holes`): the update result's `warnings` gain `reference.featureBelowTool` (info) per hole group the new scale puts below the library's smallest fitting tool, and the sections' sharp-corner count is not repeated here (it belongs to section → shape).
+- **Result fields** (implemented in P1): `design.reference.import` and `.update` return `scale` (as written), `placed` (the box in the part frame) and `facingDepth`, as `list` does, so a fit needs no follow-up `list` (the test made two).
+- **Small-feature check after a scale change** (P3, needs `holes`; not in P1): the update result's `warnings` gain `reference.featureBelowTool` (info) per hole group the new scale puts below the library's smallest fitting tool, and the sections' sharp-corner count is not repeated here (it belongs to section → shape).
 - **Not proposed:** automatic orientation for the best scale (orientation is design intent: an enclosure's cavity faces up whatever fits best) and non-uniform scale ([reference-model.md § Scope](reference-model.md#scope-v02) keeps it later).
 
 ## Core and process split
 
 All analysis is headless core (`src/core`, no Electron, DOM or Node-only imports); the worker hosts it; the renderer only draws.
 
-| Module (proposed)                                  | Contents                                                                                                        | Uses                                                      |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `src/core/design/mesh-section.ts` (extended)       | chaining segments into loops, `open` chains                                                                     | existing `meshSection`                                    |
-| `src/core/geometry/2d/fit-polyline.ts`             | corners, runs, lines/arcs within a tolerance, circle test, corner radii (promoted from `fitLoop`)               | `import/svg/fit.ts` (`fitCurve`, `biarc`), `Region2dPort` |
-| `src/core/design/mesh-levels.ts`                   | flat-triangle grouping by height, visible area (ray grid)                                                       | –                                                         |
-| `src/core/design/mesh-holes.ts`                    | circle slices, stacking, bottom and mouth, grouping and patterns, suggestions (pure; fastener table lookup)     | levels, section, `design/fastener`                        |
-| `src/core/design/mesh-distance.ts`                 | BVH, closest point, signed distance per vertex                                                                  | –                                                         |
-| `src/core/design/reference-compare.ts`             | boolean method, pieces, attribution; height-map fallback                                                        | `SolidPort`, surface-labelled part mesh, `mesh-distance`  |
-| `src/core/workers/tasks.ts`                        | tasks `reference.levels`, `reference.section` (gains loops and fitting), `reference.holes`, `reference.compare` | the cached mesh per asset                                 |
-| `src/core/design/reference-commands.ts`            | `design.reference.find` (async query), `design.reference.compare` (job), `from` on `design.shape.import`        | command layer                                             |
-| `src/renderer/src/modes/design/` (Reference panel) | levels, section, holes, compare UI; overlay geometry in the viewport                                            | –                                                         |
+| Module                                             | Contents                                                                                                           | Phase |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----- |
+| `src/core/design/mesh-section.ts` (extended)       | `sectionChains`: segments chained into loops (ends welded within 1e-4 mm), `open` chains                           | P1    |
+| `src/core/geometry/2d/fit-polyline.ts`             | corners, G1 biarcs on the vertices within a tolerance, line snapping ([§ Fitting](#fitting))                       | P1    |
+| `src/core/design/reference-section.ts`             | `fitSection`: orientation by nesting, circle test, concave corners and radii per loop                              | P1    |
+| `src/core/design/mesh-levels.ts`                   | flat-triangle grouping by height, visible area (envelopes on a 0.25 mm grid)                                       | P1    |
+| `src/core/design/reference-find.ts`                | target reference, stock face, the face-frame matrix, the worker calls behind `find` and `from`                     | P1    |
+| `src/core/design/section-shapes.ts`                | fitted loops → shape items, `split`, `roundInside` (offset in and out on `Region2dPort`)                           | P1    |
+| `src/core/workers/tasks.ts`                        | `reference.levels` (new), `reference.section` (gains `fit` and loops); both on the mesh the worker keeps per asset | P1    |
+| `src/core/design/reference-commands.ts`            | `design.reference.find` (async query); `scale`, `placed`, `facingDepth` on import and update                       | P1    |
+| `src/core/design/shape-commands.ts`                | `from` on `design.shape.import`                                                                                    | P1    |
+| `src/renderer/src/modes/design/ReferenceTools.tsx` | the Levels and Section rows of the Reference panel                                                                 | P1    |
+| `src/core/design/mesh-holes.ts`                    | circle slices, stacking, bottom and mouth, grouping and patterns, suggestions (pure; fastener table lookup)        | P3    |
+| `src/core/design/mesh-distance.ts`                 | BVH, closest point, signed distance per vertex                                                                     | P4    |
+| `src/core/design/reference-compare.ts`             | boolean method, pieces, attribution; height-map fallback                                                           | P4    |
 
 `reference.compare` runs on the geometry lane with the part's evaluation (the worker that holds the evaluated solid), so the part mesh is not copied; the reference mesh is read there once per asset as `reference.section` does.
 
 ## Agent API and budget
 
-| Tool                       | Kind                                    | `tools/list` cost (estimate)          |
-| -------------------------- | --------------------------------------- | ------------------------------------- |
-| `design.reference.find`    | async query (new)                       | ≈ 1.1 K (RQ's 1.0 K + `sides`, frame) |
-| `design.reference.compare` | job (new; `source: part` only at first) | ≈ 0.5 K                               |
-| `design.shape.import`      | existing command, gains `from`          | ≈ 0.35 K (with `roundInside`)         |
-| `design.reference.update`  | existing; result fields only            | 0 (output schema)                     |
+| Tool                       | Kind                                   | `tools/list` cost                          |
+| -------------------------- | -------------------------------------- | ------------------------------------------ |
+| `design.reference.find`    | async query (P1)                       | ≈ 1.3 K measured (levels and section args) |
+| `design.shape.import`      | existing command, gains `from` (P1)    | + 0.7 K measured (659 → ≈ 1.36 K)          |
+| `design.reference.update`  | existing; result fields only (P1)      | in the output schema                       |
+| `design.reference.compare` | job (P4; `source: part` only at first) | ≈ 0.5 K (estimate)                         |
 
-≈ 2.0 K on the current 106.8 K (124 tools, 120 K budget, [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)); measured and logged per task as usual. Results stay ≤ 5 KB by default (levels ≈ 2.5 KB, section summary ≈ 1–3 KB, holes ≈ 4 KB, compare ≈ 2 KB). The primer gains one bullet: "Reference: `design_reference_find` (levels, section, holes) → `design_shape_import { from }` / the hole suggestion → `design_reference_compare`".
+P1 measured: 107 245 → 109 183 characters (124 → 125 tools, + 1.94 K, under the 120 K budget; logged in [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)). Results stay ≤ 5 KB by default (levels ≈ 2.5 KB, section summary ≈ 1–3 KB, holes ≈ 4 KB, compare ≈ 2 KB). The primer's bullet grows with the phases; P1: "Reference: `design_reference_find` (levels, section) → `design_shape_import { from }`".
+
+## Implementation (P1)
+
+Implemented 2026-11-24 (hardening DF60 P1); code points back here.
+
+- **Async query kind** ([ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries)): `defineAsyncQuery` in `define.ts`, `Dispatcher.queryAsync`; agents reach it through the same tool as any query (read-only and idempotent hints).
+- **`design.reference.find`** with `kind: 'levels' | 'section'` as above; `design.shape.import { from }` with `roundInside`; `scale`, `placed` and `facingDepth` on import and update.
+- **Corner semantics** (two readings, both "where a tool must fit"): `find` reports the **material's** concave corners per loop (an outline's inner bends, a cavity's corners); the shapes `from` makes report `minInsideRadius` in the **pocket** sense, as `design.shape.get` does, because a shape is cut as a pocket or followed as a profile. A mid-wall outline therefore shows its fitted fillets (r 65 at z 20 of the enclosure), never the 0 of a line path.
+- **Section shapes** carry no link or source back to the reference (the reference-only rule): an ordinary literal shape, its name "Section 20 mm".
+- **UI:** the Levels and Section rows (face picker, levels from both sides, section depth, loops filter, corner chips, rounding, Create shape / Create shapes). Choosing a level sets the shared section depth that the Shape Editor backdrop reads as well.
+- Tests: `fit-polyline.test.ts`, `mesh-levels.test.ts`, `reference-section.test.ts`, `reference-find.test.ts`, `Reference.test.tsx` (axe), the e2e reference spec with renders.
+
+## Performance
+
+The worker keeps the last mesh read per asset. Measured on the full enclosure body (77 112 triangles, dev machine): `levels` ≈ 120 ms (target < 100 ms for 50 K triangles: in line), section chaining 3–8 ms and fitting 2–14 ms (target < 200 ms); `holes` (P3) < 1 s. At the 1 M triangle warn limit, about ten times that.
+
+## Not yet
+
+| Item                                                                      | Where                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Fitted loops and corner markers drawn on the ghost; level hover highlight | P1 follow-up (UI)                                            |
+| Shape Editor backdrop from the fitted loops instead of the raw segments   | P1 follow-up (UI)                                            |
+| Merging sub-0.05 mm slivers in feature-rich sections (S8)                 | P1 follow-up ([§ Fitting](#fitting))                         |
+| `detail: "full"` on `find`                                                | When an agent needs loop geometry without making shapes      |
+| Setup faces, holes, compare, overlay                                      | [P2–P5](#phases)                                             |
+| Silhouette (outline of the whole model seen from a face)                  | Later; a section near the widest level serves                |
+| Feature recognition into operations                                       | Assisted recreation, later                                   |
+| Holes along other axes than face normals; slots and obrounds              | With assisted recreation                                     |
+| STEP references (exact faces instead of facets)                           | STEP import ([reference-model.md](reference-model.md#later)) |
 
 ## Phases
 
 Smallest useful first; each phase is mergeable on its own and ends with `npm run check` green and the doc's tests.
 
-| Phase | Content                                                                                                                                                                                                                              | Needs                       | Unblocks                                                    |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
-| P0    | Docs accepted: this doc (and reference-query.md merged into it, Q71), ui.md amendment for the panel rows, llm-api amendment + ADR for async queries (Q72)                                                                            | Q70–Q80                     | all                                                         |
-| P1    | **Levels + section → shape**: async query kind; `levels` (both sides, visible area); `section` summary; chaining, `fit-polyline`, corner radii; `from` (+ `roundInside`); fit result fields; Reference panel Levels and Section rows | P0; S8 measured in P1       | The black-box flow without a slicer for outlines and depths |
-| P2    | **Setup faces**: `{ setupId }` faces and `frame: 'setup'`                                                                                                                                                                            | P1                          | Reading sections against a setup's program                  |
-| P3    | **Holes**: detection, groups, patterns, suggestions, `noTool`; `reference.featureBelowTool` after a scale; Holes list and ghost rings                                                                                                | P1                          | Bolt holes and drillings from the reference                 |
-| P4    | **Compare (agent)**: `design.reference.compare { source: part }` boolean method, height-map fallback, attribution, `cornerRadius`                                                                                                    | P1 (`mesh-distance` shared) | A measurable "does the design match"                        |
-| P5    | **Compare overlay**: per-vertex colours, missing volumes, regions list, auto re-run while shown                                                                                                                                      | P4, ui.md amendment         | –                                                           |
-| later | Simulated-cut source, causes, exit numbers ([deviation.md](deviation.md)); holes off the face normal, slots; silhouettes; STEP references                                                                                            | v0.4 follow-up              | –                                                           |
+| Phase | Content                                                                                                                                                                                                                                                      | Needs                       | Unblocks                                                    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
+| P0    | **Done.** Docs accepted: this doc (and reference-query.md merged into it, Q71), ui.md amendment for the panel rows, llm-api amendment + ADR for async queries (Q72)                                                                                          | Q70–Q80                     | all                                                         |
+| P1    | **Done (implemented).** **Levels + section → shape**: async query kind; `levels` (both sides, visible area); `section` summary; chaining, `fit-polyline`, corner radii; `from` (+ `roundInside`); fit result fields; Reference panel Levels and Section rows | P0; S8 measured in P1       | The black-box flow without a slicer for outlines and depths |
+| P2    | **Setup faces**: `{ setupId }` faces and `frame: 'setup'`                                                                                                                                                                                                    | P1                          | Reading sections against a setup's program                  |
+| P3    | **Holes**: detection, groups, patterns, suggestions, `noTool`; `reference.featureBelowTool` after a scale (left out of P1: it needs holes); Holes list and ghost rings                                                                                       | P1                          | Bolt holes and drillings from the reference                 |
+| P4    | **Compare (agent)**: `design.reference.compare { source: part }` boolean method, height-map fallback, attribution, `cornerRadius`                                                                                                                            | P1 (`mesh-distance` shared) | A measurable "does the design match"                        |
+| P5    | **Compare overlay**: per-vertex colours, missing volumes, regions list, auto re-run while shown                                                                                                                                                              | P4, ui.md amendment         | –                                                           |
+| later | Simulated-cut source, causes, exit numbers ([deviation.md](deviation.md)); holes off the face normal, slots; silhouettes; STEP references                                                                                                                    | v0.4 follow-up              | –                                                           |
 
 ## Test plans
 
-Fixtures: the enclosure STL (`src/core/design/__fixtures__/enclosure-wood-base.stl`), the black-box test's full enclosure body if the user agrees to add it as a fixture (Q71), and synthetic meshes written from the evaluated test part as `stl.test.ts` does.
+Fixtures: the enclosure STL (`src/core/design/__fixtures__/enclosure-wood-base.stl`), the black-box test's full enclosure body (`enclosure-wood-full.stl`, added with P1 as Q71 agreed; [testing.md § Fixtures](../conventions/testing.md)), and synthetic meshes written from the evaluated test part as `stl.test.ts` does.
 
 - **P1 levels** (`mesh-levels.test.ts`): a synthetic stepped block gives each floor's depth within 0.001 mm and its area within 0.1 %; a floor under an overhang has `visibleArea` 0 from that side and full from the other; the enclosure gives the cavity floor and the bottom steps within 0.01 mm of the black-box values; `minArea` and `limit` with `more`.
 - **P1 section and fitting** (`fit-polyline.test.ts`, `mesh-section.test.ts`): a faceted circle (32–256 chords) fits to one `circle` within the tolerance; a rounded rectangle r 4 faceted with 8 chords per corner gives four arcs with `minInsideRadius` 4 ± 0.01; a sharp rectangle keeps four corners (`sharp`, `minInsideRadius` absent) and none becomes a micro-arc; the enclosure outline and cavity meet S8's targets; open mesh → `open: true`; a plane missing the mesh → `loops: []`.

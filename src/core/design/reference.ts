@@ -145,6 +145,62 @@ export function placedBox(bounds: Box, p: Placement): Box {
   return { min: q, max: { x: q.x + e.x, y: q.y + e.y, z: q.z + e.z } }
 }
 
+/**
+ * The ghost's model matrix (column-major 4 × 4, three.js `Matrix4.fromArray`): scale by
+ * `scale × unit`, rotate `Rz · Ry · Rx`, then translate so the placed bounding box's min corner
+ * (the box of the 8 rotated corners of the source bounds, as `placedBox`) lands on `position`.
+ * The same box as fit and `exceedsStock`, so the ghost sits where they say. Also the source →
+ * part frame map of the reference queries (docs/modes/reference-tools.md#faces-and-frames).
+ */
+export function ghostMatrix(bounds: Box, p: Placement): number[] {
+  const k = p.scale * UNIT_MM[p.sourceUnit]
+  const m = rotationMatrix(p.rotation)
+  const lo = [Infinity, Infinity, Infinity]
+  for (const x of [bounds.min.x, bounds.max.x])
+    for (const y of [bounds.min.y, bounds.max.y])
+      for (const z of [bounds.min.z, bounds.max.z])
+        for (let r = 0; r < 3; r++)
+          lo[r] = Math.min(lo[r]!, k * (m[r * 3]! * x + m[r * 3 + 1]! * y + m[r * 3 + 2]! * z))
+  const pos = [p.position.x, p.position.y, p.position.z]
+  const out = new Array<number>(16).fill(0)
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) out[c * 4 + r] = k * m[r * 3 + c]!
+    out[12 + r] = pos[r]! - lo[r]!
+  }
+  out[15] = 1
+  return out
+}
+
+/** A face frame (local → part frame: `origin + u·x + v·y + n·z`). */
+export interface FrameLike {
+  readonly origin: readonly [number, number, number]
+  readonly u: readonly [number, number, number]
+  readonly v: readonly [number, number, number]
+  readonly n: readonly [number, number, number]
+}
+
+/**
+ * The section and levels tasks' matrix (column-major 4 × 4): the ghost's matrix (source units →
+ * part frame) followed by part frame → face frame, so the face normal is the third axis
+ * (docs/modes/design-v0.3.md#implementation-u3).
+ */
+export function sectionMatrix(ghost: readonly number[], frame: FrameLike): number[] {
+  const axes = [frame.u, frame.v, frame.n]
+  const o = frame.origin
+  const out = new Array<number>(16).fill(0)
+  for (let r = 0; r < 3; r++) {
+    const a = axes[r]!
+    for (let c = 0; c < 4; c++) {
+      // row r of F⁻¹ times column c of G (G's bottom row is 0 0 0 1)
+      let v = a[0] * ghost[c * 4]! + a[1] * ghost[c * 4 + 1]! + a[2] * ghost[c * 4 + 2]!
+      if (c === 3) v -= a[0] * o[0] + a[1] * o[1] + a[2] * o[2]
+      out[c * 4 + r] = v
+    }
+  }
+  out[15] = 1
+  return out
+}
+
 // ── fit to stock ──────────────────────────────────────────────────────────────────────────
 
 export const ANCHOR_POINTS = ['min', 'centre', 'max'] as const

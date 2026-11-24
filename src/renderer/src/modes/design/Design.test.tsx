@@ -401,6 +401,10 @@ describe('design mode', () => {
     expect(await within(status()).findByRole('button', { name: '2 warnings' })).toBeInTheDocument()
     const row = within(navigator()).getByRole('button', { name: /^Pocket 1/ })
     expect(row).toHaveTextContent('2 warnings')
+    // DF67: the badge has its tooltip, and the row keeps its actions' room at rest (CSS
+    // `data-markers`), so the badge never moves when the actions show on hover
+    expect(row.querySelector('[title="2 warnings"]')).not.toBeNull()
+    expect(row.parentElement).toHaveAttribute('data-markers')
   })
 
   it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {

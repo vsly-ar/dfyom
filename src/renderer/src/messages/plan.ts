@@ -164,6 +164,8 @@ export const planMessages = {
     moveTo: (setup: string) => `Move to ${setup}`,
     errors: (n: number) => plural(n, 'error', 'errors'),
     warnings: (n: number) => plural(n, 'warning', 'warnings'),
+    /** A row's error or warning count: its tooltip (DF67, the count shows the findings). */
+    findingsTip: (count: string) => `${count}: click to show them in the inspector`,
   },
 
   toolpaths: {
@@ -289,6 +291,8 @@ export const planMessages = {
     reset: 'Reset',
     useToolDefault: 'Use tool default',
     unlock: 'Unlock',
+    /** The operation's findings at the top of its inspector (DF67). */
+    checks: 'Checks',
     unresolved: 'No value: enter one, or add a cutting preset to the tool.',
     strategy: {
       labels: {

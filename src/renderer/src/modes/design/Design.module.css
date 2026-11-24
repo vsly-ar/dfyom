@@ -303,9 +303,12 @@
 
 /* while the actions show, the row's content gives them room: the read-out ellipsizes first and
    the name keeps its words (DF44); at rest the actions take no width */
+/* a row with a warning badge or failed marker keeps that room at rest too, so its markers never
+   move when the actions show and their tooltips stay reachable (DF67) */
 .op[data-top]:hover > .opSelect,
 .op[data-top]:focus-within > .opSelect,
-.op[data-top][data-selected] > .opSelect {
+.op[data-top][data-selected] > .opSelect,
+.op[data-top][data-markers] > .opSelect {
   padding-right: calc(2 * var(--control-md) + 2 * var(--space-1));
 }
 
@@ -684,6 +687,107 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+}
+
+/* Reference tools (DF60, ui.md § Reference tools): level rows, fitted loops, corner chips */
+.levelGroup {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.levelHeading {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.levelList,
+.loopList {
+  display: grid;
+  gap: var(--space-0-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.levelRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.levelRow:hover {
+  background: var(--bg-hover);
+}
+
+.levelRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.levelRow[data-undercut] {
+  color: var(--text-faint);
+}
+
+.levelArea {
+  color: var(--text-muted);
+}
+
+.levelRow[data-undercut] .levelArea {
+  color: var(--text-faint);
+}
+
+.loopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-sm);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.loopName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loopCorners {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.cornerChip {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.cornerChip[data-sharp] {
+  border-color: var(--warning);
+  color: var(--text);
 }
 
 .warnings {
