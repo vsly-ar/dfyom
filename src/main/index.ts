@@ -10,7 +10,7 @@ import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowFactory, type WindowSessions } from './ipc'
 import { startLogging } from './logging/electron'
 import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
-import { pushRunStatus, utilityHostFactory } from './machine/electron'
+import { pushRunStatus, registerRunProgramIpc, utilityHostFactory } from './machine/electron'
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { libraryHandlesMenuAction } from './library-context'
@@ -332,6 +332,8 @@ void app.whenReady().then(async () => {
     execPath: process.execPath,
     mainDir: __dirname,
   })
+  // DF84: the streamed program for run mode's gCode panel (renderer only)
+  registerRunProgramIpc(machine, (id) => sessions.isWindow(id))
   // The one Library window (docs/conventions/ui-library-window.md): created hidden, shown by the
   // factory (never in hidden test runs).
   const libraryWindows = createLibraryWindows(host, sessions, {

@@ -1,12 +1,14 @@
 // The shell's viewport region (task 3.6): the one `Viewport` canvas, kept mounted across modes (no
 // WebGL context churn); the mode decides the scene (`useModeScene`). Replaces the 3.3b
 // placeholder `ViewportSlot`. In design mode a selected shape lays its flat view over the canvas
-// (Shape Editor, task U1); in plan mode without a plan, the "Plan the part" card (DF29). Toasts
+// (Shape Editor, task U1); in plan mode without a plan, the "Plan the part" card (DF29); in run
+// mode the gCode panel at the bottom, the canvas shortened above it (DF84). Toasts
 // show here, bottom-centre over the view, never over the side panels (DF45). Doc: docs/conventions/ui.md#app-shell, #viewport-task-35, #shape-editor
 import type { AppMode } from '../../../core/modes'
 import { ShapeEditorLayer } from '../modes/design/ShapeEditorView'
 import { CompareLegend } from '../modes/design/ReferenceCompare'
 import { PlanStartOverlay } from '../modes/plan'
+import { GcodePanel } from '../modes/run/GcodePanel'
 import { useModeScene } from '../modes/ModePanels'
 import { ToastAnchor } from '../ui'
 import { Viewport } from '../viewport'
@@ -41,6 +43,7 @@ export function ShellViewport({
       {mode === 'plan' && doc !== undefined ? (
         <PlanStartOverlay doc={doc} insetRight={insetRight} />
       ) : null}
+      {mode === 'run' ? <GcodePanel insetRight={insetRight} /> : null}
       <ToastAnchor insetRight={insetRight} />
     </>
   )

@@ -72,6 +72,11 @@ export interface EmulatorStatus {
   readonly spindleSpeed: number
   readonly plannerFree: number
   readonly rxFree: number
+  /**
+   * The trace index of the line whose block executes (the planner's oldest), while tracing and
+   * moving; the truth the executing-line estimate is tested against (DF84).
+   */
+  readonly executing?: number
 }
 
 type Stop = 'hold' | 'jogCancel' | 'softLimit' | 'door' | 'probe'
@@ -303,6 +308,9 @@ export class GrblEmulator {
       spindleSpeed: this.spindleRpm(),
       plannerFree: this.planner.free,
       rxFree: RX_BUFFER_SIZE - this.rx.length,
+      ...(this.planner.blocks[0] === undefined || this.planner.blocks[0].line < 0
+        ? {}
+        : { executing: this.planner.blocks[0].line }),
     }
   }
 

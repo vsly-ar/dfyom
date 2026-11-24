@@ -833,3 +833,227 @@
     animation: none;
   }
 }
+
+/* gCode panel under the 3D view (DF84, docs/conventions/ui.md#run-mode-safety-ui) */
+.gcodePanel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-chrome);
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+.gcodeResize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 1;
+  touch-action: none;
+}
+
+.gcodeResize:hover,
+.gcodeResize:focus-visible {
+  outline: none;
+  background: linear-gradient(transparent 2px, var(--focus) 2px, var(--focus) 4px, transparent 4px);
+}
+
+.gcodeHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  height: 2rem;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.gcodeDisclosure,
+.gcodeFollow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.gcodeDisclosure:hover,
+.gcodeFollow:hover {
+  background: var(--bg-hover);
+}
+
+.gcodeDisclosure:focus-visible,
+.gcodeFollow:focus-visible,
+.gcodeList:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+.gcodeChevron {
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.gcodePanel[data-open] .gcodeChevron {
+  transform: none;
+}
+
+.gcodeSection {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.gcodeCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.gcodeFollow {
+  font-weight: var(--weight-regular);
+  color: var(--text-muted);
+  border-color: var(--border-control);
+}
+
+.gcodeFollow[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.gcodeBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.gcodeLegend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.gcodeEmpty {
+  margin: auto;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.gcodeList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-field);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.gcodeSpacer {
+  position: relative;
+  min-width: 100%;
+}
+
+.gcodeRow,
+.gcodeSectionRow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  height: 20px;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.gcodeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-3);
+  border-left: 2px solid transparent;
+  color: var(--text);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.gcodeSectionRow {
+  padding-left: var(--space-3);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-ui);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gcodeNumber {
+  flex: none;
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.gcodeMark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+}
+
+.gcodeText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gcodeRow[data-state='done'] {
+  color: var(--text-faint);
+}
+
+.gcodeRow[data-state='executing'] {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
+
+.gcodeRow[data-state='executing'] .gcodeNumber {
+  color: var(--text);
+}
+
+.gcodeRow[data-state='planned'] .gcodeMark {
+  background: var(--text-muted);
+}
+
+.gcodeRow[data-state='sent'] .gcodeMark {
+  border-color: var(--text-muted);
+}

@@ -259,6 +259,24 @@ export const runMessages = {
     confirm: 'Move',
   },
 
+  /** The gCode panel under the 3D view (DF84, docs/modes/run.md#gcode-panel-df84). */
+  gcode: {
+    title: 'gCode',
+    region: 'gCode',
+    list: 'Program lines',
+    legend:
+      'Muted lines have run. The highlighted line is the one the machine executes (estimated). A filled mark: acknowledged by the controller, waiting in its planner; a hollow mark: sent, not yet acknowledged.',
+    follow: 'Follow',
+    followHint: 'Keep the executing line in view. Scrolling the list turns it off.',
+    resize: 'Resize the gCode panel',
+    empty: 'The program shows here once a run starts.',
+    loading: 'Loading the program…',
+    gone: 'This run’s program is no longer kept.',
+    line: (n: number, total: number) =>
+      `Line ${n.toLocaleString('en-GB')} / ${total.toLocaleString('en-GB')}`,
+    lines: (total: number) => `${total.toLocaleString('en-GB')} lines`,
+  },
+
   /** Feed, spindle and rapid overrides (docs/modes/run-machine.md#overrides-m6). */
   overrides: {
     title: 'Overrides',

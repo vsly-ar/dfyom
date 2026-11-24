@@ -23,7 +23,7 @@ import {
 } from '../shared/preload-api'
 import type { LibraryChange } from '../core/library/library'
 import type { AppSettings } from '../shared/settings'
-import type { RunStatus } from '../core/run/service'
+import type { RunProgram, RunStatus } from '../core/run/service'
 import type { ActionEvent } from '../core/commands/action-log'
 
 /** Subscribes to a main → renderer channel; returns the unsubscribe. */
@@ -70,6 +70,7 @@ const api: PreloadApi = {
   },
   run: {
     onStatus: (listener) => on<RunStatus>(RUN_STATUS_IPC_CHANNEL, listener),
+    program: (jobId) => ipcRenderer.invoke(IPC.runProgram, jobId) as Promise<RunProgram | null>,
   },
   call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {
