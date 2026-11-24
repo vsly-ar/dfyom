@@ -229,7 +229,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
         }
       >
         <ol className={styles['steps']}>
-          {m.steps(tc.name).map((s) => (
+          {m.steps(tc.name, tc.surface, tc.spot).map((s) => (
             <li key={s}>{s}</li>
           ))}
         </ol>
