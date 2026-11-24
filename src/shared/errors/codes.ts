@@ -140,6 +140,13 @@ export const ERROR_CODES = {
     userMessage: 'The connection to the machine is closed or lost.',
     retryable: true,
   },
+  // DF87: a banner DFYOM did not cause (docs/modes/run.md#5-watchdogs): the link still works
+  'machine.reset': {
+    severity: 'error',
+    userMessage:
+      'The controller restarted by itself (it was not disconnected). Home the machine again before a run.',
+    retryable: true,
+  },
   // Run mode (task 3.9): docs/modes/run-v0.1.md#stop-errors-and-alarms
   'machine.error': {
     severity: 'warn',

@@ -1035,6 +1035,37 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     expectOk(await t.run('run.connection.close', {}, ui))
   })
 
+  it('the settings check is asked again after the library machine changed (DF87)', async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings: { ...settings, 110: 1234 } } }),
+    })
+    const byMachine = { machineId: t.s.machineId }
+    // none without a serial connection
+    expect(expectOk(t.d.query('run.settings.check', byMachine, ui)).value).toEqual({})
+    const info = expectOk(await serialOpen(t, { planId: undefined, ...byMachine })) as {
+      settingsCheck: { matches: boolean; against: string }
+    }
+    expect(info.settingsCheck).toMatchObject({ matches: false, against: 'machine' })
+    const before = expectOk(t.d.query('run.settings.check', byMachine, ui)).value as {
+      settingsCheck: { matches: boolean; differences: { setting: string }[] }
+    }
+    expect(before.settingsCheck.differences.map((d) => d.setting)).toEqual(['$110'])
+    // the user fixes the library machine (here by importing the controller's $110)
+    const found = t.s.library.lookup('machine', t.s.machineId)
+    const revision = found.state === 'found' ? found.item.revision : 0
+    expectOk(
+      await t.run(
+        'library.machine.settings.import',
+        { id: t.s.machineId, revision, text: '$110=1234', accept: ['$110'] },
+        ui,
+      ),
+    )
+    expect(expectOk(t.d.query('run.settings.check', byMachine, ui)).value).toMatchObject({
+      settingsCheck: { matches: true, against: 'machine', differences: [] },
+    })
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
   it('a real run needs homing in this connection and passes the soft-limit check (M2)', async () => {
     const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
     expectOk(await serialOpen(t))

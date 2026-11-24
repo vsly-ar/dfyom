@@ -94,6 +94,24 @@ describe('parseStatusReport', () => {
     expect(p.wpos[0]).toBeCloseTo(0, 9)
     expect(positions(parseStatusReport('<Idle|FS:0,0>')!, wco, false)).toBeUndefined()
   })
+
+  it('reads every $10 report form and builds with more axes (DF87)', () => {
+    const wco: [number, number, number] = [-100, -50, -20]
+    const forms = [
+      '<Idle|WPos:10.000,20.000,5.000|FS:0,0>', // $10=0
+      '<Idle|MPos:-90.000,-30.000,-15.000|FS:0,0>', // $10=1
+      '<Idle|WPos:10.000,20.000,5.000|Bf:15,128|FS:0,0>', // $10=2
+      '<Idle|MPos:-90.000,-30.000,-15.000|Bf:15,128|FS:0,0|Pn:Z>', // $10=3
+      '<Idle|MPos:-90.000,-30.000,-15.000,0.000|FS:0,0>', // a 4-axis build
+      '<Idle|WPos:10.000,20.000,5.000,12.500|FS:0,0|WCO:-100.000,-50.000,-20.000,0.000>',
+    ]
+    for (const f of forms)
+      expect(positions(parseStatusReport(f)!, wco, false), f).toEqual({
+        mpos: [-90, -30, -15],
+        wpos: [10, 20, 5],
+        wco,
+      })
+  })
 })
 
 describe('$ reports from the emulator', () => {
