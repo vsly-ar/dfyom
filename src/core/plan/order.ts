@@ -146,12 +146,15 @@ const SEARCH_BUDGET = 5000
  * by kind group and design order (a chamfer sharing its edge operation's tool right behind it,
  * F7); the tool of each next run is searched for the fewest runs, candidates tried in the order of
  * their first ready operation, the first minimal order kept. `port`: the 2D port for general
- * shapes in the freeing test (without it they free nothing).
+ * shapes in the freeing test (without it they free nothing). `startTool` (DF65: the last tool of
+ * the setup before): when a minimal order can start with a run of that tool, it does; never at
+ * the cost of a run.
  */
 export function defaultOrder(
   planOps: readonly PlanOperationDTO[],
   part: Part,
   port?: Region2dPort,
+  startTool?: string,
 ): PlanOperationDTO[] {
   const all = infos(planOps, part)
   const freeing = freeingDependencies(planOps, part, port)
@@ -222,10 +225,18 @@ export function defaultOrder(
     return runs
   }
   let done: boolean[] = all.map(() => false)
-  fewest(done)
+  const least = fewest(done)
+  // DF65: the setup before's last tool first, when that costs no run (a tie-break only)
+  let start: string | undefined
+  if (startTool !== undefined && candidates(done).includes(startTool)) {
+    const r = run(done, startTool)
+    if (r.seq.length > 0 && 1 + fewest(r.done) <= least) start = startTool
+  }
   const out: PlanOperationDTO[] = []
   while (!done.every(Boolean)) {
-    const r = run(done, memo.get(keyOf(done))?.tool ?? candidates(done)[0]!)
+    const tool = start ?? memo.get(keyOf(done))?.tool ?? candidates(done)[0]!
+    start = undefined
+    const r = run(done, tool)
     for (const i of r.seq) out.push(all[i]!.op)
     done = r.done
   }

@@ -764,6 +764,53 @@ describe('setup, operations and order', () => {
       { planId, planOperationId: profile, toIndex: 99 },
       'input.malformed',
     )
+    // DF66: a block from drill5 to the end refuses as its first operation does
+    const at = designIds(s.plan(planId)).indexOf('drill5')
+    const block = { planId, planOperationId: drill5, count: ids.length - at }
+    await s.failWith('plan.operation.move', { ...block, toIndex: 0 }, 'plan.order')
+  })
+
+  it('plan.operation.move { count } moves a block (a tool run) in one undo step (DF66)', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    expect(designIds(s.plan(planId))).toEqual([
+      'facing1',
+      'drill1',
+      'drill3+drill4',
+      'drill2',
+      'pocket1',
+      'profile1',
+    ])
+    const drill2 = opsOf(s.plan(planId))[3]!.id
+    await expectUndoRedo(s, 'plan.operation.move', {
+      planId,
+      planOperationId: drill2,
+      count: 2,
+      toIndex: 1,
+    })
+    expect(designIds(s.plan(planId))).toEqual([
+      'facing1',
+      'drill2',
+      'pocket1',
+      'drill1',
+      'drill3+drill4',
+      'profile1',
+    ])
+    // back down: toIndex is the block's first position after the move (at most length − count)
+    await s.failWith(
+      'plan.operation.move',
+      { planId, planOperationId: drill2, count: 2, toIndex: 5 },
+      'input.malformed',
+    )
+    await s.run('plan.operation.move', { planId, planOperationId: drill2, count: 2, toIndex: 3 })
+    expect(designIds(s.plan(planId)).slice(3, 5)).toEqual(['drill2', 'pocket1'])
+    const profile = opsOf(s.plan(planId)).at(-1)!.id
+    const e = await s.failWith(
+      'plan.operation.move',
+      { planId, planOperationId: profile, count: 2, toIndex: 0 },
+      'input.malformed',
+    )
+    expect(e.issues[0]).toMatchObject({ path: ['count'], rule: 'range', params: { max: 1 } })
   })
 })
 

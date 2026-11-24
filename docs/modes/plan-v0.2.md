@@ -67,13 +67,13 @@ Status: implemented (hardening DF61, the follow-up of DF50/DF53: a blind step be
 
 ### Commands (setups)
 
-| Command               | Args                                                                | Result        |
-| --------------------- | ------------------------------------------------------------------- | ------------- |
-| `plan.setup.split`    | `{ planId, setupId, planOperationIds, name? }` – new setup after it | `{ setupId }` |
-| `plan.setup.merge`    | `{ planId, setupIds }` – same direction only; into the first        | `{ setupId }` |
-| `plan.setup.move`     | `{ planId, setupId, toIndex }`                                      | `{}`          |
-| `plan.operation.move` | as v0.1, plus `toSetupId?` (same direction)                         | `{}`          |
-| `plan.setup.update`   | as v0.1, plus `name?` and `rotation?` (0/90/180/270, if built)      | `{}`          |
+| Command               | Args                                                                                                                                                                                 | Result        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `plan.setup.split`    | `{ planId, setupId, planOperationIds, name? }` – new setup after it                                                                                                                  | `{ setupId }` |
+| `plan.setup.merge`    | `{ planId, setupIds }` – same direction only; into the first                                                                                                                         | `{ setupId }` |
+| `plan.setup.move`     | `{ planId, setupId, toIndex }`                                                                                                                                                       | `{}`          |
+| `plan.operation.move` | as v0.1, plus `toSetupId?` (same direction); since DF66 `count?` (a block of consecutive operations, a tool run: [plan-v0.4.md](plan-v0.4.md#tool-changes-per-setup-hardening-df66)) | `{}`          |
+| `plan.setup.update`   | as v0.1, plus `name?` and `rotation?` (0/90/180/270, if built)                                                                                                                       | `{}`          |
 
 `plan.create` returns `{ planId, setupIds }`. Statuses as `plan.setup.update` in v0.1 (`draft`, `settledDesign`).
 

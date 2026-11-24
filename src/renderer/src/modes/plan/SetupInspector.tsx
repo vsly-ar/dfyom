@@ -1,8 +1,8 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
 // the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
-// heights (clearance with the clamp note, retract; moved here from the navigator) and the
-// machine checks of this setup. Each change is one `plan.setup.update`.
+// heights (clearance with the clamp note, retract; moved here from the navigator), the tool
+// changes (DF66, `ToolChanges`: the tool runs, reorderable) and the machine checks of this setup. Each change is one `plan.setup.update`.
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
 import { useState } from 'react'
@@ -42,6 +42,7 @@ import {
 import { usePlanCommand } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
+import { ToolChanges } from './ToolChanges'
 import { usePlanSelection } from './usePlan'
 
 const m = planMessages.setup
@@ -167,6 +168,7 @@ export function SetupInspector({
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
+        <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         {mine.length > 0 ? (
           <section aria-label={m.findings} className={styles['warnings']}>
             <h3 className={styles['groupTitle']}>{m.findings}</h3>

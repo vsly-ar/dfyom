@@ -9,6 +9,7 @@
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
+import { setupToolChanges, toolRuns } from '../plan/tool-runs'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
 import type { UnitSystem } from '../project/document'
@@ -245,7 +246,10 @@ export class ResultShaper {
     }
   }
 
-  /** `plan.get` summary: setups and operations with tool, feeds, times and finding counts. */
+  /**
+   * `plan.get` summary: setups and operations with tool, feeds, times and finding counts; per
+   * setup its tool runs and tool changes (DF66).
+   */
   private planSummary(value: unknown): unknown {
     const plan = isObj(value) ? value['plan'] : undefined
     if (!isObj(plan)) return value
@@ -273,7 +277,13 @@ export class ResultShaper {
     const taken = isObj(design['taken']) ? design['taken'] : {}
     let planSeconds: number | null = 0
     const inch = this.session.unitSystem?.() === 'inch'
-    const setups = ((plan['setups'] as Obj[]) ?? []).map((s) => {
+    const rawSetups = ((plan['setups'] as Obj[]) ?? []).map((s) => ({
+      operations: ((s['operations'] as Obj[]) ?? []).map((o) => ({
+        id: o['id'] as string,
+        tool: typeof o['tool'] === 'string' ? o['tool'] : undefined,
+      })),
+    }))
+    const setups = ((plan['setups'] as Obj[]) ?? []).map((s, si) => {
       let setupSeconds: number | null = 0
       // DF59: the per-side maximum of the current toolpaths' reach past the stock (mm)
       let reach: Record<Side, number> | null = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 }
@@ -316,6 +326,16 @@ export class ResultShaper {
       })
       if (setupSeconds === null) planSeconds = null
       else if (planSeconds !== null) planSeconds += setupSeconds
+      // DF66: the tool runs and the tool changes the operator makes (setup start included)
+      const secondsOf = new Map(operations.map((o) => [o.id, o.seconds]))
+      const toolRunList = toolRuns(rawSetups[si]?.operations ?? []).map((r) => {
+        let seconds: number | null = 0
+        for (const o of r.operations) {
+          const t = secondsOf.get(o.id) ?? null
+          seconds = t === null || seconds === null ? null : seconds + t
+        }
+        return { tool: nameOf(r.tool), operations: r.operations.map((o) => o.id), seconds }
+      })
       return {
         id: s['id'],
         name: s['name'],
@@ -326,6 +346,8 @@ export class ResultShaper {
         overreach: reach === null ? null : overreachIn(reach, inch),
         operations,
         seconds: setupSeconds,
+        toolChanges: setupToolChanges(rawSetups, si),
+        toolRuns: toolRunList,
       }
     })
     return {
