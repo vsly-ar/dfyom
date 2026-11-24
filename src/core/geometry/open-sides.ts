@@ -88,3 +88,67 @@ export function openRegion(
       .andThen((band) => port.union(inside, band))
   })
 }
+
+/** Material the split of a partly cleared pocket may leave uncut (mm²): boolean slivers only. */
+export const SPLIT_SLIVER = 1e-2
+
+/**
+ * The region a partly cleared pocket still cuts above the cleared level (DF61 follow-up,
+ * `PartialCover`): the part of `region` (the pocket's region or open region) outside `covered`,
+ * grown by `reach` into the covered part (clipped to `region`), so the cleared part acts as an
+ * open side – its tool-centre region keeps every real wall's offset while the tool runs into the
+ * cleared part, which clears the corners where a real wall meets it. An empty region when
+ * `covered` covers `region`. Undefined (no split: cut the whole region from the top) unless the
+ * check holds that nothing is skipped: every point of the uncovered part a tool of radius `r`
+ * reaches in the whole region (its opening) it also reaches in the grown one, up to
+ * `SPLIT_SLIVER`. Port failures answer undefined (the conservative side).
+ */
+export function uncoveredRegion(
+  port: Region2dPort,
+  region: Region,
+  covered: Region,
+  reach: number,
+  r: number,
+): Region | undefined {
+  const opening = (x: Region) => port.offset(x, r).andThen((c) => port.offset(c, -r))
+  const split = port.difference(region, covered).andThen((left): AppResult<Region | undefined> => {
+    if (regionArea(left) <= SPLIT_SLIVER) return Ok({ pieces: [] })
+    return port
+      .offset(left, -reach)
+      .andThen((grown) => port.intersect(grown, region))
+      .andThen((grown) =>
+        opening(region).andThen((all) =>
+          port.intersect(left, all).andThen((needed) =>
+            opening(grown)
+              .andThen((reached) => port.difference(needed, reached))
+              .map((missed) => (regionArea(missed) <= SPLIT_SLIVER ? grown : undefined)),
+          ),
+        ),
+      )
+  })
+  return split.mapOr(undefined, (x) => x)
+}
+
+/**
+ * Whether a v0.1 rectangle pocket (centre and size in the face frame of `face`) has a corner
+ * that is a wall: the middle of its corner arc (the vertex when sharp) lies inside the stock face,
+ * more than `ON_EDGE` from its edge. A corner on the stock edge or beyond it is reached from
+ * outside the stock (open sides, DF61 follow-up), so it does not constrain the tool – the same
+ * rule as a general shape's corners (`shapeMeasure` with the face).
+ */
+export function rectangleWallCorner(
+  center: readonly [number, number],
+  rect: { readonly length: number; readonly width: number; readonly cornerRadius: number },
+  face: Pick<StockGeometry, 'length' | 'width'>,
+): boolean {
+  const inset = rect.cornerRadius * (1 - Math.SQRT1_2)
+  const du = rect.length / 2 - inset
+  const dv = rect.width / 2 - inset
+  for (const su of [-1, 1])
+    for (const sv of [-1, 1]) {
+      const u = center[0] + su * du
+      const v = center[1] + sv * dv
+      if (Math.min(u, v, face.length - u, face.width - v) > ON_EDGE) return true
+    }
+  return false
+}

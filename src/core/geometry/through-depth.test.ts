@@ -4,6 +4,7 @@
 // Spec: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
 // docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
 import { describe, expect, it } from 'vitest'
+import { regionArea } from './2d/model'
 import { hole, rect } from './2d/testing/fixtures'
 import { nodeRegion2d } from './2d/testing/node-wasm'
 import type { OperationGeometry, StockGeometry } from './model'
@@ -272,7 +273,81 @@ describe('materialBands (DF61)', () => {
         contour: { kind: 'rectangle', length: 50, width: 30, cornerRadius: 0 },
       },
     }
-    expect(bands([small, topPocket(0, 6)])).toEqual(new Map())
+    // partial coverage (follow-up): no top, the covered part as `partial`
+    const partly = bands([small, topPocket(0, 6)]).get('pocket9')!
+    expect(partly.top).toBeUndefined()
+    expect(partly.partial?.level).toBe(-3)
+    expect(regionArea(partly.partial!.region)).toBeCloseTo(1500, 6)
+  })
+
+  it('partial coverage: stacked pockets chain, the level saving most volume wins', () => {
+    // pocket7 (20 × 20, 2 deep) inside the target; pocket6 on its floor, 2 deeper but wider
+    // than pocket7: it clears only where pocket7 cleared first
+    const square = (id: string, onZ: number, depth: number, size: number): OperationGeometry => ({
+      ...topPocket(onZ, depth),
+      id,
+      shape: {
+        center: [125, 50],
+        contour: { kind: 'rectangle', length: size, width: size, cornerRadius: 0 },
+      },
+    })
+    const p7 = square('pocket7', 0, 2, 20)
+    const p6 = square('pocket6', -2, 2, 30)
+    const partly = bands([p7, p6, topPocket(0, 6)]).get('pocket9')!
+    // level 4 over 400 mm² (1600) beats level 2 over the same 400 mm² (800)
+    expect(partly.partial?.level).toBe(-4)
+    expect(regionArea(partly.partial!.region)).toBeCloseTo(400, 6)
+    // a level at or above the target's own top is no partial coverage
+    expect(bands([p7, topPocket(-2, 6)]).get('pocket9')).toBeUndefined()
+    // facings and profiles get no partial coverage (their generators cannot split by area)
+    const step: OperationGeometry = { ...outline, id: 'profile2', depth: 6 }
+    expect(bands([p7, step]).get('profile2')).toBeUndefined()
+  })
+
+  it('a hole below a cleared level: its top, no bottom', () => {
+    const hole: OperationGeometry = { ...throughHole('drill1', 125, 50), direction: '+z' }
+    const blind: OperationGeometry = { ...hole, bottom: { kind: 'flat', depth: 8 } }
+    expect(bands([topPocket(0, 3), blind, facing(5, '-z')])).toEqual(
+      new Map([['drill1', { top: -3 }]]),
+    )
+    // partly over the pocket (its wall at X 95): none
+    expect(bands([topPocket(0, 3), { ...blind, center: [95, 50] }])).toEqual(new Map())
+  })
+
+  it('openings of an earlier setup clear their loop through the stock (follow-up)', () => {
+    // an inside through profile round the target pocket, from the bottom, in an earlier setup
+    const opening: OperationGeometry = {
+      ...outline,
+      id: 'profile3',
+      direction: '-z',
+      side: 'inside',
+      shape: {
+        center: [125, 50],
+        contour: { kind: 'rectangle', length: 70, width: 50, cornerRadius: 5 },
+      },
+      tabs: { count: 0, width: 0, thickness: 0 },
+    }
+    const target = topPocket(0, 6)
+    const setups = (a: OperationGeometry, b: OperationGeometry) =>
+      a.direction === '-z' && b.direction !== '-z'
+    const cut = materialBands([opening, target], STOCK, port, () => true, setups)
+    expect(cut.get('pocket9')).toEqual({ top: -40 })
+    // the same setup: the slug may still sit in its slot
+    expect(
+      materialBands(
+        [opening, target],
+        STOCK,
+        port,
+        () => true,
+        () => false,
+      ),
+    ).toEqual(new Map())
+    // with tabs the slug stays
+    const tabbed = { ...opening, tabs: { count: 2, width: 5, thickness: 2 } }
+    expect(materialBands([tabbed, target], STOCK, port, () => true, setups)).toEqual(new Map())
+    // the outer release profile does not count
+    const release = { ...opening, side: 'outside' as const }
+    expect(materialBands([release, target], STOCK, port, () => true, setups)).toEqual(new Map())
   })
 
   it('opposite cuts below a blind pocket: bottom where the material ends', () => {

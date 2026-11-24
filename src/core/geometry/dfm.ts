@@ -44,6 +44,7 @@ import {
   type AnalyticOperation,
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
+import { rectangleWallCorner } from './open-sides'
 import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
@@ -175,7 +176,9 @@ export function parameterChecks(
         return [...facing(op, options.unitSystem), ...tool]
       case 'pocket':
         return [
-          ...(isAnalyticOperation(op) ? pocket(op, lib) : shapePocket(op, stock, lib, measure)),
+          ...(isAnalyticOperation(op)
+            ? pocket(op, stock, lib)
+            : shapePocket(op, stock, lib, measure)),
           ...reach(op, stock, lib, own, measure),
           ...heavy,
           ...tool,
@@ -416,10 +419,19 @@ function facing(op: Op<'facing'>, unitSystem: 'metric' | 'inch'): DfmWarning[] {
 const narrowest = (op: Op<'pocket'> | Op<'profile'>): number =>
   isAnalyticOperation(op) ? 2 * inradius(op.shape.contour) : Infinity
 
-/** Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius. */
-function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
+/**
+ * Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius.
+ * With `stock` (a pocket's local stock) corners on or beyond the stock edge are open and do not
+ * count (DF61 follow-up): a pocket without a wall corner gets no corner warning.
+ */
+function corners(
+  op: Op<'pocket'> | Op<'profile'>,
+  lib: Library,
+  stock?: StockGeometry,
+): DfmWarning[] {
   const c = op.shape.contour
   if (c.kind !== 'rectangle') return []
+  if (stock !== undefined && !rectangleWallCorner(op.shape.center, c, stock)) return []
   const min = lib.minEndMill === undefined ? undefined : lib.minEndMill / 2
   const suggestion = min === undefined ? undefined : atLeast(min)
   if (c.cornerRadius <= EPSILON)
@@ -449,7 +461,7 @@ function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
   return []
 }
 
-function pocket(op: AnalyticOperation<'pocket'>, lib: Library): DfmWarning[] {
+function pocket(op: AnalyticOperation<'pocket'>, stock: StockGeometry, lib: Library): DfmWarning[] {
   const out: DfmWarning[] = []
   const size = narrowest(op)
   if (lib.minEndMill !== undefined && size < lib.minEndMill - TOOL_MATCH_TOLERANCE)
@@ -477,7 +489,7 @@ function pocket(op: AnalyticOperation<'pocket'>, lib: Library): DfmWarning[] {
         { suggestion: atMost(deepest) },
       ),
     )
-  out.push(...corners(op, lib), ...floorRadiusRule(op, lib))
+  out.push(...corners(op, lib, stock), ...floorRadiusRule(op, lib))
   return out
 }
 

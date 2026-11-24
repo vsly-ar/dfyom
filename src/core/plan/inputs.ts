@@ -24,7 +24,7 @@ import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { loadPlan, setupOf } from './plan'
 import { planMaterialBands, planThroughDepths } from './through'
-import type { MaterialBand } from '../geometry/through-depth'
+import type { MaterialBand, MaterialCover } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
 
@@ -64,9 +64,16 @@ export interface PlanOperationInput {
   /**
    * The material earlier cuts of the plan left over the region of a facing, pocket or profile
    * (DF61, `planMaterialBands`): its toolpath skips the passes that lie wholly in air. Absent =
-   * the raw stock from the cut's start level to its floor.
+   * the raw stock from the cut's start level to its floor. A pocket's carries its partial
+   * coverage too (`MaterialCover.partial`).
    */
-  readonly material?: MaterialBand
+  readonly material?: MaterialCover
+  /**
+   * A drilling's material bands by design operation id (DF61 follow-up): a hole whose whole disc
+   * earlier cuts cleared below its `on` level starts its cycle on the material. Absent or not
+   * listed = from its `on` level.
+   */
+  readonly materials?: ReadonlyMap<string, MaterialBand>
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -157,6 +164,12 @@ export function planOperationInputs(
       e.kind === 'facing' || e.kind === 'pocket' || e.kind === 'profile'
         ? planMaterialBands(plan, port).get(e.ops[0]?.id ?? '')
         : undefined
+    const materials = new Map<string, MaterialBand>()
+    if (e.kind === 'drilling')
+      for (const o of e.ops) {
+        const m = planMaterialBands(plan, port).get(o.id)
+        if (m !== undefined) materials.set(o.id, m)
+      }
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
     out.push({
@@ -175,6 +188,7 @@ export function planOperationInputs(
       machine: plan.machine,
       ...(throughDepths.size === 0 ? {} : { throughDepths }),
       ...(material === undefined ? {} : { material }),
+      ...(materials.size === 0 ? {} : { materials }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       inputHash: chain,
     })
