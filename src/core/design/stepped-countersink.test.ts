@@ -24,8 +24,9 @@ async function addHole(s: DesignSetup, args: object) {
   }
 }
 
+// flutes longer than the 20 mm stock: a through hole's walls need them (DF89)
 const tool = (values: object) => ({
-  fluteLength: '20',
+  fluteLength: '25',
   overallLength: '60',
   fluteCount: '2',
   ...values,

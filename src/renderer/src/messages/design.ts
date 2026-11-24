@@ -587,6 +587,11 @@ export const designMessages = {
       diameter: (hole: string | undefined) =>
         `doesn’t fit the ${hole === undefined ? '' : `Ø ${hole} `}hole`,
       reach: 'too short for the depth',
+      /** DF89: the flutes do not cut the walls' depth (the shank is not narrower). */
+      flutes: (fluteLength: string | undefined, depth: string | undefined) =>
+        fluteLength !== undefined && depth !== undefined
+          ? `${fluteLength} flutes, too short for the ${depth} walls`
+          : 'flutes too short for the walls',
       angle: 'another angle',
       other: 'too small for the chamfer',
     },
@@ -630,6 +635,7 @@ export const designMessages = {
         `the ${tool} didn’t fit the ${hole === undefined ? '' : `Ø ${hole} `}hole`,
       type: (tool: string, kind: string) => `the ${tool} can’t make a ${kind}`,
       reach: (tool: string) => `the ${tool} didn’t reach the depth`,
+      flutes: (tool: string) => `the flutes of the ${tool} were too short for the walls`,
       unresolved: 'the previous tool could not be read',
       /** DF54: a fitting generalized tool gave way to a library tool. */
       libraryFits: (tool: string) => `a library tool fits now instead of the ${tool}`,

@@ -1,6 +1,6 @@
 # Split parts: one part cut from several stocks
 
-Status: draft (proposal task 1.8, written 2026-11-24 after the user asked again, TG #311; the decisions below are proposals until the user answers [Q109–Q116](#questions-for-the-user)) · Proposal: [plans/proposal-multi-setup-alignment.md § 5](../plans/proposal-multi-setup-alignment.md#5-phase-4--split-parts-design) (S1–S4, [Q68](../plans/proposal-multi-setup-alignment.md#questions-for-the-user)) · Research: [research § D](../research/2026-11-23-multi-setup-alignment.md#d-splitting-one-part-across-several-stocks) · Base: [design.md](design.md), [features.md § Expansion and owned operations](features.md#expansion-and-owned-operations), [design-v0.3.md](design-v0.3.md) (shapes), [geometry.md § 2.5D evaluation](../architecture/geometry.md#25d-evaluation-v01), [alignment.md § Alignment aids](alignment.md#alignment-aids) (registration holes) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposal task 1.8, written 2026-11-24 after the user asked again, TG #311; the user took every recommendation of [Q109–Q116](#questions-for-the-user), TG #317 "go") · Proposal: [plans/proposal-multi-setup-alignment.md § 5](../plans/proposal-multi-setup-alignment.md#5-phase-4--split-parts-design) (S1–S4, [Q68](../plans/proposal-multi-setup-alignment.md#questions-for-the-user)) · Research: [research § D](../research/2026-11-23-multi-setup-alignment.md#d-splitting-one-part-across-several-stocks) · Base: [design.md](design.md), [features.md § Expansion and owned operations](features.md#expansion-and-owned-operations), [design-v0.3.md](design-v0.3.md) (shapes), [geometry.md § 2.5D evaluation](../architecture/geometry.md#25d-evaluation-v01), [alignment.md § Alignment aids](alignment.md#alignment-aids) (registration holes) · Terms: [glossary.md](../glossary.md)
 
 The user (2026-11-24, TG #311): "any progress on splitting a large part into separate parts? I was trying to do it for temp/enclosure_1x.dfyom but haven't found an option." There is none yet: phase 4 of the proposal was not scheduled. This doc specifies it so it can be accepted and built in slices, smallest first ([§ Slices](#slices)).
 
@@ -172,7 +172,7 @@ Sizes are agent working days including docs, tests and review, comparable to ali
 
 ## Questions for the user
 
-Each with a recommendation; "Q109 ok" takes it.
+Answered 2026-11-24 (TG #317 "go"): every recommendation below was taken.
 
 1. **Q109 – Pieces follow the source.** (1) Derived and kept in sync, read-only; (2) one-time copy; (3) derived, with Detach later. _Recommendation: (1), Detach later (3)._ You iterate on the enclosure (two scales already); a copy would make every change a re-split by hand.
 2. **Q110 – What 4a ships.** (1) Straight lines **and levels**, butt joints, margins, own blanks; (2) lines only, as the proposal first said; (3) (1) plus dowels on levels. _Recommendation: (1)._ Your enclosure needs a level (60.5 mm tall, cavity deeper than your longest flute); lines alone would not help it.
