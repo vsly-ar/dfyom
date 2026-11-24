@@ -6,7 +6,7 @@
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
-import type { JobDirectory, Services } from '../commands/context'
+import type { JobContext, JobDirectory, Services } from '../commands/context'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
 import { setupStockSize } from '../plan/setups'
@@ -84,6 +84,31 @@ async function act(
   if (m.isErr()) return m
   const r = await m.unwrap().machine(action)
   return r.mapErr((e) => e.withContext(where))
+}
+
+/**
+ * A machine action run by a job (homing, Probe Z): `job.abort` stops the machine with a reset
+ * (`0x18`), as Stop does without a run job (GRBL stops a homing cycle only by a reset, DF35;
+ * docs/modes/run.md#1-emergency-stop-stop-and-reset). Before, the abort only marked the job and
+ * the cycle ran on (and the job with it) until the machine finished.
+ */
+async function actStoppable(
+  ctx: JobContext,
+  action: MachineAction,
+  where: string,
+): Promise<AppResult<unknown>> {
+  const m = machineOf(ctx.services, where)
+  if (m.isErr()) return m
+  if (ctx.signal.aborted) return fail('op.aborted', `${where} was aborted`, { where })
+  const machine = m.unwrap()
+  const stop = () => void machine.machine({ kind: 'reset' })
+  ctx.signal.addEventListener('abort', stop, { once: true })
+  try {
+    const r = await machine.machine(action)
+    return r.mapErr((e) => e.withContext(where))
+  } finally {
+    ctx.signal.removeEventListener('abort', stop)
+  }
 }
 
 /**
@@ -267,7 +292,7 @@ export const runMachineHome = defineCommand({
   args: Empty,
   result: z.object({ workZero: Vec3Schema.describe('G54 in machine coordinates (mm)') }),
   async run(_doc, _args, ctx) {
-    const r = await act(ctx.services, { kind: 'home' }, 'run.machine.home')
+    const r = await actStoppable(ctx, { kind: 'home' }, 'run.machine.home')
     if (r.isErr()) return r
     return Ok({ workZero: [...(ctx.services.machine?.status().workZero ?? [0, 0, 0])] as Vec3 })
   },
@@ -551,8 +576,8 @@ export const runMachineProbeZ = defineCommand({
     contact: Vec3Schema.describe('Contact, MPos mm'),
   }),
   async run(_doc, args, ctx) {
-    const r = await act(
-      ctx.services,
+    const r = await actStoppable(
+      ctx,
       {
         kind: 'probeZ',
         plateThickness: args.plateThickness,

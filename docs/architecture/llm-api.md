@@ -77,7 +77,8 @@ The instance has one machine connection ([run-v0.1.md](../modes/run-v0.1.md#proc
 
 - **Routing** (`AgentSession`): a session **without a bound project** sends those names (and `job.wait`) to the machine-scope dispatcher instead of answering `noProject`; `run.connection.open` with `planId` still answers `noProject`, and so do the plan-reading run commands (`run.job.start`, `run.job.check`, `run.align.*`). A bound session is unchanged: everything goes to its project's dispatcher.
 - **Names are not new tools:** the commands are the project registry's own definitions, so the tool list and its budget ([DF79](#result-size)) do not change; the registry test checks the machine scope is a subset of the project scope.
-- **Stop from any window:** a window's `job.abort` refused by its own scope is tried in the machine scope and then in every other open project (`abortElsewhere`, `src/main/ipc.ts`), so Stop reaches a homing or probing job started without a project.
+- **Jobs of the machine scope from a bound session:** `job.get`, `job.pause`, `job.resume`, `job.abort` and `job.wait` with a job id the bound project does not know but the machine scope does run in the machine scope (`AgentSession`), so a project window or a bound agent stops (and follows) a homing or probing job started without a project. `job.list` stays per scope.
+- **Stop from any window:** a window's `job.abort` refused by its own session is tried in every other open project (`abortElsewhere`, `src/main/host/stop.ts`, called by `src/main/ipc.ts`), so a window without a project stops a project window's job. Agents are not windows: an unbound agent reaches only the machine scope's jobs with `job.abort`; `run.machine.reset` and `run.machine.jogCancel` act on the one connection from any scope. Tests: `src/main/host/machine-scope-stop.test.ts`.
 
 ### Session tools
 

@@ -37,6 +37,7 @@ import {
   type DialogFolders,
 } from './file-dialogs'
 import type { AppHost } from './host/app-host'
+import { abortElsewhere } from './host/stop'
 import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
 import type { SaveAllOutcome } from './quit'
@@ -198,38 +199,17 @@ export function registerProjectIpc(
       const out = reply(r.result)
       // Stop works from every window (ui.md#run-mode-safety-ui): a run job belongs to its
       // project's dispatcher, so a window without that project (another project, the Library
-      // window) aborts it there.
-      if (!out.ok && name === 'job.abort') return abortElsewhere(args, ws, out)
-      return out
+      // window) aborts it there; the session already reached the machine scope (DF80).
+      if (out.ok || name !== 'job.abort') return out
+      const elsewhere = await abortElsewhere(
+        host,
+        { kind: 'ui', id: `stop-${ws.win.id}` },
+        ws.session.boundKey,
+        args,
+      )
+      return elsewhere === undefined ? out : reply(elsewhere)
     },
   )
-
-  /**
-   * `job.abort` through the machine scope (a homing or probing job started without a project,
-   * DF80; the stop session is unbound at first) and then each other open project until one knows
-   * the job; else `refused`.
-   */
-  const abortElsewhere = async (
-    args: unknown,
-    ws: WindowSession,
-    refused: CallReply,
-  ): Promise<CallReply> => {
-    const session = host.openSession({ kind: 'ui', id: `stop-${ws.win.id}` })
-    try {
-      if (ws.session.boundKey !== undefined) {
-        const r = reply((await session.call('job.abort', args ?? {})).result)
-        if (r.ok) return r
-      }
-      for (const p of host.list()) {
-        if (p.key === ws.session.boundKey || session.bind(p.key).isErr()) continue
-        const r = reply((await session.call('job.abort', args ?? {})).result)
-        if (r.ok) return r
-      }
-      return refused
-    } finally {
-      session.end()
-    }
-  }
 
   // Same sender check for every handler: only a DFYOM window's main frame.
   ipcMain.handle(IPC.agentsList, (event) =>
