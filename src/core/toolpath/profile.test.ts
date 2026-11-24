@@ -291,6 +291,40 @@ describe('generateProfile', () => {
     )
   })
 
+  // docs/modes/plan-v0.1.md#finishing-defaults-hardening-df75-df76 and
+  // docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+  it('finishes in levels of finishStepdown at the finishing feed (DF74, DF76)', () => {
+    const op = profile(rect(30, 20, 3), 'outside', 8, { count: 0, width: 4, thickness: 1.5 })
+    const base = profileInput(stock, op, endMill(6))
+    const finishOf = (over: object) => {
+      const tp = generateProfile({ ...base, ...over }).unwrap()
+      const finish = tp.passes.filter((p) => p.kind === 'finish').flatMap((p) => p.moves)
+      const cuts = finish.flatMap((m) =>
+        (m.kind === 'line' || m.kind === 'arc') && m.feed !== base.cutting.plungeRate ? [m] : [],
+      )
+      return {
+        levels: [...new Set(cuts.map((m) => Math.round(m.to[2] * 1e6) / 1e6))],
+        feeds: [...new Set(cuts.map((m) => m.feed))],
+      }
+    }
+    // absent: one level at the full depth (6 + 0.5 breakthrough), at the feed rate
+    expect(finishOf({})).toEqual({ levels: [-6.5], feeds: [base.cutting.feedRate] })
+    // 2.5 mm: three equal levels of 6.5 / 3, at the finishing feed
+    const levels = finishOf({
+      strategy: { ...base.strategy, finishStepdown: 2.5 },
+      cutting: { ...base.cutting, finishFeedRate: 2345 },
+    })
+    expect(levels.feeds).toEqual([2345])
+    expect(levels.levels.map((z) => Math.round(z * 1000) / 1000)).toEqual([-2.167, -4.333, -6.5])
+    // the roughing passes keep the feed rate
+    const tp = generateProfile({
+      ...base,
+      cutting: { ...base.cutting, finishFeedRate: 2345 },
+    }).unwrap()
+    for (const p of tp.passes.filter((x) => x.kind === 'rough'))
+      for (const m of p.moves) if (m.kind !== 'rapid') expect(m.feed).not.toBe(2345)
+  })
+
   /** Radii (from the shape center) of the arcs at the last level, in cutting order. */
   const lastLevelRadii = (op: ProfileOperation, tool: ToolpathTool) => {
     const tp = generateProfile(profileInput(stock, op, tool)).unwrap()

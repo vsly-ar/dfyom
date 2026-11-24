@@ -223,6 +223,11 @@ describe('Plan inspector: calculation', () => {
     expect(r.queryByRole('list', { name: 'How stepover is calculated' })).toBeNull()
     for (const term of ['Surface speed', 'Chip load after chip thinning', 'Chip thinning'])
       expect(r.getByText(term)).toBeInTheDocument()
+    // DF74: the finishing pass's own feed at the 0.2 mm allowance
+    const finish = within(r.getByRole('region', { name: 'Finishing pass' }))
+    for (const term of ['Finishing feed', 'Finishing chip load', 'Finishing chip thinning'])
+      expect(finish.getByText(term)).toBeInTheDocument()
+    expect(finish.getByText('0.2 mm')).toBeInTheDocument()
     expect(t.callsOf('plan.operation.feeds.get')).toContainEqual({
       planId: t.planId,
       planOperationId: planOp(t.s, t.planId, 'pocket1').id,

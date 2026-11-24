@@ -121,6 +121,7 @@ const CuttingSchema = z.object({
   plungeRate: z.number(),
   stepdown: z.number(),
   stepover: z.number(),
+  finishFeedRate: z.number().exactOptional(),
 })
 const DrillCuttingSchema = CuttingSchema.pick({
   spindleSpeed: true,
@@ -204,6 +205,7 @@ const ProfileStrategySchema = z.object({
   rampAngle: z.number(),
   breakthrough: z.number(),
   finishAllowance: z.number(),
+  finishStepdown: z.number().exactOptional(),
   direction: Direction,
 })
 

@@ -16,6 +16,7 @@ import { availablePower, rctf } from './formulas'
 import {
   checkCutting,
   cuttingAt,
+  finishingAt,
   machineLimits,
   noDataFor,
   suggestCutting,
@@ -745,5 +746,66 @@ describe('cuttingAt', () => {
   it('no data or no speed: None', () => {
     expect(cuttingAt(input({ materialClass: 'other' }), { n: 1, vf: 1 }, TEST_DATA)).toEqual(None)
     expect(cuttingAt(input(), { n: 0, vf: 1 }, TEST_DATA)).toEqual(None)
+  })
+})
+
+// docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+describe('finishingAt', () => {
+  const input = (over: Partial<CuttingInput> = {}): CuttingInput => ({
+    tool: tool(),
+    materialClass: 'aluminum',
+    engagement: { kind: 'stepover', ae: 2.4 },
+    machine: None,
+    ...over,
+  })
+
+  it('keeps the roughing chip load at the allowance: vf · kf / kr', () => {
+    const f = finishingAt(input(), { n: 10_000, vf: 1000, ap: 6, ae: 2.4 }, 0.2, 6, TEST_DATA)
+    const kr = rctf(2.4, 6)
+    const kf = rctf(0.2, 6)
+    expect(f.unwrap()).toMatchObject({ allowance: 0.2, clamped: false, minimum: 0.02 })
+    expect(f.unwrap().chipThinning).toBeCloseTo(kf, 12)
+    expect(f.unwrap().feedRate).toBeCloseTo((1000 * kf) / kr, 9)
+    // the same chip as roughing
+    expect(f.unwrap().fz).toBeCloseTo(1000 / (10_000 * 2 * kr), 12)
+  })
+
+  it('held at the machine feed limit: the chip thins (clamped)', () => {
+    const machine = limits({ maxFeedXY: 1500 })
+    const f = finishingAt(
+      input({ machine }),
+      { n: 10_000, vf: 1000, ap: 6, ae: 2.4 },
+      0.2,
+      6,
+      TEST_DATA,
+    )
+    expect(f.unwrap().feedRate).toBe(1500)
+    expect(f.unwrap().clamped).toBe(true)
+    expect(f.unwrap().fz).toBeCloseTo(1500 / (10_000 * 2 * rctf(0.2, 6)), 12)
+  })
+
+  it('a slot roughs at full width; no allowance, drills or no data: None', () => {
+    const f = finishingAt(
+      input({ engagement: SLOT }),
+      { n: 10_000, vf: 600, ap: 3 },
+      0.5,
+      6,
+      TEST_DATA,
+    )
+    expect(f.unwrap().feedRate).toBeCloseTo(600 * rctf(0.5, 6), 9)
+    expect(finishingAt(input(), { n: 10_000, vf: 1000 }, 0, 6, TEST_DATA)).toEqual(None)
+    expect(
+      finishingAt(input({ materialClass: 'other' }), { n: 10_000, vf: 1000 }, 0.2, 6, TEST_DATA),
+    ).toEqual(None)
+    const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
+    expect(
+      finishingAt(
+        input({ tool: drill, engagement: { kind: 'drill' } }),
+        { n: 1, vf: 1 },
+        0.2,
+        6,
+        TEST_DATA,
+      ),
+    ).toEqual(None)
   })
 })

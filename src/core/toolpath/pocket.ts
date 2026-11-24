@@ -181,6 +181,8 @@ export function generatePocket(input: PocketInput, steps: Steps = noSteps): AppR
   // finishing: the wall ring at full size, lead-in and lead-out from the roughed ring
   if (finishing) {
     b.pass('finish')
+    // DF74: the finishing feed keeps the chip load at the allowance's radial engagement
+    const finishFeed = cutting.finishFeedRate ?? feed
     const wallRing = ring(wall)
     const lead = ring(outermost)
     const leadPoint = lead.length > 0 ? segPoint(lead[0]!, 0) : c
@@ -190,9 +192,9 @@ export function generatePocket(input: PocketInput, steps: Steps = noSteps): AppR
       const step = pass(roughZ.length + k)
       if (step.isErr()) return Err(step.unwrapErr())
       b.line(at(leadPoint, z), cutting.plungeRate)
-      b.line(at(wallStart, z), feed)
-      for (const s of flat(wallRing, z)) b.seg(s, feed)
-      b.line(at(leadPoint, z), feed)
+      b.line(at(wallStart, z), finishFeed)
+      for (const s of flat(wallRing, z)) b.seg(s, finishFeed)
+      b.line(at(leadPoint, z), finishFeed)
     }
     b.rapid(at(leadPoint, retract))
   }

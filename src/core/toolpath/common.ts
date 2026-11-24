@@ -69,7 +69,14 @@ export function commonIssues(input: GeneratorInput<unknown, unknown, object>): I
   issues.positive('tool.diameter', input.tool.diameter)
   issues.nonNegative('tool.cornerRadius', input.tool.cornerRadius)
   const c = input.cutting as Record<string, number>
-  for (const key of ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover'])
+  for (const key of [
+    'spindleSpeed',
+    'feedRate',
+    'plungeRate',
+    'stepdown',
+    'stepover',
+    'finishFeedRate',
+  ])
     if (key in c) issues.positive(`cutting.${key}`, c[key]!)
   issues.positive('heights.retractHeight', input.heights.retractHeight)
   if (!(input.heights.clearanceHeight > input.heights.retractHeight))

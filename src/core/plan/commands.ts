@@ -1358,6 +1358,16 @@ const operationFeedsGet = defineQuery({
       })
       .nullable()
       .describe('At the values used; null without calculator data'),
+    finish: z
+      .object({
+        allowance: Num.describe('Finishing allowance (radial engagement), mm'),
+        feedRate: Num.describe('Finishing feed, mm/min'),
+        chipThinning: Num,
+        fz: Num.describe('Finishing chip after chip thinning, mm'),
+        clamped: z.boolean().describe('Held at the machine feed limit'),
+      })
+      .nullable()
+      .describe('Finishing pass (DF74); null without a finishing pass or calculator data'),
   }),
   run(doc, args) {
     const where = 'plan.operation.feeds.get'
@@ -1418,7 +1428,16 @@ const operationFeedsGet = defineQuery({
         Pc: d.Pc.unwrapOr(null as unknown as number),
         spindleLoad: d.spindleLoad.unwrapOr(null as unknown as number),
       }))
-    return Ok({ auto, inputs, fields, used })
+    const finish = e.feeds
+      .andThen((r) => r.finish)
+      .mapOr(null, (f) => ({
+        allowance: f.allowance,
+        feedRate: f.feedRate,
+        chipThinning: f.chipThinning,
+        fz: f.fz,
+        clamped: f.clamped,
+      }))
+    return Ok({ auto, inputs, fields, used, finish })
   },
 })
 

@@ -511,11 +511,23 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   ])
   // DF39/Q57: Flat 3 has calculator data (the ≤ 3 mm band, Amana 1/16″ in MDF: .003–.005″); the
   // preset's 3600 mm/min at 18,000 rpm, 2 flutes (fz 0.1 mm) sits in the range's middle, so the
-  // lid's plan has no feeds findings (nor any other)
+  // lid's plan has no roughing feeds findings (nor any other). DF74: Flat 6's two profiles
+  // finish 0.2 mm in plywood at 18,000 rpm; the finishing feed that keeps the preset's chip load
+  // is held at the router's 5000 mm/min, which leaves 0.05 mm chips (under half the 0.127 mm
+  // minimum): a true finishing-rub warning per profile
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
-  expect(findings.warnings.map((f) => [f.severity, f.rule, f.params['chipLoad']])).toEqual([])
+  expect(
+    findings.warnings.map((f) => [
+      f.severity,
+      f.rule,
+      Math.round(Number(f.params['chipLoad']) * 1000),
+    ]),
+  ).toEqual([
+    ['warning', 'finishRubbing', 50],
+    ['warning', 'finishRubbing', 50],
+  ])
 
   const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })
   const generated = (await waitJob(gen.value.jobId)) as {

@@ -1,7 +1,7 @@
 // "Show calculation" under the plan inspector's feeds fields (v0.2): the calculator's inputs,
 // each field's value and source with the derivation steps of calculator values (formula, inputs,
 // result), and surface speed, chip thinning, removal rate, power and spindle load at the values
-// used, from `plan.operation.feeds.get` (read once per revision while open). Canonical metric
+// used, and the finishing pass's feed (DF74), from `plan.operation.feeds.get` (read once per revision while open). Canonical metric
 // units, as the calculator's messages. Doc: docs/conventions/ui.md#plan-mode-task-37
 // (Calculation), docs/modes/plan-v0.1.md#feeds-explanation-v02
 import { useEffect, useId, useState } from 'react'
@@ -56,6 +56,14 @@ export interface FeedsExplanation {
     readonly Q: number | null
     readonly Pc: number | null
     readonly spindleLoad: number | null
+  } | null
+  /** The finishing pass's own feed (DF74); absent from older replies, null without one. */
+  readonly finish?: {
+    readonly allowance: number
+    readonly feedRate: number
+    readonly chipThinning: number
+    readonly fz: number
+    readonly clamped: boolean
   } | null
 }
 
@@ -250,6 +258,21 @@ function Explanation({
           </dl>
         )}
       </section>
+
+      {e.finish != null ? (
+        <section aria-label={c.finish} className={styles['group']}>
+          <h4 className={styles['groupTitle']}>{c.finish}</h4>
+          <dl className={styles['calcList']}>
+            <Row term={c.finishAllowance} value={`${calcNumber(e.finish.allowance)} mm`} />
+            <Row
+              term={c.finishFeed}
+              value={`${calcNumber(e.finish.feedRate)} mm/min${e.finish.clamped ? ` ${c.finishClamped}` : ''}`}
+            />
+            <Row term={c.finishChipLoad} value={`${calcNumber(e.finish.fz)} mm`} />
+            <Row term={c.finishChipThinning} value={`×${calcNumber(e.finish.chipThinning)}`} />
+          </dl>
+        </section>
+      ) : null}
     </>
   )
 }

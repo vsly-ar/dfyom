@@ -127,6 +127,11 @@ export interface CuttingParams {
   readonly stepdown: number
   /** mm between neighbouring passes. */
   readonly stepover: number
+  /**
+   * mm/min of the finishing passes (DF74: radial chip thinning at the allowance); absent =
+   * `feedRate`. Doc: docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+   */
+  readonly finishFeedRate?: number
 }
 
 /** Drilling uses no stepdown or stepover (the peck depth and helix pitch are its strategy's). */
@@ -196,6 +201,8 @@ export interface ProfileStrategy {
   /** Below the stock bottom (mm). */
   readonly breakthrough: number
   readonly finishAllowance: number
+  /** Depth per finishing level (DF76); absent = one level at full depth. */
+  readonly finishStepdown?: number
   readonly direction: CutDirection
 }
 

@@ -500,6 +500,7 @@ export function shownStrategyKeys(
         return true
       case 'profile':
         if (key === 'breakthrough') return through
+        if (key === 'finishStepdown') return Number(resolved['finishAllowance'] ?? 0) > 0
         return key !== 'rampAngle' || entry === 'ramp'
       case 'drilling':
         if (key === 'peckDepth') return cycle === 'peck' || cycle === 'chipBreak'

@@ -197,8 +197,8 @@ export function generateRegionPocket(
     else if (pos[2] < retract) b.rapid([pos[0], pos[1], retract])
     b.rapid(at(p, retract))
   }
-  const cutRing = (ring: readonly Seg[], z: number) => {
-    for (const s of flat(ring, z)) b.seg(s, feed)
+  const cutRing = (ring: readonly Seg[], z: number, f = feed) => {
+    for (const s of flat(ring, z)) b.seg(s, f)
   }
 
   // over the material earlier cuts left (DF61): no passes wholly in air
@@ -333,6 +333,8 @@ export function generateRegionPocket(
 
   if (finishing) {
     b.pass('finish')
+    // DF74: the finishing feed keeps the chip load at the allowance's radial engagement
+    const finishFeed = cutting.finishFeedRate ?? feed
     const finishRegion: Region = { pieces: finishPieces }
     const loops = regionLoops(finishRegion)
       .map((l) => loopRing(l, cw))
@@ -355,10 +357,10 @@ export function generateRegionPocket(
         const s = pass(roughZ.length + k)
         if (s.isErr()) return Err(s.unwrapErr())
         b.line(at(lead.start, z), cutting.plungeRate)
-        for (const sg of flat(lead.leadIn, z)) b.seg(sg, feed)
-        cutRing(lead.ring, z)
-        for (const sg of flat(lead.leadOut, z)) b.seg(sg, feed)
-        if (k < finishZ.length - 1) b.line(at(lead.start, z), feed)
+        for (const sg of flat(lead.leadIn, z)) b.seg(sg, finishFeed)
+        cutRing(lead.ring, z, finishFeed)
+        for (const sg of flat(lead.leadOut, z)) b.seg(sg, finishFeed)
+        if (k < finishZ.length - 1) b.line(at(lead.start, z), finishFeed)
       }
       const pos = b.position!
       b.rapid([pos[0], pos[1], retract])

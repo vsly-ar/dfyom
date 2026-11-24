@@ -324,6 +324,106 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
   return out
 }
 
+/**
+ * Room above the stock top the stickout needs beyond the deepest cut (mm): the collet nut
+ * (research 2026-11-24 § 3: 31 mm cut + ~5 mm). Doc:
+ * docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
+ */
+export const STICKOUT_CLEARANCE = 5
+/** Deflection factor (stickout / needed)³ from which excess stickout warns. */
+export const DEFLECTION_FACTOR_WARN = 2
+/** Excess stickout warns only for slender tools: stickout > this × D. */
+export const SLENDER_STICKOUT = 4
+
+/**
+ * The depth of each cut below the stock face the `reach` rule compares with the stickout (mm):
+ * pocket floor, hole (with breakthrough), profile cut, chamfer tip, facing depth.
+ */
+function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): number {
+  const { part, stock, tool } = i
+  switch (op.kind) {
+    case 'facing':
+      return belowTop(table, op.on) + op.depth.canonical
+    case 'pocket':
+      return belowTop(table, `${op.id}.floor`)
+    case 'drilling': {
+      const through = op.bottom === 'through'
+      const left = through ? i.throughDepths?.get(op.id) : undefined
+      const depth =
+        left === undefined ? holeDepth(op, part.operations, stock) : left - belowTop(table, op.on)
+      const breakthrough = through && i.strategy.kind === 'drilling' ? i.strategy.breakthrough : 0
+      return belowTop(table, op.on) + depth + breakthrough
+    }
+    case 'profile': {
+      const breakthrough = i.strategy.kind === 'profile' ? i.strategy.breakthrough : 0
+      const material = i.throughDepths?.get(op.id) ?? stock.thickness.canonical
+      return op.depth.mapOr(material + breakthrough, (d) => d.canonical)
+    }
+    case 'chamfer': {
+      const cut = chamferCuts(op, part.operations, stock, tool)
+      if (cut === undefined) return 0
+      const plunged = i.strategy.kind === 'chamfer' && i.strategy.entry === 'plunge'
+      return belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
+    }
+  }
+}
+
+/**
+ * The reach and rigidity warnings (hardening DF73, DF75): excess stickout (deflection factor
+ * (stickout / needed)³ ≥ 2 on a slender tool, drills exempt) and a pocket deeper than the flutes
+ * (the shank rubs the wall). Warnings: they never disqualify a tool.
+ * Doc: docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
+ */
+export function rigidityFindings(i: Omit<ToolCheckInput, 'stepdown'>): Finding[] {
+  const out: Finding[] = []
+  const { tool } = i
+  const table = SurfaceTable.of(i.part.operations, i.stock)
+  const D = tool.diameter.canonical
+  const flute = tool.fluteLength.canonical
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  // DF75: a pocket deeper than the flutes, unless the shank is reduced below D
+  const reduced = tool.shankDiameter.mapOr(false, (s) => s.canonical < D - 0.01)
+  if (!reduced)
+    for (const op of i.ops) {
+      if (op.kind !== 'pocket') continue
+      const depth = belowTop(table, `${op.id}.floor`)
+      if (depth > flute + EPS)
+        out.push({
+          field: 'tool',
+          rule: 'shankRub',
+          message: `pocket depth ${r2(depth)} mm is deeper than the flute length (${r2(flute)} mm): below the flutes the shank rubs the wall; check the flute length in the library or use a tool with longer flutes`,
+          params: { depth, fluteLength: flute },
+        })
+    }
+  // DF73: excess stickout
+  if (tool.type === 'drill' || i.ops.length === 0) return out
+  const depth = Math.max(...i.ops.map((op) => reachDepth(op, i, table)))
+  const needed = depth + STICKOUT_CLEARANCE
+  const factor = (i.stickout / needed) ** 3
+  // the shortest stickout that keeps the collet on the shank
+  const shank = Math.max(needed, flute)
+  const shankFactor = (i.stickout / shank) ** 3
+  if (
+    factor >= DEFLECTION_FACTOR_WARN &&
+    i.stickout > SLENDER_STICKOUT * D + EPS &&
+    // already chucked at the flutes: only a shorter-fluted tool helps, so no warning
+    (shankFactor >= DEFLECTION_FACTOR_WARN || i.stickout > flute + EPS)
+  ) {
+    const onShank = shankFactor >= DEFLECTION_FACTOR_WARN
+    const suggested = Math.ceil((onShank ? shank : needed) - EPS)
+    const flutes = onShank
+      ? ''
+      : ' (the collet then grips the flutes; a tool with shorter flutes is stiffer)'
+    out.push({
+      field: 'stickout',
+      rule: 'excessStickout',
+      message: `stickout ${r2(i.stickout)} mm makes the tool ${Math.round(factor * 10) / 10}× as flexible as the ${r2(needed)} mm the deepest cut (${r2(depth)} mm) needs: chuck the tool deeper, about ${suggested} mm${flutes}`,
+      params: { stickout: i.stickout, depth, needed, factor, suggested },
+    })
+  }
+  return out
+}
+
 /** Named stock sizes (mm) on the machine axes of one setup (`setupStockSize`). */
 export interface AxisSizes {
   readonly x: readonly [string, number]
