@@ -472,6 +472,37 @@
   stroke-width: 1.5;
 }
 
+.workZeroRing[data-current] {
+  stroke: var(--vp-selected);
+  stroke-width: 2;
+}
+
+/* DF78: alignment points on the setup picture; the step's current entry in the selection colour */
+.alignMarker polygon {
+  fill: color-mix(in oklab, var(--vp-tool) 12%, transparent);
+  stroke: var(--vp-tool);
+  stroke-width: 1.25;
+  transition:
+    stroke var(--motion-base) var(--ease-standard),
+    fill var(--motion-base) var(--ease-standard);
+}
+
+.alignMarker text {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.alignMarker[data-current] polygon {
+  fill: color-mix(in oklab, var(--vp-selected) 30%, transparent);
+  stroke: var(--vp-selected);
+  stroke-width: 2;
+}
+
+.alignMarker[data-current] text {
+  fill: var(--text);
+}
+
 .workZeroDot {
   fill: var(--vp-tool);
 }

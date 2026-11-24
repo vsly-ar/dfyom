@@ -671,3 +671,64 @@ describe('Setup work zero and alignment points', () => {
     await waitFor(() => expect(t.setupRows()[1]).toHaveTextContent('G54 front left'))
   })
 })
+
+// DF78 slice 2: docs/modes/alignment.md#implementation-slice-2
+describe('Alignment aids and picking points', () => {
+  it('adds marks for the next setup, edits and removes an aid, and picks a point in the viewport', async () => {
+    const t = await renderSetups()
+    const [first, second] = t.plan().setups
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    expect(within(insp).getByText(new RegExp(`so ${second!.name} can line up`))).toBeInTheDocument()
+    await t.user.click(within(insp).getByRole('button', { name: 'Add witness marks' }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.aid.set')).toContainEqual({
+        planId: t.planId,
+        setupId: first!.id,
+        place: 'marks',
+        forSetupId: second!.id,
+      }),
+    )
+    await waitFor(() => expect(t.plan().setups[1]!.alignment).toHaveLength(2))
+    // the aid rows: their own name and the aid edge
+    const aidRows = () =>
+      within(t.opsOf(first!.name))
+        .getAllByRole('listitem')
+        .filter((r) => r.hasAttribute('data-aid'))
+    await waitFor(() => expect(aidRows()).toHaveLength(2))
+    expect(aidRows()[0]).toHaveTextContent('Witness mark 1')
+    expect(aidRows()[0]).toHaveAttribute('data-aid', 'witnessMark')
+
+    // its inspector: rename, then remove
+    const id = t.plan().setups[0]!.operations.find((o) => o.aid?.name === 'Witness mark 1')!.id
+    await t.user.click(within(aidRows()[0]!).getAllByRole('button')[0]!)
+    const aidInsp = await within(t.inspector()).findByRole('region', { name: 'Alignment aid' })
+    const name = within(aidInsp).getByLabelText('Name', { selector: 'input' })
+    await t.user.clear(name)
+    await t.user.type(name, 'Front mark{Enter}')
+    await waitFor(() =>
+      expect(t.plan().setups[0]!.operations.find((o) => o.id === id)?.aid?.name).toBe('Front mark'),
+    )
+    await expectNoAxeViolations()
+    await t.user.click(within(aidInsp).getByRole('button', { name: 'Remove aid' }))
+    await waitFor(() => expect(t.plan().setups[0]!.operations.some((o) => o.id === id)).toBe(false))
+
+    // picking in the second setup: targets in the scene, a click adds the point, Esc ends it
+    await t.user.click(t.setupRows()[1]!)
+    const pick = await within(t.inspector()).findByRole('button', { name: 'Pick in viewport' })
+    await t.user.click(pick)
+    await waitFor(() => expect(probe.scene?.alignmentTargets?.length ?? 0).toBeGreaterThan(0))
+    const corner = probe.scene!.alignmentTargets!.find((x) => x.label.includes('front-left'))!
+    expect(corner.label).toMatch(/^Add Top front-left corner \(X 0 mm\s+Y 0 mm\)$/)
+    const before = t.plan().setups[1]!.alignment!.length
+    corner.onPick()
+    await waitFor(() => expect(t.plan().setups[1]!.alignment).toHaveLength(before + 1))
+    expect(within(t.inspector()).getByRole('button', { name: 'Done picking' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await t.user.keyboard('{Escape}')
+    await waitFor(() => expect(probe.scene?.alignmentTargets).toBeUndefined())
+  })
+})

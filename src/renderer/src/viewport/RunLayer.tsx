@@ -12,7 +12,12 @@ import { BufferAttribute, BufferGeometry, Color, Matrix4, SRGBColorSpace } from 
 import type { Placement } from '../../../core/geometry/model'
 import { MIX, mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
-import { AlignmentLayer, type AlignmentMarker } from './AlignmentLayer'
+import {
+  AlignmentLayer,
+  AlignmentTargets,
+  type AlignmentMarker,
+  type AlignmentTarget,
+} from './AlignmentLayer'
 import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 
@@ -46,6 +51,8 @@ export interface RunScene {
   readonly zRef?: ZRefOverlay | undefined
   /** The setup's alignment points (plan scene, DF78), in work coordinates; absent: none. */
   readonly alignment?: readonly AlignmentMarker[] | undefined
+  /** Sources a point can be added from while picking (plan scene, DF78 S22); absent: not picking. */
+  readonly alignmentTargets?: readonly AlignmentTarget[] | undefined
   /**
    * The setup's workholding items, the open item's keep-out zone and collision hits (plan scene,
    * workholding.md#ui-summary), in work coordinates; absent: none.
@@ -202,6 +209,9 @@ export function RunLayer({
       ) : null}
       {run.alignment && run.alignment.length > 0 ? (
         <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />
+      ) : null}
+      {run.alignmentTargets && run.alignmentTargets.length > 0 ? (
+        <AlignmentTargets targets={run.alignmentTargets} palette={palette} />
       ) : null}
       {/* work zero: a ring with a dot at the WCS origin */}
       <group raycast={noRaycast}>

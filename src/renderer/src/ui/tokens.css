@@ -78,6 +78,8 @@
   --vp-rapid: #868f8d;
   --vp-plunge: #835bae;
   --vp-tool: #1c2121;
+  /* alignment aids (witness marks, registration holes): alignment.md, ui.md */
+  --aid: #237a75;
   --vp-axis-x: #d0605f;
   --vp-axis-y: #4f9d6c;
   --vp-axis-z: #4a7fc8;
@@ -150,6 +152,7 @@
     --vp-rapid: #7a8482;
     --vp-plunge: #a886cf;
     --vp-tool: #e9edf3;
+    --aid: #5fc2b9;
     --vp-axis-x: #e07574;
     --vp-axis-y: #62b580;
     --vp-axis-z: #6c9ee0;
@@ -222,6 +225,7 @@
   --vp-rapid: #7a8482;
   --vp-plunge: #a886cf;
   --vp-tool: #e9edf3;
+  --aid: #5fc2b9;
   --vp-axis-x: #e07574;
   --vp-axis-y: #62b580;
   --vp-axis-z: #6c9ee0;

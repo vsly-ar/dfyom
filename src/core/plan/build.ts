@@ -42,6 +42,7 @@ import { defaultSetupIndex, deriveSetups, newSetup, setupDirection } from './set
 import { takeDesignSnapshot } from './snapshot'
 import { designToolField, sameDesignToolField } from './design-tool'
 import { resolveTool } from './tool-resolution'
+import { isAid } from './aids'
 import { checkPartFits } from './validity'
 
 export interface BuildContext {
@@ -216,7 +217,7 @@ function setTool(op: PlanOperationDTO, snapshotId: string | undefined): void {
  * (docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field), and marks it
  * `toolSource: 'design'`. Never fails because of a tool: an unresolved one is a finding.
  */
-function resolveAndAssign(
+export function resolveAndAssign(
   plan: PlanDTO,
   planOperationIds: readonly string[],
   c: BuildContext,
@@ -360,6 +361,11 @@ export function rebuildPlan(
   const setups: SetupDTO[] = plan.setups.map((s) => {
     const kept: PlanOperationDTO[] = []
     for (const p of s.operations) {
+      // alignment aids are no design operation: a rebuild keeps them in place (S20)
+      if (isAid(p)) {
+        kept.push(p)
+        continue
+      }
       const ids = p.designOperationIds.filter((id) => byId.has(id))
       if (ids.length === 0) continue
       const groups = groupOperations(
@@ -385,12 +391,19 @@ export function rebuildPlan(
   const placed: PlanOperationDTO[] = []
   for (const s of setups)
     s.operations = s.operations.filter((p) => {
+      if (isAid(p)) return true
       const same = direction.get(p.id) === setupDirection(s)
       if (!same) placed.push(p)
       return same
     })
   placed.push(...fresh)
-  const rank = (p: PlanOperationDTO) => RANK[byId.get(p.designOperationIds[0]!)!.kind]
+  // an aid ranks as a drilling (holes) or last (marks), alignment.md § Alignment aids (Order)
+  const rank = (p: PlanOperationDTO) =>
+    p.aid !== undefined
+      ? p.aid.kind === 'registrationHole'
+        ? RANK.drilling
+        : Infinity
+      : RANK[byId.get(p.designOperationIds[0]!)!.kind]
   const owner = new Map<string, string>()
   for (const s of setups)
     for (const p of s.operations) for (const d of p.designOperationIds) owner.set(d, p.id)
@@ -421,8 +434,9 @@ export function rebuildPlan(
     list.splice(at, 0, p)
   }
   for (const s of setups) s.operations = repairOrder(s.operations, part.unwrap())
-  // a setup left empty is removed; a plan keeps at least one setup
-  const used = setups.filter((s) => s.operations.length > 0)
+  // a setup left without design operations is removed, with its aids (S20); a plan keeps at
+  // least one setup
+  const used = setups.filter((s) => s.operations.some((p) => !isAid(p)))
   plan.setups = used.length > 0 ? used : setups.slice(0, 1)
   pruneSnapshots(plan)
   // the design fits the design's stock; the plan's own stock copy may differ

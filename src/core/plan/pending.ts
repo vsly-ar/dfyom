@@ -31,7 +31,13 @@ const PLAN_OPERATION_IGNORED = new Set(['id'])
 const SETUP_IGNORED = new Set(['id', 'name', 'operations'])
 
 /** "Pocket 1, Drilling 2": the design operations a plan operation machines. */
-function opLabel(plan: PlanDTO, designOperationIds: readonly string[]): string {
+function opLabel(
+  plan: PlanDTO,
+  designOperationIds: readonly string[],
+  aid?: { name: string },
+): string {
+  // an alignment aid names itself (alignment.md S13)
+  if (aid !== undefined) return aid.name
   const names = designOperationIds.map(
     (id) => plan.design.part.operations.find((o) => o.id === id)?.name ?? UNKNOWN_OPERATION,
   )
@@ -95,7 +101,7 @@ function planInputDiff(after: PlanDTO, before: PlanDTO): PendingChange[] {
   )
   for (const { op, s } of afterOps) {
     const at = { operationId: op.id }
-    const name = opLabel(after, op.designOperationIds)
+    const name = opLabel(after, op.designOperationIds, op.aid)
     const b = oldOps.get(op.id)
     if (b === undefined) {
       out.push(key('added', `${name} added`, at))
@@ -115,7 +121,9 @@ function planInputDiff(after: PlanDTO, before: PlanDTO): PendingChange[] {
   for (const { op } of beforeOps)
     if (!afterOpIds.has(op.id))
       out.push(
-        key('removed', `${opLabel(before, op.designOperationIds)} removed`, { operationId: op.id }),
+        key('removed', `${opLabel(before, op.designOperationIds, op.aid)} removed`, {
+          operationId: op.id,
+        }),
       )
   return out
 }

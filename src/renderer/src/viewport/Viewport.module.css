@@ -321,6 +321,43 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   color: var(--text);
 }
 
+.alignTarget {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid var(--aid);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--aid) 14%, transparent);
+  cursor: crosshair;
+  pointer-events: auto;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.alignTarget:hover {
+  transform: scale(1.25);
+  background: color-mix(in oklab, var(--aid) 32%, transparent);
+}
+
+.alignTarget:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alignTarget {
+    transition: none;
+  }
+
+  .alignTarget:hover {
+    transform: none;
+  }
+}
+
 .alignChip[data-error] {
   border-color: var(--danger);
   color: var(--danger-text);

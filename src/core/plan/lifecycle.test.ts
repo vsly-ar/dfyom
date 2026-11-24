@@ -360,6 +360,7 @@ describe('undo law of every plan command', () => {
         { planId, setupId, points: [{ source: { corner: 'top front left' } }] },
       ],
       ['plan.setup.update', { planId, setupId, zero: { at: ['-20', '15'] } }],
+      ['plan.aid.set', { planId, setupId, place: 'holes' }],
       [
         'plan.workholding.set',
         { planId, setupId, items: [{ kind: 'toeClamp', edge: 'vMin', at: '30', top: '20' }] },

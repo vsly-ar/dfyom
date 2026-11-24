@@ -70,7 +70,7 @@ export function alignmentView(
 }
 
 /** The next free `al<n>` id of the plan (ids are unique per plan, alignment.md § Alignment points). */
-function nextPointIds(plan: PlanDTO, count: number): string[] {
+export function nextPointIds(plan: PlanDTO, count: number): string[] {
   let n = 0
   for (const s of plan.setups)
     for (const p of s.alignment ?? []) {
@@ -80,7 +80,11 @@ function nextPointIds(plan: PlanDTO, count: number): string[] {
   return Array.from({ length: count }, (_, i) => `al${n + i + 1}`)
 }
 
-function loaded(draft: Draft<ProjectDoc>, planId: string, where: string): AppResult<LoadedPlan> {
+export function loaded(
+  draft: Draft<ProjectDoc>,
+  planId: string,
+  where: string,
+): AppResult<LoadedPlan> {
   const dto = findPlanDTO(draft as ProjectDoc, planId, where)
   if (dto.isErr()) return dto
   const allowed = checkAllowed(planId, dto.unwrap().status, where)

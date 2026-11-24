@@ -14,7 +14,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { PlanOperationInput } from '../plan/inputs'
 import { defineCommand, defineQuery } from '../commands/define'
 import { planOperationInputs } from '../plan/inputs'
-import { planOperationLabel, UNKNOWN_OPERATION } from '../plan/labels'
+import { aidName, planOpLabel, UNKNOWN_OPERATION } from '../plan/labels'
 import { planPendingApply } from '../plan/pending'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { toolpathGenerate } from '../workers/tasks'
@@ -149,10 +149,10 @@ export const toolpathGenerateJob = defineCommand({
       const label =
         part === undefined
           ? UNKNOWN_OPERATION
-          : planOperationLabel(
-              part,
-              input.operations.map((o) => o.id),
-            )
+          : planOpLabel(part, {
+              designOperationIds: input.operations.map((o) => o.id),
+              ...aidName(doc.plans[args.planId]!, id),
+            })
       const cp = await tryAsync(() => ctx.checkpoint(), 'op.aborted', 'checkpoint')
       if (cp.isErr()) return abortedJob()
       ctx.progress({ done: i, total, label })

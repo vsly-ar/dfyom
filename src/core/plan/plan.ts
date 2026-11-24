@@ -14,7 +14,7 @@ import { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { feedModeIssues } from './feeds'
-import { planOperationLabel } from './labels'
+import { planOpLabel } from './labels'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from './plan.dto'
 
 export interface LoadedPlan {
@@ -117,25 +117,21 @@ export function loadPlanDTO(
       if (op.tool !== undefined && !tools.has(op.tool))
         return broken(
           plan,
-          `the tool copy of ${planOperationLabel(plan.design.part, op.designOperationIds)} is missing`,
+          `the tool copy of ${planOpLabel(plan.design.part, op)} is missing`,
           where,
           { planOperationId: op.id, snapshotId: op.tool },
         )
       const kind = operationById(part.unwrap(), op.designOperationIds[0] ?? '')?.kind
       const issues = kind === undefined ? [] : feedModeIssues(op, kind)
       if (issues.length > 0)
-        return fail(
-          'model.invariant',
-          `${planOperationLabel(plan.design.part, op.designOperationIds)} has invalid locks`,
-          {
-            issues: issues.map((i) => ({
-              ...i,
-              path: ['setups', si, 'operations', op.id, ...i.path],
-            })),
-            where,
-            data: { planId: plan.id, planOperationId: op.id },
-          },
-        )
+        return fail('model.invariant', `${planOpLabel(plan.design.part, op)} has invalid locks`, {
+          issues: issues.map((i) => ({
+            ...i,
+            path: ['setups', si, 'operations', op.id, ...i.path],
+          })),
+          where,
+          data: { planId: plan.id, planOperationId: op.id },
+        })
     }
   const { setups } = plan
   const operations = setups.flatMap((x) => x.operations)

@@ -4,7 +4,7 @@
 // put the zero on one). Each change is one command: `plan.setup.update { zero }` or
 // `plan.alignment.set` with the whole list. Focusing a point marks it in the viewport.
 // Doc: docs/modes/alignment.md#plan-ui, docs/conventions/ui.md#design-and-plan-controls-v02
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AlignmentPointDTO } from '../../../../core/plan/alignment.dto'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
@@ -27,9 +27,10 @@ import {
   type MenuEntry,
 } from '../../ui'
 import { defaultUnit } from '../design/model'
-import { setupZeroOf } from './model'
+import { pointsWithAdded, setupZeroOf } from './model'
 import {
   usePlanCommand,
+  usePlanState,
   usePlanStore,
   type AlignmentSourceView,
   type SetupAlignmentView,
@@ -94,16 +95,35 @@ export function AlignmentFields({
     call('plan.alignment.set', { planId: plan.id, setupId: setup.id, points: list })
   // a new point goes last, without an id (the core names it after its source)
   const add = async (s: AlignmentSourceView) =>
+    done(await setPointsArgs(pointsWithAdded(setup, s.source)))
+  // S22: picking in the viewport (the scene draws the sources as targets while on)
+  const picking = usePlanState((st) => st.pickingAlignment) === setup.id
+  useEffect(() => {
+    if (!picking) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') store.getState().pickAlignment(undefined)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      // leaving the setup (or the inspector) ends picking
+      store.getState().pickAlignment(undefined)
+    }
+  }, [picking, store])
+  // S18: aids cut here for the next setup
+  const index = plan.setups.findIndex((x) => x.id === setup.id)
+  const next = plan.setups[index + 1]
+  const placeAids = async (place: 'marks' | 'holes') => {
+    if (next === undefined) return
     done(
-      await setPointsArgs([
-        ...points.map((p) => ({
-          id: p.id,
-          ...(p.name === undefined ? {} : { name: p.name }),
-          source: p.source,
-        })),
-        { source: s.source },
-      ]),
+      await call('plan.aid.set', {
+        planId: plan.id,
+        setupId: setup.id,
+        place,
+        forSetupId: next.id,
+      }),
     )
+  }
   const move = (i: number, by: -1 | 1) => {
     const list = [...points]
     const [p] = list.splice(i, 1)
@@ -126,7 +146,11 @@ export function AlignmentFields({
 
   const groups: MenuEntry[] = (
     [
-      [m.pointGroupStock, sources.filter((s) => !('operation' in s.source))],
+      [
+        m.pointGroupStock,
+        sources.filter((s) => !('operation' in s.source) && !('aid' in s.source)),
+      ],
+      [m.pointGroupAids, sources.filter((s) => 'aid' in s.source)],
       [m.pointGroupHoles, sources.filter((s) => 'hole' in s.source)],
       [m.pointGroupVertices, sources.filter((s) => 'vertex' in s.source)],
     ] as const
@@ -311,9 +335,43 @@ export function AlignmentFields({
                 </Button>
               </Menu>
             )}
+            <Button
+              size="sm"
+              variant="default"
+              aria-pressed={picking}
+              disabled={groups.length === 0 && !picking}
+              onClick={() => store.getState().pickAlignment(picking ? undefined : setup.id)}
+            >
+              <Icon name="pick" /> {picking ? m.pickStop : m.pickStart}
+            </Button>
           </div>
         )}
+        {picking ? (
+          <p className={styles['muted']} role="status">
+            {m.pickHint}
+          </p>
+        ) : null}
       </section>
+      {readOnly ? null : (
+        <section aria-labelledby={`aids-${setup.id}`} className={styles['alignGroup']}>
+          <h3 id={`aids-${setup.id}`} className={styles['groupTitle']}>
+            {m.aidsTitle}
+          </h3>
+          <p className={styles['muted']}>
+            {next === undefined ? m.aidsNone : m.aidsHint(next.name)}
+          </p>
+          {next === undefined ? null : (
+            <div className={styles['alignActions']}>
+              <Button size="sm" variant="default" onClick={() => void placeAids('marks')}>
+                <Icon name="chamfer-mill" /> {m.aidMarks}
+              </Button>
+              <Button size="sm" variant="default" onClick={() => void placeAids('holes')}>
+                <Icon name="drill" /> {m.aidHoles}
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
     </>
   )
 }

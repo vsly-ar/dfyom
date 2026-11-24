@@ -2,8 +2,10 @@
 // on the up face (Z 0, where the pointer sights them from above): each a small diamond with a
 // crosshair in the tool colour (the work zero's), `--danger` when it has an error, and its cycle
 // number in a chip. The point selected in the inspector is drawn larger in `--vp-selected`. A new
-// marker scales in (`--motion-base`; none under reduced motion). Not pickable: points are added
-// from the inspector (alignment.md § Implementation (slice 1)). Props only.
+// marker scales in (`--motion-base`; none under reduced motion). The points themselves are not
+// pickable; while the inspector's "Pick in the viewport" is on, the valid sources are drawn as
+// pick targets (`AlignmentTargets`, alignment.md S22): a hollow ring in `--aid` with a button at
+// its centre (keyboard reachable, named after the source); a click adds that point. Props only.
 // Doc: docs/modes/alignment.md#plan-ui, docs/conventions/ui.md#design-and-plan-controls-v02
 import { Html, Line } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
@@ -128,6 +130,68 @@ export function AlignmentLayer({
     <group raycast={noRaycast}>
       {points.map((p) => (
         <Marker key={p.id} marker={p} palette={palette} reducedMotion={reducedMotion} />
+      ))}
+    </group>
+  )
+}
+
+/** A source a point can be added from while picking (`RunScene.alignmentTargets`, S22). */
+export interface AlignmentTarget {
+  readonly key: string
+  /** X, Y in the WCS (mm), on the up face. */
+  readonly at: readonly [number, number]
+  /** Accessible name: "Add Front-left corner (X 0 Y 0)". */
+  readonly label: string
+  readonly onPick: () => void
+}
+
+/** Ring radius of a pick target (mm). */
+const TARGET_R = 1.8
+
+function ring(r: number): [number, number, number][] {
+  const out: [number, number, number][] = []
+  for (let i = 0; i <= 24; i++) {
+    const a = (i / 24) * Math.PI * 2
+    out.push([r * Math.cos(a), r * Math.sin(a), 0])
+  }
+  return out
+}
+
+export function AlignmentTargets({
+  targets,
+  palette,
+}: {
+  targets: readonly AlignmentTarget[]
+  palette: Palette
+}): React.JSX.Element {
+  const c = useMemo(() => colour(palette.aid), [palette])
+  const points = useMemo(() => ring(TARGET_R), [])
+  return (
+    <group raycast={noRaycast}>
+      {targets.map((t) => (
+        <group key={t.key} position={[t.at[0], t.at[1], 0.04]}>
+          <Line
+            points={points}
+            color={c}
+            lineWidth={1.5}
+            dashed
+            dashSize={0.6}
+            gapSize={0.4}
+            depthTest={false}
+            renderOrder={7}
+            raycast={noRaycast}
+          />
+          <Html zIndexRange={[20, 11]} className={styles['zSpotAnchor']}>
+            <button
+              type="button"
+              className={styles['alignTarget']}
+              data-align-source={t.key}
+              aria-label={t.label}
+              title={t.label}
+              onClick={t.onPick}
+            />
+          </Html>
+        </group>
       ))}
     </group>
   )

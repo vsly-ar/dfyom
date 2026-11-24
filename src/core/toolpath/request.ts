@@ -14,6 +14,7 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
 import { generateChamfer } from './chamfer'
+import { generateMark, type MarkInput } from './mark'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
 import type {
@@ -34,6 +35,7 @@ import {
   ChamferInputSchema,
   DrillingInputSchema,
   FacingInputSchema,
+  MarkInputSchema,
   PocketInputSchema,
   ProfileInputSchema,
   RegionPocketInputSchema,
@@ -52,6 +54,7 @@ export type GeneratorRequest = (
   | { readonly kind: 'regionPocket'; readonly inputs: readonly RegionPocketInput[] }
   | { readonly kind: 'regionProfile'; readonly inputs: readonly RegionProfileInput[] }
   | { readonly kind: 'chamfer'; readonly inputs: readonly ChamferInput[] }
+  | { readonly kind: 'mark'; readonly inputs: readonly MarkInput[] }
 ) & {
   /**
    * The setup's quarter turn (v0.2 task C3) and work zero (alignment phase 1): the inputs are in
@@ -96,6 +99,7 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
     inputs: z.array(ChamferInputSchema).min(1).readonly(),
     wcs,
   }),
+  z.object({ kind: z.literal('mark'), inputs: one(MarkInputSchema), wcs }),
 ])
 
 /** The 2D port of the worker, loaded on first use; the region generators need it. */
@@ -136,6 +140,8 @@ function generateLocal(
       return joined(request.inputs, generateDrilling, 'hole', steps)
     case 'chamfer':
       return joined(request.inputs, generateChamfer, 'chamfer', steps)
+    case 'mark':
+      return generateMark(request.inputs[0]!, steps)
     case 'regionPocket':
       return region2d().andThen((port) => {
         // a partly cleared pocket (DF61 follow-up): the uncovered part above the cleared level,
