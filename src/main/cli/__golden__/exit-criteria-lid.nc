@@ -16,10 +16,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Bolt hole 1 - drill x 4)
-(DFYOM TOOL CHANGE 1: Flat 3)
+(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 (Clones 1 #1)
 X39 Y55.5
 Z2
@@ -1764,16 +1764,17 @@ G1 X79.805
 G0 Z2
 Z10
 (Profile 2)
+(Tool change to T2: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6)
-M0
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X187.5 Y98.5
 Z2
 G1 Z0 F800
@@ -1865,16 +1866,17 @@ G1 Y92.2
 G0 Z2
 Z10
 (Bolt hole 1 - countersink x 4)
+(Tool change to T3: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 3: Chamfer 90 x 12)
-M0
+(DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)
+M0 ;Stop spindle, install T3 Chamfer 90 x, 12 mm chamfer, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S12000
 (Set spindle to 12000 rpm)
-M0
+M0 ;Set spindle to 12000 rpm
 (Clones 1 #1)
 X39 Y55.7
 Z2
@@ -1906,16 +1908,17 @@ Y89 I0 J-11
 Y100 I0 J5.5
 G0 Z10
 (Profile 1)
+(Tool change to T2: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6)
-M0
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X126.089 Y8.443
 Z2
 G1 Z0 F800
@@ -2256,5 +2259,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

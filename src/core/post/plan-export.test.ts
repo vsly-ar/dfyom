@@ -12,7 +12,14 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { GeneratorRequest } from '../toolpath/request'
-import { exportPlan, SOFT_LIMIT_NOTE, type ExportFiles, type PlanExport } from './plan-export'
+import {
+  exportPlan,
+  programGenerator,
+  SOFT_LIMIT_NOTE,
+  withoutAppVersion,
+  type ExportFiles,
+  type PlanExport,
+} from './plan-export'
 
 const ui = uiSource()
 
@@ -277,7 +284,7 @@ describe('plan.export', () => {
 
   it('rejects a target without a gCode file name and unknown plans', async () => {
     const t = await setup()
-    for (const target of ['/out/plan.txt', '/o/.nc', '/o.nc/', 'C:\\o\\.gcode', '/out/a.nc/x'])
+    for (const target of ['/out/plan.txt', '/o/.nc', '/o/a.nc.txt', 'C:\\o\\.gcode', '/out/a.nc/x'])
       expect(
         expectErrCode(await t.exportCmd({ target }), 'input.malformed').issues[0]?.path,
         target,
@@ -287,6 +294,15 @@ describe('plan.export', () => {
     expect(e.issues[0]?.rule).toBe('unknownPlan')
     for (const target of ['/out/a.NC', '/out/a.gcode', '/out/a.ngc', 'C:\\o\\b.nc'])
       expectOk(await t.exportCmd({ target, confirm: true }))
+  })
+
+  // docs/architecture/grbl.md#file-name-hardening-df62
+  it('a folder target (ending in / or \\) writes the short suggested file name', async () => {
+    const t = await setup()
+    const r = expectOk(await t.exportCmd({ target: '/out/', confirm: true })) as Result
+    expect(r.filePath).toBe('/out/bracket.nc')
+    expectOk(await t.exportCmd({ target: 'C:\\out\\', confirm: true }))
+    expect(t.written.map((w) => w.target)).toEqual(['/out/bracket.nc', 'C:\\out\\bracket.nc'])
   })
 
   it('changes neither the revision nor the undo history', async () => {
@@ -396,5 +412,20 @@ describe('exportPlan (the path run mode shares)', () => {
       ),
       'op.aborted',
     )
+  })
+})
+
+// The app version in the header's Generator line (TG #242): docs/architecture/grbl.md#plan-export-command
+describe('generator line', () => {
+  it('names the injected app version; without one just DFYOM', () => {
+    expect(programGenerator('0.3.106')).toBe('DFYOM 0.3.106')
+    expect(programGenerator(undefined)).toBe('DFYOM')
+    expect(programGenerator('')).toBe('DFYOM')
+  })
+
+  it('golden comparisons drop the version from that one line', () => {
+    const text = '(Program: P)\n(Generator: DFYOM 0.3.106)\nG90 G94 G17 G21\n'
+    expect(withoutAppVersion(text)).toBe('(Program: P)\n(Generator: DFYOM)\nG90 G94 G17 G21\n')
+    expect(withoutAppVersion('(Generator: DFYOM)\n')).toBe('(Generator: DFYOM)\n')
   })
 })

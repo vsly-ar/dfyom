@@ -39,6 +39,7 @@ import { loadArchive } from '../persistence/archive'
 import { nodeFs } from '../persistence/fs'
 import { agentSession, type Call, programEnd, type RunJobStatus } from './exit-criteria.fixture'
 import { ENCLOSURE_SVG } from './exit-criteria.v03.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /**
  * The golden program of the lid's one setup (path relative to the test files). Update after an
@@ -536,7 +537,7 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
     regenerated: [],
   })
   const program = readFileSync(target, 'utf8')
-  await expect(program).toMatchFileSnapshot(GOLDEN_V04)
+  await expect(withoutAppVersion(program)).toMatchFileSnapshot(GOLDEN_V04)
   expect(program.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
   expect(program.trimEnd().endsWith('M30')).toBe(true)
   // the first tool is loaded at the start, then one change per tool run of the plan (see above)

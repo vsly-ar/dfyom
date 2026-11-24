@@ -25,6 +25,7 @@ import { loadArchive } from '../persistence/archive'
 import { nodeFs } from '../persistence/fs'
 import { agentSession, type Call, programEnd, type RunJobStatus } from './exit-criteria.fixture'
 import { ENCLOSURE_STL } from './exit-criteria.v02.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /** The X0 drawing: the STL's outline and cavity sectioned at mid-wall height, cubic Béziers. */
 export const ENCLOSURE_SVG = resolve(
@@ -543,7 +544,7 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
       regenerated: [],
     })
     const gcode = readFileSync(target, 'utf8')
-    await expect(gcode).toMatchFileSnapshot(GOLDEN_V03[i]!)
+    await expect(withoutAppVersion(gcode)).toMatchFileSnapshot(GOLDEN_V03[i]!)
     expect(gcode).toContain(`(Setup ${i + 1} of ${plan.setups.length}: ${setup.name})`)
     expect(gcode.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
     expect(gcode.trimEnd().endsWith('M30')).toBe(true)

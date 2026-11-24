@@ -14,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 6)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X104 Y2
 Z2
 G1 Z-0.5 F200
@@ -133,5 +133,5 @@ G0 Z1.5
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

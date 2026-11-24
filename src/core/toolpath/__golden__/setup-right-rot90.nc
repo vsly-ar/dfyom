@@ -14,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1)
-(DFYOM TOOL CHANGE 1: Flat 4)
+(DFYOM TOOL CHANGE 1: Flat 4, 4 mm flat)
 M3 S12128
 (Set spindle to 12128 rpm)
-M0
+M0 ;Set spindle to 12128 rpm
 X11 Y30
 Z2
 G1 Z0 F154
@@ -101,5 +101,5 @@ G1 X10
 G0 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30
