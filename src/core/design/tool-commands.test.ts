@@ -27,7 +27,7 @@ import { loadPart } from './load'
 import { operationFromDTO, operationToDTO } from './operation'
 import type { DesignToolDTO, OperationDTO } from './part.dto'
 import { checkGeneralizedTool, designToolFromDTO, designToolToDTO, generalizedLabel } from './tool'
-import { designToolAutoChoice, toolScan } from './tool-commands'
+import { designToolAutoChoice, toolRechoicePending } from './tool-commands'
 
 const ui = uiSource()
 
@@ -62,7 +62,7 @@ const aluPreset = {
 }
 
 /** A project with one part on the 100 × 60 × 20 test stock, the auto choice as apply hook. */
-async function setup(units: UnitSystem = 'mm') {
+async function setup(units: UnitSystem = 'mm', rechoice = false) {
   const library = expectOk(await Library.open(createMemoryLibraryStorage()))
   const registry = expectOk(
     createRegistry({
@@ -71,6 +71,7 @@ async function setup(units: UnitSystem = 'mm') {
       hooks: APP_HOOKS,
       applyHooks: [designToolAutoChoice],
       applyWarnings: designApplyWarnings,
+      ...(rechoice ? { pendingSources: [toolRechoicePending] } : {}),
     }),
   )
   const d = createDispatcher({
@@ -108,7 +109,14 @@ async function setup(units: UnitSystem = 'mm') {
     }
   const undo = () => run('history.undo', {})
   const redo = () => run('history.redo', {})
+  const pending = () =>
+    (
+      expectOk(d.query('project.pending.get', {}, ui)).value as {
+        changes: Record<string, unknown>[]
+      }
+    ).changes
   return {
+    pending,
     d,
     library,
     partId,
@@ -623,17 +631,18 @@ describe('auto choice (apply hook design.toolAutoChoice)', () => {
     expect(unfit()).toBeUndefined()
   })
 
-  it('the consistency scan on open makes absent or unfit auto tools pending until the next Apply', async () => {
+  it('opening makes auto tools pending only when Apply would change them (X2 F6)', async () => {
     const s = await setup()
     await s.addTool('flatEndMill', '8')
     await s.pocket() // never applied: no tool yet
-    await s.pocket({ tool: generalized('flatEndMill', '6') }) // locked: not scanned
+    await s.pocket({ tool: generalized('flatEndMill', '6') }) // locked: never re-chosen
+    await s.pocket({ shape: rect('40', '25', '0') }) // nothing fits: not pending (DF52)
     const registry = expectOk(
       createRegistry({
         commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
         queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES],
         applyHooks: [designToolAutoChoice],
-        openScan: toolScan,
+        pendingSources: [toolRechoicePending],
       }),
     )
     const d = createDispatcher({
@@ -660,6 +669,87 @@ describe('auto choice (apply hook design.toolAutoChoice)', () => {
       expect.objectContaining({ operationId: 'pocket1', from: null, reason: 'unset' }),
     ])
     expect(pending().changes).toEqual([])
+  })
+
+  it('X2 F6: a library tool added later re-chooses an unlocked generalized tool on the next Apply, once', async () => {
+    const s = await setup('mm', true)
+    await s.pocket()
+    await s.pocket({ tool: generalized('flatEndMill', '8') }) // locked
+    await s.apply()
+    expect(toolOf(s, 'pocket1')).toMatchObject({ kind: 'generalized' })
+    expect(s.pending()).toEqual([])
+    const six = await s.addTool('flatEndMill', '6')
+    expect(s.pending()).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', field: 'tool', label: 'Pocket 1: tool' }),
+    ])
+    const out = await s.apply()
+    expect(out.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', reason: 'libraryFits' }),
+    ])
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: six })
+    expect(toolOf(s, 'pocket2')).toMatchObject({ kind: 'generalized' })
+    expect(s.d.doc.parts[s.partId]!.operations[1]!.toolLocked).toBe(true)
+    // stable: nothing left to re-choose, and an Apply now changes nothing
+    expect(s.pending()).toEqual([])
+    // one undoable step: undo brings the generalized tool and the key back
+    await s.undo()
+    expect(toolOf(s, 'pocket1')).toMatchObject({ kind: 'generalized' })
+    expect(s.pending()).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', field: 'tool' }),
+    ])
+  })
+
+  it('X2 F6: an operation pending through an edit gets no second key', async () => {
+    const s = await setup('mm', true)
+    await s.pocket()
+    await s.apply()
+    await s.addTool('flatEndMill', '6')
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
+    expect(s.pending()).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', field: 'depth' }),
+    ])
+    expect((await s.apply()).toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', reason: 'libraryFits' }),
+    ])
+  })
+
+  it('X2 F6: a removed library tool gives way to another library tool; with none it stays', async () => {
+    const s = await setup('mm', true)
+    const six = await s.addTool('flatEndMill', '6')
+    await s.pocket()
+    await s.apply()
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: six })
+    const four = await s.addTool('flatEndMill', '4')
+    expect(s.pending()).toEqual([]) // the 6 mm still fits and is in the library: kept
+    const revision = (id: string) =>
+      (expectOk(s.d.query('library.tool.get', { id }, ui)).value as { revision: number }).revision
+    await s.run('library.tool.remove', { id: six, revision: revision(six), confirm: true })
+    expect(s.pending()).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', field: 'tool' }),
+    ])
+    const out = await s.apply()
+    expect(out.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', reason: 'libraryRemoved' }),
+    ])
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: four })
+    // the last one removed: nothing else fits, the snapshot stays (Plan uses its copy)
+    await s.run('library.tool.remove', { id: four, revision: revision(four), confirm: true })
+    expect(s.pending()).toEqual([])
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: four })
+  })
+
+  it('X2 F6: a locked library tool stays when it is removed from the library', async () => {
+    const s = await setup('mm', true)
+    const six = await s.addTool('flatEndMill', '6')
+    await s.addTool('flatEndMill', '4')
+    await s.pocket({ tool: { kind: 'specific', toolLibraryItemId: six } })
+    await s.apply()
+    const item = expectOk(s.d.query('library.tool.get', { id: six }, ui)).value as {
+      revision: number
+    }
+    await s.run('library.tool.remove', { id: six, revision: item.revision, confirm: true })
+    expect(s.pending()).toEqual([])
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: six })
   })
 
   it('replacing a library tool drops its snapshot when no operation uses it', async () => {

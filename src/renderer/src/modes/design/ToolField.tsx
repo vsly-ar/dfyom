@@ -189,6 +189,8 @@ export function autoChangeReason(
       return w.reach(from)
     case 'libraryFits':
       return w.libraryFits(from)
+    case 'libraryRemoved':
+      return w.libraryRemoved(from)
     default:
       return w.other(from)
   }

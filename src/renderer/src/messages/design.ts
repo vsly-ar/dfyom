@@ -597,6 +597,16 @@ export const designMessages = {
     chosenAuto: 'Chosen automatically.',
     chosenAutoBecause: (why: string) => `Chosen automatically: ${why}.`,
     chosenAgain: 'Chosen again on Apply.',
+    /**
+     * Design's toast after an Apply re-chose tools because of the library (X2 F6,
+     * design-v0.2.md § Library changes and opening): one with its reason, several counted.
+     */
+    rechosen: (operation: string | undefined, why: string | undefined, n: number) =>
+      n === 1 && operation !== undefined && why !== undefined
+        ? `Tool of ${operation} changed: ${why}.`
+        : n === 1
+          ? 'Tool of 1 operation changed: a library tool fits now.'
+          : `Tools of ${n} operations changed: library tools fit now.`,
     lockNoTool: 'No tool yet. Apply chooses one, or pick one from the list.',
     use: (label: string) => `Use ${label}`,
     unlock: 'Unlock',
@@ -619,6 +629,8 @@ export const designMessages = {
       unresolved: 'the previous tool could not be read',
       /** DF54: a fitting generalized tool gave way to a library tool. */
       libraryFits: (tool: string) => `a library tool fits now instead of the ${tool}`,
+      /** X2 F6: a tool removed from the library gave way to another library tool. */
+      libraryRemoved: (tool: string) => `the ${tool} is no longer in the library`,
       other: (tool: string) => `the ${tool} didn’t fit`,
     },
   },

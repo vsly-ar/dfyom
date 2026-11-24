@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { flat6 } from '../../core/plan/plan.fixture'
 import { libraryInput } from '../../core/library/library.fixture'
+import { testStock } from '../../core/design/design.fixture'
 import type { Source } from '../../core/commands/context'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { ENCLOSURE_STL, ENCLOSURE_TRIANGLES } from '../../core/design/stl.testing'
@@ -128,6 +129,71 @@ describe('app host', () => {
     expect(d.applyState.pending()).toEqual([])
     expect(d.history.undoable.at(-1)).toMatchObject({ command: 'project.apply' })
     expect(d.log.since(0, { names: ['plan.libraryItem.update'] })).toEqual([])
+  })
+
+  it('X2 F6: library tools that arrive re-choose generalized tools on open and in a library write', async () => {
+    const { host, session, call, dir } = await setup()
+    const stock = ((await call('library.stock.add', { values: testStock() })) as { id: string }).id
+    const created = (await call('project.create', { name: 'F6', unitSystem: 'mm' })) as {
+      key: string
+    }
+    const { partId } = (await call('design.part.add', {
+      name: 'F6',
+      stockLibraryItemId: stock,
+    })) as { partId: string }
+    const pocket = { kind: 'rectangle', center: ['50', '30'], length: '40', width: '25' }
+    await call('design.pocket.add', { partId, shape: pocket, depth: '3' })
+    await call('design.pocket.add', {
+      partId,
+      shape: { ...pocket, center: ['20', '20'], length: '10', width: '10' },
+      depth: '2',
+    })
+    const file = join(dir, 'f6.dfyom')
+    await call('project.save', { target: file })
+    await call('project.close', { key: created.key })
+    // a window adds a fitting tool while the project is closed
+    const ui = { kind: 'ui' as const, id: 'w' }
+    expectOk(await host.app.dispatch('library.tool.add', { values: libraryInput(flat6()) }, ui))
+    const opened = expectOk((await session.call('project.open', { file })).result) as {
+      value: { key: string }
+      revision: number
+      applied?: { toolChanges: { operationId: string; reason: string }[] }
+    }
+    expect(opened.applied?.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', reason: 'libraryFits' }),
+      expect.objectContaining({ operationId: 'pocket2', reason: 'libraryFits' }),
+    ])
+    const d = host.project(opened.value.key).unwrap()
+    expect(d.revision).toBe(opened.revision)
+    expect(d.applyState.pending()).toEqual([])
+    // saved again: the next open has nothing to re-choose and applies nothing
+    await call('project.save', {})
+    await call('project.close', { key: opened.value.key })
+    const again = expectOk((await session.call('project.open', { file })).result) as {
+      value: { key: string }
+      applied?: unknown
+    }
+    expect(again.applied).toBeUndefined()
+    // a corner the 6 mm tool does not fit gets a generalized 4 mm; the agent adds a 4 mm tool
+    await call('design.pocket.update', {
+      partId,
+      operationId: 'pocket2',
+      shape: { ...pocket, center: ['20', '20'], length: '10', width: '10', cornerRadius: '2' },
+    })
+    const tool2 = () =>
+      host.project(again.value.key).unwrap().doc.parts[partId]!.operations[1]!.tool
+    expect(tool2()).toMatchObject({ kind: 'generalized' })
+    const added = expectOk(
+      (
+        await session.call('library.tool.add', {
+          values: { ...libraryInput(flat6()), name: 'Flat 4', diameter: '4' },
+        })
+      ).result,
+    ) as { applied?: { toolChanges: { operationId: string; reason: string }[] } }
+    expect(added.applied?.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket2', reason: 'libraryFits' }),
+    ])
+    expect(tool2()).toMatchObject({ kind: 'specific' })
   })
 
   it('shutdown closes every project and leaves unsaved changes recoverable', async () => {

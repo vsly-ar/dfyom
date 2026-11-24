@@ -17,6 +17,7 @@ const pending = (patch: Partial<PendingState> = {}): PendingState => ({
   appliedBy: null,
   version: 1,
   toolChanges: new Map(),
+  rechosen: null,
   ...patch,
 })
 

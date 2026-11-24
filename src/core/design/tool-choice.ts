@@ -466,16 +466,34 @@ export function lengthSourceUp(mm: number, units: UnitSystem): string {
 }
 
 /**
+ * Whether the operation's tool is a specific tool whose library item is no longer among the
+ * readable library tools (removed, or it does not load): X2 F6, design-v0.2.md § Library changes
+ * and opening. Its snapshot still describes the tool.
+ */
+export function orphanTool(input: ChoiceInput): boolean {
+  if (input.op.tool.isNone()) return false
+  const t = input.op.tool.unwrap()
+  if (t.kind !== 'specific') return false
+  const snap = Object.hasOwn(input.snapshots, t.snapshotId)
+    ? input.snapshots[t.snapshotId]
+    : undefined
+  const itemId = snap !== undefined && snap.kind === 'tool' ? snap.libraryItemId : undefined
+  return itemId !== undefined && !input.library.some((i) => i.id === itemId)
+}
+
+/**
  * The auto choice for one unlocked operation (design-v0.2.md § Auto choice): keep a current tool
- * that fits (a generalized one only while no library tool fits, DF54); otherwise the first fitting library tool; otherwise the largest fitting generalized
- * tool; nothing fits: `none` (the caller keeps the current tool).
+ * that fits (a generalized one, or one removed from the library, only while no library tool
+ * fits: DF54, X2 F6); otherwise the first fitting library tool; otherwise the largest fitting
+ * generalized tool; nothing fits: `none` (the caller keeps the current tool).
  */
 export function chooseTool(input: ChoiceInput): ToolChoice {
   const current = input.op.tool.andThen((t) => resolveDesignTool(t, input.snapshots))
   const fits = current.isSome() && fitOf(current.unwrap(), input) === undefined
-  // DF54: a fitting generalized tool is kept only while no library tool fits
+  // DF54: a fitting generalized tool is kept only while no library tool fits; X2 F6: so is a
+  // library tool removed from the library
   const generalized = input.op.tool.mapOr(false, (t) => t.kind === 'generalized')
-  if (fits && !generalized) return { kind: 'keep' }
+  if (fits && !generalized && !orphanTool(input)) return { kind: 'keep' }
   const library = fittingLibraryTools(input)
   if (library.length > 0) return { kind: 'library', candidate: library[0]! }
   if (fits) return { kind: 'keep' }
