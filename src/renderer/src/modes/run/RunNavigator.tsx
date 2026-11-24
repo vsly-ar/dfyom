@@ -20,6 +20,7 @@ import { useSettings } from '../../shell/ShellContext'
 import { Icon, Button, Checkbox, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
 import { AlarmPanel, LostConnectionWarning } from './AlarmPanel'
 import { JogPad, useJogControls, useMachineJog } from './JogPad'
+import { planLabel } from '../plan/model'
 import { useLibraryItems } from '../plan/usePlan'
 import { actionText, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
@@ -179,7 +180,10 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             disabled={connected}
             options={[
               { value: NO_PLAN, label: m.noPlan },
-              ...plans.map((p) => ({ value: p.id, label: p.name })),
+              ...plans.map((p) => ({
+                value: p.id,
+                label: doc === undefined ? p.name : planLabel(doc, p),
+              })),
             ]}
             {...(chosen === undefined ? {} : { value: chosen })}
             onValueChange={(v) => a.setPlan(v)}

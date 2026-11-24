@@ -37,17 +37,21 @@ export interface DesignPart {
   readonly table: SurfaceTable | undefined
 }
 
-const cache = new WeakMap<ProjectDoc, DesignPart | null>()
+const cache = new WeakMap<ProjectDoc, Map<string, DesignPart>>()
 
-/** The project's part (one per project in v0.1), memoized per immutable document. */
-export function designPart(doc: ProjectDoc): DesignPart | undefined {
-  const hit = cache.get(doc)
-  if (hit !== undefined) return hit ?? undefined
-  const dto = Object.values(doc.parts)[0]
-  if (dto === undefined) {
-    cache.set(doc, null)
-    return undefined
-  }
+/**
+ * The part Design shows: `partId` while the document has it, else the first part (split parts S0:
+ * the window's part choice, ui-store `designPart`); memoized per immutable document and part.
+ */
+export function designPart(doc: ProjectDoc, partId?: string | null): DesignPart | undefined {
+  const dto =
+    (partId != null && Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined) ??
+    Object.values(doc.parts)[0]
+  if (dto === undefined) return undefined
+  let parts = cache.get(doc)
+  if (parts === undefined) cache.set(doc, (parts = new Map()))
+  const hit = parts.get(dto.id)
+  if (hit !== undefined) return hit
   const r = loadPart(doc, dto.id, 'design UI')
   const loaded = r.isOk() ? r.unwrap() : undefined
   const part: DesignPart = {
@@ -58,7 +62,7 @@ export function designPart(doc: ProjectDoc): DesignPart | undefined {
     table:
       loaded === undefined ? undefined : SurfaceTable.build(loaded.part.operations, loaded.stock),
   }
-  cache.set(doc, part)
+  parts.set(dto.id, part)
   return part
 }
 

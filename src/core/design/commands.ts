@@ -80,7 +80,7 @@ import {
   warningsWithEvaluation,
 } from './evaluation'
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
-import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
+import { dropUnusedToolSnapshot, ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
 import { defaultSlotWidth, lengthSourceUp, resolveDesignTool } from './tool-choice'
 import { toGeometryInput } from './geometry-input'
@@ -1098,7 +1098,7 @@ const partAdd = defineCommand({
   kind: 'document',
   name: 'design.part.add',
   summary:
-    'Create the part from a library block (stockLibraryItemId) or its own block (stock); one part per project.',
+    'Create a part from a library block (stockLibraryItemId) or its own block (stock); a project holds several.',
   title: () => 'Add part',
   machine: false,
   args: z.object({
@@ -1109,8 +1109,6 @@ const partAdd = defineCommand({
   result: z.object({ partId: PartIdSchema }),
   run(draft, args, ctx) {
     const where = 'design.part.add'
-    if (Object.keys(draft.parts).length > 0)
-      return invalid([{ path: [], rule: 'onePart', message: 'v0.1 projects have one part' }], where)
     if ((args.stockLibraryItemId === undefined) === (args.stock === undefined))
       return fail('input.malformed', 'pass exactly one of stockLibraryItemId and stock', {
         issues: [
@@ -1190,6 +1188,64 @@ const partUpdate = defineCommand({
     if (dto === undefined) delete target.generalTolerance
     else if (!deepEqual(target.generalTolerance, dto)) target.generalTolerance = dto
     return withWarnings({}, loaded.unwrap(), part.operations, ctx, where)
+  },
+})
+
+/**
+ * Removes a part with what belongs only to it: its references, its plans (`confirm` when it has
+ * any; refused while one is `inUse`, as `plan.remove`), its stock snapshot and the tool snapshots
+ * no other part uses. One undo step. Doc: docs/modes/split-parts.md#prerequisite-several-parts-per-project
+ */
+const partRemove = defineCommand({
+  kind: 'document',
+  name: 'design.part.remove',
+  summary: 'Remove a part with its references and plans (confirm: true when it has plans).',
+  title: () => 'Remove part',
+  machine: false,
+  args: z.object({
+    ...PartArg,
+    confirm: z.literal(true).optional().describe('Required when the part has plans: they go too'),
+  }),
+  result: z.object({ removedPlans: z.array(z.string()) }),
+  run(draft, args) {
+    const where = 'design.part.remove'
+    const part = Object.hasOwn(draft.parts, args.partId) ? draft.parts[args.partId] : undefined
+    if (part === undefined) return unknownPart(args.partId, where)
+    const plans = Object.values(draft.plans).filter((p) => p.design.partId === args.partId)
+    const inUse = plans.find((p) => p.status === 'inUse')
+    if (inUse !== undefined)
+      return invalid(
+        [
+          {
+            path: ['partId'],
+            rule: 'planInUse',
+            message: `plan ${inUse.name} is in use; archive it first`,
+          },
+        ],
+        where,
+      )
+    if (plans.length > 0 && args.confirm !== true)
+      return fail('input.malformed', `the part has ${plans.length} plan(s); pass confirm: true`, {
+        issues: [
+          {
+            path: ['confirm'],
+            rule: 'partHasPlans',
+            message: `removing the part removes its ${plans.length} plan(s); pass confirm: true`,
+          },
+        ],
+        where,
+      })
+    const stock = part.stock
+    const tools = new Set(
+      part.operations.flatMap((o) => (o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [])),
+    )
+    delete draft.parts[args.partId]
+    for (const p of plans) delete draft.plans[p.id]
+    for (const r of Object.values(draft.references))
+      if (r.partId === args.partId) delete draft.references[r.id]
+    if (!Object.values(draft.parts).some((p) => p.stock === stock)) delete draft.snapshots[stock]
+    for (const id of tools) dropUnusedToolSnapshot(draft, id)
+    return Ok({ removedPlans: plans.map((p) => p.id) })
   },
 })
 
@@ -1308,7 +1364,7 @@ export function splitFeature(
 
 const partList = defineQuery({
   name: 'design.part.list',
-  summary: 'List the parts of the project (v0.1: at most one) with their ids.',
+  summary: 'List the parts of the project with their ids.',
   args: z.object({}),
   result: z.object({ parts: z.array(z.object({ id: PartIdSchema, name: z.string() })) }),
   run(doc) {
@@ -1501,6 +1557,7 @@ export function updateOperation(
 export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   partAdd,
   partUpdate,
+  partRemove,
   ...kindCommands(facingSpec),
   ...kindCommands(pocketSpec),
   ...kindCommands(drillingSpec),

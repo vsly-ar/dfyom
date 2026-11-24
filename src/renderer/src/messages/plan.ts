@@ -37,12 +37,18 @@ export const planMessages = {
       'A plan turns the part into toolpaths: a setup per face it is machined from, a tool for every operation, feeds and speeds.',
     action: 'Create plan',
     navigator: 'No plan yet: create one in the view.',
+    /** The card's Part field with several parts (split parts S0). */
+    part: 'Part',
   },
 
   picker: {
     label: 'Plan',
     actions: 'Plan actions',
     create: 'New plan',
+    /** With several parts New plan asks for the part (split parts S0): a group of parts. */
+    createFor: 'New plan for',
+    /** "Plan 1 · Enclosure 1": a plan with its part, while the project has several. */
+    withPart: (plan: string, part: string) => `${plan} · ${part}`,
     duplicate: 'Duplicate plan',
     remove: 'Remove plan…',
     removeTitle: (name: string) => `Remove “${name}”?`,

@@ -47,6 +47,22 @@ export function pickerPlans(doc: ProjectDoc): PlanDTO[] {
   ]
 }
 
+/**
+ * A plan's name in pickers: with several parts in the project, the plan's part follows it ("Plan 1
+ * · Enclosure 1"; the design part's current name, else the plan's copy). Split parts S0.
+ */
+export function planLabel(doc: ProjectDoc, plan: PlanDTO): string {
+  const part = planPartName(doc, plan)
+  return part === undefined ? plan.name : m.picker.withPart(plan.name, part)
+}
+
+/** The plan's part name while the project has several parts (split parts S0), else undefined. */
+export function planPartName(doc: ProjectDoc, plan: PlanDTO): string | undefined {
+  if (Object.keys(doc.parts).length < 2) return undefined
+  const id = plan.design.partId
+  return Object.hasOwn(doc.parts, id) ? doc.parts[id]!.name : plan.design.part.name
+}
+
 /** The plan the window shows: the chosen one if it still exists, else the first offered. */
 export function chosenPlan(doc: ProjectDoc, planId: string | undefined): PlanDTO | undefined {
   const plans = pickerPlans(doc)

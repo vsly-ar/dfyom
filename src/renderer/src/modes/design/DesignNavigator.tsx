@@ -5,15 +5,17 @@
 // (the viewport and inspector follow), move by drag and Alt+↑/↓, remove with an undo toast
 // instead of a confirmation; tools re-chosen because of the library get a toast too (X2 F6). Rows carry warning badges and the error marker of a failed
 // evaluation. Without a part an empty state opens the Stock dialog. Stock setup, shapes and
-// reference models are in the part-setup dialogs (PartSetupDialogs.tsx, D45).
+// reference models are in the part-setup dialogs (PartSetupDialogs.tsx, D45). The part menu after the
+// name switches, adds and removes parts (split parts S0).
 // Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, #panels-and-inspectors,
-// #confirmations, #undo-and-redo; docs/modes/design.md#ordering-and-composition
-import { useEffect, useRef } from 'react'
+// #confirmations, #undo-and-redo, #part-menu-split-parts-s0; docs/modes/design.md#ordering-and-composition
+import { useEffect, useRef, useState } from 'react'
 import type { OperationKind } from '../../../../core/design/part.dto'
 import { designMessages } from '../../messages/design'
 import { usePending, useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   Menu,
@@ -31,7 +33,7 @@ import { autoChangeReason } from './ToolField'
 import { OperationList } from './OperationList'
 import { operationUnits } from './feature-view'
 import { stockReadout } from './PartSetupDialogs'
-import { useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
+import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
 
@@ -100,6 +102,75 @@ function useRechosenToast(part: DesignPart, show: (message: string) => void): vo
   }, [rechosen, part, show])
 }
 
+/**
+ * The part menu (split parts S0, ui.md § Part menu): the project's parts in document order, the
+ * shown one checked (window state, ui-store `designPart`); New part… (the Stock dialog for
+ * another part) and Remove <part> (`design.part.remove`: an undo toast, or a confirmation when
+ * the part's plans go too; refused with the reason while one is in use). Pieces of a split (4a)
+ * will list indented under their source.
+ */
+function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
+  const call = useCommand()
+  const setPart = useUi((st) => st.setDesignPart)
+  const openDialog = useUi((st) => st.setDesignDialog)
+  const setRemovedToast = useUi((st) => st.setRemovedToast)
+  const [confirm, setConfirm] = useState(false)
+  const pm = m.parts
+  const parts = Object.values(part.doc.parts)
+  const plans = Object.values(part.doc.plans).filter((p) => p.design.partId === part.dto.id)
+  const inUse = plans.find((p) => p.status === 'inUse')
+  const remove = async () => {
+    const r = await call('design.part.remove', {
+      partId: part.dto.id,
+      ...(plans.length > 0 ? { confirm: true } : {}),
+    })
+    if (!r.ok) return
+    setPart(null)
+    setRemovedToast(m.navigator.removed(part.dto.name))
+  }
+  const items: MenuEntry[] = [
+    {
+      group: pm.group,
+      items: parts.map((p) => ({
+        id: p.id,
+        label: p.name,
+        checked: p.id === part.dto.id,
+        onSelect: () => setPart(p.id),
+      })),
+    },
+    'separator',
+    { label: pm.newPart, icon: <Icon name="add" />, onSelect: () => openDialog('newPart') },
+    {
+      label: pm.remove(part.dto.name),
+      icon: <Icon name="delete" />,
+      danger: true,
+      disabledReason: inUse === undefined ? undefined : pm.inUse(inUse.name),
+      onSelect: () => (plans.length > 0 ? setConfirm(true) : void remove()),
+    },
+  ]
+  return (
+    <>
+      <Menu label={pm.menu} items={items}>
+        <IconButton
+          label={parts.length > 1 ? `${pm.menu} (${pm.count(parts.length)})` : pm.menu}
+          icon={<Icon name="chevron-down" />}
+          className={styles['partMenu']}
+        />
+      </Menu>
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={pm.confirmTitle(part.dto.name)}
+        description={pm.confirmDescription(plans.length)}
+        confirmLabel={pm.confirmAction}
+        cancelLabel={m.setup.cancel}
+        destructive
+        onConfirm={() => void remove()}
+      />
+    </>
+  )
+}
+
 function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const { bridge } = useShell()
   const [selected, select] = useDesignSelection()
@@ -162,6 +233,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
         >
           {part.dto.name}
         </button>
+        <PartMenu part={part} />
         {readout !== undefined ? (
           <button
             type="button"

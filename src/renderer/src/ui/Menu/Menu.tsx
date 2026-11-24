@@ -6,6 +6,7 @@
 // Doc: docs/conventions/ui.md#radix-wrapping-pattern, #inventory-v01, #feature-rows-and-add
 import { ContextMenu as RadixContextMenu, DropdownMenu } from 'radix-ui'
 import { useId, type ComponentType, type ReactElement, type ReactNode } from 'react'
+import { Icon } from '../icons/Icon'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Menu.module.css'
 
@@ -27,6 +28,13 @@ export interface MenuItem {
    * tooltip, so a single Escape still closes the menu.
    */
   description?: string | undefined
+  /**
+   * One of a choice (the part menu's parts, split parts S0): `menuitemradio` with `aria-checked`,
+   * a check mark at the end while true.
+   */
+  checked?: boolean | undefined
+  /** React key when labels may repeat (two parts of the same name); default the label. */
+  id?: string | undefined
 }
 
 /** A labelled group of items (`role="group"` named by its label). */
@@ -159,7 +167,7 @@ function Entries({ p, items }: { p: Parts; items: readonly MenuEntry[] }): React
         ) : 'group' in item ? (
           <Group key={`group-${item.group}`} p={p} group={item} />
         ) : (
-          <Item key={item.label} p={p} item={item} />
+          <Item key={item.id ?? item.label} p={p} item={item} />
         ),
       )}
     </>
@@ -174,7 +182,7 @@ function Group({ p, group }: { p: Parts; group: MenuGroup }): React.JSX.Element 
         {group.group}
       </p.Label>
       {group.items.map((item) => (
-        <Item key={item.label} p={p} item={item} />
+        <Item key={item.id ?? item.label} p={p} item={item} />
       ))}
     </p.Group>
   )
@@ -191,6 +199,9 @@ function Item({ p, item }: { p: Parts; item: MenuItem }): React.JSX.Element {
       data-danger={item.danger || undefined}
       data-reason={reason !== undefined || undefined}
       disabled={item.disabled ?? false}
+      {...(item.checked !== undefined
+        ? { role: 'menuitemradio', 'aria-checked': item.checked }
+        : {})}
       {...(description !== undefined && reason === undefined
         ? { 'aria-describedby': descriptionId }
         : {})}
@@ -219,6 +230,11 @@ function Item({ p, item }: { p: Parts; item: MenuItem }): React.JSX.Element {
         ) : null}
       </span>
       {item.shortcut ? <kbd className={styles['kbd']}>{item.shortcut}</kbd> : null}
+      {item.checked === true ? (
+        <span className={styles['check']} aria-hidden="true">
+          <Icon name="check" size="sm" />
+        </span>
+      ) : null}
       {description !== undefined ? (
         <span id={descriptionId} role="tooltip" className={styles['description']}>
           {description}

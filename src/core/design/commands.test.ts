@@ -67,14 +67,13 @@ describe('design.part.add / update', () => {
     expect(s.d.doc.snapshots).toEqual({})
   })
 
-  it('v0.1: a second part fails with model.invariant; an unknown stock with input.malformed', async () => {
+  it('a second part is added beside the first (S0); an unknown stock fails with input.malformed', async () => {
     const s = await designSetup()
-    const e = await s.fail(
-      'design.part.add',
-      { name: 'Two', stockLibraryItemId: 'stock-1' },
-      'model.invariant',
-    )
-    expect(e.issues[0]?.rule).toBe('onePart')
+    const { partId } = (await s.run('design.part.add', {
+      name: 'Two',
+      stockLibraryItemId: 'stock-1',
+    })) as { partId: string }
+    expect(Object.keys(s.d.doc.parts)).toEqual([s.partId, partId])
     await s.undo()
     const u = await s.fail(
       'design.part.add',

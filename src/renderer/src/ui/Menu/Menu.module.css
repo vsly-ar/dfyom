@@ -169,3 +169,10 @@
 .context {
   transform-origin: var(--radix-context-menu-content-transform-origin);
 }
+
+/* the chosen item of a choice (menuitemradio, split parts S0): an amber check at the end */
+.check {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--accent-icon);
+}

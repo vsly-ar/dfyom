@@ -17,16 +17,26 @@ import {
   useUi,
 } from '../../shell/ShellContext'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
+import type { ProjectDoc } from '../../../../core/project/document'
 import type { PartEvaluationEntry } from '../../state/evaluations'
 import type { ReferenceMeshEntry } from '../../state/reference-meshes'
 import { designPart, type DesignPart } from './model'
 import { partReferences } from './reference-view'
 
-/** The design part of the window's project, or undefined (no project or no part yet). */
+/**
+ * The design part of the window's project: the part chosen in the part menu (split parts S0), else
+ * the first; undefined without a project or a part.
+ */
 export function useDesignPart(): DesignPart | undefined {
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
-  return useMemo(() => (doc === undefined ? undefined : designPart(doc)), [doc])
+  return useDesignPartOf(doc)
+}
+
+/** As `useDesignPart`, for a document the caller already has. */
+export function useDesignPartOf(doc: ProjectDoc | undefined): DesignPart | undefined {
+  const partId = useUi((s) => s.designPart)
+  return useMemo(() => (doc === undefined ? undefined : designPart(doc, partId)), [doc, partId])
 }
 
 export interface DesignWarnings {

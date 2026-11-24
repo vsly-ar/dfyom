@@ -37,6 +37,7 @@ import {
   isError,
   pickerPlans,
   planEditCount,
+  planLabel,
   setupExportBlocked,
   snapshotName,
   statusChoices,
@@ -81,13 +82,12 @@ export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const [plan, choose] = useChosenPlan(doc)
   const call = usePlanCommand()
   const machines = useLibraryItems('machine')
-  const part = Object.values(doc.parts)[0]
 
-  const create = async () => {
-    if (part === undefined) return
+  // a new plan of the given part (split parts S0: the plan menu asks for it when there are several)
+  const create = async (partId: string) => {
     const machine = machines?.[0]
     const r = await call('plan.create', {
-      partId: part.id,
+      partId,
       ...(machine === undefined ? {} : { machineLibraryItemId: machine.id }),
     })
     if (r.ok) choose((r.value as { planId: string }).planId)
@@ -112,7 +112,7 @@ function PlanView({
   doc: ProjectDoc
   plan: PlanDTO
   choose: (planId: string) => void
-  onCreate: () => Promise<void>
+  onCreate: (partId: string) => Promise<void>
 }): React.JSX.Element {
   const call = usePlanCommand()
   const data = usePlanData(plan.id)
@@ -122,6 +122,7 @@ function PlanView({
   const [discard, setDiscard] = useState<'rebuild' | 'draft' | null>(null)
   const edits = planEditCount(plan)
   const plans = pickerPlans(doc)
+  const parts = Object.values(doc.parts)
   const canEdit = editable(plan)
 
   const send = async (name: string, args: object) => {
@@ -138,7 +139,10 @@ function PlanView({
             aria-label={m.picker.label}
             options={plans.map((p) => ({
               value: p.id,
-              label: p.status === 'archived' ? `${p.name} (${m.statuses.archived})` : p.name,
+              label:
+                p.status === 'archived'
+                  ? `${planLabel(doc, p)} (${m.statuses.archived})`
+                  : planLabel(doc, p),
             }))}
             value={plan.id}
             onValueChange={choose}
@@ -146,11 +150,22 @@ function PlanView({
           <Menu
             label={m.picker.actions}
             items={[
-              {
-                label: m.picker.create,
-                icon: <Icon name="add" />,
-                onSelect: () => void onCreate(),
-              },
+              // one part: New plan plans it (the shown plan's part); several: a group naming each
+              parts.length > 1
+                ? {
+                    group: m.picker.createFor,
+                    items: parts.map((p) => ({
+                      id: p.id,
+                      label: p.name,
+                      icon: <Icon name="add" />,
+                      onSelect: () => void onCreate(p.id),
+                    })),
+                  }
+                : {
+                    label: m.picker.create,
+                    icon: <Icon name="add" />,
+                    onSelect: () => void onCreate(parts[0]?.id ?? plan.design.partId),
+                  },
               {
                 label: m.picker.duplicate,
                 icon: <Icon name="copy" />,

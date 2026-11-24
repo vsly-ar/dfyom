@@ -43,7 +43,17 @@ The data model keeps a list of parts ([design.md § Part and stock](design.md#pa
 
 - Lift `onePart`; the part row in the Design navigator becomes a part menu (source parts, their pieces indented under them); the selected part is window state, not document state.
 - Plan: the plan's part shown in the plan row; "New plan" asks for the part when there are several. Run shows the plan's part name in the setup picture.
-- Agents already address parts by id; no new tool.
+- Agents already address parts by id; no new tool. (Implemented with one: removing a part, below.)
+
+### Implementation (S0)
+
+Done 2026-11-24 (branch of task S0, 4a started). What was built, and where this section left room:
+
+- **Core:** `design.part.add` adds parts beside the first (rule `onePart` removed). New `design.part.remove { partId, confirm? }` – the task asked for remove and rename; rename is the existing `design.part.update { name }`. It removes the part, its references, its plans (`confirm: true` required when there are any, `input.malformed` rule `partHasPlans` otherwise; `model.invariant` rule `planInUse` while one is `inUse`, as `plan.remove` refuses an `inUse` plan), its stock snapshot when no other part uses it and its tool snapshots no other part uses, in one undo step (`removedPlans` in the result). No document format change, no `schemaVersion` bump. Every other design, plan, shape, feature, reference and Clones tool already took `partId` (checked: none read "the first part"); `design.part.list` lists all. `tools/list` +0.34 K ([llm-api.md](../architecture/llm-api.md#implementation-task-310)). Tests: `src/core/design/several-parts.test.ts` (two parts, rename, plans per part with Apply following only the edited part's plan, remove with plans and snapshots and its undo, `planInUse`, last part, tools by id) and a reference case in `reference-commands.test.ts`.
+- **Design UI:** the part menu ([ui.md § Part menu](../conventions/ui.md#part-menu-split-parts-s0)): switch (window state `designPart`), New part… (the Stock dialog), Remove with an undo toast or a confirmation when plans go too. `designPart(doc, partId)` (renderer `modes/design/model.ts`) resolves the shown part, falling back to the first; every Design hook reads it through `useDesignPart`. The menu item gained `checked` (`menuitemradio`) and `id` (key) in `ui/Menu`. No `kind`/`derivedFrom` fields yet: pieces (4a) add `derivedFrom` and the indented menu rows.
+- **Plan and Run:** the Plan start card's Part field (several parts), "New plan for" per part in the plan menu, plan names with their part in the Plan and Run pickers (`planLabel`), the setup-change picture captioned with the part. Export and Run are unchanged: a plan carries its own part copy.
+- **Tests:** component `modes/design/Parts.test.tsx` (part menu, New part, remove with toast and with confirmation, Plan start Part field, New plan per part; axe on each state), e2e `e2e/several-parts.e2e.ts` (New part…, switch, plan the second part, export holds only its operations).
+- **The user's file:** `temp/enclosure_1x.dfyom` as read on 2026-11-24 at implementation holds **one** part ("enclosure 1", 9 operations, one plan), not two as read earlier for this doc; the 0.54-scale "Enclosure" part is no longer in it. Loaded headless with a second part added: both list and load in Design's model, the plan is named "Plan 1 · enclosure 1", removing the added part restores one part.
 
 ## Model
 
