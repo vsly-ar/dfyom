@@ -387,6 +387,7 @@ describe('plan.get', () => {
     'plan.toolpath.get {"planId":"plan-1","planOperationId":"op1"}': {
       toolpath: { stats: { estimatedSeconds: 30 } },
       stale: false,
+      overreach: { xMin: 4.2426, xMax: 0, yMin: 1, yMax: 0 },
     },
     'plan.toolpath.get {"planId":"plan-1","planOperationId":"op2"}': {
       toolpath: null,
@@ -419,6 +420,7 @@ describe('plan.get', () => {
             rotation: 0,
             clearanceHeight: 10,
             retractHeight: 2,
+            overreach: null,
             operations: [
               {
                 id: 'op1',
@@ -448,6 +450,27 @@ describe('plan.get', () => {
       },
       detail: expect.stringContaining('detail: "full"'),
     })
+  })
+
+  // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+  it('gives the setup reach past the stock in the project units once every toolpath is current', () => {
+    const current = {
+      ...peeks,
+      'plan.toolpath.get {"planId":"plan-1","planOperationId":"op2"}': {
+        toolpath: { stats: { estimatedSeconds: 5 } },
+        stale: false,
+        overreach: { xMin: 1, xMax: 0, yMin: 2.54, yMax: 0 },
+      },
+    }
+    const reach = (unitSystem: 'mm' | 'inch') => {
+      const shaper = new ResultShaper({ ...fakeSession(current), unitSystem: () => unitSystem })
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      return (valueOf(r) as { plan: { setups: { overreach: unknown }[] } }).plan.setups[0]!
+        .overreach
+    }
+    // the per-side maximum, rounded up to 0.1 mm / 0.01 in
+    expect(reach('mm')).toEqual({ xMin: 4.3, xMax: 0, yMin: 2.6, yMax: 0 })
+    expect(reach('inch')).toEqual({ xMin: 0.17, xMax: 0, yMin: 0.1, yMax: 0 })
   })
 
   it('detail "full" returns the record with compact quantities', () => {

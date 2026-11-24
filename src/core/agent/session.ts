@@ -24,6 +24,7 @@ import type { ApplyOutcome } from '../commands/apply'
 import type { AppliedResult, CommandOutcome, Dispatcher } from '../commands/dispatcher'
 import { JobInfoSchema } from '../commands/jobs'
 import type { Registry } from '../commands/registry'
+import type { UnitSystem } from '../project/document'
 import { APPLY_KEY, EXPECTED_REVISION, type SessionToolDef } from './tools'
 
 /** What a session needs from the app host. Implemented by src/main/host. */
@@ -421,6 +422,12 @@ export class AgentSession {
       .unwrap()
       .query(name, args, this.source)
       .map((o) => o.value)
+  }
+
+  /** The bound project's unit system, for lengths in results (shape.ts). */
+  unitSystem(): UnitSystem | undefined {
+    const bound = this.bound()
+    return bound.isNone() ? undefined : bound.unwrap().doc.unitSystem
   }
 
   /** A library snapshot of the bound project, to name tools in results (shape.ts). */

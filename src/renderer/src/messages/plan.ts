@@ -131,6 +131,16 @@ export const planMessages = {
     rotation: 'Rotation on the table',
     rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
     clearanceHeight: 'Clearance height',
+    /** DF59 (interim, no clamp model): the note on the clearance field, with its value. */
+    clampNote: (height: string) =>
+      `Keep clamps lower than ${height} above the stock top; clamps are not modelled yet.`,
+    /** DF59: how far the tool reaches past the stock sides on the machine. */
+    reach: 'Past the stock',
+    reachValue: (sides: readonly string[]) =>
+      `${capital(sides.join(', '))}; keep clamps clear of these sides.`,
+    reachSide: (side: 'left' | 'right' | 'front' | 'back', length: string) => `${side} ${length}`,
+    reachNone: 'The tool stays within the stock outline.',
+    reachUnknown: 'Generate toolpaths to see where the tool leaves the stock.',
     retractHeight: 'Retract height',
     shown: 'Shown in the viewport and exported',
     moveUpItem: 'Move up',
@@ -520,6 +530,20 @@ export function findingText(
 }
 
 /** "12 min 5 s", "45 s". */
+/**
+ * A length in the document's units rounded up (the tool reaches at most this far, DF59):
+ * 0.1 mm or 0.01 in. "4.3 mm", "0.17 in".
+ */
+export function formatReach(mm: number, units: UnitSystem): string {
+  const [v, step, unit] = units === 'inch' ? [mm / 25.4, 100, 'in'] : [mm, 10, 'mm']
+  return `${Math.ceil(v * step - 1e-9) / step || 0} ${unit}`
+}
+
+/** A height in the document's units without trailing zeros: "10 mm", "0.394 in". */
+export function formatHeight(mm: number, units: UnitSystem): string {
+  return units === 'inch' ? `${+(mm / 25.4).toFixed(3)} in` : `${+mm.toFixed(2)} mm`
+}
+
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds))
   const h = Math.floor(s / 3600)

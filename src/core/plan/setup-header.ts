@@ -7,6 +7,7 @@
 import { DIRECTION_LABEL, type StockSize } from '../geometry/face'
 import type { Vec3 } from '../geometry/model'
 import type { SetupHeader } from '../post/program'
+import type { Overreach } from '../toolpath/overreach'
 import { setupFrame, setupOrientation } from '../toolpath/wcs'
 import type { SetupDTO } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
@@ -135,12 +136,14 @@ export function setupMotion(
 
 /**
  * The header's setup instructions for `setups[index]` (machining order): its number, the part
- * faces up, in front and on the right, the move from setup 1, the work-zero corner and the stock.
+ * faces up, in front and on the right, the move from setup 1, the work-zero corner and the stock;
+ * with `overreach` the tool's reach past the stock (DF59).
  */
 export function setupHeader(
   setups: readonly Pick<SetupDTO, 'direction' | 'rotation'>[],
   index: number,
   stock: StockSize,
+  overreach?: Overreach,
 ): SetupHeader {
   const setup = setups[index]!
   const o = setupOrientation(setupDirection(setup), setupRotation(setup), stock)
@@ -153,5 +156,6 @@ export function setupHeader(
     ...(index === 0 ? {} : { fromFirst: setupMotion(setups[0]!, setup, stock) }),
     corner: setupCorner(setup, stock),
     stock: o.size,
+    ...(overreach === undefined ? {} : { overreach }),
   }
 }

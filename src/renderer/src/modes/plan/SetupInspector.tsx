@@ -1,7 +1,8 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
-// the spindle (direction icon and word), the work zero G54 at its part corner, the rotation about
-// the spindle axis (0/90/180/270°), the safe heights (clearance, retract; moved here from the
-// navigator) and the machine checks of this setup. Each change is one `plan.setup.update`.
+// the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
+// reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
+// heights (clearance with the clamp note, retract; moved here from the navigator) and the
+// machine checks of this setup. Each change is one `plan.setup.update`.
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
 import { useState } from 'react'
@@ -13,9 +14,10 @@ import {
   type SetupDTO,
   type SetupRotation,
 } from '../../../../core/plan/plan.dto'
-import type { ProjectDoc } from '../../../../core/project/document'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import type { Overreach } from '../../../../core/toolpath/overreach'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
-import { planMessages, sentence } from '../../messages/plan'
+import { formatHeight, formatReach, planMessages, sentence } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
 import {
   ErrorMessage,
@@ -29,7 +31,14 @@ import {
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { DirectionIcon } from './DirectionIcon'
-import { allows, directionOfSetup, planStockSize, setupCorner } from './model'
+import {
+  allows,
+  directionOfSetup,
+  planStockSize,
+  setupCorner,
+  setupOverreach,
+  type ToolpathEntry,
+} from './model'
 import { usePlanCommand } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
@@ -42,11 +51,13 @@ export function SetupInspector({
   plan,
   setup,
   warnings,
+  toolpaths = {},
 }: {
   doc: ProjectDoc
   plan: PlanDTO
   setup: SetupDTO
   warnings: readonly PlanWarning[]
+  toolpaths?: Readonly<Record<string, ToolpathEntry>>
 }): React.JSX.Element {
   const call = usePlanCommand()
   const [, select] = usePlanSelection()
@@ -61,6 +72,18 @@ export function SetupInspector({
   const stock = planStockSize(doc, plan)
   // per-setup machine checks carry the setup (plan-v0.2.md#implementation-task-e1)
   const mine = warnings.filter((w) => w.params['setupId'] === setup.id)
+  const reach = reachText(setupOverreach(setup, toolpaths), units)
+  const clearance = quantityOf(setup.clearanceHeight)
+  const clampNote: FieldMessage[] =
+    clearance === undefined
+      ? []
+      : [
+          {
+            id: 'clampNote',
+            severity: 'note',
+            text: m.clampNote(formatHeight(clearance.canonical, units)),
+          },
+        ]
 
   const update = async (args: object, gesture?: string) => {
     const r = await call(
@@ -100,6 +123,8 @@ export function SetupInspector({
                 <dd>{m.workOffsetValue(setupCorner(setup, stock), face)}</dd>
               </>
             ) : null}
+            <dt>{m.reach}</dt>
+            <dd>{reach}</dd>
           </dl>
         </div>
         <Field
@@ -127,7 +152,7 @@ export function SetupInspector({
           value={quantityOf(setup.clearanceHeight)}
           illustration={<FieldIcon name="clearance" />}
           readOnly={readOnly}
-          messages={messages('clearanceHeight')}
+          messages={[...messages('clearanceHeight'), ...clampNote]}
           onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
@@ -155,4 +180,20 @@ export function SetupInspector({
       </div>
     </div>
   )
+}
+
+/** The setup's reach past the stock as a sentence (DF59), or why it is not known yet. */
+function reachText(reach: Overreach | undefined, units: UnitSystem): string {
+  if (reach === undefined) return m.reachUnknown
+  const sides = (
+    [
+      ['left', reach.xMin],
+      ['right', reach.xMax],
+      ['front', reach.yMin],
+      ['back', reach.yMax],
+    ] as const
+  )
+    .filter(([, v]) => v > 0)
+    .map(([side, v]) => m.reachSide(side, formatReach(v, units)))
+  return sides.length === 0 ? m.reachNone : m.reachValue(sides)
 }

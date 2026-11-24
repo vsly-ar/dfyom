@@ -6,6 +6,8 @@
 (Work zero G54 X0 Y0: front-left corner of the top face)
 (That corner sits front left on the machine)
 (Z0 on the top face: the stock surface facing up)
+(Tool reaches past stock: left 13, right 13, front 8.1, back 8.1 mm)
+(Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Flat 12, dia 12 mm)
 (Tool 2: Flat 6, dia 6 mm)

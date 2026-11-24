@@ -6,6 +6,7 @@
  * spindle speeds in rpm. The post converts units and owns every text detail.
  */
 import type { Vec3 } from '../toolpath/model'
+import type { Overreach } from '../toolpath/overreach'
 
 /** The tool snapshot as the header and tool-change marker show it. */
 export interface ProgramTool {
@@ -53,6 +54,11 @@ export interface SetupHeader {
   readonly corner: string
   /** Stock extents along machine X, Y, Z (mm). */
   readonly stock: Vec3
+  /**
+   * How far the program's tools reach past the stock sides (mm, hardening DF59); absent = no
+   * reach lines.
+   */
+  readonly overreach?: Overreach
 }
 
 export interface MachiningProgram {

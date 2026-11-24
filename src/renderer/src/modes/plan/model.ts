@@ -27,6 +27,7 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
+import { maxOverreach, type Overreach } from '../../../../core/toolpath/overreach'
 import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import {
@@ -349,6 +350,26 @@ export interface ToolpathEntry {
   readonly stale: boolean
   /** The plan's inputs have changes not applied yet (P2): outdated until Apply. */
   readonly pendingApply?: boolean
+  /** How far the current toolpath's tool reaches past the stock sides (mm, DF59); null if stale. */
+  readonly overreach?: Overreach | null
+}
+
+/**
+ * A setup's reach past the stock (DF59): the per-side maximum over its plan operations, or
+ * `undefined` while any of their toolpaths is missing or outdated.
+ * Doc: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+ */
+export function setupOverreach(
+  setup: SetupDTO,
+  toolpaths: Readonly<Record<string, ToolpathEntry>>,
+): Overreach | undefined {
+  const list: Overreach[] = []
+  for (const op of setup.operations) {
+    const e = toolpaths[op.id]
+    if (e === undefined || toolpathState(e, undefined) !== 'ready' || !e.overreach) return undefined
+    list.push(e.overreach)
+  }
+  return maxOverreach(list)
 }
 
 export function toolpathState(

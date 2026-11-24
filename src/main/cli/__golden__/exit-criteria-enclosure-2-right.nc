@@ -6,6 +6,8 @@
 (Work zero G54 X0 Y0: bottom-front corner of the right face)
 (That corner sits front left on the machine)
 (Z0 on the right face: the stock surface facing up)
+(Tool stays within the stock outline)
+(Keep clamps below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Drill 6, dia 6 mm)
 (Generator: DFYOM)

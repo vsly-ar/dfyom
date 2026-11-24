@@ -380,6 +380,30 @@ describe('open sides of pockets (DF61)', () => {
     expect(Math.min(...xs)).toBeGreaterThan(-3 * Math.SQRT1_2 - 0.5)
   })
 
+  // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+  const reachOf = async (items: object[]) => {
+    const { s, planId, planOp } = await onePlan(items, { kind: 'pocket', args: { depth: '2' } })
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+    return (
+      s.query('plan.toolpath.get', { planId, planOperationId: planOp }) as {
+        overreach: { xMin: number; xMax: number; yMin: number; yMax: number } | null
+      }
+    ).overreach
+  }
+
+  it('an open pocket reaches past every stock side it opens; a closed pocket stays within', async () => {
+    const open = (await reachOf(ring(['100', '60'])))!
+    // the tool edge goes up to r (1 + √½) + allowance past the edge, and at least past it
+    for (const v of [open.xMin, open.xMax, open.yMin, open.yMax]) {
+      expect(v).toBeGreaterThan(0)
+      expect(v).toBeLessThanOrEqual(3 * (1 + Math.SQRT1_2) + 0.5 + 1e-9)
+    }
+    // a 40 × 20 pocket in the middle of the 100 × 60 stock
+    expect(await reachOf([rect('40', '20', '4')])).toEqual({ xMin: 0, xMax: 0, yMin: 0, yMax: 0 })
+  })
+
   it('a ring 1 mm inside the stock edge keeps its walls: the tool does not fit', async () => {
     const { s, planId, planOp } = await onePlan(ring(['98', '58']), {
       kind: 'pocket',

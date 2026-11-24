@@ -196,6 +196,43 @@ class Writer {
     this.comment(`Work zero G54 X0 Y0: ${corner} corner of the ${h.up} face`)
     this.comment('That corner sits front left on the machine')
     this.comment(`Z0 on the ${h.up} face: the stock surface facing up`)
+    if (h.overreach !== undefined) this.reachComments(h.overreach)
+  }
+
+  /**
+   * The tool's reach past the stock sides and the clamp note (DF59): docs/architecture/grbl.md#setup-header-hardening-df58.
+   */
+  private reachComments(o: NonNullable<SetupHeader['overreach']>): void {
+    const unit = this.p.units
+    // rounded up: the tool reaches at most this far
+    const step = unit === 'in' ? 100 : 10
+    const up = (mm: number) =>
+      formatNumber(Math.ceil(mm * this.units.perMm * step - 1e-9) / step, 2)
+    const clearance = `clearance Z ${this.coord(this.p.clearanceZ)} ${unit}`
+    const sides = (list: readonly [string, number][]) =>
+      list.filter(([, v]) => v > 0).map(([name, v]) => `${name} ${up(v)}`)
+    const x = sides([
+      ['left', o.xMin],
+      ['right', o.xMax],
+    ])
+    const y = sides([
+      ['front', o.yMin],
+      ['back', o.yMax],
+    ])
+    if (x.length + y.length === 0) {
+      this.comment('Tool stays within the stock outline')
+      this.comment(`Keep clamps below ${clearance}`)
+      return
+    }
+    const line = (parts: readonly string[]) =>
+      `Tool reaches past stock: ${parts.join(', ')} ${unit}`
+    const one = line([...x, ...y])
+    if (one.length + 2 <= MAX_LINE_BYTES || x.length === 0 || y.length === 0) this.comment(one)
+    else {
+      this.comment(line(x))
+      this.comment(line(y))
+    }
+    this.comment(`Keep clamps clear of those sides, below ${clearance}`)
   }
 
   private modes(): void {
