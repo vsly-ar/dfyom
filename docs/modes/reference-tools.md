@@ -1,6 +1,6 @@
 # Reference tools: section, levels, holes, compare and fit for a reference model
 
-Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented** ([§ Implementation (P1)](#implementation-p1)), P2–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented with its follow-ups** ([§ Implementation (P1)](#implementation-p1)), P2–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
 
 ## Problem
 
@@ -100,28 +100,33 @@ Black-box case: one call from `stock.top` returns the rim (0), the cavity floor 
 ### Fitting
 
 - **Pipeline:** `meshSection` segments → chain into loops (ends welded within 1e-4 mm) → orient and nest (`Region2dPort.normalise`) → split at corners (turn > `cornerAngle`) → each run fitted to lines and tangent arcs within `tolerance` → circle test (every point within `tolerance` of one circle) → shape items.
-- **Fitter (S8 outcome):** direct G1 **biarcs on the section's vertices** (`fitPolyline` in `src/core/geometry/2d/fit-polyline.ts`) replaced the planned detour through the test-only `fitLoop` (cubic chains) and `fitCurve`: the vertices already lie on the surface, so tangents are estimated from them and each span between corners is covered by biarcs, split until every vertex is within `tolerance`. Two refinements make faceted CAD shapes come out exact: a biarc half that turns less than 1° becomes a line when the points still fit, and a vertex next to a chord at least 3 × longer than its other chord takes that long chord's direction (a straight side meeting a fillet), so a faceted r 4 rounded rectangle fits to four lines and four r 4 arcs.
-- **S8 measured** on the full enclosure body (`enclosure-wood-full.stl`, 77 112 triangles, `stock.top` frame without scale, tolerance 0.01 mm): every loop within 0.0100 mm; chaining + fitting 6–12 ms per section (38 ms at z 2 with the four foot holes).
+- **Fitter (S8 outcome):** direct G1 **biarcs on the section's vertices** (`fitClosedPolyline` in `src/core/geometry/2d/fit-polyline.ts`) replaced the planned detour through the test-only `fitLoop` (cubic chains) and `fitCurve`: the vertices already lie on the surface, so tangents are estimated from them and each span between corners is covered by biarcs, split until every vertex is within `tolerance`. Refinements that make faceted CAD shapes come out exact and compact:
+  - a biarc half that turns less than 1° becomes a line when the points still fit;
+  - a vertex's tangent is the tangent of the **circle through it and its two neighbours** (the central chord when the chords are equal; with uneven chords the central chord leans towards the longer one, which broke a stretch at every short chord);
+  - a vertex next to a chord at least 3 × longer than its other chord, whose short side goes on with another short chord (a straight side meeting a fillet's fan), takes the long chord's direction first, so a faceted r 4 rounded rectangle fits to four lines and four r 4 arcs; the circle tangent stays the alternative a stretch may end on, since a smooth curve cut through a slanted strip of facets gives the same long–short pattern;
+  - **slivers merged:** a stretch holding an element under 0.05 mm (`MIN_ELEMENT`) is refitted as one line or arc over the same vertices (alone or with a neighbouring stretch), within the tolerance and leaving a tangent break of at most 4.5° to the right (under the inside-corner check's 5°, so a merge never makes a sharp inside corner; loops are oriented with the material on the left) or half `cornerAngle` to the left.
+- **S8 measured** on the full enclosure body (`enclosure-wood-full.stl`, 77 112 triangles, `stock.top` frame without scale, tolerance 0.01 mm): every loop within 0.0100 mm; chaining + fitting 4–14 ms per section (≈ 40 ms at z 2 with the four foot holes). P1 as first built, then with the circle tangents, the long-chord alternative and the sliver merge (P1 follow-up, 2026-11-24):
 
-  | Height          | Outline elements  | Cavity elements | Elements < 0.05 mm |
-  | --------------- | ----------------- | --------------- | ------------------ |
-  | z 20 (mid-wall) | 78                | 61              | 0                  |
-  | z 50            | 192               | 63              | 3                  |
-  | z 2             | 237 (+ 4 circles) | –               | 2                  |
-  | z 40            | 360               | 315             | 57                 |
-  | z 5             | 384               | 289             | 92                 |
-  | z 59            | 510               | –               | 63                 |
+  | Height          | Outline elements (P1 → now) | Cavity elements | Elements < 0.05 mm |
+  | --------------- | --------------------------- | --------------- | ------------------ |
+  | z 20 (mid-wall) | 78 → 74                     | 61 → 66         | 0 → 0              |
+  | z 50            | 192 → 169                   | 63 → 66         | 3 → 0              |
+  | z 2             | 237 → 86 (+ 4 circles)      | –               | 2 → 0              |
+  | z 40            | 360 → 201                   | 315 → 174       | 57 → 0             |
+  | z 5             | 384 → 176                   | 289 → 104       | 92 → 0             |
+  | z 59            | 510 → 283                   | –               | 63 → 0             |
 
-  The ≤ 300 elements target holds mid-wall and at plain heights; heights that cut through slots, ribs and the lid lip exceed it, and there the "no element under 0.05 mm" target is missed (shortest 0.001 mm), since short facets between nearly tangent runs survive as their own elements. Accepted for P1 (the shapes are correct within the tolerance and `sectionLimit` still guards size); merging slivers into their neighbours is a follow-up ([§ Not yet](#not-yet)).
+  Both S8 targets now hold at every height: a sweep every 0.5 mm from z 0.25 to 59.75 gives at most 266 elements per loop, none under 0.05 mm (the shortest 0.05 mm), every loop within 0.01 mm (`reference-section.test.ts` checks the six heights above).
 
+- **Circle test:** every vertex within `tolerance` of the least-squares circle **and** no chord spanning more than 46° of it (eight chords and some slack), so a D-shaped hole, whose flat is one chord with its ends on the circle, stays a line and an arc with two corners (found with the P1 follow-ups).
 - **Radii from facets:** an STL fillet of radius r is a fan of chords; the fitted arc's radius is within `tolerance` of r when the chord count is ≥ 3, so `minInsideRadius` is meaningful. A 90° corner exported sharp stays a corner (reported `sharp`), never a tiny arc.
 
 ### UI
 
 In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8), visuals in [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) (existing tokens only). P1 ships the rows below except the parts marked later:
 
-- **Levels** list: two groups "From top" / "From bottom" (the face and its opposite; a face picker for side faces), each row depth, area, visible area; an undercut row greyed. Choosing one sets the section depth just inside the level (0.01 mm past it, so the cut has the floor's outline, not the face itself). Hovering a row to highlight the level's faces on the ghost: later.
-- **Section**: face picker, depth field (quantity; `stock.top.z - 10` style formulas as in placement), the loops filter (the tolerance stays at its 0.01 mm default; a field for it later); the loops listed with their size and inside corners as chips (sharp ones with the warning token) ("r 0", "r 3.98"). "Create shape" (one shape, holes kept) and "Create shapes" (one per outer loop) send `design.shape.import { from }`; "Round sharp inside corners to …" offers the smallest library end mill radius as its default. Drawing the fitted loops over the ghost and in the Shape Editor backdrop (instead of the raw segments): later.
+- **Levels** list: two groups "From top" / "From bottom" (the face and its opposite; a face picker for side faces), each row depth, area, visible area; an undercut row greyed. Choosing one sets the section depth just inside the level (0.01 mm past it, so the cut has the floor's outline, not the face itself). Pointing at a row highlights the level's faces on the ghost.
+- **Section**: face picker, depth field (quantity; `stock.top.z - 10` style formulas as in placement), the loops filter (the tolerance stays at its 0.01 mm default; a field for it later); the loops listed with their size and inside corners as chips (sharp ones with the warning token) ("r 0", "r 3.98"). "Create shape" (one shape, holes kept) and "Create shapes" (one per outer loop) send `design.shape.import { from }`; "Round sharp inside corners to …" offers the smallest library end mill radius as its default. The fitted loops are drawn over the ghost with the sharp inside corners marked, and the Shape Editor backdrop shows the same fitted loops instead of the raw segments (P1 follow-ups).
 
 ## 2. Features (holes)
 
@@ -221,6 +226,11 @@ Implemented 2026-11-24 (hardening DF60 P1); code points back here.
 - **Section shapes** carry no link or source back to the reference (the reference-only rule): an ordinary literal shape, its name "Section 20 mm".
 - **UI:** the Levels and Section rows (face picker, levels from both sides, section depth, loops filter, corner chips, rounding, Create shape / Create shapes). Choosing a level sets the shared section depth that the Shape Editor backdrop reads as well.
 - Tests: `fit-polyline.test.ts`, `mesh-levels.test.ts`, `reference-section.test.ts`, `reference-find.test.ts`, `Reference.test.tsx` (axe), the e2e reference spec with renders.
+- **Follow-ups (2026-11-24):**
+  - **Fitter:** circle tangents, the long-chord alternative and the sliver merge ([§ Fitting](#fitting)); S8 met at every height of the enclosure. The circle test also refuses a chord over 46° (a D shape was read as a full circle).
+  - **Loops on the ghost:** the window's `reference.section` IPC takes `fit` and answers the fitted loops too (the agent result stays a summary, RT-G); the Reference panel publishes the face, depth, the shown loops and the hovered level as window state (`referenceOverlay`), and the Design scene draws them in the part frame (`reference-overlay.ts`, `ReferenceOverlay.tsx`): loops as lines, sharp inside corners as rings, the hovered level's faces (`levelTriangles` in `mesh-levels.ts`, run in the window on the ghost's own triangles: a display filter, not a query).
+  - **Shape Editor backdrop:** `useReferenceSection` asks for the fitted loops and draws (and snaps to) them, chorded within 0.002 mm; an open section keeps the raw segments.
+  - Tests: `fit-polyline.test.ts` (long and short chords in turns), `reference-section.test.ts` (feature-rich heights), `mesh-levels.test.ts` (`levelTriangles`), `reference-overlay.test.ts`, `Reference.test.tsx`; renders `df-reference-tools` and `df-reference-level-hover`.
 
 ## Performance
 
@@ -228,17 +238,14 @@ The worker keeps the last mesh read per asset. Measured on the full enclosure bo
 
 ## Not yet
 
-| Item                                                                      | Where                                                        |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Fitted loops and corner markers drawn on the ghost; level hover highlight | P1 follow-up (UI)                                            |
-| Shape Editor backdrop from the fitted loops instead of the raw segments   | P1 follow-up (UI)                                            |
-| Merging sub-0.05 mm slivers in feature-rich sections (S8)                 | P1 follow-up ([§ Fitting](#fitting))                         |
-| `detail: "full"` on `find`                                                | When an agent needs loop geometry without making shapes      |
-| Setup faces, holes, compare, overlay                                      | [P2–P5](#phases)                                             |
-| Silhouette (outline of the whole model seen from a face)                  | Later; a section near the widest level serves                |
-| Feature recognition into operations                                       | Assisted recreation, later                                   |
-| Holes along other axes than face normals; slots and obrounds              | With assisted recreation                                     |
-| STEP references (exact faces instead of facets)                           | STEP import ([reference-model.md](reference-model.md#later)) |
+| Item                                                         | Where                                                        |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `detail: "full"` on `find`                                   | When an agent needs loop geometry without making shapes      |
+| Setup faces, holes, compare, overlay                         | [P2–P5](#phases)                                             |
+| Silhouette (outline of the whole model seen from a face)     | Later; a section near the widest level serves                |
+| Feature recognition into operations                          | Assisted recreation, later                                   |
+| Holes along other axes than face normals; slots and obrounds | With assisted recreation                                     |
+| STEP references (exact faces instead of facets)              | STEP import ([reference-model.md](reference-model.md#later)) |
 
 ## Phases
 

@@ -11,6 +11,7 @@ import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { createInProcessWorkers, memoryFiles } from '../../../../core/commands/jobs'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
+import type { FittedLoop } from '../../../../core/design/reference-section'
 import { Quantity } from '../../../../core/quantity/quantity'
 import { binaryStl, boxSoup } from '../../../../core/design/stl.testing'
 import { assetPathOf, type AssetRef } from '../../../../core/project/assets'
@@ -438,6 +439,51 @@ describe('reference model UI', () => {
     })
     expect(d.history.undoable).toHaveLength(undoable + 1)
     expect(Object.values(d.doc.parts)[0]!.shapes!.map((s) => s.name)).toEqual(['Section 3 mm'])
+  })
+
+  it('the fitted loops and the hovered level go to the viewport; closing the panel clears them (DF60)', async () => {
+    const { user, bridge, ui, importBox } = await renderReference()
+    const square: FittedLoop = {
+      role: 'outer',
+      open: false,
+      loop: {
+        elements: [
+          { kind: 'line', a: [0, 0], b: [20, 0] },
+          { kind: 'line', a: [20, 0], b: [20, 10] },
+          { kind: 'line', a: [20, 10], b: [0, 10] },
+          { kind: 'line', a: [0, 10], b: [0, 0] },
+        ],
+      },
+      area: 200,
+      bounds: { min: [0, 0], max: [20, 10] },
+      sharp: [],
+      maxDeviation: 0,
+    }
+    bridge.setReferenceSection(() => ({ ok: true, segments: new Float32Array(), loops: [square] }))
+    await importBox()
+    // the window asks the worker for the fitted loops at the section plane (2.5 mm below the top)
+    await waitFor(() =>
+      expect(bridge.referenceSectionCalls.some((c) => c.fit === true && c.level === -2.5)).toBe(
+        true,
+      ),
+    )
+    await waitFor(() => expect(ui().referenceOverlay?.loops).toEqual([square]))
+    expect(ui().referenceOverlay).toMatchObject({ direction: '+z', depth: 2.5, hover: null })
+    // the Cavities filter leaves the outline out of the drawing too
+    const section = within(inspector()).getByRole('region', { name: 'Section' })
+    await user.click(within(section).getByRole('radio', { name: 'Cavities' }))
+    await waitFor(() => expect(ui().referenceOverlay?.loops).toEqual([]))
+
+    // pointing at a level row highlights that level; leaving it drops the highlight
+    const levels = within(inspector()).getByRole('region', { name: 'Levels' })
+    const top = await within(levels).findByRole('button', { name: /^Depth 0 mm/ })
+    await user.hover(top)
+    expect(ui().referenceOverlay?.hover).toEqual({ depth: 0, facing: 'face' })
+    await user.unhover(top)
+    expect(ui().referenceOverlay?.hover).toBeNull()
+
+    await pressToggle()
+    await waitFor(() => expect(ui().referenceOverlay).toBeNull())
   })
 
   it('shows a command error at its field and keeps the record', async () => {

@@ -7,7 +7,8 @@
 // placed as saved, shown again, read from the stored asset. Windows stay hidden (app.fixture.ts).
 // With DFYOM_RENDERS=1 it writes the light and dark review renders of the panel and of Fit mode
 // to design/reference/renders/. A second test reads levels and a section of the reference and makes
-// a shape from it (DF60 P1; render df-reference-tools).
+// a shape from it, with the fitted loops on the ghost (DF60 P1; renders df-reference-tools and
+// df-reference-level-hover).
 // Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display,
 // docs/conventions/ui.md#reference-tools-df60
 import { existsSync } from 'node:fs'
@@ -45,9 +46,9 @@ async function stubFileDialogs(app: ElectronApplication, project: string): Promi
 
 /**
  * With DFYOM_RENDERS=1: the window in light and dark. The theme changes through Settings, which
- * leaves the panel (and Fit mode) as they are.
+ * leaves the panel (and Fit mode) as they are; `before` runs after each change (a hover).
  */
-async function render(page: Page, name: string): Promise<void> {
+async function render(page: Page, name: string, before?: () => Promise<void>): Promise<void> {
   if (!RENDERS) return
   const settings = page.getByRole('dialog', { name: 'Settings' })
   for (const theme of ['light', 'dark'] as const) {
@@ -56,6 +57,7 @@ async function render(page: Page, name: string): Promise<void> {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     await settings.getByRole('button', { name: 'Done' }).click()
     await expect(settings).toBeHidden()
+    await before?.()
     await page.waitForTimeout(400)
     await page.screenshot({ path: `${rendersDir}/df-${name}-${theme}.png` })
   }
@@ -233,8 +235,16 @@ test('reference tools (DF60): levels from both sides, a level sets the section, 
   await expect(section.getByText(/^Outline /)).toBeVisible({ timeout: 30_000 })
   await expect(section.getByText(/^Cavity /)).toBeVisible()
   await expect(section.getByText(/elements, within/)).toBeVisible()
+  // the fitted loops are drawn on the ghost (the viewport's text summary says so)
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/Section on the reference: 2 loops/, {
+    timeout: 30_000,
+  })
   await section.scrollIntoViewIfNeeded()
   await render(page, 'reference-tools')
+  // pointing at a level highlights its faces on the ghost (render only: the canvas has no text)
+  await render(page, 'reference-level-hover', () => rim.hover())
+  await page.mouse.move(0, 0)
 
   // a level from the top sets the section just inside it
   const before = await input(section, 'Section depth').inputValue()

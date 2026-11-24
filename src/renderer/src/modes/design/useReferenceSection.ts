@@ -2,7 +2,10 @@
 // parallel to the edited shape's face, `sectionDepth` below it (per window; by default the middle
 // of the reference there). The cut runs in the compute worker (`reference.section`, the mesh read
 // once and kept there); the window keeps the latest answer and shows the previous one meanwhile.
-// Doc: docs/conventions/ui.md#snap-and-measure, docs/modes/design-v0.3.md#implementation-u3
+// Since DF60 the backdrop (and its snap) is the section's fitted loops (lines and arcs, drawn
+// within 0.002 mm), the raw segments only when the section has an open chain (an open mesh).
+// Doc: docs/conventions/ui.md#snap-and-measure, docs/modes/design-v0.3.md#implementation-u3,
+// docs/modes/reference-tools.md#ui
 import { useEffect, useMemo, useState } from 'react'
 import { Quantity } from '../../../../core/quantity/quantity'
 import { lengthSource } from '../../messages/dfm'
@@ -10,6 +13,7 @@ import { useShell, useUi } from '../../shell/ShellContext'
 import type { SectionView } from '../../viewport/ShapeView'
 import type { DesignPart } from './model'
 import type { OperationFace } from './outline'
+import { fittedSegments } from './reference-overlay'
 import {
   ghostMatrix,
   middleDepth,
@@ -52,9 +56,15 @@ export function useReferenceSection(
     if (request === null) return
     let live = true
     void bridge.reference
-      .section({ referenceId: request.referenceId, matrix: request.matrix, level: request.level })
+      .section({
+        referenceId: request.referenceId,
+        matrix: request.matrix,
+        level: request.level,
+        fit: true,
+      })
       .then((r) => {
-        if (live && r.ok) setAnswer({ key: request.key, segments: r.segments })
+        if (live && r.ok)
+          setAnswer({ key: request.key, segments: fittedSegments(r.loops) ?? r.segments })
       })
     return () => {
       live = false
