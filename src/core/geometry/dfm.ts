@@ -102,6 +102,8 @@ const POCKET_DEPTH_RATIO = 4
 const HOLE_DEPTH_RATIO = 5
 /** Smallest tab thickness and width (mm): 1 mm / 1/32″. */
 const TAB_MIN = { metric: 1, inch: 25.4 / 32 } as const
+/** Tabs taller than this (mm, 5 mm / 3/16″) and than half the material are `dfm.tabsTall` (DF90). */
+const TAB_TALL = { metric: 5, inch: (25.4 * 3) / 16 } as const
 /** Fit rules after which rest material is not reported (the tool cannot make the cut at all). */
 const NO_REST_RULES: ReadonlySet<string> = new Set(['type', 'width'])
 /** Inside corners of a shape reported one by one; the rest go into one count warning. */
@@ -794,7 +796,7 @@ function profile(
   if (op.side === 'outside') out.push(...slotStock(op, margins(op, stock)))
   else out.push(...corners(op, lib))
   out.push(...slotTool(op, lib))
-  out.push(...tabRules(op, op.tabs.count, covers, () => narrowest(op), unitSystem))
+  out.push(...tabRules(op, op.tabs.count, covers, () => narrowest(op), unitSystem, stock.thickness))
   if (!covers && op.tabs.count > 0) out.push(...tabHold(op, stock, out))
   return out
 }
@@ -853,7 +855,8 @@ function slotTool(op: Op<'profile'>, lib: Library): DfmWarning[] {
 /**
  * Tab rules of a through cut of a closed loop with `count` tabs (`tabs.positions` count as
  * theirs): `dfm.tabsUnused` when the slot covers the whole opening, `dfm.tabsNone`, `dfm.tabsThin`,
- * `dfm.tabsThick` (DF50).
+ * `dfm.tabsThick` (DF50), `dfm.tabsTall` (DF90). `stockThickness`: the stock extent along the
+ * profile's normal (the material when no earlier setup cleared any under the slot).
  */
 function tabRules(
   op: Op<'profile'>,
@@ -861,6 +864,7 @@ function tabRules(
   covers: boolean,
   width: () => number,
   unitSystem: 'metric' | 'inch',
+  stockThickness: number,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   if (covers && count > 0)
@@ -917,6 +921,22 @@ function tabRules(
             `leaves only ${mm(material)} of material under the slot`,
           { thickness: op.tabs.thickness, material },
           { suggestion: atMost(material) },
+        ),
+      )
+    // DF90: tabs stand on the slot's bottom; past half the material they hold most of the wall
+    // (often a thickness meant from another level, e.g. a floor of an earlier setup)
+    const cut = material ?? stockThickness
+    const tall = op.tabs.thickness > cut / 2 + EPSILON && op.tabs.thickness > TAB_TALL[unitSystem]
+    if (tall && !(material !== undefined && op.tabs.thickness >= material - EPSILON))
+      out.push(
+        warning(
+          'dfm.tabsTall',
+          op,
+          'tabs.thickness',
+          `tabs.thickness ${mm(op.tabs.thickness)} is over half the ${mm(cut)} of material the ` +
+            `slot cuts (tabs stand on the slot's bottom, not on a face)`,
+          { thickness: op.tabs.thickness, material: cut },
+          { suggestion: atMost(cut / 2) },
         ),
       )
   }
@@ -1160,7 +1180,9 @@ function shapeProfile(
     const covers =
       m !== undefined && op.side === 'inside' && !m.fits(op.slotWidth + CHORD_TOLERANCE)
     const count = op.tabs.positions?.length ?? op.tabs.count
-    out.push(...tabRules(op, count, covers, () => m?.narrowest() ?? Infinity, unitSystem))
+    out.push(
+      ...tabRules(op, count, covers, () => m?.narrowest() ?? Infinity, unitSystem, stock.thickness),
+    )
     if (!covers && count > 0) out.push(...tabHold(op, stock, out))
   }
   return out

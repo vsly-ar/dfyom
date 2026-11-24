@@ -883,7 +883,12 @@ describe('queries', () => {
   it('plan.get returns the record; unknown plans are input.malformed', async () => {
     const s = await planSetup()
     const planId = await s.create()
-    expect(s.query('plan.get', { planId })).toEqual({ plan: s.plan(planId) })
+    expect(s.query('plan.get', { planId })).toEqual({
+      plan: s.plan(planId),
+      effectiveClearance: [
+        { setupId: s.plan(planId).setups[0]!.id, clearanceHeight: 10, reason: 'default' },
+      ],
+    })
     expect(s.d.query('plan.get', { planId: 'nope' }, ui).isErr()).toBe(true)
   })
 })

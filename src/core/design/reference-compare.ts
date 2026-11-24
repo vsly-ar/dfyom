@@ -18,9 +18,10 @@ import {
   EPSILON_VOLUME,
   unapplyPlacement,
   type OperationGeometry,
+  type Vec2,
   type Vec3,
 } from '../geometry/model'
-import type { Solid, SolidKernel } from '../geometry/solid-port'
+import type { Solid, SolidKernel, SolidPort } from '../geometry/solid-port'
 import { arcRadius, regionLoops } from '../geometry/2d/model'
 import { MeshBvh } from './mesh-distance'
 
@@ -500,7 +501,9 @@ interface KindRegions {
  * surface indices), `other` the surface distances are measured to. A piece is split into
  * regions where its deviating samples (over the threshold) are apart: a thin facet sliver
  * along a wall must not join a notch and a rebate into one region. `boxVolume` gives the
- * volume of this kind's material in a box (a region that is only part of its piece).
+ * volume of this kind's material in a box (a region that is only part of its piece). `clipIds`:
+ * the faces where the offcut waste was cut away (DF90): neither contact with the other surface
+ * nor a surface to measure to.
  */
 function regionsOf(
   kind: 'missing' | 'extra',
@@ -511,6 +514,7 @@ function regionsOf(
   threshold: number,
   steps: Steps,
   boxVolume: (b: Box) => AppResult<number>,
+  clipIds?: ReadonlySet<number>,
 ): AppResult<KindRegions> {
   const { positions: p, indices: ix } = m
   const { of, n } = solidPieces(p, ix)
@@ -549,6 +553,7 @@ function regionsOf(
     grow(box[k]!, p, i1)
     grow(box[k]!, p, i2)
     const orig = m.triangleOriginal[t]!
+    if (clipIds?.has(orig) === true) continue
     if (orig === partId) partTris[k]!.push(t)
     else touchesOther[k] = 1
     if (orig === own) ownTris[k]!.push(t)
@@ -571,7 +576,6 @@ function regionsOf(
       out.offcuts.volume += v
       continue
     }
-    out.volume += v
     const diag = diagonal(box[k]!)
     // a piece cannot be further from the other surface than its own size: noise without a query
     if (v <= EPSILON_VOLUME || diag < threshold) {
@@ -597,6 +601,9 @@ function regionsOf(
       out.below.volume += v
       continue
     }
+    // the stats count the pieces over the threshold; `below` the rest (DF90: a missing volume
+    // of 17.5 mm³ beside a maxMissing of 0)
+    out.volume += v
     out.shown.push(k)
     const clusters = sampleClusters(samples, h)
     for (const members of clusters) {
@@ -779,6 +786,99 @@ export interface BooleanOptions {
   readonly keepAs?: string | undefined
   /** Receives the missing pieces over the threshold as a soup (part frame), for the overlay. */
   readonly onMissing?: ((soup: Float32Array) => void) | undefined
+  /** The offcut sides of the through profiles with tabs, cut away from the extra material (DF90). */
+  readonly waste?: WasteLoops | undefined
+}
+
+/**
+ * The waste of the through profiles with tabs (DF90): the material on a profile's offcut side
+ * (outside its loop for an outside profile, inside for an inside one) is a frame cut free, not
+ * extra material, also when the tabs join it to the part and so to the reference. Loops are the
+ * shape's rings in the part frame's XY, flattened outward of the part (+z profiles only).
+ */
+export interface WasteLoops {
+  readonly loops: readonly {
+    /** Outer rings counter-clockwise, holes clockwise (`SolidPort.triangulate`). */
+    readonly rings: readonly (readonly (readonly [number, number])[])[]
+    readonly outside: boolean
+  }[]
+}
+
+export const WasteLoopsSchema = z.object({
+  loops: z.array(
+    z.object({
+      rings: z.array(z.array(z.tuple([z.number(), z.number()]))),
+      outside: z.boolean(),
+    }),
+  ),
+})
+
+/** A prism of `rings` from `z0` to `z1` (outward, counter-clockwise from outside). */
+function ringPrism(
+  rings: readonly (readonly (readonly [number, number])[])[],
+  cap: Uint32Array,
+  z0: number,
+  z1: number,
+): IndexedMesh {
+  const n = rings.reduce((a, r) => a + r.length, 0)
+  const positions = new Float64Array(6 * n)
+  let i = 0
+  for (const r of rings)
+    for (const [x, y] of r) {
+      positions.set([x, y, z0], 3 * i)
+      positions.set([x, y, z1], 3 * (n + i))
+      i++
+    }
+  const tri: number[] = []
+  for (let t = 0; t < cap.length; t += 3) {
+    tri.push(n + cap[t]!, n + cap[t + 1]!, n + cap[t + 2]!)
+    tri.push(cap[t]!, cap[t + 2]!, cap[t + 1]!)
+  }
+  let first = 0
+  for (const r of rings) {
+    for (let k = 0; k < r.length; k++) {
+      const a = first + k
+      const b = first + ((k + 1) % r.length)
+      tri.push(a, b, n + b, a, n + b, n + a)
+    }
+    first += r.length
+  }
+  const triangles = new Uint32Array(tri)
+  return { positions, triangles, faces: new Uint32Array(triangles.length / 3) }
+}
+
+/**
+ * The waste solid of `loops` over the box `b` (part frame) and the original ids of its faces
+ * (what it cuts in the extra material), or undefined without loops.
+ */
+function wasteSolid(
+  s: SolidPort,
+  loops: WasteLoops['loops'],
+  b: Box,
+): AppResult<{ solid: Solid; ids: ReadonlySet<number> } | undefined> {
+  const parts: Solid[] = []
+  const ids = new Set<number>()
+  const make = (mesh: IndexedMesh) =>
+    s.reserveOriginalId().andThen((id) => {
+      ids.add(id)
+      return s.fromMesh(mesh, id)
+    })
+  for (const loop of loops) {
+    const cap = s.triangulate(loop.rings.map((r) => r.map(([x, y]) => [x, y] as Vec2)))
+    if (cap.isErr()) return Err(cap.unwrapErr())
+    const prism = make(ringPrism(loop.rings, cap.unwrap(), b[0][2], b[1][2]))
+    if (prism.isErr()) return Err(prism.unwrapErr())
+    if (!loop.outside) {
+      parts.push(prism.unwrap())
+      continue
+    }
+    const around = make(boxMesh(b)).andThen((x) => s.subtract(x, prism.unwrap()))
+    if (around.isErr()) return Err(around.unwrapErr())
+    parts.push(around.unwrap())
+  }
+  if (parts.length === 0) return Ok(undefined)
+  const solid = parts.length === 1 ? Ok(parts[0]!) : s.union(parts)
+  return solid.map((x) => ({ solid: x, ids }))
 }
 
 /**
@@ -819,11 +919,40 @@ export function compareBoolean(
         .andThen((id) => s.fromMesh(boxMesh(b), id))
         .andThen((x) => s.intersect(solid, x))
         .andThen((x) => s.volume(x))
+    // DF90: the frame a through profile's tabs hold is waste, cut away from the extra material
+    let clipped = 0
+    let waste: { solid: Solid; ids: ReadonlySet<number> } | undefined
+    if (options.waste !== undefined && options.waste.loops.length > 0) {
+      const b = emptyBox()
+      const wp = welded.positions
+      for (let v = 0; v < wp.length; v += 3)
+        for (let c = 0; c < 3; c++) {
+          b[0][c] = Math.min(b[0][c]!, wp[v + c]!)
+          b[1][c] = Math.max(b[1][c]!, wp[v + c]!)
+        }
+      for (let c = 0; c < 3; c++) {
+        b[0][c] = b[0][c]! - 1
+        b[1][c] = b[1][c]! + 1
+      }
+      const w = wasteSolid(s, options.waste.loops, b)
+      if (w.isErr()) return Err(w.unwrapErr())
+      waste = w.unwrap()
+    }
     const results: KindRegions[] = []
     for (const kind of ['missing', 'extra'] as const) {
-      const solid =
+      let solid =
         kind === 'missing' ? s.subtract(ref, whole.unwrap()) : s.subtract(whole.unwrap(), ref)
       if (solid.isErr()) return Err(solid.unwrapErr())
+      if (kind === 'extra' && waste !== undefined) {
+        const full = solid.unwrap()
+        solid = s.subtract(full, waste.solid)
+        if (solid.isErr()) return Err(solid.unwrapErr())
+        const before = s.volume(full)
+        const after = s.volume(solid.unwrap())
+        if (before.isErr()) return Err(before.unwrapErr())
+        if (after.isErr()) return Err(after.unwrapErr())
+        clipped = Math.max(0, before.unwrap() - after.unwrap())
+      }
       const mesh = s.toMesh(solid.unwrap())
       if (mesh.isErr()) return Err(mesh.unwrapErr())
       const r = regionsOf(
@@ -835,6 +964,7 @@ export function compareBoolean(
         threshold,
         steps,
         boxVolume(solid.unwrap()),
+        kind === 'extra' ? waste?.ids : undefined,
       )
       if (r.isErr()) return Err(r.unwrapErr())
       if (kind === 'missing' && options.onMissing !== undefined)
@@ -846,6 +976,11 @@ export function compareBoolean(
     const pv = s.volume(whole.unwrap())
     if (pv.isErr()) return Err(pv.unwrapErr())
     const [mm, ee] = results as [KindRegions, KindRegions]
+    // the clipped frame counts as one offcut (DF90)
+    const offcuts =
+      clipped > EPSILON_VOLUME
+        ? { count: ee.offcuts.count + 1, volume: ee.offcuts.volume + clipped }
+        : ee.offcuts
     const { pieces, more } = ranked([...mm.pieces, ...ee.pieces])
     return Ok({
       method: 'boolean' as const,
@@ -855,7 +990,7 @@ export function compareBoolean(
         maxMissing: mm.max,
         maxExtra: ee.max,
         referenceVolume: rv.unwrap(),
-        partVolume: pv.unwrap() - ee.offcuts.volume,
+        partVolume: pv.unwrap() - offcuts.volume,
       },
       pieces,
       ...(more === undefined ? {} : { more }),
@@ -863,7 +998,7 @@ export function compareBoolean(
         count: mm.below.count + ee.below.count,
         volume: mm.below.volume + ee.below.volume,
       },
-      ...(ee.offcuts.count > 0 ? { offcuts: ee.offcuts } : {}),
+      ...(offcuts.count > 0 ? { offcuts } : {}),
     })
   })
 }

@@ -24,7 +24,7 @@ import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
-import { exportGrbl, type ExportOperation, type GrblExport } from './export'
+import { exportGrbl, type ExportOperation, type GrblExport, type TravelFit } from './export'
 import { gcodeFileStem } from './file-name'
 import { commentLine } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
@@ -457,6 +457,20 @@ export function connectedWorkZero(
  * `plan.export`'s note when the soft limits were not checked (hardening DF58): where to check them.
  * Doc: docs/architecture/grbl.md#plan-export-command
  */
+const round3 = (v: number) => Math.round(v * 1000) / 1000 + 0
+
+/** A `TravelFit` rounded to 0.001 mm for the result. */
+function roundFit(f: TravelFit): TravelFit {
+  return {
+    axis: f.axis,
+    min: round3(f.min),
+    max: round3(f.max),
+    travel: round3(f.travel),
+    from: round3(f.from),
+    to: round3(f.to),
+  }
+}
+
 export const SOFT_LIMIT_NOTE =
   "Soft limits not checked: no homed connection to this plan's machine. Before running, set the work zero and check with run.job.check (or the Run pre-flight); run.job.start checks too."
 
@@ -516,6 +530,21 @@ export const planExport = defineCommand({
       .string()
       .optional()
       .describe('Without the check: how to check the soft limits before running'),
+    travelFit: z
+      .array(
+        z.object({
+          axis: z.enum(['x', 'y', 'z']),
+          min: z.number(),
+          max: z.number(),
+          travel: z.number(),
+          from: z.number(),
+          to: z.number(),
+        }),
+      )
+      .optional()
+      .describe(
+        'Without the check, per axis: program extent (work coords, mm) and the work-zero machine positions [from, to] that stay within soft limits [-travel, 0]; from > to: none fits',
+      ),
     regenerated: z
       .array(z.string())
       .describe('Plan operations whose toolpath was missing or stale and was generated'),
@@ -548,7 +577,9 @@ export const planExport = defineCommand({
       stats: e.stats,
       warnings: [...e.warnings],
       softLimitChecked: e.softLimitChecked,
-      ...(e.softLimitChecked ? {} : { softLimitNote: SOFT_LIMIT_NOTE }),
+      ...(e.softLimitChecked
+        ? {}
+        : { softLimitNote: SOFT_LIMIT_NOTE, travelFit: e.travelFit.map(roundFit) }),
       regenerated: [...e.regenerated],
       ...(e.lowLinks > 0 ? { linksNote: LINKS_NOTE } : {}),
     })

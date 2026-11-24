@@ -73,7 +73,7 @@ const RowsArg = z
   .array(RowArg)
   .max(CLONE_ROWS_MAX)
   .describe(
-    'From the source, each row from the last position of the one before. polar: angle from +u CCW. arc: centre radius away at angle, sweep arc (±360°, + CCW) every step. point: absolute u v. along: a one-item shape with its start on that position; from arc length start (0), every spacing or count evenly. skip: indices of the row points from 0 (first row: instance n is n-2), left out, numbers kept.',
+    'From the source, each row from the last position of the one before. grid: cols × rows cells, the first on that position (cols·rows−1 clones; du/dv 0 only with 1 col/row). offset, polar: count steps beyond it (count clones). polar: angle from +u CCW. arc: centre radius away at angle, sweep arc (±360°, + CCW) every step. point: absolute u v. along: a one-item shape with its start on that position; from arc length start (0), every spacing or count evenly (one at length 0 is no clone). skip: indices of the row points from 0 (first row: instance n is n-2), left out, numbers kept.',
   )
 
 const params = {

@@ -242,6 +242,7 @@ export const planMessages = {
     clampHeightNote:
       'How far clamps rise above the stock top: links between operations pass over them by the retract height.',
     clampHeightNoteUnknown: 'Unknown: links stay inside the cut area or at the clearance height.',
+    clampHeightNoteItems: 'Not used: links keep clear of the workholding items instead.',
     /** DF64: the setup's links as a fact. */
     links: 'Link time',
     linksValue: (low: number, count: number, saved: string | undefined) =>

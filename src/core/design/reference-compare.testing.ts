@@ -194,6 +194,7 @@ const named = (r: Imported) => {
 export async function enclosureDesign(
   cavityDepth: string,
   workers?: WorkerPort,
+  outlineTabs: { count?: string; thickness?: string } = {},
 ): Promise<CompareSetup> {
   SOURCES[ENCLOSURE] ??= enclosureFullStl()
   const s = await compareSetup({ ...testStock(), ...HARDWOOD }, workers)
@@ -219,6 +220,11 @@ export async function enclosureDesign(
       depth,
       tabs,
     })
-  await s.run('design.profile.add', { partId, side: 'outside', ...named(outline), tabs })
+  await s.run('design.profile.add', {
+    partId,
+    side: 'outside',
+    ...named(outline),
+    tabs: { ...tabs, ...outlineTabs },
+  })
   return s
 }

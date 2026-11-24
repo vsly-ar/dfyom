@@ -80,10 +80,13 @@ import {
   cornerRadii,
   isCornerFillet,
   operationDirections,
+  type WasteLoops,
 } from './reference-compare'
 import type { FittedLoop } from './reference-section'
 import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
-import type { Vec3 } from '../geometry/model'
+import type { OperationGeometry, Vec3 } from '../geometry/model'
+import { shapeOutline } from '../geometry/outline'
+import { flattenRegion } from '../geometry/prism'
 import { TOOL_MATCH_TOLERANCE } from '../geometry/dfm'
 
 // ── args ──────────────────────────────────────────────────────────────────────────────────
@@ -1197,6 +1200,7 @@ const referenceCompare = defineCommand({
         threshold,
         stock: stockSize(l),
         directions: operationDirections(ops),
+        waste: wasteLoops(ops),
       },
       { signal: ctx.signal, progress: ctx.progress, pause: ctx.pause },
       where,
@@ -1250,6 +1254,27 @@ const referenceCompare = defineCommand({
 })
 
 type Vec3Tuple = [number, number, number]
+
+/**
+ * The offcut sides of the through profiles with tabs on the top face (DF90): their shapes'
+ * rings in the part frame's XY (the top face frame is the part frame's XY), flattened away from
+ * the part's side so its walls stay whole.
+ */
+function wasteLoops(ops: readonly OperationGeometry[]): WasteLoops {
+  const loops: WasteLoops['loops'][number][] = []
+  for (const op of ops) {
+    if (op.kind !== 'profile' || op.side === 'on' || op.depth !== undefined) continue
+    if ((op.direction ?? '+z') !== '+z') continue
+    if ((op.tabs.positions?.length ?? op.tabs.count) === 0) continue
+    const outline = shapeOutline(op.shape)
+    if (outline.kind !== 'region') continue
+    const rings = flattenRegion(outline.region, op.side === 'outside' ? 'grow' : 'shrink').map(
+      (r) => r.points.map((q) => [q[0], q[1]] as [number, number]),
+    )
+    loops.push({ rings, outside: op.side === 'outside' })
+  }
+  return { loops }
+}
 
 export const REFERENCE_COMMANDS: readonly AnyCommand[] = [
   referenceImport as AnyCommand,

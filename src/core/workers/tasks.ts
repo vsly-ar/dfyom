@@ -15,6 +15,8 @@ import { meshHoles, MeshHolesSchema, type HoleOptions, type MeshHoles } from '..
 import {
   compareBoolean,
   compareHeightmap,
+  WasteLoopsSchema,
+  type WasteLoops,
   CompareRawSchema,
   prepareReference,
   type CompareMesh,
@@ -423,6 +425,8 @@ export interface CompareInput {
   readonly stock: StockSize
   /** Faces the design's operations use, for the height maps. */
   readonly directions: readonly Direction[]
+  /** The offcut sides of the through profiles with tabs: a frame held by tabs is not extra (DF90). */
+  readonly waste?: WasteLoops | undefined
 }
 
 /**
@@ -444,6 +448,7 @@ export const referenceCompare: WorkerTask<CompareInput, CompareRaw> = {
       thickness: z.number().positive(),
     }),
     directions: z.array(z.enum(DIRECTIONS)),
+    waste: WasteLoopsSchema.optional(),
   }),
   output: CompareRawSchema,
   timeoutMs: 120_000,
@@ -463,6 +468,7 @@ export const referenceCompare: WorkerTask<CompareInput, CompareRaw> = {
     const missingKey = `${key}|${positionsHash(input.part.positions)}|${input.threshold}`
     const r = compareBoolean(solids, reference, input.part, input.threshold, ctl.steps, {
       keepAs: key,
+      waste: input.waste,
       onMissing: (soup) => {
         keptMissing = { key: missingKey, soup }
       },

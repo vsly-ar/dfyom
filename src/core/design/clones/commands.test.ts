@@ -101,6 +101,31 @@ describe('design.clones.add', () => {
     expect(s.op('pocket1').featureId).toBeUndefined()
   })
 
+  it('a one-row grid accepts dv 0 and a one-column grid du 0 (DF90: the holes suggestion)', async () => {
+    const s = await setup()
+    await withSource(s)
+    const out = await addClones(s, [
+      { kind: 'grid', cols: 2, rows: 1, du: '36.217 mm', dv: '0 mm' },
+    ])
+    expect(out.operationIds).toEqual(['clones1_2_pocket1', 'clones1_2_drill1'])
+    await s.run('design.clones.update', {
+      partId: s.partId,
+      featureId: 'clones1',
+      rows: [{ kind: 'grid', cols: 1, rows: 3, du: '0', dv: '10' }],
+    })
+    // still refused where the step separates cells
+    const e = await s.fail(
+      'design.clones.update',
+      {
+        partId: s.partId,
+        featureId: 'clones1',
+        rows: [{ kind: 'grid', cols: 2, rows: 2, du: '5', dv: '0' }],
+      },
+      'model.invariant',
+    )
+    expect(e.issues[0]).toMatchObject({ path: ['rows', 0, 'dv'], rule: 'nonZero' })
+  })
+
   it('gathers a scattered source at its first operation; others keep their order', async () => {
     const s = await setup()
     await withSource(s)

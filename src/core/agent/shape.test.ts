@@ -461,6 +461,22 @@ describe('plan.get', () => {
     })
   })
 
+  // DF90: the stored setting stays; the height the workholding raised it to is beside it
+  it('gives the effective clearance when the workholding raised it', () => {
+    const shaper = new ResultShaper(fakeSession(peeks))
+    const effectiveClearance = [
+      { setupId: 's1', clearanceHeight: 14, reason: 'workholding', item: 'Toe clamp 1', margin: 2 },
+    ]
+    const r = shaper.shape(
+      call('plan.get', { plan, effectiveClearance }),
+      { planId: 'plan-1' },
+      SUMMARY,
+    )
+    const setup = (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups[0]!
+    expect(setup['clearanceHeight']).toBe(10)
+    expect(setup['effectiveClearance']).toEqual({ value: 14, reason: 'Toe clamp 1 + 2' })
+  })
+
   // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
   it('gives the setup reach past the stock in the project units once every toolpath is current', () => {
     const current = {

@@ -132,7 +132,11 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     ])
     expect(r.items[0]!.top).toBe(12)
     expect(r.clearanceHeight).toBe('14 mm')
-    expect(r.findings).toEqual([])
+    // what plan.warning.list says of the setup: the facing's uncut material under the clamps
+    expect(r.findings.map((f) => f.code)).toEqual([
+      'plan.workholding.unmachined',
+      'plan.workholding.unmachined',
+    ])
     const sv = services()
     const e = expectOk(await exportPlan(s.d.doc, planId, sv))
     const text = withoutAppVersion(e.text)
@@ -190,6 +194,53 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     const err = expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.check')
     expect(err.message).toMatch(/Profile 1: a cut at Z-?[0-9.]+ hits Toe clamp 1/)
     expect(err.issues[0]!.rule).toBe('plan.workholding.collision')
+  })
+
+  // DF90 B-4: plan.get gives the clearance the program uses beside the stored setting
+  it('plan.get: the effective clearance and its reason beside the stored setting', async () => {
+    const { s, planId, setupId } = await userCase()
+    const effective = () =>
+      (s.query('plan.get', { planId }) as { effectiveClearance: unknown[] }).effectiveClearance
+    expect(effective()).toEqual([{ setupId, clearanceHeight: 10, reason: 'default' }])
+    await s.run('plan.workholding.set', { planId, setupId, items: USER_CLAMPS })
+    expect(effective()).toEqual([
+      { setupId, clearanceHeight: 14, reason: 'workholding', item: 'Toe clamp 1', margin: 2 },
+    ])
+    // the setting stays as stored (it applies again without the items)
+    expect(s.plan(planId).setups[0]!.clearanceHeight.source).toBe('10 mm')
+    await s.run('plan.setup.update', { planId, setupId, clearanceHeight: '20' })
+    expect(effective()).toEqual([{ setupId, clearanceHeight: 20, reason: 'set' }])
+  })
+
+  // DF90 B-5: the set result reads as "OK" only when the moves were checked
+  it('plan.workholding.set returns the collision of current toolpaths and names the unchecked', async () => {
+    const { s, planId, setupId } = await userCase({ outline: '236', toolpaths: true })
+    const set = async () =>
+      (await s.run('plan.workholding.set', {
+        planId,
+        setupId,
+        items: USER_CLAMPS,
+      })) as SetResult & { movesUnchecked: string[] }
+    // no toolpaths yet: nothing checked, every operation named
+    const cold = await set()
+    expect(cold.findings.filter((f) => f.code === 'plan.workholding.collision')).toEqual([])
+    expect(cold.movesUnchecked).toEqual(['Facing 1', 'Pocket 1', 'Profile 1'])
+    await s.run('plan.workholding.set', { planId, setupId, items: [] })
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+    // the profile's toolpath does not depend on the clamps: checked at once, as the export does
+    const warm = await set()
+    expect(warm.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'plan.workholding.collision',
+          message: expect.stringMatching(/Profile 1: a cut at Z-?[0-9.]+ hits Toe clamp 1/),
+        }),
+      ]),
+    )
+    // the facing and pocket keep out of the new clamps: they regenerate
+    expect(warm.movesUnchecked).toEqual(['Facing 1', 'Pocket 1'])
   })
 
   // DF78 S12 (docs/modes/alignment.md#frames): what the operator reads on the machine
