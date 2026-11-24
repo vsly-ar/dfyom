@@ -184,6 +184,9 @@ function modalRestore(words: readonly string[], inches: boolean): string[] {
 /** Machine time a manual feed hold may take to report `Hold:0` (as the sender's stop, 5 s). */
 const FEED_HOLD_MS = 5000
 
+/** GRBL states in which a held run stands still (`Hold:1` and `Door:2` still decelerate). */
+const STILL_STATES: ReadonlySet<string> = new Set(['Hold:0', 'Door:0', 'Door:1'])
+
 const fmt = (v: number) => {
   const s = v.toFixed(3).replace(/\.?0+$/, '')
   return s === '-0' ? '0' : s
@@ -574,6 +577,30 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return stateError('the controller did not report the hold', machineState(c))
   }
 
+  /**
+   * After a run's feed hold (`job.pause`, hardening DF82): Ok once a report taken after the `!`
+   * says motion has stopped (`Hold:0`; a door's `Door:0`/`Door:1`). `Hold:1` is still decelerating.
+   * A hold at a tool change or `M0` wait is Ok at once (nothing moves; kept until resume). A run that
+   * stops or ends meanwhile, or no `Hold:0` within `FEED_HOLD_MS` machine time, fails `run.state`
+   * (the job stays running). Doc: docs/modes/run.md#1-emergency-stop-stop-and-reset
+   */
+  async function awaitRunHeld(c: Connection, jobId: string): Promise<AppResult<void>> {
+    const deadline = c.clock.now() + FEED_HOLD_MS
+    for (;;) {
+      const phase = c.sender.phase
+      if (phase === 'toolChange' || phase === 'programPause') return Ok(undefined)
+      if (conn !== c || c.job?.jobId !== jobId || phase !== 'held')
+        return stateError(`the run did not hold (${phase ?? 'ended'})`, machineState(c))
+      if (c.clock.now() >= deadline)
+        return stateError('the controller did not report the hold', machineState(c))
+      const s = await c.sender.freshStatus()
+      status.now()
+      if (s !== undefined && STILL_STATES.has(s.state) && c.sender.phase === 'held')
+        return Ok(undefined)
+      await new Promise<void>((resolve) => c.clock.schedule(c.clock.now() + 50, resolve))
+    }
+  }
+
   /** After a probe alarm: the modal state the probe changed, once GRBL takes gCode again. */
   async function restoreModes(c: Connection): Promise<AppResult<void>> {
     const lines = c.restoreModes
@@ -885,8 +912,14 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         data: { state: machineState(c) },
       })
     switch (action) {
-      case 'hold':
-        return c.sender.hold()
+      case 'hold': {
+        // already held (a hold we did not send, or an earlier one not yet confirmed): wait on it
+        if (c.sender.phase !== 'held') {
+          const sent = c.sender.hold()
+          if (sent.isErr()) return sent
+        }
+        return awaitRunHeld(c, jobId)
+      }
       case 'resume':
         return c.sender.resume()
       case 'continue': {

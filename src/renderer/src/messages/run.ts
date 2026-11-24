@@ -28,6 +28,7 @@ export const runMessages = {
     homing: 'Homing',
     stopping: 'Stopping',
     hold: 'Feed hold',
+    holding: 'Holding…',
     door: 'Door open',
     paused: 'Paused by program',
     needsHoming: 'Needs homing',

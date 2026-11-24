@@ -330,6 +330,14 @@ describe('Run mode', () => {
     // resume only while held; never a single key
     await t.user.click(within(group).getByRole('button', { name: 'Resume' }))
     expect(t.callsOf('job.resume')).toEqual([{ jobId: 'run-1' }])
+    // DF82: while the hold still decelerates (Hold:1) Resume waits, the badge says "Holding…"
+    t.machine.push({ state: 'Hold:1', job: { ...t.machine.status.job!, phase: 'held' } })
+    await within(group).findByText('Holding…', { selector: '[data-state]' })
+    expect(within(group).getByRole('button', { name: 'Resume' })).toBeDisabled()
+    t.machine.push({ state: 'Hold:0' })
+    await waitFor(() =>
+      expect(within(group).getByRole('button', { name: 'Resume' })).not.toBeDisabled(),
+    )
     // stop is never confirmed
     await t.user.click(within(group).getByRole('button', { name: 'Stop' }))
     expect(t.callsOf('job.abort')).toEqual([{ jobId: 'run-1' }])
@@ -920,6 +928,42 @@ describe('Run mode', () => {
     await expectNoAxeViolations()
     await t.user.click(within(confirm).getByRole('button', { name: 'Probe' }))
     expect(t.callsOf('run.machine.probeZ')).toEqual([{ plateThickness: 10 }])
+  })
+
+  it("the toolbar's Resume resumes this window's held Probe Z job (DF82)", async () => {
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    // the probe runs until the test lets job.wait answer
+    let finish: () => void = () => {}
+    t.bridge.handle(
+      'job.wait',
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(ok({ state: 'finished', outcome: { ok: true, value: {} } }))
+        }),
+    )
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Probe Z' }))
+    await t.user.click(
+      within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {
+        name: 'Probe',
+      }),
+    )
+    const group = machineGroup()!
+    // held from elsewhere (the job list, an agent): decelerating, then held
+    t.machine.push({ state: 'Hold:1' })
+    expect(await within(group).findByRole('button', { name: 'Resume' })).toBeDisabled()
+    t.machine.push({ state: 'Hold:0' })
+    await waitFor(() =>
+      expect(within(group).getByRole('button', { name: 'Resume' })).not.toBeDisabled(),
+    )
+    await t.user.click(within(group).getByRole('button', { name: 'Resume' }))
+    expect(t.callsOf('job.resume')).toEqual([{ jobId: 'probe-1' }])
+    // once the probe ended, a Hold without a run offers no Resume (nothing of this window's to resume)
+    finish()
+    t.machine.push({ state: 'Idle' })
+    await waitFor(() => expect(within(group).queryByRole('button', { name: 'Resume' })).toBeNull())
+    t.machine.push({ state: 'Hold:0' })
+    expect(within(group).queryByRole('button', { name: 'Resume' })).toBeNull()
   })
 
   it('at a tool change: Probe Z in the dialog; a miss shows its alarm and Unlock there (M4)', async () => {
