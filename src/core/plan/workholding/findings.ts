@@ -63,10 +63,18 @@ export function staticWorkholdingFindings(plan: LoadedPlan, setupId?: string): P
   return out
 }
 
-/** The check's view of a setup's current toolpaths (with their inputs, in machining order). */
+/**
+ * The check's view of a setup's toolpaths (with their inputs, in machining order), in the setup
+ * frame of the items: the toolpaths are in the WCS, so a moved work zero (DF78,
+ * docs/modes/alignment.md#frames) is added back to their moves.
+ */
 export function checkOperations(
   pairs: readonly { readonly input: PlanOperationInput; readonly toolpath: Toolpath }[],
+  zero: readonly [number, number] = [0, 0],
 ): CheckOperation[] {
+  const [zx, zy] = zero
+  const back = (tp: Toolpath) =>
+    zx === 0 && zy === 0 ? tp : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] })
   return pairs.map(({ input, toolpath }) => ({
     planOperationId: input.planOperationId,
     tool: {
@@ -75,7 +83,7 @@ export function checkOperations(
         ? { shankDiameter: input.tool.shankDiameter.unwrap().canonical }
         : {}),
     },
-    moves: toolpath.passes.flatMap((p) => p.moves),
+    moves: back(toolpath).passes.flatMap((p) => p.moves),
   }))
 }
 
@@ -87,12 +95,15 @@ const KIND_WORD: Readonly<Record<Collision['kind'], string>> = {
 
 /**
  * The collision findings of one setup's program (`operations` in machining order, the final moves
- * of every operation of the setup).
+ * of every operation of the setup, in the setup frame as `checkOperations` gives them). Their
+ * X and Y (message and params) are in the WCS, what the operator reads on the machine: the check's
+ * setup-frame point less the work `zero` (DF78 S12, as `unmachined`).
  */
 export function moveFindings(
   plan: LoadedPlan,
   setup: SetupDTO,
   operations: readonly CheckOperation[],
+  zero: readonly [number, number] = [0, 0],
 ): PlanWarning[] {
   const h = setupWorkholding(setup, plan.stock)
   const plate = h.items.find((i) => i.kind === 'base' && i.type === 'fixturePlate')
@@ -112,13 +123,15 @@ export function moveFindings(
       ? 'An operation'
       : planOperationLabel(plan.dto.design.part, op.designOperationIds)
   }
+  const x = (c: Collision) => c.at[0] - zero[0]
+  const y = (c: Collision) => c.at[1] - zero[1]
   const params = (c: Collision) => ({
     setupId: setup.id,
     itemId: c.itemId,
     kind: c.kind,
     moveIndex: c.moveIndex,
-    x: c.at[0],
-    y: c.at[1],
+    x: x(c),
+    y: y(c),
     lowestZ: c.lowestZ,
     gap: c.gap,
   })
@@ -134,7 +147,7 @@ export function moveFindings(
     out.push({
       code: 'plan.workholding.collision',
       severity: 'error',
-      message: `${label(c.planOperationId)}: ${KIND_WORD[c.kind]} at Z${mm(c.lowestZ)} hits ${name} near X${mm(c.at[0])} Y${mm(c.at[1])} (gap ${mm(c.gap)} mm, margin ${mm(h.margin)} mm): ${fix}`,
+      message: `${label(c.planOperationId)}: ${KIND_WORD[c.kind]} at Z${mm(c.lowestZ)} hits ${name} near X${mm(x(c))} Y${mm(y(c))} (gap ${mm(c.gap)} mm, margin ${mm(h.margin)} mm): ${fix}`,
       planOperationId: c.planOperationId,
       rule: c.kind,
       params: params(c),
@@ -250,20 +263,16 @@ export function workholdingFindings(
     if (setupId !== undefined && setup.id !== setupId) continue
     const mine = inputs.filter((i) => i.setup.id === setup.id)
     if (mine.length === 0) continue
-    // the items are in the setup frame, the toolpaths in the WCS: a moved work zero (DF78,
-    // docs/modes/alignment.md#frames) is added back to the moves before the check
-    const [zx, zy] = setupZero(plan, setup, port)
-    const back = (tp: Toolpath | undefined) =>
-      tp === undefined || (zx === 0 && zy === 0)
-        ? tp
-        : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] })
-    const pairs = mine.map((input) => ({ input, toolpath: back(current(input)) }))
+    // the items are in the setup frame, the toolpaths in the WCS (DF78, alignment.md#frames)
+    const zero = setupZero(plan, setup, port)
+    const pairs = mine.map((input) => ({ input, toolpath: current(input) }))
     if (pairs.some((p) => p.toolpath === undefined)) continue
     out.push(
       ...moveFindings(
         plan,
         setup,
-        checkOperations(pairs as { input: PlanOperationInput; toolpath: Toolpath }[]),
+        checkOperations(pairs as { input: PlanOperationInput; toolpath: Toolpath }[], zero),
+        zero,
       ),
     )
   }

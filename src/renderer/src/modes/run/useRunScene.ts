@@ -5,11 +5,13 @@
 // machine travel with its home position in work coordinates while connected (DF33). Positions
 // are in the setup frame: a work zero set on a tool run's Z reference surface (DF69, the host's
 // `zeroLevel`) is added back, and a tool-change wait onto such a surface shows the surface and
-// its touch-off spot (docs/modes/z-reference.md#dfyom-run).
+// its touch-off spot (docs/modes/z-reference.md#dfyom-run). DF64 L3: the lowered links between
+// operations (`plan.warning.list`) drawn as the program moves, so playback follows the tool.
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene)
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppMode } from '../../../../core/modes'
 import type { UnitSystem } from '../../../../core/project/document'
+import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { useReplica, useShell } from '../../shell/ShellContext'
 import { homedPosition } from '../../../../core/run/grbl/envelope'
@@ -23,7 +25,7 @@ import {
   type ToolpathLines,
   type ZRefOverlay,
 } from '../../viewport'
-import type { ZRefRunView } from '../plan/plan-store'
+import type { LoweredLinkView, SetupLinksView, ZRefRunView } from '../plan/plan-store'
 import { activeJob, isConnected } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
@@ -38,22 +40,22 @@ export function useRunScene(mode: AppMode): RunScene | null {
   const ended = useRun((s) => s.ended)
   const plan =
     replica.status === 'open' && planId !== undefined ? replica.doc.plans[planId] : undefined
-  const operations = useMemo(
-    () => (plan ? planRunInfo(plan, setupId).operations : []),
-    [plan, setupId],
-  )
+  const info = useMemo(() => (plan ? planRunInfo(plan, setupId) : undefined), [plan, setupId])
+  const operations = useMemo(() => info?.operations ?? [], [info])
+  const runSetupId = info?.setup.id
   const units = replica.status === 'open' ? replica.doc.unitSystem : 'mm'
   const frame = useMemo(
     () => (plan ? setupPlacement(plan, setupId, units)?.frame : undefined),
     [plan, setupId, units],
   )
-  const [lines, setLines] = useState<ToolpathLines | null>(null)
+  const [read, setRead] = useState<{ toolpaths: Toolpath[]; current: boolean } | null>(null)
+  const [lowered, setLowered] = useState<readonly LoweredLinkView[]>([])
   const active = mode === 'run'
 
   // the toolpaths, in machining order
   useEffect(() => {
     if (!active || planId === undefined || operations.length === 0) {
-      setLines(null)
+      setRead(null)
       return
     }
     let live = true
@@ -63,15 +65,44 @@ export function useRunScene(mode: AppMode): RunScene | null {
       ),
     ).then((replies) => {
       if (!live) return
-      const toolpaths = replies.flatMap((r) =>
-        r.ok ? [(r.value as { toolpath: Toolpath | null }).toolpath].filter((t) => t !== null) : [],
+      const got = replies.flatMap((r) =>
+        r.ok ? [r.value as { toolpath: Toolpath | null; stale: boolean }] : [],
       )
-      setLines(toolpaths.length === 0 ? null : toolpathLines(toolpaths))
+      const toolpaths = got.flatMap((r) => (r.toolpath === null ? [] : [r.toolpath]))
+      setRead({
+        toolpaths,
+        current: toolpaths.length === operations.length && got.every((r) => !r.stale),
+      })
     })
     return () => {
       live = false
     }
   }, [active, bridge, planId, operations, jobId])
+
+  // DF64 L3: the lowered links between operations (`plan.warning.list`), read when the setup is
+  // shown, not again when a run starts: the checks are not recomputed while the run streams
+  useEffect(() => {
+    setLowered([])
+    if (!active || planId === undefined || runSetupId === undefined) return
+    let live = true
+    void bridge.call('plan.warning.list', { planId }).then((r) => {
+      if (!live || !r.ok) return
+      const links = (r.value as { links?: SetupLinksView[] }).links
+      setLowered(links?.find((l) => l.setupId === runSetupId)?.links?.lowered ?? [])
+    })
+    return () => {
+      live = false
+    }
+  }, [active, bridge, planId, runSetupId])
+
+  // the moves the program makes: the links applied when every toolpath of the setup is current
+  // (they are computed from exactly those)
+  const lines = useMemo((): ToolpathLines | null => {
+    if (read === null || read.toolpaths.length === 0) return null
+    const linked =
+      read.current && lowered.length > 0 ? linkedToolpaths(read.toolpaths, lowered) : read.toolpaths
+    return toolpathLines(linked)
+  }, [read, lowered])
 
   // playback: a cursor that only moves forward during one run
   const cursor = useRef({ jobId: undefined as string | undefined, done: 0 })

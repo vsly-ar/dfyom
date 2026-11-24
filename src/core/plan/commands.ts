@@ -1727,6 +1727,17 @@ const SetupLinksSchema = z.object({
       atClearance: z.number().int(),
       seconds: z.number().nullable().describe('Their rapid time (s); null without a machine'),
       savedSeconds: z.number().nullable().describe('Saved against the clearance height (s)'),
+      lowered: z
+        .array(
+          z.object({
+            index: z.number().int(),
+            trim: z.number().int(),
+            tail: z.array(z.tuple([z.number(), z.number(), z.number()])),
+            head: z.array(z.tuple([z.number(), z.number(), z.number()])),
+            savedSeconds: z.number(),
+          }),
+        )
+        .describe('Lowered links as rapids for the plan and run scenes (not in plan_get)'),
     })
     .nullable(),
 })

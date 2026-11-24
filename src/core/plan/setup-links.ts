@@ -12,6 +12,7 @@ import type { ToolpathCache } from '../toolpath/cache'
 import { toolpathTool } from '../toolpath/inputs'
 import {
   planLinks,
+  type LinkEdit,
   type LinkOperation,
   type LinkSettings,
   type LinksSummary,
@@ -150,6 +151,19 @@ export function currentSetupLinks(
   return cachedSetupLinks(own, current, linkSettings(setup, stock, machine))
 }
 
+/**
+ * A lowered link as `plan.warning.list` returns it for the scenes (DF64 L3): its edit of the
+ * generated toolpaths (`linkedToolpaths`) and the time it saves (s; 0 without a machine).
+ * `index`: the later operation's position in the setup.
+ */
+export interface LoweredLinkDTO {
+  index: number
+  trim: LinkEdit['trim']
+  tail: [number, number, number][]
+  head: [number, number, number][]
+  savedSeconds: number
+}
+
 /** The summary as `plan.warning.list` returns it; times null without a machine. */
 export function linksSummaryDTO(
   links: SetupLinks,
@@ -160,15 +174,30 @@ export function linksSummaryDTO(
   atClearance: number
   seconds: number | null
   savedSeconds: number | null
+  lowered: LoweredLinkDTO[]
 } {
   const s: LinksSummary = links.summary
   const r = (v: number) => Math.round(v * 10) / 10
+  const p = (v: Vec3): [number, number, number] => [v[0], v[1], v[2]]
   return {
     count: s.count,
     low: s.low,
     atClearance: s.atClearance,
     seconds: timed ? r(s.seconds) : null,
     savedSeconds: timed ? r(s.savedSeconds) : null,
+    lowered: links.links.flatMap((l) =>
+      l.edit === undefined
+        ? []
+        : [
+            {
+              index: l.index,
+              trim: l.edit.trim,
+              tail: l.edit.tail.map(p),
+              head: l.edit.head.map(p),
+              savedSeconds: timed ? l.fullSeconds - l.seconds : 0,
+            },
+          ],
+    ),
   }
 }
 

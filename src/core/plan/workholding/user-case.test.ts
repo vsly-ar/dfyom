@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { Ok } from '../../../shared/result'
 import { expectErrCode, expectOk } from '../../../shared/testing/result'
 import { createInProcessWorkers } from '../../commands/jobs'
+import { uiSource } from '../../commands/testing'
 import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
 import { exportPlan, withoutAppVersion } from '../../post/plan-export'
 import { createToolpathCache } from '../../toolpath/cache'
@@ -38,9 +39,13 @@ const ORACLE_BOXES = [
 ] as const
 
 async function userCase(
-  opts: { outline?: string } = {},
+  opts: { outline?: string; toolpaths?: boolean } = {},
 ): Promise<{ s: PlanSetup; planId: string; setupId: string }> {
-  const s = await planSetup({ part: false, stock: STOCK, services: { region2d } })
+  const s = await planSetup({
+    part: false,
+    stock: STOCK,
+    services: opts.toolpaths === true ? services() : { region2d },
+  })
   const partId = s.partId
   await s.run('design.facing.add', { partId, depth: '0.5' })
   await s.run('design.pocket.add', {
@@ -152,6 +157,57 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     const err = expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.check')
     expect(err.message).toMatch(/Profile 1: a cut at Z-?[0-9.]+ hits Toe clamp 1/)
     expect(err.issues[0]!.rule).toBe('plan.workholding.collision')
+  })
+
+  // DF78 S12 (docs/modes/alignment.md#frames): what the operator reads on the machine
+  it('with a moved work zero the collision is reported in the WCS, in the list and the export', async () => {
+    const { s, planId, setupId } = await userCase({ outline: '236', toolpaths: true })
+    await s.run('plan.workholding.set', { planId, setupId, items: USER_CLAMPS })
+    const hit = async () => {
+      const { jobId } = expectOk(
+        await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()),
+      ).value as { jobId: string }
+      expectOk(await s.d.job(jobId).unwrap().result)
+      const listed = findings(s, planId).filter((f) => f.code === 'plan.workholding.collision')
+      const err = expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.check')
+      return { listed, exported: err.issues }
+    }
+    const xy = (p: unknown) => {
+      const q = p as Record<string, number>
+      return [Math.round(q['x']! * 1000) / 1000, Math.round(q['y']! * 1000) / 1000] as const
+    }
+    const points = (ps: readonly unknown[], dx = 0, dy = 0) =>
+      ps
+        .map(xy)
+        .map(([x, y]) => `${Math.round((x + dx) * 100) / 100},${Math.round((y + dy) * 100) / 100}`)
+        .sort()
+    const corner = await hit()
+    expect(corner.listed.length).toBeGreaterThan(0)
+    await s.run('plan.setup.update', { planId, setupId, zero: { at: ['40', '25'] } })
+    const moved = await hit()
+    // the same hits (the facing's keep-out stays round the clamps: footprints are in the setup
+    // frame, not shifted by the zero), each 40, 25 mm over: the setup-frame point less the zero
+    expect(
+      points(
+        moved.listed.map((f) => f.params),
+        40,
+        25,
+      ),
+    ).toEqual(points(corner.listed.map((f) => f.params)))
+    expect(
+      points(
+        moved.exported.map((i) => i.params),
+        40,
+        25,
+      ),
+    ).toEqual(points(corner.exported.map((i) => i.params)))
+    // the message says the WCS point too; the left clamp is left of the moved zero
+    const m = (f: PlanWarning) => {
+      const [x, y] = xy(f.params)
+      return `near X${Math.round(x * 100) / 100} Y${Math.round(y * 100) / 100}`
+    }
+    for (const f of moved.listed) expect(f.message).toContain(m(f))
+    expect(Math.min(...moved.listed.map((f) => xy(f.params)[0]))).toBeLessThan(0)
   })
 
   it('a clearance height the user set below the clamps is an error until set back to auto', async () => {

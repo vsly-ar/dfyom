@@ -6,6 +6,10 @@
 }
 
 .panel {
+  /* the containing block of absolutely placed descendants (screen-reader-only text): inside a
+     scrolled panel they would otherwise overflow the shell and scroll it (seen dragging a tool run
+     in a scrolled inspector) */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;

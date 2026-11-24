@@ -8,6 +8,7 @@ import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { AlignmentSourceDTO } from '../../../../core/plan/alignment.dto'
 import type { PlanWarning } from '../../../../core/plan/checks'
+import type { LinkEdit } from '../../../../core/toolpath/links'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useCall } from '../../shell/hooks'
@@ -66,7 +67,15 @@ export interface SetupLinksView {
     /** Null without a machine (no rates). */
     readonly seconds: number | null
     readonly savedSeconds: number | null
+    /** DF64 L3: the lowered links as moves (`linkedToolpaths`) and what each saves (s). */
+    readonly lowered?: readonly LoweredLinkView[]
   } | null
+}
+
+/** A lowered link of `plan.warning.list` (core `LoweredLinkDTO`): safe-links.md#where-it-runs. */
+export interface LoweredLinkView extends LinkEdit {
+  readonly index: number
+  readonly savedSeconds: number
 }
 
 /** DF78: a setup's work zero and alignment points (`plan.warning.list` `alignment`). */

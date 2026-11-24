@@ -221,7 +221,8 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
 // DF78 (alignment phase 1): the top setup's work zero moved left of the stock (negative X is
 // valid), a stock corner added as an alignment point from the inspector's menu, its marker in the
 // viewport, and the exported program's header naming both. With DFYOM_RENDERS=1 light and dark
-// renders go to design/features/renders/df78-alignment-*.png.
+// renders go to design/features/renders/df78-alignment-*.png (with a toe clamp and the links, the
+// whole setup inspector in a tall window).
 // Doc: docs/modes/alignment.md#setup-work-zero-q61, docs/conventions/ui.md#design-and-plan-controls-v02
 test('setup work zero and alignment points: inspector, viewport marker, program header', async ({
   dfyom,
@@ -260,13 +261,37 @@ test('setup work zero and alignment points: inspector, viewport marker, program 
   )
   await expect(list.getByText(/X 120 mm\s+Y 60 mm/)).toBeVisible()
   await expect(page.locator('[data-align-point]')).toHaveCount(1)
-  await list.getByLabel('Point 1 name', { exact: true }).hover()
-  await render(page, 'df78-alignment')
 
-  // the program names the zero and the point
+  // with the moved zero, a toe clamp on the right edge (DF59) and the links between the top's
+  // operations (DF64) in the same inspector; the clearance follows the clamp
+  const { plans } = await bridgeCall<{ plans: { id: string }[] }>(page, 'plan.list')
+  const planId = plans[0]!.id
+  const setupId = (
+    await bridgeCall<{ plan: { setups: { id: string }[] } }>(page, 'plan.get', { planId })
+  ).plan.setups[1]!.id
+  await bridgeCall(page, 'plan.workholding.set', {
+    planId,
+    setupId,
+    items: [{ kind: 'toeClamp', edge: 'uMax', width: '20', grip: '8', reach: '14', top: '12' }],
+  })
+  const workholding = inspector.getByRole('heading', { name: /Workholding/ })
+  await expect(workholding).toContainText('1 item')
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
-  await top.click({ position: { x: 24, y: 12 } })
+  if (!(await inspector.getByRole('heading', { name: 'Work zero' }).isVisible()))
+    await top.click({ position: { x: 24, y: 12 } })
+  await expect(inspector.getByText('Link time')).toBeVisible()
+  if (RENDERS) {
+    // tall enough for the whole setup inspector: heights, links, work zero, alignment points,
+    // tool changes and workholding
+    await page.setViewportSize({ width: 1280, height: 1640 })
+    await page.getByRole('button', { name: 'Fit' }).click()
+    await list.getByLabel('Point 1 name', { exact: true }).hover()
+    await render(page, 'df78-alignment')
+    await page.setViewportSize({ width: 1280, height: 800 })
+  }
+
+  // the program names the zero and the point
   await navigator.getByRole('button', { name: 'Export Top gCode…' }).click()
   const done = page.getByRole('dialog', { name: 'gCode exported' })
   await expect(done.getByText('Setup Top (2 of 2)')).toBeVisible({ timeout: 30_000 })

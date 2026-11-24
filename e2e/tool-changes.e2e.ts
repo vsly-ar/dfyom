@@ -159,6 +159,8 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
   await expect(runs.nth(1)).toContainText('Flat 3')
   await expect(title).toContainText('1 tool change')
   await expect(runs.nth(0)).toContainText(/\d+ (min|s)/)
+  // the inspector is taller than the window since DF64/DF78: the section in view for the renders
+  await list.scrollIntoViewIfNeeded()
   await render(page, 'df66-tool-changes')
 
   // Alt+↓: the Flat 6 run after Flat 3; now both tools are changes
@@ -207,6 +209,7 @@ test('setup inspector: a later run touches off on the faced floor, chosen in its
   await expect(runs.nth(0)).toContainText('Z fromTop face · 0 mm')
   const zFrom = runs.nth(1).getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor/ })
   await expect(zFrom).toHaveAccessibleName(/\(default\)/)
+  await list.scrollIntoViewIfNeeded()
   await render(page, 'df69-z-from')
 
   await zFrom.click()
