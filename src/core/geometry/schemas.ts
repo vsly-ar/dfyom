@@ -96,6 +96,7 @@ export const DrillingGeometrySchema = z.object({
   center: Vec2Schema,
   diameter: z.number(),
   bottom: DrillBottomSchema,
+  throughDepth: z.number().exactOptional(),
 })
 export const ProfileGeometrySchema = z.object({
   kind: z.literal('profile'),

@@ -135,6 +135,9 @@ const base = {
   heights: z.object({ clearanceHeight: z.number(), retractHeight: z.number() }),
   stock: StockGeometrySchema,
   maxFeedRate: Vec3Schema.exactOptional(),
+  material: z
+    .object({ top: z.number().exactOptional(), bottom: z.number().exactOptional() })
+    .exactOptional(),
 }
 
 export const FacingInputSchema: z.ZodType<FacingInput> = z.object({

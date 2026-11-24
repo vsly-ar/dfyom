@@ -161,7 +161,7 @@ export function parameterChecks(
       options.region2d !== undefined && (op.kind === 'pocket' || op.kind === 'profile')
         ? isAnalyticOperation(op)
           ? undefined
-          : shapeMeasure(options.region2d, op)
+          : shapeMeasure(options.region2d, op, stock)
         : undefined
     const tool =
       own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure)
@@ -554,8 +554,10 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
         ),
       )
   }
-  // through holes: the material below `on` along the normal
-  const depth = op.bottom.kind === 'through' ? op.onZ + stock.thickness : op.bottom.depth
+  // through holes: the material below `on` along the normal (less what an earlier setup
+  // cleared under the hole, DF61)
+  const depth =
+    op.bottom.kind === 'through' ? op.onZ + (op.throughDepth ?? stock.thickness) : op.bottom.depth
   const deepest = HOLE_DEPTH_RATIO * op.diameter
   if (depth > deepest + EPSILON)
     out.push(

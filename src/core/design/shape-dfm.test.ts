@@ -215,10 +215,23 @@ describe('ring pockets round the stock edge (DF53)', () => {
     expect(JSON.stringify(s.d.doc.snapshots[snapshot])).toContain('6 mm flat')
   })
 
-  it('a corner whose leftover reaches into the stock stays a wall corner', async () => {
-    // corners 1 mm beyond each side: √2 mm away, under the smallest tool's radius 1.5
+  it('open sides (DF61): corners near the stock corners are reached from outside the stock', async () => {
+    // corners 1 mm beyond each side: √2 mm away, under the smallest tool's radius 1.5 (a wall
+    // corner by DF53's distance rule), but the ring's sides are open: the toolpath runs past the
+    // stock edge and leaves nothing there
     const s = await ringPocket(['102', '62'], ['80', '40'])
-    expect(s.warnings().filter((w) => w.code === 'dfm.cornerSharp')).toHaveLength(4)
+    expect(s.warnings().filter((w) => w.code === 'dfm.cornerSharp')).toEqual([])
+    expect(s.warnings().filter((w) => w.code === 'dfm.restMaterial')).toEqual([])
+  })
+
+  it('open sides (DF61): a margin strip narrower than every tool fits them all', async () => {
+    // the stock less a part 1 mm from its edge: a 1 mm strip, narrower than the 3 mm tool
+    const s = await ringPocket(['100', '60'], ['98', '58'])
+    const codes = s.warnings().map((w) => w.code)
+    expect(codes).not.toContain('dfm.toolUnfit')
+    expect(codes).not.toContain('dfm.noFittingTool')
+    expect(codes).not.toContain('dfm.cornerSharp')
+    expect(codes).not.toContain('dfm.restMaterial')
   })
 
   it('a shape wholly outside the face warns that it cuts nothing', async () => {

@@ -178,6 +178,12 @@ export type OperationGeometry = FacePlacement &
         readonly center: Vec2
         readonly diameter: number
         readonly bottom: DrillBottom
+        /**
+         * A through hole's depth below the stock face when an earlier setup already cleared
+         * material under the whole hole from the opposite face (DF61, `throughDepths`); absent =
+         * the stock extent along the normal.
+         */
+        readonly throughDepth?: number
       }
     | {
         readonly kind: 'profile'

@@ -148,7 +148,8 @@ export function measureOf(input: ChoiceInput): ShapeMeasure | undefined {
   const g = input.geometry
   if (input.region2d === undefined || (g.kind !== 'pocket' && g.kind !== 'profile'))
     return undefined
-  return isAnalyticOperation(g) ? undefined : shapeMeasure(input.region2d, g)
+  // a pocket on the stock edge is measured with its open sides (DF61)
+  return isAnalyticOperation(g) ? undefined : shapeMeasure(input.region2d, g, localOf(input))
 }
 
 /** The failed fit rule of a tool for the operation, or undefined when it fits. */

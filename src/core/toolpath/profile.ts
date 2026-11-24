@@ -9,7 +9,7 @@ import { slotCoversOpening } from '../geometry/operations'
 import { analyticTabCentres } from '../geometry/tab-hold'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { ProfileInput, Toolpath } from './model'
 import { flat, MoveBuilder, ringSegs, segPoint, slope, walkRing, type Seg, type Seg3 } from './path'
@@ -154,9 +154,10 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   }
 
   const finishing = first - R > EPSILON
-  const zs = levels(0, bottom, cutting.stepdown)
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const zs = cutLevels(0, bottom, cutting.stepdown, input.material)
   const pass = passSteps(steps, zs.length + (finishing ? 1 : 0))
-  let previous = 0
+  let previous = cutTop(0, bottom, input.material)
   for (const [k, z] of zs.entries()) {
     const step = pass(k)
     if (step.isErr()) return Err(step.unwrapErr())

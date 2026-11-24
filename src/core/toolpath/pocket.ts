@@ -5,7 +5,7 @@
 import { EPSILON, type AnalyticContour as Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { PocketInput, Toolpath } from './model'
 import { flat, MoveBuilder, offsetRing, segPoint, slope, type Seg } from './path'
@@ -130,10 +130,11 @@ export function generatePocket(input: PocketInput, steps: Steps = noSteps): AppR
 
   const b = new MoveBuilder()
   const finishing = outermost - wall > EPSILON
-  const roughZ = levels(op.onZ, floor, cutting.stepdown)
-  const finishZ = finishing ? levels(op.onZ, floor, st.finishStepdown) : []
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const roughZ = cutLevels(op.onZ, floor, cutting.stepdown, input.material)
+  const finishZ = finishing ? cutLevels(op.onZ, floor, st.finishStepdown, input.material) : []
   const pass = passSteps(steps, roughZ.length + finishZ.length)
-  let previous = op.onZ
+  let previous = cutTop(op.onZ, floor, input.material)
   for (const [k, z] of roughZ.entries()) {
     const step = pass(k)
     if (step.isErr()) return Err(step.unwrapErr())

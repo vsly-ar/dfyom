@@ -1,8 +1,12 @@
 // Material removed by earlier setups (hardening DF50): a top outline over a bottom pocket cuts only
 // the material left, its tabs stand on it and the checks measure it, in the plan's setup order.
-// Spec: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups
+// DF61: through holes too, and passes over the material earlier cuts left.
+// Spec: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
+// docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
 import { describe, expect, it } from 'vitest'
+import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
+import { noSteps } from '../workers/steps'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { toGeneratorInputs } from '../toolpath/inputs'
 import { generateRequest } from '../toolpath/request'
@@ -85,7 +89,7 @@ describe('through profiles after an earlier setup (DF50)', () => {
     const [input] = expectOk(
       planOperationInputs(s.d.doc, planId, [profileOp(s, planId).id], region2d),
     )
-    expect(input!.throughDepth).toBe(15)
+    expect(input!.throughDepths?.get('profile1')).toBe(15)
     const z = zs(profileToolpath(s, planId))
     // 15 mm of material + 0.5 breakthrough, no passes below; the tool lifts to 3 above the floor
     expect(Math.min(...z)).toBeCloseTo(-15.5, 9)
@@ -126,5 +130,70 @@ describe('through profiles after an earlier setup (DF50)', () => {
     expect(out.warnings.filter((w) => w.code === 'dfm.tabsThick')).toEqual([
       expect.objectContaining({ params: { thickness: 16, material: 15 } }),
     ])
+  })
+})
+
+const opOf = (s: PlanSetup, planId: string, id: string) =>
+  s
+    .plan(planId)
+    .setups.flatMap((x) => x.operations)
+    .find((o) => o.designOperationIds.includes(id))!
+
+const inputOf = (s: PlanSetup, planId: string, id: string) =>
+  expectOk(planOperationInputs(s.d.doc, planId, [opOf(s, planId, id).id], region2d))[0]!
+
+const toolpathOf = (s: PlanSetup, planId: string, id: string): Toolpath =>
+  expectOk(
+    generateRequest(expectOk(toGeneratorInputs(inputOf(s, planId, id), region2d)), noSteps, () =>
+      Ok(region2d),
+    ),
+  )
+
+describe('through holes after an earlier setup (DF61)', () => {
+  it('a top through hole over the relief drills the material left', async () => {
+    const { s } = await relieved()
+    await s.run('design.drilling.add', { partId: s.partId, center: ['50', '30'], diameter: '6' })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: opOf(s, planId, 'drill1').id,
+      overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
+    })
+    expect(inputOf(s, planId, 'drill1').throughDepths?.get('drill1')).toBe(15)
+    const drill = toolpathOf(s, planId, 'drill1')
+      .passes.flatMap((p) => p.moves)
+      .find((m) => m.kind === 'drill')
+    // 15 mm of material + breakthrough + the drill tip, not the 20 mm stock
+    if (drill?.kind !== 'drill') throw new Error('no drill cycle')
+    expect(drill.bottom).toBeGreaterThan(-20)
+    expect(drill.bottom).toBeLessThan(-15)
+  })
+})
+
+describe('passes over the material earlier cuts left (DF61)', () => {
+  it('a step below a facing starts at the facing floor; the floor stays', async () => {
+    const s = await planSetup({ part: false, services: { region2d } })
+    await s.run('design.facing.add', { partId: s.partId, depth: '2' })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: {
+        kind: 'rectangle',
+        center: ['50', '30'],
+        length: '84',
+        width: '44',
+        cornerRadius: '5',
+      },
+      slotWidth: '6',
+      depth: '5',
+      tabs: { count: '0', width: '8', thickness: '3' },
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    expect(inputOf(s, planId, 'profile1').material).toEqual({ top: -2 })
+    const z = zs(toolpathOf(s, planId, 'profile1'))
+    // no move between the stock face and the facing floor; down to the step's floor
+    expect(z.filter((v) => v < 0 && v > -2 + 1e-9)).toEqual([])
+    expect(Math.min(...z)).toBeCloseTo(-5, 9)
   })
 })

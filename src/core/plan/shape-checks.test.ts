@@ -16,6 +16,9 @@ import { planOperationInputs } from './inputs'
 import { testStock } from '../design/design.fixture'
 import { planSetup, stale, type PlanSetup } from './plan.fixture'
 import { rebuildBlocker } from './validity'
+import { toGeneratorInputs } from '../toolpath/inputs'
+import { generateRequest } from '../toolpath/request'
+import { noSteps } from '../workers/steps'
 
 const region2d = nodeRegion2d()
 const ui = uiSource()
@@ -332,5 +335,56 @@ describe('rebuild and blocker checks with the 2D port', () => {
     expect(blocked?.reason).toContain('Profile 1 tab 2 position')
     expect(blocked?.reason).not.toMatch(/profile1|operations\.|tabs\.positions/)
     expect(blocked?.fields).toContain('operations.profile1.tabs.positions.1')
+  })
+})
+
+describe('open sides of pockets (DF61)', () => {
+  const ring = (outer: [string, string]) => [
+    {
+      kind: 'rectangle',
+      op: 'add',
+      center: ['0', '0'],
+      length: outer[0],
+      width: outer[1],
+      cornerRadius: '0',
+    },
+    {
+      kind: 'rectangle',
+      op: 'subtract',
+      center: ['0', '0'],
+      length: '96',
+      width: '56',
+      cornerRadius: '4',
+    },
+  ]
+
+  it('a 2 mm margin strip on the stock edge takes the 6 mm tool and is cut past the edge', async () => {
+    // the stock 100 × 60 less the part 96 × 56: every side of the ring lies on the stock edge
+    const { s, planId, planOp } = await onePlan(ring(['100', '60']), {
+      kind: 'pocket',
+      args: { depth: '2' },
+    })
+    expect(ofOp(warnings(s, planId), planOp)).toEqual([])
+    expect(
+      warnings(s, planId).filter(
+        (w) => w.code === 'plan.restMaterial' && w.planOperationId === planOp,
+      ),
+    ).toEqual([])
+    const [input] = expectOk(planOperationInputs(s.d.doc, planId, [planOp], region2d))
+    const request = expectOk(toGeneratorInputs(input!, region2d))
+    expect(request.kind).toBe('regionPocket')
+    const tp = expectOk(generateRequest(request, noSteps, () => Ok(region2d)))
+    const xs = tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[0])))
+    // the tool centre runs past the stock edge (x < 0), at most r √½ + allowance beyond it
+    expect(Math.min(...xs)).toBeLessThan(0)
+    expect(Math.min(...xs)).toBeGreaterThan(-3 * Math.SQRT1_2 - 0.5)
+  })
+
+  it('a ring 1 mm inside the stock edge keeps its walls: the tool does not fit', async () => {
+    const { s, planId, planOp } = await onePlan(ring(['98', '58']), {
+      kind: 'pocket',
+      args: { depth: '2' },
+    })
+    expect(ofOp(warnings(s, planId), planOp).map((f) => f.rule)).toEqual(['pocketSize'])
   })
 })

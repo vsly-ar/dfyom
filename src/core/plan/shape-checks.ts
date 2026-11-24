@@ -10,7 +10,7 @@ import { isGeneralShape, type Operation, type Part } from '../design/operation'
 import { placeShape } from '../design/placement'
 import type { Region2dPort } from '../geometry/2d/port'
 import { localStock } from '../geometry/face'
-import type { OperationGeometry, Vec2 } from '../geometry/model'
+import type { OperationGeometry, StockGeometry, Vec2 } from '../geometry/model'
 import {
   FIT_SLACK,
   shapeMeasure,
@@ -41,6 +41,8 @@ export function generalShapeMeasure(
   op: Operation,
   part: Part,
   port: Region2dPort,
+  /** The local stock of the operation's face: a pocket on its edge has open sides (DF61). */
+  face?: Pick<StockGeometry, 'length' | 'width'>,
 ): { readonly measure: ShapeMeasure; readonly centre: Vec2 } | undefined {
   if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
   if (!isGeneralShape(op.shape)) return undefined
@@ -67,7 +69,7 @@ export function generalShapeMeasure(
           slotWidth: op.slotWidth.canonical,
           tabs: { count: 0, width: 0, thickness: 0 },
         }
-  const measure = shapeMeasure(port, geometry)
+  const measure = shapeMeasure(port, geometry, face)
   return measure === undefined ? undefined : { measure, centre }
 }
 
@@ -93,7 +95,15 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
   const R = D / 2
   const byId = new Map(i.part.operations.map((o) => [o.id, o]))
   for (const op of i.ops) {
-    const placed = generalShapeMeasure(op, i.part, port)
+    const face =
+      i.stock === undefined || !('on' in op)
+        ? undefined
+        : localStock(surfaceDirection(op.on, byId), {
+            length: i.stock.length.canonical,
+            width: i.stock.width.canonical,
+            thickness: i.stock.thickness.canonical,
+          })
+    const placed = generalShapeMeasure(op, i.part, port, face)
     if (placed === undefined) continue
     const m = placed.measure
     const opening = m.side === 'inside'
@@ -111,18 +121,7 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
     // rotated rectangles keep the v0.1 corner rule (an error); named shapes warn; corners whose
     // leftover lies beyond the stock do not count (DF53)
     const corner =
-      i.stock === undefined || !('on' in op)
-        ? m.smallestCornerRadius
-        : smallestWallCorner(
-            m,
-            placed.centre,
-            localStock(surfaceDirection(op.on, byId), {
-              length: i.stock.length.canonical,
-              width: i.stock.width.canonical,
-              thickness: i.stock.thickness.canonical,
-            }),
-            R,
-          )
+      face === undefined ? m.smallestCornerRadius : smallestWallCorner(m, placed.centre, face, R)
     if ('shape' in op && op.shape.kind === 'named' && corner < R - CORNER_TOLERANCE) {
       out.push({
         severity: 'warning',
