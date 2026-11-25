@@ -64,6 +64,7 @@ const params = {
     .describe(
       'gap: web between cell boxes (polar: between circumcircles; default 2 mm / 1/16"), or pitch [along rows, between rows]',
     ),
+  alternate: z.enum(['none', 'flip']).describe('flip: every other cell turned 180°'),
   angle: Src.describe('Turns the whole lattice about origin; default 0°'),
   origin: PointArg.nullable().describe('A node; null = centre of the area'),
   boundary: z
@@ -78,9 +79,16 @@ const params = {
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
   through: z.boolean().describe('Cells cut through the stock'),
   chamfer: z
-    .object({ width: Src.optional(), angle: Src.optional() })
+    .object({
+      width: Src.optional(),
+      angle: Src.optional(),
+      side: z.enum(['top', 'bottom', 'both']).optional(),
+    })
+    .strict()
     .nullable()
-    .describe('Edge chamfer round every cell; default 0.5 mm, 90°; null = none'),
+    .describe(
+      'Edge chamfer round every cell; default 0.5 mm, 90°, top (bottom: through); null = none',
+    ),
 }
 
 type Args = Partial<z.output<z.ZodObject<typeof params>>>
@@ -96,6 +104,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
     spacing: listedAs('object', 'design.pattern.add spacing'),
     origin: z.unknown().describe('As design.pattern.add origin'),
     boundary: z.unknown().describe('As design.pattern.add boundary'),
+    chamfer: z.unknown().describe('As design.pattern.add chamfer'),
   },
   /** Fields not given keep their previous value (add: the patterns.md defaults). */
   build(a: Args, prev, { f, id, name, on }): Pattern {
@@ -189,6 +198,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       return Some({
         width: f.pick('chamfer.width', 'length', c.width, old?.width, 'chamferWidth'),
         angle: f.pick('chamfer.angle', 'angle', c.angle, old?.angle, 'chamferAngle'),
+        side: c.side ?? old?.side ?? 'top',
       })
     }
     const len = (
@@ -209,6 +219,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
           : (prev?.angle ?? f.q('angle', 'angle', '0')),
       origin,
       spacing: spacing(),
+      alternate: a.alternate ?? prev?.alternate ?? 'none',
       boundary: boundary(),
       margin: len('margin', prev?.margin, 'patternMargin'),
       fit: a.fit ?? prev?.fit ?? 'whole',

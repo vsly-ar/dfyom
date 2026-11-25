@@ -14,8 +14,15 @@ import type { Issue, IssuePath } from '../../../shared/errors/app-error'
 import { parseWith } from '../../../shared/parse'
 import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../../../shared/result'
 import type { Region2dPort } from '../../geometry/2d/port'
-import { localStock, type Direction } from '../../geometry/face'
-import type { DfmWarning } from '../../geometry/model'
+import {
+  faceToFace,
+  localStock,
+  oppositeDirection,
+  STOCK_FACE,
+  stockFaceDirection,
+  type Direction,
+} from '../../geometry/face'
+import type { DfmWarning, Vec2 } from '../../geometry/model'
 import { flattenLoop } from '../../geometry/prism'
 import { regionLoops } from '../../geometry/2d/model'
 import { quantityDto, quantityFromDTO } from '../../library/item'
@@ -81,10 +88,17 @@ export interface PatternBoundary {
 
 export type PatternFit = 'whole' | 'clip'
 
+export type PatternAlternate = 'none' | 'flip'
+
+/** Which cell edges are chamfered (P5: bottom edges of through cells from a flipped setup). */
+export type PatternChamferSide = 'top' | 'bottom' | 'both'
+
 /** The optional chamfer (P3): the owned edge chamfer round every cell, one width for all. */
 export interface PatternChamfer {
   readonly width: Quantity
   readonly angle: Quantity
+  /** P5: `bottom` / `both` (through cells on a stock face only) add `<id>_bottomChamfer`. */
+  readonly side: PatternChamferSide
 }
 
 export interface Pattern extends FeatureBase {
@@ -96,6 +110,8 @@ export interface Pattern extends FeatureBase {
   /** `[u, v]` in the face frame; None = the centre of the face less the margin. */
   readonly origin: Option<Point>
   readonly spacing: PatternSpacing
+  /** P5: `flip` turns every other cell 180° (triangles nest; the pitches are found for the gap). */
+  readonly alternate: PatternAlternate
   /** None = the `on` face's rectangle (P2: a named closed shape, keep-outs its subtract items). */
   readonly boundary: Option<PatternBoundary>
   /** The uncut border inside the boundary (≥ 0). */
@@ -159,6 +175,7 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
     z.object({ gap: length() }),
     z.object({ pitch: z.tuple([length(), length()]) }),
   ]),
+  alternate: z.literal('flip').optional(),
   boundary: z
     .object({ shapeId: z.string(), center: z.tuple([length(), length()]), rotation: angle() })
     .optional(),
@@ -167,7 +184,9 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   invert: z.boolean().optional(),
   depth: length(),
   through: z.boolean().optional(),
-  chamfer: z.object({ width: length(), angle: angle() }).optional(),
+  chamfer: z
+    .object({ width: length(), angle: angle(), side: z.enum(['bottom', 'both']).optional() })
+    .optional(),
 })
 
 function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
@@ -258,6 +277,7 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
         s.length === 1
           ? { kind: 'gap' as const, gap: s[0]! }
           : { kind: 'pitch' as const, pitch: [s[0]!, s[1]!] as const },
+      alternate: d.alternate ?? 'none',
       boundary:
         bd === undefined
           ? None
@@ -267,7 +287,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       invert: d.invert ?? false,
       depth: depth!,
       through: d.through ?? false,
-      chamfer: chq.length === 0 ? None : Some({ width: chq[0]!, angle: chq[1]! }),
+      chamfer:
+        chq.length === 0
+          ? None
+          : Some({ width: chq[0]!, angle: chq[1]!, side: d.chamfer?.side ?? 'top' }),
     }
   })
 }
@@ -322,6 +345,7 @@ function patternToDTO(p: Pattern): FeatureDTO {
       p.spacing.kind === 'gap'
         ? { gap: p.spacing.gap.toDTO() }
         : { pitch: [p.spacing.pitch[0].toDTO(), p.spacing.pitch[1].toDTO()] },
+    ...(p.alternate === 'flip' ? { alternate: 'flip' } : {}),
     ...(p.boundary.isSome()
       ? {
           boundary: {
@@ -341,6 +365,7 @@ function patternToDTO(p: Pattern): FeatureDTO {
           chamfer: {
             width: p.chamfer.unwrap().width.toDTO(),
             angle: p.chamfer.unwrap().angle.toDTO(),
+            ...(p.chamfer.unwrap().side === 'top' ? {} : { side: p.chamfer.unwrap().side }),
           },
         }
       : {}),
@@ -371,6 +396,15 @@ function patternInvariants(p: Pattern): Issue[] {
   )
   // the angle's range is the owned chamfer's rule (validate.ts), reported at chamfer.angle
   if (p.chamfer.isSome()) positive(p.chamfer.unwrap().width, 'chamfer', 'width')
+  // P5: only a through cell has a bottom edge (from the opposite stock face, `expandPattern`)
+  check(
+    p.chamfer.mapOr(true, (c) => c.side === 'top') || patternBottomFace(p) !== undefined,
+    ['chamfer', 'side'],
+    'patternChamferBottom',
+    p.through
+      ? 'the bottom edges are chamfered from the opposite stock face: the pattern must be on a stock face'
+      : 'only through cells have a bottom edge: turn on Through or chamfer the top edges',
+  )
   check(p.margin.exact.compare(ZERO) >= 0, ['margin'], 'nonNegative', 'must be 0 or more')
   if (p.spacing.kind === 'gap') positive(p.spacing.gap, 'spacing', 'gap')
   else {
@@ -435,25 +469,44 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
         ...(p.through ? { through: true } : {}),
       },
     },
-    ...(p.chamfer.isNone()
-      ? []
-      : [
-          {
-            role: 'chamfer',
-            operation: {
-              kind: 'chamfer' as const,
-              on: p.on,
-              edgeOf: ctx.ownedId('pocket'),
-              width: p.chamfer.unwrap().width,
-              angle: p.chamfer.unwrap().angle,
-              stepdown: None,
-              sourceEdge: None,
-              loops: None,
-              cornerLift: false,
-            },
-          },
-        ]),
+    ...chamfers(p, ctx),
   ])
+}
+
+/**
+ * P3: the owned edge chamfer round every cell on the top face (`<id>_chamfer`); P5: with `side`
+ * `bottom` or `both`, `<id>_bottomChamfer` round the cells' bottom edges from the opposite stock
+ * face (edge-chamfers.md E4b: a flipped setup). The invariants keep a bottom side to through
+ * cells on a stock face (`patternChamferBottom`).
+ */
+function chamfers(p: Pattern, ctx: ExpansionContext): ExpandedOperation[] {
+  if (p.chamfer.isNone()) return []
+  const c = p.chamfer.unwrap()
+  const op = (role: string, on: string): ExpandedOperation => ({
+    role,
+    operation: {
+      kind: 'chamfer' as const,
+      on,
+      edgeOf: ctx.ownedId('pocket'),
+      width: c.width,
+      angle: c.angle,
+      stepdown: None,
+      sourceEdge: None,
+      loops: None,
+      cornerLift: false,
+    },
+  })
+  const out: ExpandedOperation[] = []
+  if (c.side !== 'bottom') out.push(op('chamfer', p.on))
+  const bottom = patternBottomFace(p)
+  if (c.side !== 'top' && bottom !== undefined) out.push(op('bottomChamfer', bottom))
+  return out
+}
+
+/** The stock face opposite a through pattern's `on` (P5); undefined off a stock face. */
+export function patternBottomFace(p: Pick<Pattern, 'on' | 'through'>): string | undefined {
+  const d = stockFaceDirection(p.on)
+  return p.through && d !== undefined ? STOCK_FACE[oppositeDirection(d)] : undefined
 }
 
 /** The material below the surface `on` along its normal (mm exact; the stock thickness on top). */
@@ -553,6 +606,7 @@ export function patternRecord(
       p.spacing.kind === 'gap'
         ? { gap: p.spacing.gap.canonical }
         : { pitch: [p.spacing.pitch[0].canonical, p.spacing.pitch[1].canonical] },
+    ...(p.alternate === 'flip' ? { alternate: 'flip' as const } : {}),
     boundary: faceRect(p.on, before, stock),
     ...(p.boundary.isSome()
       ? {
@@ -606,7 +660,7 @@ function patternShapes(p: Pattern, ctx: ExpansionContext): AppResult<readonly Sh
 
 /** Owned pocket (and chamfer, P3) parameter → pattern field. */
 function patternFieldOf(role: string, path: IssuePath): IssuePath | undefined {
-  if (role === 'chamfer') {
+  if (role === 'chamfer' || role === 'bottomChamfer') {
     const head = String(path[0])
     if (head === 'width' || head === 'angle') return ['chamfer', head]
     return head === 'edgeOf' || head === 'depth' ? ['chamfer', 'width'] : undefined
@@ -681,8 +735,7 @@ function patternWarnings(
       },
     })
   }
-  const meets = chamferMeetsOf(p, facts, geometry.region2d)
-  if (meets !== undefined) out.push(meets)
+  out.push(...chamferMeetsOf(p, facts, geometry.region2d, _stock))
   const chords = regionLoops(contour.region).reduce(
     (s, l) => s + flattenLoop(l, 'shrink').points.length,
     0,
@@ -708,33 +761,61 @@ const websAt = new WeakMap<WebInput, Map<number, PatternWeb | undefined>>()
  * P3: `dfm.chamferMeets` of the owned chamfer when the bevels of two cells meet: the narrowest web
  * (inverted: island) under twice the chamfer's width, measured as `dfm.patternThinWeb` (exact for
  * the lattice, a few 2D operations); the suggestion is half that web. It stands in for the edge
- * chamfer's region-wide check (`edge.pattern`), which takes minutes on hundreds of cells.
+ * chamfer's region-wide check (`edge.pattern`), which takes minutes on hundreds of cells. P5: the
+ * bottom chamfer of through cells (`<id>_bottomChamfer`) meets on the same web and has its own.
  */
 function chamferMeetsOf(
   p: Pattern,
   facts: PatternFacts | undefined,
   port: Region2dPort | undefined,
-): DfmWarning | undefined {
+  stock: Stock,
+): DfmWarning[] {
   const input = facts?.webInput
-  if (p.chamfer.isNone() || input === undefined || port === undefined) return undefined
-  const width = p.chamfer.unwrap().width.canonical
+  if (p.chamfer.isNone() || input === undefined || port === undefined) return []
+  const { width: w, side } = p.chamfer.unwrap()
+  const width = w.canonical
   const limit = 2 * width
   let byLimit = websAt.get(input)
   if (byLimit === undefined) websAt.set(input, (byLimit = new Map()))
   if (!byLimit.has(limit)) byLimit.set(limit, patternWeb(port, input, limit))
   const web = byLimit.get(limit)
-  if (web === undefined) return undefined
-  const id = `${p.id}_chamfer`
+  if (web === undefined) return []
+  const roles =
+    side === 'both'
+      ? ['chamfer', 'bottomChamfer']
+      : side === 'top'
+        ? ['chamfer']
+        : ['bottomChamfer']
   const where = web.island ? 'an island' : 'the web between cells'
-  return {
-    code: 'dfm.chamferMeets',
-    severity: 'warning',
-    message: `${id}: the bevels meet on ${where}, ${web.width} mm wide: its top becomes a ridge`,
-    operation: id,
-    parameter: 'width',
-    params: { at: web.at, wall: web.width, width, feature: p.id },
-    suggestion: { relation: 'atMost', value: Math.floor((web.width / 2) * 100) / 100 },
-  }
+  return roles.map((role): DfmWarning => {
+    const id = `${p.id}_${role}`
+    return {
+      code: 'dfm.chamferMeets',
+      severity: 'warning',
+      message: `${id}: the bevels meet on ${where}, ${web.width} mm wide: its top becomes a ridge`,
+      operation: id,
+      parameter: 'width',
+      params: { at: atOn(p, role, web.at, stock), wall: web.width, width, feature: p.id },
+      suggestion: { relation: 'atMost', value: Math.floor((web.width / 2) * 100) / 100 },
+    }
+  })
+}
+
+/** A point of the pattern's face frame read on its bottom chamfer's face (mirrored, E4b). */
+function atOn(p: Pattern, role: string, at: Vec2, stock: Stock): Vec2 {
+  const from = stockFaceDirection(p.on)
+  const bottom = patternBottomFace(p)
+  const to = bottom === undefined ? undefined : stockFaceDirection(bottom)
+  if (role !== 'bottomChamfer' || from === undefined || to === undefined) return at
+  const f = faceToFace(from, to, {
+    length: stock.length.canonical,
+    width: stock.width.canonical,
+    thickness: stock.thickness.canonical,
+  })
+  return [
+    f.m[0][0] * at[0] + f.m[0][1] * at[1] + f.t[0] + 0,
+    f.m[1][0] * at[0] + f.m[1][1] * at[1] + f.t[1] + 0,
+  ]
 }
 
 /**

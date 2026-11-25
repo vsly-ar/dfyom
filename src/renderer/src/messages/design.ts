@@ -81,6 +81,9 @@ export const designMessages = {
       angle: 'Angle',
       origin: (i: number) => (i === 0 ? 'Origin U' : 'Origin V'),
       originCentre: 'Centre of the area',
+      /** P5: `alternate: flip`. */
+      alternate: 'Flip every other cell',
+      alternateNote: 'Turned 180° so triangles nest; the pitches keep the gap as the web.',
       on: 'On',
       boundary: 'Boundary',
       boundaryFace: 'Whole face',
@@ -101,6 +104,7 @@ export const designMessages = {
         honeycomb: 'Honeycomb',
         roundedSquares: 'Rounded squares',
         diamonds: 'Diamonds',
+        triangles: 'Triangles',
         slots: 'Slots',
         grille: 'Grille',
       } as Record<string, string>,
@@ -113,6 +117,11 @@ export const designMessages = {
       chamferWidth: 'Chamfer width',
       chamferAngle: 'Chamfer angle',
       chamferTool: 'V-bit',
+      /** P5: which cell edges (bottom: through cells, from a flipped setup). */
+      chamferSide: 'Edges',
+      chamferSides: { top: 'Top', bottom: 'Bottom', both: 'Both' } as Record<string, string>,
+      chamferSideNote: 'The bottom edges are cut from a flipped setup.',
+      chamferBottomTool: 'V-bit (bottom)',
       chamferNote:
         'An edge chamfer round every cell (inverted: every island), cut after the pocket.',
       readout: (cells: number) => (cells === 1 ? '1 cell' : `${cells} cells`),

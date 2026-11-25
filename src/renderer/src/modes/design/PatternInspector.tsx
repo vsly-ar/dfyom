@@ -161,6 +161,7 @@ export function PatternInspector({
     'spacing',
     'angle',
     'origin',
+    'alternate',
     'on',
     'boundary',
     'margin',
@@ -253,9 +254,13 @@ export function PatternInspector({
     const below = part.dto.features?.find((f) => f.id === id && f.kind === 'pattern')
     return below?.name
   })()
-  const chamfer = feature['chamfer'] as { width: QuantityDTO; angle: QuantityDTO } | undefined
+  const chamfer = feature['chamfer'] as
+    { width: QuantityDTO; angle: QuantityDTO; side?: 'bottom' | 'both' } | undefined
   const pocketOp = owned.find((o) => o.id === `${feature.id}_pocket`)
   const chamferOp = owned.find((o) => o.id === `${feature.id}_chamfer`)
+  // P5: the through cells' bottom edges, from a flipped setup
+  const bottomChamferOp = owned.find((o) => o.id === `${feature.id}_bottomChamfer`)
+  const flip = feature['alternate'] === 'flip'
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -424,6 +429,25 @@ export function PatternInspector({
               />
             </div>
           ))}
+          <div data-feature-field="alternate">
+            <Field
+              label={p.alternate}
+              kind="toggle"
+              messages={[
+                ...messagesAt('alternate'),
+                ...note('alternate', flip ? p.alternateNote : undefined),
+              ]}
+            >
+              <Switch
+                label={p.alternate}
+                hideLabel
+                checked={flip}
+                onCheckedChange={(on) =>
+                  void update({ alternate: on ? 'flip' : 'none' }, 'alternate')
+                }
+              />
+            </Field>
+          </div>
         </Group>
 
         <Group title={p.groups.area}>
@@ -586,6 +610,32 @@ export function PatternInspector({
                 quantityField('chamfer.angle', p.chamferAngle, 'angle', chamfer.angle, (a) => ({
                   chamfer: { angle: a },
                 })),
+                // P5: through cells have bottom edges too
+                through ? (
+                  <div key="chamfer.side" data-feature-field="chamfer.side">
+                    <Field
+                      label={p.chamferSide}
+                      kind="toggle"
+                      messages={[
+                        ...messagesAt('chamfer.side'),
+                        ...note(
+                          'chamfer.side',
+                          (chamfer.side ?? 'top') === 'top' ? undefined : p.chamferSideNote,
+                        ),
+                      ]}
+                    >
+                      <SegmentedControl<string>
+                        label={p.chamferSide}
+                        options={['top', 'bottom', 'both'].map((v) => ({
+                          value: v,
+                          label: p.chamferSides[v] ?? v,
+                        }))}
+                        value={chamfer.side ?? 'top'}
+                        onValueChange={(side) => void update({ chamfer: { side } }, 'chamfer.side')}
+                      />
+                    </Field>
+                  </div>
+                ) : null,
               ]}
           {chamferOp === undefined ? null : (
             <div data-feature-field="chamfer.tool">
@@ -594,6 +644,16 @@ export function PatternInspector({
                 op={chamferOp}
                 warnings={warnings.warnings.filter((w) => w.operation === chamferOp.id)}
                 label={p.chamferTool}
+              />
+            </div>
+          )}
+          {bottomChamferOp === undefined ? null : (
+            <div data-feature-field="chamfer.bottomTool">
+              <ToolField
+                part={part}
+                op={bottomChamferOp}
+                warnings={warnings.warnings.filter((w) => w.operation === bottomChamferOp.id)}
+                label={p.chamferBottomTool}
               />
             </div>
           )}

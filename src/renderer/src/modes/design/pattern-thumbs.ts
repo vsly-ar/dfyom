@@ -3,7 +3,8 @@
 // preset's sources are read as millimetres (they are metric, presets.ts), the cell drawn at the
 // preset's proportions and rotation, its neighbours at the lattice's pitch (cell extent + gap);
 // the window is about 2.4 pitches wide, so a cell is a readable few pixels and the arrangement
-// shows, the cells at its edges cut by the box.
+// shows, the cells at its edges cut by the box. P5: a flipped preset (Triangles) turns every other
+// cell and nests them about half a cell apart.
 // Doc: docs/conventions/ui.md#pattern-inspector-p1
 import type { PatternPreset } from '../../../../core/design/pattern/presets'
 
@@ -67,7 +68,9 @@ export function cellPoints(cell: Readonly<Record<string, string>>): Vec[] {
       const d = num(cell['diameter'], 8)
       // across flats: the circumradius is the inradius over cos(π/n)
       const r = cell['across'] === 'corners' ? d / 2 : d / 2 / Math.cos(Math.PI / n)
-      pts = arc([0, 0], r, 0, 360 - 360 / n, n)
+      // a flat side at the bottom, as the core's polygon (y is down here: mirrored, P5)
+      const start = 90 + 180 / n
+      pts = arc([0, 0], r, start, start + 360 - 360 / n, n)
       break
     }
     default:
@@ -84,14 +87,16 @@ export function cellPoints(cell: Readonly<Record<string, string>>): Vec[] {
  * row shifted half a pitch (staggered, hex).
  */
 export function presetThumb(preset: PatternPreset): Vec[][] {
-  const { cell, lattice, spacing } = preset.args
+  const { cell, lattice, spacing, alternate } = preset.args
   const pts = cellPoints(cell)
   const xs = pts.map((p) => p[0])
   const ys = pts.map((p) => p[1])
   const w = Math.max(...xs) - Math.min(...xs)
   const h = Math.max(...ys) - Math.min(...ys)
   const gap = num(spacing.gap)
-  const px = w + gap
+  // P5: flipped neighbours nest (about half a cell apart, as triangles), every other cell turned
+  const flip = alternate === 'flip'
+  const px = flip ? w / 2 + gap : w + gap
   const py = lattice === 'hex' ? Math.max((px * Math.sqrt(3)) / 2, h + gap) : h + gap
   const shift = lattice === 'square' ? 0 : px / 2
   // the window: about 2.4 pitches across (a tall cell: one cell high), the thumbnail's aspect
@@ -104,7 +109,8 @@ export function presetThumb(preset: PatternPreset): Vec[][] {
       const ox = px * 0.25 + col * px + (Math.abs(row) % 2 === 1 ? shift : 0)
       const oy = py * 0.3 + row * py
       if (ox + w / 2 < 0 || ox - w / 2 > ww || oy + h / 2 < 0 || oy - h / 2 > wh) continue
-      out.push(pts.map(([x, y]) => [(x + ox) * scale, (y + oy) * scale] as Vec))
+      const turn = flip && (((row + col) % 2) + 2) % 2 === 1 ? -1 : 1
+      out.push(pts.map(([x, y]) => [(turn * x + ox) * scale, (turn * y + oy) * scale] as Vec))
     }
   return out
 }

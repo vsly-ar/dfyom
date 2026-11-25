@@ -4,7 +4,9 @@
 // virtual machine. P2 (docs/modes/patterns.md#implementation-p2): a vent grille of hex circles
 // clipped to a rounded-rectangle boundary with a round logo keep-out, the same way. P3
 // (docs/modes/patterns.md#implementation-p3): the honeycomb with its chamfer on, cut by a V-bit
-// after the pocket, the bevel's volume against h(P·w/2 + πw²/3) per cell, the same way.
+// after the pocket, the bevel's volume against h(P·w/2 + πw²/3) per cell, the same way. P5
+// (docs/modes/patterns.md#implementation-p5): flipped triangles on the lid, and the through grille
+// chamfered top and bottom (the bottom from a flipped setup), each setup exported and streamed.
 import { beforeAll, describe, expect, it } from 'vitest'
 import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
@@ -286,7 +288,10 @@ describe('patterns P3 exit', () => {
 
 /** The lowest Z of a plan operation's toolpath for `designId`. */
 function lowestZ(s: Awaited<ReturnType<typeof planSetup>>, planId: string, designId: string) {
-  const op = opsOf(s.plan(planId)).find((o) => o.designOperationIds.includes(designId))!
+  const op = s
+    .plan(planId)
+    .setups.flatMap((x) => x.operations)
+    .find((o) => o.designOperationIds.includes(designId))!
   const tp = (
     s.query('plan.toolpath.get', { planId, planOperationId: op.id }) as {
       toolpath: Toolpath
@@ -408,5 +413,155 @@ describe('patterns P4 exit', () => {
     await expect(lines.join('\n') + '\n').toMatchFileSnapshot(
       '__golden__/pattern-through-grille.nc',
     )
+  })
+})
+
+describe('patterns P5 exit', () => {
+  const vbit = () =>
+    libraryInput({
+      name: 'V-bit 90°',
+      type: 'chamferMill' as const,
+      diameter: len('6'),
+      angle: deg('90'),
+      fluteLength: len('8'),
+      overallLength: len('50'),
+      fluteCount: num('2'),
+      toolMaterial: 'carbide' as const,
+      presets: [],
+    })
+
+  it('flipped triangles on the lid: nested at the gap, volume, plan, golden, machine', async () => {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const s = await planSetup({ part: false, services: svc, stock: LID })
+    const out = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Triangles',
+      lattice: 'square',
+      alternate: 'flip',
+      cell: { kind: 'polygon', sides: '3', diameter: '14', across: 'corners', cornerRadius: '2' },
+      spacing: { gap: '2' },
+      margin: '4',
+      depth: '1.5',
+    })) as { cells: number; warnings: { code: string; severity: string }[] }
+    expect(out.cells).toBeGreaterThan(15)
+    expect(out.warnings.filter((w) => w.severity !== 'info')).toEqual([])
+    await s.run('project.apply', {})
+
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const pocket = input.operations[0]!
+    if (pocket.kind !== 'pocket' || pocket.shape.contour.kind !== 'region')
+      throw new Error('no region')
+    // the cells keep the 2 mm web: grown by 0.99 they stay apart, by 1.01 they merge
+    const region = pocket.shape.contour.region
+    expect(expectOk(region2d.offset(region, -0.99)).pieces).toHaveLength(out.cells)
+    expect(expectOk(region2d.offset(region, -1.01)).pieces.length).toBeLessThan(out.cells)
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    const want = regionArea(region) * 1.5
+    expect(Math.abs(80 * 50 * 12 - solid.volume - want) / want).toBeLessThan(0.002)
+
+    const { lines, toolpath } = await planExportRun(s, svc)
+    const zs = toolpath.passes.flatMap((p) =>
+      p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])),
+    )
+    expect(Math.min(...zs)).toBeCloseTo(-1.5, 9)
+    await expect(lines.join('\n') + '\n').toMatchFileSnapshot(
+      '__golden__/pattern-triangles-flip.nc',
+    )
+  })
+
+  it('a through grille chamfered top and bottom: two setups, the bottom bevel from the flip, goldens, machine', async () => {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const panel = {
+      ...LID,
+      name: 'Panel',
+      thickness: '6',
+      material: { name: 'Birch plywood', class: 'sheetGood' as const },
+    }
+    const s = await planSetup({ part: false, services: svc, stock: panel })
+    await s.run('library.tool.add', { values: vbit() })
+    const out = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Grille',
+      lattice: 'hex',
+      cell: { kind: 'circle', diameter: '6' },
+      spacing: { gap: '2' },
+      margin: '5',
+      through: true,
+      chamfer: { width: '0.5', side: 'both' },
+    })) as { cells: number; operationIds: string[]; warnings: { code: string; severity: string }[] }
+    expect(out.operationIds).toEqual([
+      'pattern1_pocket',
+      'pattern1_chamfer',
+      'pattern1_bottomChamfer',
+    ])
+    expect(out.warnings.filter((w) => w.severity !== 'info')).toEqual([])
+    await s.run('project.apply', {})
+
+    // both bevels: 2 × h·(P·w/2 + π·w²/3) per Ø 6 cell (90°, h = w), beyond the through cells
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const pocket = input.operations[0]!
+    if (pocket.kind !== 'pocket' || pocket.shape.contour.kind !== 'region')
+      throw new Error('no region')
+    const w = 0.5
+    const P = Math.PI * 6
+    const bevels = 2 * out.cells * w * ((P * w) / 2 + (Math.PI * w * w) / 3)
+    const volume = (operations: typeof input.operations) =>
+      kernel
+        .withSolids((x) => evaluatePart({ ...input, operations }, x, undefined, region2d))
+        .unwrap().volume
+    const cut = volume(input.operations.slice(0, 1)) - volume(input.operations)
+    expect(Math.abs(cut - bevels) / bevels).toBeLessThan(0.002)
+
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const setups = s.plan(planId).setups
+    expect(setups.map((x) => [x.name, x.direction ?? '+z'])).toEqual([
+      ['Top', '+z'],
+      ['Bottom', '-z'],
+    ])
+    expect(setups[0]!.operations.flatMap((o) => o.designOperationIds)).toEqual([
+      'pattern1_pocket',
+      'pattern1_chamfer',
+    ])
+    expect(setups[1]!.operations.flatMap((o) => o.designOperationIds)).toEqual([
+      'pattern1_bottomChamfer',
+    ])
+    const warnings = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] })
+      .warnings
+    expect(warnings.filter((x) => x.severity === 'error')).toEqual([])
+    // plan.operation.list: the through pocket's material, 6 mm
+    const listed = (
+      s.query('plan.operation.list', { planId }) as {
+        operations: { designOperationIds: string[]; throughDepth: number | null }[]
+      }
+    ).operations
+    const through = (id: string) => listed.find((o) => o.designOperationIds.includes(id))
+    expect(through('pattern1_pocket')?.throughDepth).toBe(6)
+    expect(through('pattern1_chamfer')?.throughDepth).toBeNull()
+
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+      .value as { jobId: string }
+    const gen = expectOk(await s.d.job(jobId).unwrap().result) as {
+      operations: { status: string }[]
+    }
+    expect(gen.operations.every((o) => o.status === 'generated')).toBe(true)
+    // the bottom bevel: tip at Z −0.5 below the bottom face, one ring per cell
+    expect(lowestZ(s, planId, 'pattern1_bottomChamfer').z).toBeCloseTo(-0.5, 9)
+    const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+    for (const [i, setup] of setups.entries()) {
+      const e = expectOk(await exportPlan(s.d.doc, planId, svc as never, { setupId: setup.id }))
+      const run = await streamProgram(e.lines, machine)
+      expect(run.lines).toBe(e.lines.length)
+      await expect(e.lines.join('\n') + '\n').toMatchFileSnapshot(
+        `__golden__/pattern-through-grille-chamfer-${i === 0 ? 'top' : 'bottom'}.nc`,
+      )
+    }
   })
 })

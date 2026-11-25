@@ -6,7 +6,8 @@
  * the cells holes of the area; a split piece's `clip` rectangle cuts the result last. P4: a
  * stacked pattern's area is the region of the pattern below it, less the margin.
  * Doc: docs/modes/patterns.md#owned-shape-and-operations, docs/modes/patterns.md#implementation-p1,
- * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p4
+ * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p4,
+ * docs/modes/patterns.md#implementation-p5 (flip, ghosts)
  *
  * Pure numbers (mm, degrees) and the 2D port; the cell's and the boundary's own resolution is
  * passed in (shape.ts resolves named shapes and primitives), so this module has no shape-layer
@@ -33,7 +34,7 @@ import {
 import { orientRegion, translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { PatternRecord, ShapeItem } from '../shape.dto'
-import { patternWeb, type PatternWeb, type WebInput } from './web'
+import { latticePairs, patternWeb, type LatticePair, type PatternWeb, type WebInput } from './web'
 
 /** Most cells of one pattern (`patternTooMany`; S8: 2 000 with the P1 changes). */
 export const PATTERN_CELLS_MAX = 2000
@@ -85,7 +86,15 @@ export interface PatternFacts {
   readonly web?: PatternWeb | undefined
   /** What the web is measured on (P3: again at twice a chamfer's width, `dfm.chamferMeets`). */
   readonly webInput?: WebInput | undefined
+  /**
+   * P5: the cells left out at the border (crossing the area with `whole`, or dropped as slivers
+   * with `clip`), whole, face frame: the viewport's ghosts. At most `PATTERN_GHOSTS_MAX` pieces.
+   */
+  readonly ghosts?: Region | undefined
 }
+
+/** Ghost pieces kept at most (the viewport draws them dashed). */
+export const PATTERN_GHOSTS_MAX = 500
 
 /** The resolved cells: one region of disjoint pieces, in face-frame coordinates. */
 export interface PatternCells extends PatternFacts {
@@ -192,6 +201,9 @@ export function resolvePattern(
   const ex = tb.max[0] - tb.min[0]
   const ey = tb.max[1] - tb.min[1]
   const polar = p.lattice === 'polar'
+  // P5: every other cell turned 180° about its box centre (the same box)
+  const flip = p.alternate === 'flip'
+  const flippedCentred = flip ? orientRegion(centred, { rotation: 180, mirror: false }) : centred
   // polar: cells keep their orientation, so any two closer than the circumscribed diameter may
   // touch (P2)
   const diameter = 2 * circumRadius(centred)
@@ -205,7 +217,12 @@ export function resolvePattern(
         issue(['spacing', 'gap'], 'positive', 'must be greater than 0', { actual: g }),
       ])
     if (polar) a = b = diameter + g
-    else {
+    else if (flip) {
+      // P5: flipped neighbours nest (triangles), so both pitches are bisected to a web of g
+      const nested = flipPitches(port, centred, flippedCentred, ex, ey, g, p.lattice !== 'square')
+      if (nested.isErr()) return nested
+      ;[a, b] = nested.unwrap()
+    } else {
       a = ex + g
       b = p.lattice === 'hex' ? (a * Math.sqrt(3)) / 2 : ey + g
     }
@@ -220,7 +237,13 @@ export function resolvePattern(
   }
   const overlap = polar
     ? Ok(Math.min(a, b) < diameter + PATTERN_MIN_WEB)
-    : cellsOverlap(port, centred, ex, ey, a, b, p.lattice !== 'square')
+    : cellsOverlap(port, [centred, flippedCentred], ex, ey, {
+        a,
+        b,
+        shifted: p.lattice !== 'square',
+        angle: 0,
+        flip,
+      })
   if (overlap.isErr()) return overlap
   if (overlap.unwrap())
     return invalid([
@@ -257,6 +280,10 @@ export function resolvePattern(
     polar || p.angle === 0 ? centred : orientRegion(centred, { rotation: p.angle, mirror: false })
   const cb = boundsOf(cell)!
   const cellArea = regionArea(cell)
+  // P5: the flipped cell (about the node, so its box is the cell's mirrored through the node)
+  const flipped = flip ? orientRegion(cell, { rotation: 180, mirror: false }) : cell
+  const fb: Bounds2 = { min: [-cb.max[0], -cb.max[1]], max: [-cb.min[0], -cb.min[1]] }
+  const cellAt = (f: boolean) => (f ? flipped : cell)
 
   const tooMany = () =>
     invalid([
@@ -270,41 +297,56 @@ export function resolvePattern(
   const clip = p.fit === 'clip'
   const index = rect ? undefined : new EdgeIndex(regionElements(areaRegion))
   const whole: Vec2[] = []
+  const wholeFlips: boolean[] = []
   const fragments: RegionPiece[] = []
+  const ghosts: RegionPiece[] = []
   let crossing = 0
   let dropped = 0
-  /** Sorts one node: kept whole, cut (clip), or left out. */
-  const place = (n: Vec2): AppResult<void> => {
+  const keep = (n: Vec2, f: boolean) => {
+    whole.push(n)
+    wholeFlips.push(f)
+  }
+  const ghost = (n: Vec2, f: boolean) => {
+    if (ghosts.length < PATTERN_GHOSTS_MAX) ghosts.push(...translateRegion(cellAt(f), n).pieces)
+  }
+  /** Sorts one node: kept whole, cut (clip), or left out (a ghost when it crosses the area). */
+  const place = (n: Vec2, f: boolean): AppResult<void> => {
+    const c = f ? fb : cb
     const box: Bounds2 = {
-      min: [n[0] + cb.min[0], n[1] + cb.min[1]],
-      max: [n[0] + cb.max[0], n[1] + cb.max[1]],
+      min: [n[0] + c.min[0], n[1] + c.min[1]],
+      max: [n[0] + c.max[0], n[1] + c.max[1]],
     }
     if (disjoint(box, lo, hi)) return Ok(undefined)
     let cut: Region | undefined
     if (rect) {
       if (inside(box, lo, hi)) {
-        whole.push(n)
+        keep(n, f)
         return Ok(undefined)
       }
-      if (!clip) return Ok(undefined)
+      if (!clip) {
+        ghost(n, f)
+        return Ok(undefined)
+      }
     } else if (!index!.touches(box)) {
-      if (regionContains(areaRegion, n)) whole.push(n)
+      if (regionContains(areaRegion, n)) keep(n, f)
       return Ok(undefined)
     } else {
-      const x = port.intersect(translateRegion(cell, n), areaRegion)
+      const x = port.intersect(translateRegion(cellAt(f), n), areaRegion)
       if (x.isErr()) return Err(x.unwrapErr())
       const share = regionArea(x.unwrap())
       if (share >= cellArea * (1 - AREA_SHARE)) {
-        whole.push(n)
+        keep(n, f)
         return Ok(undefined)
       }
+      if (share > cellArea * AREA_SHARE) ghost(n, f)
       if (!clip || share <= cellArea * AREA_SHARE) return Ok(undefined)
       cut = x.unwrap()
     }
     if (cut === undefined) {
-      const x = port.intersect(translateRegion(cell, n), areaRegion)
+      const x = port.intersect(translateRegion(cellAt(f), n), areaRegion)
       if (x.isErr()) return Err(x.unwrapErr())
       cut = x.unwrap()
+      if (cut.pieces.length > 0) ghost(n, f)
     }
     let kept = false
     for (const piece of cut.pieces) {
@@ -323,10 +365,10 @@ export function resolvePattern(
 
   // nodes covering the area
   const nodes = polar
-    ? polarNodes(origin, lo, hi, a, b, p.angle)
-    : rowNodes(origin, lo, hi, a, b, p)
-  for (const n of nodes) {
-    const done = place(n)
+    ? polarNodes(origin, lo, hi, a, b, p.angle, flip)
+    : rowNodes(origin, lo, hi, a, b, p, flip)
+  for (const { at: n, flip: f } of nodes) {
+    const done = place(n, f)
     if (done.isErr()) return done
     if (whole.length + crossing > PATTERN_CELLS_MAX) return tooMany()
   }
@@ -335,11 +377,13 @@ export function resolvePattern(
   if (p.invert === true) {
     // our own sharp corners (the margin's rectangle, cells meeting the boundary) are rounded
     const round = fragments.length > 0 || (rect && p.margin > 0)
-    const holes = invertCells(port, areaRegion, cell, whole, fragments, round)
+    const holes = invertCells(port, areaRegion, cellAt, whole, wholeFlips, fragments, round)
     if (holes.isErr()) return holes
     pieces = holes.unwrap()
   } else {
-    for (const n of whole) pieces.push(...translateRegion(cell, [n[0] + 0, n[1] + 0]).pieces)
+    whole.forEach((n, i) =>
+      pieces.push(...translateRegion(cellAt(wholeFlips[i]!), [n[0] + 0, n[1] + 0]).pieces),
+    )
     pieces.push(...fragments)
   }
   let region: Region = { pieces }
@@ -350,10 +394,13 @@ export function resolvePattern(
   }
   const webInput: WebInput = {
     cell,
+    ...(flip ? { flipped, flips: wholeFlips } : {}),
     diameter,
     nodes: whole,
     invert: p.invert === true,
-    lattice: polar ? undefined : { a, b, shifted: p.lattice !== 'square', angle: p.angle },
+    lattice: polar
+      ? undefined
+      : { a, b, shifted: p.lattice !== 'square', angle: p.angle, ...(flip ? { flip } : {}) },
     centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2],
   }
   const web = patternWeb(port, webInput)
@@ -366,6 +413,7 @@ export function resolvePattern(
     pitch: [a, b],
     webInput,
     ...(web === undefined ? {} : { web }),
+    ...(ghosts.length === 0 ? {} : { ghosts: { pieces: ghosts } }),
   })
 }
 
@@ -438,7 +486,16 @@ function stackedArea(
     .map((region) => ({ region, rect: false }))
 }
 
-/** Row lattices (square, staggered, hex): nodes over the area's box, one pitch beyond. */
+/** A lattice node and whether its cell is flipped (P5, `alternate: flip`). */
+interface LatticeNode {
+  readonly at: Vec2
+  readonly flip: boolean
+}
+
+/**
+ * Row lattices (square, staggered, hex): nodes over the area's box, one pitch beyond. With
+ * `flip` (P5), the node in column i of row j is flipped when i + j is odd (the origin's is not).
+ */
 function rowNodes(
   origin: Vec2,
   lo: Vec2,
@@ -446,7 +503,8 @@ function rowNodes(
   a: number,
   b: number,
   p: PatternDefinition,
-): Vec2[] {
+  flip: boolean,
+): LatticeNode[] {
   const shifted = p.lattice !== 'square'
   const cs = cosSin(p.angle)
   const inv: Vec2 = [cs[0], -cs[1]]
@@ -459,14 +517,17 @@ function rowNodes(
   const qy1 = Math.max(...corners.map((c) => c[1]))
   const j0 = Math.floor(qy0 / b) - 1
   const j1 = Math.ceil(qy1 / b) + 1
-  const nodes: Vec2[] = []
+  const nodes: LatticeNode[] = []
   for (let j = j0; j <= j1; j++) {
     const s = shifted && ((j % 2) + 2) % 2 === 1 ? a / 2 : 0
     const i0 = Math.floor((qx0 - s) / a) - 1
     const i1 = Math.ceil((qx1 - s) / a) + 1
     for (let i = i0; i <= i1; i++) {
       const q = rot(cs, [i * a + s, j * b])
-      nodes.push([origin[0] + q[0], origin[1] + q[1]])
+      nodes.push({
+        at: [origin[0] + q[0], origin[1] + q[1]],
+        flip: flip && (((i + j) % 2) + 2) % 2 === 1,
+      })
     }
   }
   return nodes
@@ -475,15 +536,23 @@ function rowNodes(
 /**
  * Polar nodes (P2): ring 0 is the origin, ring k at radius k·b holds ⌊π / asin(a / 2r)⌋ cells
  * (neighbours a chord of at least `a` apart), each ring starting at `angle`; rings out to the
- * area's farthest corner.
+ * area's farthest corner. With `flip` (P5) every odd cell of a ring is flipped.
  */
-function polarNodes(origin: Vec2, lo: Vec2, hi: Vec2, a: number, b: number, angle: number): Vec2[] {
+function polarNodes(
+  origin: Vec2,
+  lo: Vec2,
+  hi: Vec2,
+  a: number,
+  b: number,
+  angle: number,
+  flip: boolean,
+): LatticeNode[] {
   const reach = Math.max(
     ...[lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]].map((c) =>
       Math.hypot(c[0] - origin[0], c[1] - origin[1]),
     ),
   )
-  const nodes: Vec2[] = [[origin[0], origin[1]]]
+  const nodes: LatticeNode[] = [{ at: [origin[0], origin[1]], flip: false }]
   const start = (angle * Math.PI) / 180
   // more rings than cells could fit is a pitch far too small: patternTooMany stops it
   const rings = Math.min(Math.ceil(reach / b) + 1, PATTERN_CELLS_MAX * 4)
@@ -492,7 +561,10 @@ function polarNodes(origin: Vec2, lo: Vec2, hi: Vec2, a: number, b: number, angl
     const n = a >= 2 * r ? 1 : Math.max(1, Math.floor(Math.PI / Math.asin(a / (2 * r)) + 1e-9))
     for (let i = 0; i < n; i++) {
       const t = start + (2 * Math.PI * i) / n
-      nodes.push([origin[0] + r * Math.cos(t), origin[1] + r * Math.sin(t)])
+      nodes.push({
+        at: [origin[0] + r * Math.cos(t), origin[1] + r * Math.sin(t)],
+        flip: flip && i % 2 === 1,
+      })
     }
     if (nodes.length > PATTERN_CELLS_MAX * 8) break
   }
@@ -559,8 +631,9 @@ function holder(pieces: readonly RegionPiece[], p: Vec2): number {
 function invertCells(
   port: Region2dPort,
   area: Region,
-  cell: Region,
+  cellAt: (flipped: boolean) => Region,
   whole: readonly Vec2[],
+  flips: readonly boolean[],
   fragments: readonly RegionPiece[],
   round: boolean,
 ): AppResult<RegionPiece[]> {
@@ -578,8 +651,8 @@ function invertCells(
   const out = base.pieces.map((p) => ({ outer: p.outer, holes: [...p.holes] }))
   const extra: RegionPiece[] = []
   const boxes = out.map((p) => chainBounds(p.outer.elements)!)
-  for (const n of whole) {
-    for (const piece of translateRegion(cell, [n[0] + 0, n[1] + 0]).pieces) {
+  for (const [k0, n] of whole.entries()) {
+    for (const piece of translateRegion(cellAt(flips[k0]!), [n[0] + 0, n[1] + 0]).pieces) {
       const at = piece.outer.elements[0]!.a
       const near = out.map((_, i) => i).filter((i) => !disjoint(boxes[i]!, at, at))
       const k = holder(
@@ -641,39 +714,93 @@ export function clipToRect(
 
 /**
  * Whether the cell overlaps (or comes within `PATTERN_MIN_WEB` of) a neighbour: every lattice
- * offset at which the cells' boxes overlap is measured with the port (the cell grown by the web
- * against the moved cell). Translation invariance makes one cell enough.
+ * pair at which the cells' boxes overlap is measured with the port (the cell grown by the web
+ * against the moved cell). Translation invariance makes one cell enough (P5, flip: one of each
+ * orientation, `cells` = [cell, flipped]; both have one box).
  */
 function cellsOverlap(
   port: Region2dPort,
-  cell: Region,
+  cells: readonly [Region, Region],
   ex: number,
   ey: number,
-  a: number,
-  b: number,
-  shifted: boolean,
+  l: { a: number; b: number; shifted: boolean; angle: 0; flip: boolean },
 ): AppResult<boolean> {
-  const offsets: Vec2[] = []
-  const nj = Math.ceil((ey + PATTERN_MIN_WEB) / b)
-  for (let j = 0; j <= nj; j++) {
-    const s = shifted && j % 2 === 1 ? a / 2 : 0
-    const ni = Math.ceil((ex + PATTERN_MIN_WEB) / a) + 1
-    for (let i = -ni; i <= ni; i++) {
-      const dx = i * a + s
-      const dy = j * b
-      if (j === 0 && dx <= 0) continue
-      if (Math.abs(dx) < ex + PATTERN_MIN_WEB && Math.abs(dy) < ey + PATTERN_MIN_WEB)
-        offsets.push([dx, dy])
+  const nj = Math.ceil((ey + PATTERN_MIN_WEB) / l.b)
+  const ni = Math.ceil((ex + PATTERN_MIN_WEB) / l.a) + 1
+  const pairs = latticePairs(
+    l,
+    ni,
+    nj,
+    (dx, dy) => Math.abs(dx) < ex + PATTERN_MIN_WEB && Math.abs(dy) < ey + PATTERN_MIN_WEB,
+  )
+  if (pairs.length === 0) return Ok(false)
+  if (pairs.length > OVERLAP_CHECKS_MAX * (l.flip ? 4 : 1)) return Ok(true)
+  return closePair(port, cells, PATTERN_MIN_WEB, pairs)
+}
+
+/** Whether some pair of cells comes within `web` (the pair's first cell grown by it). */
+function closePair(
+  port: Region2dPort,
+  cells: readonly [Region, Region],
+  web: number,
+  pairs: readonly LatticePair[],
+): AppResult<boolean> {
+  const grown: [Region | undefined, Region | undefined] = [undefined, undefined]
+  for (const d of pairs) {
+    let g = grown[d.from]
+    if (g === undefined) {
+      const r = port.offset(cells[d.from], -web)
+      if (r.isErr()) return Err(r.unwrapErr())
+      g = grown[d.from] = r.unwrap()
     }
-  }
-  if (offsets.length === 0) return Ok(false)
-  if (offsets.length > OVERLAP_CHECKS_MAX) return Ok(true)
-  const grown = port.offset(cell, -PATTERN_MIN_WEB)
-  if (grown.isErr()) return Err(grown.unwrapErr())
-  for (const d of offsets) {
-    const both = port.intersect(grown.unwrap(), translateRegion(cell, d))
+    const both = port.intersect(g, translateRegion(cells[d.to], d.off))
     if (both.isErr()) return Err(both.unwrapErr())
     if (both.unwrap().pieces.length > 0 && regionArea(both.unwrap()) > 1e-12) return Ok(true)
   }
   return Ok(false)
+}
+
+/** The flip pitches are bisected to this (mm). */
+const PITCH_PRECISION = 1e-6
+
+/**
+ * P5 (`alternate: flip`): the pitches at which flipped neighbours nest with a web of `gap`, as
+ * the triangles of a triangle tiling: along a row (alternating cells) the smallest pitch at which
+ * no two cells of the row come within the gap, then between rows the smallest at which no cell
+ * of another row does. Each is bisected between 0 and the box rule (cell extent + gap), where the
+ * boxes alone keep the gap.
+ */
+function flipPitches(
+  port: Region2dPort,
+  cell: Region,
+  flipped: Region,
+  ex: number,
+  ey: number,
+  gap: number,
+  shifted: boolean,
+): AppResult<Vec2> {
+  const cells = [cell, flipped] as const
+  const tooClose = (a: number, b: number, rows: boolean): AppResult<boolean> => {
+    const ni = Math.ceil((ex + gap) / a) + 1
+    const nj = rows ? Math.ceil((ey + gap) / b) : 0
+    const pairs = latticePairs({ a, b, shifted, angle: 0, flip: true }, ni, nj, (dx, dy) => {
+      const near = Math.abs(dx) < ex + gap && Math.abs(dy) < ey + gap
+      return near && (rows ? dy !== 0 : dy === 0)
+    }).sort((p, q) => Math.hypot(p.off[0], p.off[1]) - Math.hypot(q.off[0], q.off[1]))
+    return closePair(port, cells, gap, pairs)
+  }
+  const bisect = (hi: number, close: (x: number) => AppResult<boolean>): AppResult<number> => {
+    let lo = 0
+    while (hi - lo > PITCH_PRECISION) {
+      const mid = (lo + hi) / 2
+      const c = close(mid)
+      if (c.isErr()) return c
+      if (c.unwrap()) lo = mid
+      else hi = mid
+    }
+    return Ok(hi)
+  }
+  const a = bisect(ex + gap, (x) => tooClose(x, ey + gap, false))
+  if (a.isErr()) return a
+  return bisect(ey + gap, (y) => tooClose(a.unwrap(), y, true)).map((b): Vec2 => [a.unwrap(), b])
 }

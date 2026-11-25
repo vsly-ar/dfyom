@@ -1,9 +1,11 @@
 // Patterns P1 in the built app: Add → Features → Pattern adds a pattern feature with the defaults
 // on the stock top, the minimal inspector shows the cell read-out, and its Lattice and Cell
 // fields update the pattern (one `design.pattern.update` each). P2: a preset, the Polar lattice,
-// Clip and Invert. P3: the Chamfer switch and its width. P4: the Through switch. Windows stay
-// hidden (app.fixture.ts).
+// Clip and Invert. P3: the Chamfer switch and its width. P4: the Through switch. P5: the chamfer's
+// Edges (Both shows the bottom V-bit) and the Triangles preset's Flip. Windows stay hidden
+// (app.fixture.ts).
 // Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, #implementation-p3, #implementation-p4,
+// #implementation-p5,
 // docs/conventions/ui.md
 import type { Locator } from '@playwright/test'
 import { expect, test } from './app.fixture'
@@ -109,7 +111,28 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(through).toBeChecked()
   await expect(depth).toBeHidden()
   await expect(inspector.getByText(/cut through the stock and cleared/)).toBeVisible()
+
+  // ── P5: through cells chamfered on both faces (the bottom from a flipped setup) ────────────
+  const side = inspector.locator('[data-feature-field="chamfer.side"]')
+  const bottomTool = inspector.locator('[data-feature-field="chamfer.bottomTool"]')
+  await expect(bottomTool).toBeHidden()
+  await side.getByRole('radio', { name: 'Both' }).click()
+  await expect(side.getByRole('radio', { name: 'Both' })).toBeChecked()
+  await expect(bottomTool).toBeVisible()
+  await expect(inspector.getByText(/cut from a flipped setup/)).toBeVisible()
+  await side.getByRole('radio', { name: 'Top' }).click()
+  await expect(bottomTool).toBeHidden()
   await through.click()
   await expect(through).not.toBeChecked()
   await expect(depth).toBeVisible()
+
+  // ── P5: the Triangles preset turns every other cell (Flip) ─────────────────────────────────
+  const flip = inspector.getByRole('switch', { name: 'Flip every other cell' })
+  await expect(flip).not.toBeChecked()
+  await inspector.getByRole('button', { name: 'Presets' }).click()
+  await page.getByRole('menuitem', { name: 'Triangles' }).click()
+  await expect(flip).toBeChecked()
+  await expect(inspector.getByText(/so triangles nest/)).toBeVisible()
+  await flip.click()
+  await expect(flip).not.toBeChecked()
 })

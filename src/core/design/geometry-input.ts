@@ -256,7 +256,7 @@ function operationGeometry(
             // patterns P3: the cells' bevels meeting is the pattern's finding (its own chamfer;
             // a separate chamfer on the cells keeps the region-wide check)
             ...(op.owner.isSome() &&
-            op.owner.unwrap().role === 'chamfer' &&
+            PATTERN_CHAMFER_ROLES.has(op.owner.unwrap().role) &&
             isPatternShape(source?.shape ?? edgeOp.shape, shapes)
               ? { pattern: true }
               : {}),
@@ -288,6 +288,9 @@ function operationGeometry(
     }
   }
 }
+
+/** A pattern's own chamfers: its top edges (P3) and its through cells' bottom edges (P5). */
+const PATTERN_CHAMFER_ROLES: ReadonlySet<string> = new Set(['chamfer', 'bottomChamfer'])
 
 /** A named shape that is a pattern's owned cells (patterns P3). */
 const isPatternShape = (shape: Shape, shapes: Part['shapes']): boolean =>

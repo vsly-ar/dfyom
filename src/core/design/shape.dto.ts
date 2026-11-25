@@ -225,6 +225,8 @@ export interface PatternRecord {
   /** Face frame; absent = the centre of the boundary less the margin. */
   origin?: [number, number] | undefined
   spacing: { gap: number } | { pitch: [number, number] }
+  /** P5: every other cell turned 180° (absent = none). */
+  alternate?: 'flip' | undefined
   boundary: { min: [number, number]; max: [number, number] }
   /** A named shape as the boundary: its box centre at `center` (face frame), turned by `rotation`. */
   area?: { shapeId: string; center: [number, number]; rotation: number } | undefined
@@ -255,6 +257,7 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
   angle: num,
   origin: pair.optional(),
   spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),
+  alternate: z.literal('flip').optional(),
   boundary: z.object({ min: pair, max: pair }),
   area: z.object({ shapeId: ShapeIdSchema, center: pair, rotation: num }).optional(),
   margin: num,

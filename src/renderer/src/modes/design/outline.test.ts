@@ -1,13 +1,15 @@
 // The live outline of named and rotated shapes (task U1): placed through the renderer's 2D port
 // (`placeShape`), all loops of a region at the top face and the floor, an open path marked open;
-// without the port these shapes draw no outline.
+// without the port these shapes draw no outline. Patterns P5: a selected pattern's guide is its
+// area, the cells left out at the border (ghosts) and a ring at the thinnest web.
 // Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
 // docs/modes/design-v0.3.md#placing-a-shape-on-a-face
 import { describe, expect, it } from 'vitest'
 import { designSetup } from '../../../../core/design/design.fixture'
 import { nodeRegion2d } from '../../../../core/geometry/2d/testing/node-wasm'
 import { designPart } from './model'
-import { operationOutline } from './outline'
+import { patternFacts } from '../../../../core/design/pattern/pattern'
+import { operationOutline, PATTERN_WEB_MARKER, patternGuideLoops } from './outline'
 
 const region2d = nodeRegion2d()
 
@@ -90,5 +92,30 @@ describe('outline of named and rotated shapes', () => {
       [35, 30],
       [65, 30],
     ])
+  })
+})
+
+describe("a pattern's guide (patterns P5)", () => {
+  it('the area, a ghost per cell left out at the border and a ring at the thinnest web', async () => {
+    const s = await designSetup({ services: { region2d } })
+    await s.run('design.pattern.add', {
+      partId: s.partId,
+      lattice: 'hex',
+      cell: { kind: 'circle', diameter: '6' },
+      spacing: { gap: '0.6' },
+      margin: '3',
+    })
+    const part = designPart(s.d.doc)!
+    const op = part.loaded!.part.operations[0]!
+    const facts = patternFacts('pattern1', part.dto.shapes ?? [], region2d)!
+    expect(facts.ghosts?.pieces.length).toBeGreaterThan(0)
+    expect(facts.web).toBeDefined()
+    const loops = patternGuideLoops(op, part.loaded!.stock, part.table!, facts)
+    expect(loops).toHaveLength(1 + facts.ghosts!.pieces.length + 1)
+    // on the top face; the last loop rings the web marker
+    expect(loops.every((l) => l.every((p) => Math.abs(p[2]!) < 1e-9))).toBe(true)
+    const [u, v] = facts.web!.at
+    for (const p of loops.at(-1)!)
+      expect(Math.hypot(p[0]! - u, p[1]! - v)).toBeCloseTo(PATTERN_WEB_MARKER, 6)
   })
 })
