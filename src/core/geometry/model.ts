@@ -350,6 +350,8 @@ export const DFM_WARNING_CODES = [
   // tabs off free sides (v0.4 TB1): docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
   'dfm.tabsRelocated',
   'dfm.tabsNoHold',
+  // split parts 4a (`operation` = the split id, `params.rule` the rule): docs/modes/split-parts.md#dfm-near-a-split
+  'design.split',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 

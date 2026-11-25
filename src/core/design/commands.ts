@@ -64,6 +64,7 @@ import {
   OperationDtoSchema,
   type OperationDTO,
   OperationIdSchema,
+  DerivedFromDtoSchema,
   PartDtoSchema,
   type PartDTO,
   PartIdSchema,
@@ -80,6 +81,8 @@ import {
   warningsWithEvaluation,
 } from './evaluation'
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
+import { derivedPartError } from './split/derived'
+import { splitWarnings } from './split/findings'
 import { dropUnusedToolSnapshot, ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
 import { defaultSlotWidth, lengthSourceUp, resolveDesignTool } from './tool-choice'
@@ -1201,7 +1204,8 @@ const partUpdate = defineCommand({
 const partRemove = defineCommand({
   kind: 'document',
   name: 'design.part.remove',
-  summary: 'Remove a part with its references and plans (confirm: true when it has plans).',
+  summary:
+    'Remove a part with its references, plans and split pieces (confirm: true when any have plans).',
   title: () => 'Remove part',
   machine: false,
   args: z.object({
@@ -1213,7 +1217,15 @@ const partRemove = defineCommand({
     const where = 'design.part.remove'
     const part = Object.hasOwn(draft.parts, args.partId) ? draft.parts[args.partId] : undefined
     if (part === undefined) return unknownPart(args.partId, where)
-    const plans = Object.values(draft.plans).filter((p) => p.design.partId === args.partId)
+    // a piece goes with its split (split-parts.md § Source and pieces); a source takes its pieces
+    if (part.derivedFrom !== undefined) return derivedPartError(draft, part, where)
+    const gone = new Set([
+      args.partId,
+      ...Object.values(draft.parts)
+        .filter((p) => p.derivedFrom?.partId === args.partId)
+        .map((p) => p.id),
+    ])
+    const plans = Object.values(draft.plans).filter((p) => gone.has(p.design.partId))
     const inUse = plans.find((p) => p.status === 'inUse')
     if (inUse !== undefined)
       return invalid(
@@ -1237,15 +1249,19 @@ const partRemove = defineCommand({
         ],
         where,
       })
-    const stock = part.stock
+    const removed = [...gone].map((id) => draft.parts[id]!)
     const tools = new Set(
-      part.operations.flatMap((o) => (o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [])),
+      removed.flatMap((q) =>
+        q.operations.flatMap((o) => (o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [])),
+      ),
     )
-    delete draft.parts[args.partId]
+    for (const id of gone) delete draft.parts[id]
     for (const p of plans) delete draft.plans[p.id]
     for (const r of Object.values(draft.references))
-      if (r.partId === args.partId) delete draft.references[r.id]
-    if (!Object.values(draft.parts).some((p) => p.stock === stock)) delete draft.snapshots[stock]
+      if (gone.has(r.partId)) delete draft.references[r.id]
+    for (const q of removed)
+      if (!Object.values(draft.parts).some((p) => p.stock === q.stock))
+        delete draft.snapshots[q.stock]
     for (const id of tools) dropUnusedToolSnapshot(draft, id)
     return Ok({ removedPlans: plans.map((p) => p.id) })
   },
@@ -1368,9 +1384,24 @@ const partList = defineQuery({
   name: 'design.part.list',
   summary: 'List the parts of the project with their ids.',
   args: z.object({}),
-  result: z.object({ parts: z.array(z.object({ id: PartIdSchema, name: z.string() })) }),
+  result: z.object({
+    parts: z.array(
+      z.object({
+        id: PartIdSchema,
+        name: z.string(),
+        // a split piece (split parts 4a): its source and number
+        derivedFrom: DerivedFromDtoSchema.optional(),
+      }),
+    ),
+  }),
   run(doc) {
-    return Ok({ parts: Object.values(doc.parts).map((p) => ({ id: p.id, name: p.name })) })
+    return Ok({
+      parts: Object.values(doc.parts).map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.derivedFrom === undefined ? {} : { derivedFrom: p.derivedFrom }),
+      })),
+    })
   },
 })
 
@@ -1477,11 +1508,15 @@ const warningList = defineQuery({
         const r = warningsWithEvaluation(doc, args.partId, warnings, state)
         return {
           ...r,
-          warnings: r.warnings.map((w) =>
-            TOOL_RULES.has(w.code) && again.has(w.operation)
-              ? { ...w, pendingApply: true as const }
-              : w,
-          ),
+          warnings: [
+            ...r.warnings.map((w) =>
+              TOOL_RULES.has(w.code) && again.has(w.operation)
+                ? { ...w, pendingApply: true as const }
+                : w,
+            ),
+            // split findings (split parts 4a) after the part's own
+            ...(dto.split === undefined ? [] : splitWarnings(doc, loaded.unwrap(), ctx.services)),
+          ],
         }
       })
       .mapErr((e) => e.withContext(where))

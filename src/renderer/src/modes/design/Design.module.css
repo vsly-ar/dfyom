@@ -1724,3 +1724,96 @@
     transform: translateY(4px);
   }
 }
+
+/* split parts 4a: the split section of the part inspector (ui.md § Split part) */
+.splitSection {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.splitSection > * {
+  justify-self: stretch;
+}
+
+.splitSection > button {
+  justify-self: start;
+}
+
+.splitGroup {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: var(--space-1);
+}
+
+.splitPreview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.splitView {
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.splitView svg {
+  width: 100%;
+  height: auto;
+  max-height: 120px;
+  background: var(--bg-viewport);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* the whole part, faint: where the pieces came from */
+.splitWhole {
+  fill: none;
+  stroke: var(--border-control);
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.splitPiece {
+  transition: transform var(--motion-slow) var(--ease-emphasized);
+}
+
+.splitPiece rect {
+  fill: var(--bg-raised);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.splitPiece text {
+  fill: var(--text-muted);
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-variant-numeric: tabular-nums;
+}
+
+.splitChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.splitChip {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

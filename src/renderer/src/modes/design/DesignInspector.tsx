@@ -40,6 +40,7 @@ import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
 import { ReferencePanel } from './ReferencePanel'
 import { ShapeInspector } from './ShapeInspector'
+import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
 import { ToolField } from './ToolField'
 import {
   defaultUnit,
@@ -161,6 +162,18 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
   const face = selectedFace(part, selected)
   if (face !== undefined) return <FaceInspector key={face.id} part={part} face={face} />
   const op = part.dto.operations.find((o) => o.id === selected)
+  // a split piece is read-only: its source is edited (split parts 4a)
+  if (part.dto.derivedFrom !== undefined)
+    return op === undefined ? (
+      <PieceInspector
+        part={part}
+        warnings={warnings}
+        warningItems={(w) => warningView(w, part, undefined)}
+        labels={warningLabels}
+      />
+    ) : (
+      <PieceOperationNote key={op.id} part={part} operationId={op.id} />
+    )
   if (op === undefined) return <PartInspector part={part} warnings={warnings} />
   const owner = ownerFeature(part.dto, op)
   return owner !== undefined ? (
@@ -237,6 +250,7 @@ function PartInspector({
         <EvaluationLine status={evaluation?.status} />
         {/* how operations get onto a face (DF22) */}
         <p className={styles['muted']}>{m.face.emptyHint}</p>
+        <SplitSection part={part} />
         <section aria-label={dfmMessages.listTitle} className={styles['warnings']}>
           <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
           <WarningList

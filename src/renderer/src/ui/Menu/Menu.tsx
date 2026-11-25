@@ -35,6 +35,8 @@ export interface MenuItem {
   checked?: boolean | undefined
   /** React key when labels may repeat (two parts of the same name); default the label. */
   id?: string | undefined
+  /** One level in under the item before it (a split's pieces under their source, split parts 4a). */
+  inset?: boolean | undefined
 }
 
 /** A labelled group of items (`role="group"` named by its label). */
@@ -196,6 +198,7 @@ function Item({ p, item }: { p: Parts; item: MenuItem }): React.JSX.Element {
   return (
     <p.Item
       className={styles['item']}
+      data-inset={item.inset || undefined}
       data-danger={item.danger || undefined}
       data-reason={reason !== undefined || undefined}
       disabled={item.disabled ?? false}

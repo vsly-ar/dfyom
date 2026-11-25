@@ -201,6 +201,41 @@ export const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 // No description: the primer says once that ids come from results (llm-api.md#schemas).
 export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN)
 
+/** `split1`: one split per part (SP-D); generated operations are `<splitId>_<role>`. */
+export const SPLIT_ID_PATTERN = /^split[1-9]\d{0,5}$/
+export const SplitIdSchema = z.string().regex(SPLIT_ID_PATTERN)
+/** 4a: butt joints only (glue faces, no geometry); keyed joints come in 4b. */
+export const SPLIT_JOINTS = ['butt'] as const
+export type SplitJoint = (typeof SPLIT_JOINTS)[number]
+
+/**
+ * A straight vertical split line through the whole part (4a): `axis` is the coordinate it fixes,
+ * `{ axis: 'x', at: 125 }` is the plane x = 125 (it runs along Y).
+ */
+export const SplitLineDtoSchema = z.object({ axis: z.enum(['x', 'y']), at: length() })
+export type SplitLineDTO = z.output<typeof SplitLineDtoSchema>
+
+/**
+ * The split of a source part (docs/modes/split-parts.md#split): lines and levels (part-frame z,
+ * between the stock bottom −T and the top 0) cut it into pieces; `margin` per side of each blank.
+ */
+export const SplitDtoSchema = z.object({
+  id: SplitIdSchema,
+  lines: z.array(SplitLineDtoSchema),
+  levels: z.array(length()),
+  margin: length(),
+  joint: z.object({ kind: z.enum(SPLIT_JOINTS) }),
+})
+export type SplitDTO = z.output<typeof SplitDtoSchema>
+
+/** A piece's source: the part, its split and the piece's number (1-based, by position). */
+export const DerivedFromDtoSchema = z.object({
+  partId: z.string().regex(RECORD_ID_PATTERN),
+  splitId: SplitIdSchema,
+  index: z.number().int().min(1),
+})
+export type DerivedFromDTO = z.output<typeof DerivedFromDtoSchema>
+
 export const PartDtoSchema = z.object({
   id: PartIdSchema,
   name: z.string().min(1).max(NAME_MAX),
@@ -211,5 +246,11 @@ export const PartDtoSchema = z.object({
   /** Features (v0.4, docs/modes/features.md#persistence-high-level); absent = none. */
   features: z.array(FeatureDtoSchema).optional().describe('Features owning operations'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
+  /** Split parts 4a (docs/modes/split-parts.md#model): on a source part; absent = not split. */
+  split: SplitDtoSchema.optional(),
+  /** On a piece: its source. A piece is derived, regenerated from the source, read-only. */
+  derivedFrom: DerivedFromDtoSchema.optional(),
+  /** On a piece: source part frame + offset = piece frame (mm). */
+  offset: z.tuple([length(), length(), length()]).optional(),
 })
 export type PartDTO = z.output<typeof PartDtoSchema>

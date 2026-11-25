@@ -6,7 +6,8 @@
 // (exit-criteria.v03.fixture.ts: SVG shapes, Shape Editor commands, shape operations, two setups,
 // the deviation check); and the v0.4 flow (exit-criteria.v04.fixture.ts: the enclosure lid with
 // holes, Clones and countersink chamfers); and the alignment phase 1 flow
-// (exit-criteria.alignment.fixture.ts, DF78). Also checks the CI criterion.
+// (exit-criteria.alignment.fixture.ts, DF78); and the split parts 4a flow
+// (exit-criteria.split.fixture.ts, DF91). Also checks the CI criterion.
 // Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria,
 // docs/plans/v0.3.md#exit-criteria, docs/plans/v0.4.md#exit-criteria,
 // docs/architecture/llm-api.md#testing,
@@ -24,6 +25,7 @@ import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
 import { exitCriteriaV03Flow } from './exit-criteria.v03.fixture'
 import { CALL_BUDGET, exitCriteriaV04Flow } from './exit-criteria.v04.fixture'
 import { exitCriteriaAlignmentFlow } from './exit-criteria.alignment.fixture'
+import { exitCriteriaSplitFlow } from './exit-criteria.split.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
 // the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
@@ -31,8 +33,10 @@ const dirV02 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v02-'))
 const dirV03 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v03-'))
 const dirV04 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v04-'))
 const dirAlign = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-align-'))
+const dirSplit = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-split-'))
 afterAll(() => {
   rmSync(dirAlign, { recursive: true, force: true })
+  rmSync(dirSplit, { recursive: true, force: true })
   rmSync(dir, { recursive: true, force: true })
   rmSync(dirV02, { recursive: true, force: true })
   rmSync(dirV03, { recursive: true, force: true })
@@ -173,6 +177,18 @@ describe('exit criteria headless: dfyom mcp, alignment phase 1', { timeout: 180_
     await exitCriteriaAlignmentFlow(call, dirAlign)
     await client.close()
     expect(stderr.join('')).toBe('')
+  })
+})
+
+// hardening DF91: docs/modes/split-parts.md#implementation-4a
+describe('exit criteria headless: dfyom mcp, split parts 4a', { timeout: 300_000 }, () => {
+  it('splits the enclosure by a level, then by the level and two lines; every piece runs', async () => {
+    const { client, call, stderr } = await connect(dirSplit)
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain('design_split_set')
+    const r = await exitCriteriaSplitFlow(call, dirSplit)
+    await client.close()
+    expect(stderr.join('')).toBe('')
+    expect(r.pieces).toBe(10)
   })
 })
 

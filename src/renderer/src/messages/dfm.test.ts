@@ -173,4 +173,36 @@ describe('dfm messages', () => {
     // a tool check's suggestion is the size the operation needs, never a value of the tool field
     expect(dfmMessages.suggestionSource(unfit({ rule: 'cornerRadius' }), 'mm')).toBeUndefined()
   })
+
+  it('renders split findings by rule in the project units (split parts 4a)', () => {
+    const split = (params: DfmWarning['params']): DfmWarning => {
+      const { suggestion: _, ...rest } = w({ code: 'design.split', operation: 'split1', params })
+      return rest
+    }
+    expect(
+      dfmMessages.text(
+        split({ rule: 'thinJoint', axis: 'x', at: 25.4, width: 5.08, limit: 10 }),
+        'inch',
+        names,
+      ),
+    ).toBe(
+      'The glue face at the line at X 1" is 0.2" wide at its narrowest, less than 0.394": a weak butt joint. Move the split.',
+    )
+    expect(
+      dfmMessages.text(
+        split({ rule: 'cutsFeature', operationId: 'drill1', reason: 'line' }),
+        'mm',
+        names,
+      ),
+    ).toMatch(/^Drilling 1: A split line crosses it/)
+    expect(
+      dfmMessages.text(
+        split({ rule: 'noStock', piece: 2, blank: [130, 98.5, 40], nearest: 'Board', short: 3 }),
+        'mm',
+        names,
+      ),
+    ).toBe(
+      'Piece 2: its blank 130 mm × 98.5 mm × 40 mm fits no library stock; Board is 3 mm short. It uses its own blank.',
+    )
+  })
 })

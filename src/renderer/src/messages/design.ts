@@ -380,6 +380,45 @@ export const designMessages = {
     count: (n: number) => (n === 1 ? '1 part' : `${n} parts`),
   },
 
+  /** Split parts 4a (ui.md § Split part): the split editor, its preview and read-only pieces. */
+  split: {
+    title: 'Split',
+    action: 'Split part…',
+    actionDescription: 'Cut this part from several blanks: pieces follow the part.',
+    intro:
+      'Pieces are parts of their own, each cut from its own blank. Edit this part; the pieces follow.',
+    lines: 'Lines',
+    levels: 'Levels',
+    lineAt: (axis: 'x' | 'y') => `Line at ${axis.toUpperCase()}`,
+    levelAt: 'Level at Z',
+    addLine: (axis: 'x' | 'y') => `Add line at ${axis.toUpperCase()}`,
+    addLevel: 'Add level',
+    removeLine: (axis: 'x' | 'y', at: string) => `Remove line at ${axis.toUpperCase()} ${at}`,
+    removeLevel: (at: string) => `Remove level at Z ${at}`,
+    margin: 'Blank margin',
+    joint: 'Joint: butt (glue faces)',
+    remove: 'Remove split',
+    noCuts: 'No lines or levels yet: the part is one piece.',
+    pieces: (n: number) => (n === 1 ? '1 piece' : `${n} pieces`),
+    preview: 'Split preview',
+    top: 'Top',
+    front: 'Front',
+    /** "3 · 135 × 98.5 × 40 · own blank" */
+    chip: (n: number, size: string) => `${n} · ${size} · own blank`,
+    ownBlank: 'own blank',
+    pieceTitle: 'Piece',
+    pieceOf: (n: number, of: number, source: string) => `Piece ${n} of ${of} of ${source}`,
+    editSplit: 'Edit the split',
+    readOnly: (source: string) => `Read-only: this piece follows ${source}.`,
+    fromSource: (op: string, source: string) => `${op} comes from ${source}. Edit it there.`,
+    generated: (op: string) => `${op} is made by the split. Edit the split to change it.`,
+    showInSource: (source: string) => `Show in ${source}`,
+    confirmTitle: 'Remove pieces with plans?',
+    confirmDescription: (plans: number) =>
+      `${plans === 1 ? 'A plan of a removed piece is' : `${plans} plans of removed pieces are`} removed too. Undo brings them back.`,
+    confirmAction: 'Remove pieces',
+  },
+
   /** Drag to reorder and Alt+↑/↓ in the design lists (D45, ui.md § Reordering lists). */
   reorder: {
     grip: 'Drag to reorder (Alt+↑/↓)',

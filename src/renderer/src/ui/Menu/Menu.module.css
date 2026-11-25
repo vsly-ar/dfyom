@@ -61,6 +61,10 @@
     visibility 0s linear var(--motion-fast);
 }
 
+.item[data-inset] {
+  padding-left: 24px;
+}
+
 .item[data-highlighted] > .description {
   visibility: visible;
   opacity: 1;

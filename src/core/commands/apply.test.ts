@@ -452,10 +452,11 @@ describe('implicit apply (applyFirst)', () => {
     expect(APPLY_HOOKS.map((h) => h.name)).toEqual([
       'design.toolAutoChoice',
       'design.clonesFollow',
+      'design.splitFollow',
       'plan.draftFollow',
     ])
     expect(APPLY_JOBS.map((j) => j.name)).toEqual(['plan.toolpaths'])
-    expect(APP_HOOKS.map((h) => h.name)).toEqual(['design.clonesFollow'])
+    expect(APP_HOOKS.map((h) => h.name)).toEqual(['design.clonesFollow', 'design.splitFollow'])
   })
 })
 
