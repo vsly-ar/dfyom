@@ -1,0 +1,13 @@
+// Spike E0 (docs/research/2026-11-25-engraved-patterns-and-lines.md#spike-e0): vitest-run
+// TypeScript against src/core, not part of the app build. Run:
+// `npx vitest run -c spikes/engrave/vitest.config.mts --silent=false`; typecheck: `npx tsc -p spikes/engrave`.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["*.ts", "*.mts"]
+}
