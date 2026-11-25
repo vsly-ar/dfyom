@@ -126,7 +126,7 @@ The program as it streams, in a collapsible panel under the 3D view, following t
 
 ## Safety
 
-Status: draft (hardening 1.1, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user)) · Real-machine lane: [run-machine.md](run-machine.md) · Virtual-machine rules: [run-v0.1.md § Safety (v0.1)](run-v0.1.md#safety-v01) · Protocol facts: [grbl.md](../architecture/grbl.md#transport-and-sender)
+Status: accepted (hardening 1.1, 2026-11-23; accepted by the user 2026-11-25, TG #268 "machine ok" and TG #331 "go" (Q122), on the [Q49–Q52](../plans/hardening.md#questions-for-the-user) recommendations) · Real-machine lane: [run-machine.md](run-machine.md) · Virtual-machine rules: [run-v0.1.md § Safety (v0.1)](run-v0.1.md#safety-v01) · Protocol facts: [grbl.md](../architecture/grbl.md#transport-and-sender)
 
 The rules every connection to a **real machine** (a controller on a serial port) follows, for every source and every window. The [virtual machine](run-v0.1.md#safety-v01) keeps its looser rules (no hardware moves). Each rule names where it is implemented: M1 (done on this branch) or the [hardening task](../plans/hardening.md#5-real-machine) that still implements it.
 

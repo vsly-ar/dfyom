@@ -1,6 +1,6 @@
 # LLM / agent API
 
-Status: implemented ([below](#implementation-task-310)); the [hardening amendment](#amendment-hardening-a1-a2-a5-a7-agent-friction) (A1, A2, A5, A7) is a draft for review · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
+Status: implemented ([below](#implementation-task-310)); the [hardening amendment](#amendment-hardening-a1-a2-a5-a7-agent-friction) (A1, A2, A5, A7) is accepted (user 2026-11-25, TG #331 "go", Q123) · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
 
 How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. The [decisions](#decisions) were settled with the user; the sections after them specify them.
 
@@ -306,7 +306,7 @@ Per [testing.md](../conventions/testing.md); everything runs in `npm run check` 
 
 ## Amendment (hardening A1, A2, A5, A7): agent friction
 
-Status: **draft for review** (implemented on the hardening branch; the user reviews it with the [hardening plan](../plans/hardening.md) task 1.3) · Source: the LLM-first black-box test of 2026-11-22 (`.continuous/research/2026-11-22-llm-first-test.md`, findings F3, F5, F8, F13) · Tasks: [hardening.md § 4](../plans/hardening.md) A1, A2, A5, A7 (the follow-up's A2, A3, A6 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md))
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch; the user reviews it with the [hardening plan](../plans/hardening.md) task 1.3) · Source: the LLM-first black-box test of 2026-11-22 (`.continuous/research/2026-11-22-llm-first-test.md`, findings F3, F5, F8, F13) · Tasks: [hardening.md § 4](../plans/hardening.md) A1, A2, A5, A7 (the follow-up's A2, A3, A6 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md))
 
 No new tools ([A8](../plans/hardening.md)): every change is a default, a reserved arg, a field in an existing result or message text. The size of `tools/list` is logged under [Implementation](#implementation-task-310).
 
@@ -347,7 +347,7 @@ Every agent-facing refusal names the **field** (the issue `path`, or the arg in 
 
 ## Amendment (hardening DF38, DF39, DF41): X2 agent friction
 
-Status: **draft for review** (implemented on the hardening branch, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), findings F1, F2, F4–F8, F10, F11) · Rows: DF38, DF39, DF41 in the [hardening plan](../plans/hardening.md) intake
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), findings F1, F2, F4–F8, F10, F11) · Rows: DF38, DF39, DF41 in the [hardening plan](../plans/hardening.md) intake
 
 No new tools: every change is a reserved-arg default, a shaped result, a field in an existing result or description text, following [A1](#a1-compact-results). The `tools/list` size is logged under [Implementation](#implementation-task-310).
 
@@ -381,7 +381,7 @@ No new tools: every change is a reserved-arg default, a shaped result, a field i
 
 ## Amendment (hardening DF51, DF52, DF54, DF55): tool choice
 
-Status: **draft for review** (implemented on the hardening branch) · Source: the agent's two-setup enclosure test (TG #232, findings I-3, I-6, I-7, I-8) · Rows: DF51, DF52, DF54, DF55 in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Tool choice fixes](../modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55)
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch) · Source: the agent's two-setup enclosure test (TG #232, findings I-3, I-6, I-7, I-8) · Rows: DF51, DF52, DF54, DF55 in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Tool choice fixes](../modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55)
 
 No new tools. What an agent sees:
 
@@ -401,7 +401,7 @@ No new tools; result fields only (`tools/list` unchanged, results are not in it)
 
 ## Amendment (hardening X2 F6): tool re-choice on library change and open
 
-Status: **draft for review** (implemented on the hardening branch) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), finding F6) · Row: DF41 (open item F6) in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Library changes and opening](../modes/design-v0.2.md#library-changes-and-opening-x2-f6)
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), finding F6) · Row: DF41 (open item F6) in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Library changes and opening](../modes/design-v0.2.md#library-changes-and-opening-x2-f6)
 
 No new tools or args. What an agent sees:
 
@@ -411,7 +411,7 @@ No new tools or args. What an agent sees:
 
 ## Amendment (hardening A3, A6): frames, placed bounds, snap and measure
 
-Status: **draft for review** (implemented on the hardening branch; reviewed with the [hardening plan](../plans/hardening.md) task 1.3, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the LLM-first black-box test (finding F9: frames not described where an agent looks), the v0.3 X1 finding "snap and measure have no headless command" ([plans/v0.3.md](../plans/v0.3.md#known-issues-and-risks)) · Tasks: [hardening.md § 4](../plans/hardening.md) A3 (the follow-up's A4 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md)) and A6
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch; reviewed with the [hardening plan](../plans/hardening.md) task 1.3, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the LLM-first black-box test (finding F9: frames not described where an agent looks), the v0.3 X1 finding "snap and measure have no headless command" ([plans/v0.3.md](../plans/v0.3.md#known-issues-and-risks)) · Tasks: [hardening.md § 4](../plans/hardening.md) A3 (the follow-up's A4 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md)) and A6
 
 One new tool, `design.measure` ([A8](../plans/hardening.md): one consolidated query instead of a snap and a measure tool); the rest is primer text and a field in existing results.
 
@@ -438,7 +438,7 @@ One new tool, `design.measure` ([A8](../plans/hardening.md): one consolidated qu
 
 ## Amendment (hardening A4): launcher and "Connect an agent"
 
-Status: **draft for review** (implemented on the hardening branch; reviewed with the [hardening plan](../plans/hardening.md) task 1.3, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the LLM-first black-box test (finding F11: the agent had to find the CLI entry inside the bundle and guess `ELECTRON_RUN_AS_NODE`) · Task: [hardening.md § 4](../plans/hardening.md) A4 (the follow-up's A5 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md))
+Status: **accepted** (user 2026-11-25, TG #331 "go", Q123; implemented on the hardening branch; reviewed with the [hardening plan](../plans/hardening.md) task 1.3, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the LLM-first black-box test (finding F11: the agent had to find the CLI entry inside the bundle and guess `ELECTRON_RUN_AS_NODE`) · Task: [hardening.md § 4](../plans/hardening.md) A4 (the follow-up's A5 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md))
 
 No new tools and no change to `tools/list`: the launcher and the dialog are packaging and window plumbing.
 
