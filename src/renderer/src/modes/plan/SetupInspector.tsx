@@ -227,7 +227,7 @@ export function SetupInspector({
           kind="toggle"
           illustration={<FieldIcon name="rotation" />}
           readOnly={readOnly}
-          messages={[{ id: 'rotationHint', severity: 'note', text: m.rotationHint }]}
+          info={m.rotationHint}
         >
           <SegmentedControl<string>
             label={m.rotation}
@@ -242,6 +242,8 @@ export function SetupInspector({
         </Field>
         <QuantityInput
           label={m.clearanceHeight}
+          stepKind="depth"
+          stepUncapped
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={clearance}
@@ -264,6 +266,8 @@ export function SetupInspector({
         ) : null}
         <QuantityInput
           label={m.retractHeight}
+          stepKind="depth"
+          stepUncapped
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(setup.retractHeight)}
@@ -299,6 +303,8 @@ export function SetupInspector({
         {(holding?.items.length ?? 0) > 0 ? null : (
           <QuantityInput
             label={m.clampHeight}
+            stepKind="depth"
+            stepUncapped
             kind="length"
             optional
             placeholder={m.clampHeightPlaceholder}

@@ -16,6 +16,7 @@ import type { PlanWarning } from '../../../../core/plan/checks'
 import type { FeedField, PlanDTO, PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { Quantity } from '../../../../core/quantity/quantity'
+import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { applyMessages } from '../../messages/apply'
 import { findingText, planMessages, sentence } from '../../messages/plan'
@@ -33,6 +34,10 @@ import {
   WarningList,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
+  type StepScale,
+  StepScaleProvider,
+  stockStepScale,
   type WarningListLabels,
   type WarningTier,
   type WarningView,
@@ -50,6 +55,7 @@ import {
   lengthText,
   findingNames,
   pieceBlank,
+  planPart,
   planOperationName,
   snapshotName,
   type PlanOperationView,
@@ -104,7 +110,39 @@ export function planWarningView(
   }
 }
 
+/**
+ * The Plan inspector; value fields scale their adjust steps to the plan's stock and machine
+ * (docs/conventions/inspector-layout.md#field-step-model-df104 rule 5).
+ */
 export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+  const [plan] = useChosenPlan(doc)
+  return (
+    <StepScaleProvider scale={plan === undefined ? undefined : planStepScale(doc, plan)}>
+      <PlanInspectorBody doc={doc} />
+    </StepScaleProvider>
+  )
+}
+
+type MachineLimits = {
+  maxFeedRate?: { x: QuantityDTO; y: QuantityDTO }
+  spindle?: { maxSpeed?: QuantityDTO }
+}
+
+/** The plan part's stock and its machine's max XY feed and spindle speed (step caps). */
+function planStepScale(doc: ProjectDoc, plan: PlanDTO): StepScale | undefined {
+  const m = plan.snapshots.find((s) => s.id === plan.machine)?.values as MachineLimits | undefined
+  const num = (d: QuantityDTO | undefined) =>
+    d === undefined ? undefined : quantityOf(d)?.canonical
+  const x = num(m?.maxFeedRate?.x)
+  const y = num(m?.maxFeedRate?.y)
+  const maxRpm = num(m?.spindle?.maxSpeed)
+  return stockStepScale(planPart(doc, plan).loaded?.stock, {
+    ...(x === undefined || y === undefined ? {} : { maxFeed: Math.max(x, y) }),
+    ...(maxRpm === undefined ? {} : { maxRpm }),
+  })
+}
+
+function PlanInspectorBody({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const [plan] = useChosenPlan(doc)
   const [selected] = usePlanSelection()
   const data = usePlanData(plan?.id)
@@ -306,6 +344,14 @@ function useSuggestions(planId: string, planOperationId: string): Suggestion[] |
   return tools
 }
 
+/** Adjust steps per feeds field (inspector-layout.md § Step assignment per field). */
+const FEED_STEP: Record<FeedField, StepKind> = {
+  spindleSpeed: 'rpm',
+  feedRate: 'feed',
+  plungeRate: 'feed',
+  stepdown: 'stepdown',
+  stepover: 'small',
+}
 const FEED_ICON: Record<FeedField, FieldIconName> = {
   spindleSpeed: 'spindle',
   feedRate: 'feed',
@@ -520,6 +566,7 @@ function OperationInspector({
           {current !== null ? (
             <QuantityInput
               label={t.stickout}
+              stepKind="xy"
               kind="length"
               defaultUnit={lengthUnit}
               value={stickoutValue}
@@ -679,11 +726,16 @@ function FeedField({
     resolved?.recommended != null
       ? feedQuantity(field, resolved.recommended.value, units)?.source
       : undefined
-  const sourceMessage = (): FieldMessage => {
+  // provenance (preset, calculator, strategy default) is a tag on the title row; unresolved,
+  // locked and entered values keep their line (a state or a way back, inspector-layout.md § Info tips)
+  const tag =
+    source !== undefined && source !== 'override' && !locked
+      ? { text: t.sourceTag[source], title: t.source(source, view.presetName) }
+      : undefined
+  const sourceMessage = (): FieldMessage | undefined => {
     if (source === undefined) return { id: 'source', severity: 'note', text: t.unresolved }
     if (locked) return { id: 'source', severity: 'note', text: t.locked }
-    if (source !== 'override')
-      return { id: 'source', severity: 'note', text: t.source(source, view.presetName) }
+    if (source !== 'override') return undefined
     // entered: back to the recommendation (auto mode) or to the preset/strategy value
     const clear = () => onSet(null)
     return recommended !== undefined
@@ -708,21 +760,26 @@ function FeedField({
   const note = sourceMessage()
   // Only the top message shows its fix: a warning about the entered value (chip load, power)
   // carries the way back ("Use …", "Reset") when it has no fix of its own.
-  const host = note.fix
+  const host = note?.fix
     ? fromFindings.findIndex((m) => m.fix === undefined && m.severity !== 'error')
     : -1
   const messages: FieldMessage[] =
-    host < 0
-      ? [...fromFindings, note]
-      : [
-          ...fromFindings.map((m, i) => (i === host ? { ...m, fix: note.fix! } : m)),
-          { id: note.id, severity: note.severity, text: note.text },
-        ]
+    note === undefined
+      ? fromFindings
+      : host < 0
+        ? [...fromFindings, note]
+        : [
+            ...fromFindings.map((m, i) => (i === host ? { ...m, fix: note.fix! } : m)),
+            { id: note.id, severity: note.severity, text: note.text },
+          ]
   const lock = resolved?.lock
   return (
     <QuantityInput
       label={t.feeds[field]}
       kind={FEED_KIND[field]}
+      stepKind={FEED_STEP[field]}
+      stepKey={`plan.${field}`}
+      {...(tag !== undefined ? { tag } : {})}
       defaultUnit={feedUnit(field, units)}
       value={value}
       illustration={<FieldIcon name={FEED_ICON[field]} />}

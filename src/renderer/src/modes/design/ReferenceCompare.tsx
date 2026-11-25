@@ -68,6 +68,7 @@ export function ReferenceCompare({
       />
       <QuantityInput
         label={c.threshold}
+        stepKind="fit"
         kind="length"
         defaultUnit={defaultUnit('length', units)}
         value={lengthQuantity(threshold, units)}

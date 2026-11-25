@@ -71,6 +71,7 @@ export function AidFields({
       <QuantityInput
         key={`${key}${k}`}
         label={`${label} ${k === 0 ? 'X' : 'Y'}`}
+        stepKind="xy"
         kind="length"
         defaultUnit={unit}
         value={q(at[k])}
@@ -99,7 +100,8 @@ export function AidFields({
       defaultUnit={unit}
       value={q(mm)}
       readOnly={readOnly}
-      messages={hint === undefined ? [] : [{ id: `${key}Hint`, severity: 'note', text: hint }]}
+      stepKind={key === 'markDepth' ? 'depth' : key === 'lineLength' ? 'xy' : 'small'}
+      {...(hint === undefined ? {} : { info: hint })}
       onCommit={commit}
       onCancelGesture={cancelGesture}
     />

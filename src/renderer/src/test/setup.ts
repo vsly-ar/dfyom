@@ -3,6 +3,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { resetSessionSteps } from '../ui/QuantityInput/StepContext'
 import { setReducedMotion } from './media'
 
 // `findBy*` / `waitFor` wait up to 5 s instead of 1 s: under heavy load a bridge round trip and
@@ -13,6 +14,8 @@ configure({ asyncUtilTimeout: 5000 })
 afterEach(() => {
   cleanup()
   setReducedMotion(false)
+  // a step chosen in one test's adjust panel is remembered for the session (DF104 rule 4)
+  resetSessionSteps()
   vi.restoreAllMocks()
 })
 

@@ -251,6 +251,8 @@ export function Workholding({
       {items.length > 0 ? (
         <QuantityInput
           label={m.margin}
+          stepKind="xy"
+          info={m.marginHint}
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(setup.workholdingMargin ?? defaultMargin(units))}
@@ -263,7 +265,6 @@ export function Workholding({
                 severity: 'error' as const,
                 text: sentence(i.message),
               })),
-            { id: 'marginHint', severity: 'note', text: m.marginHint },
           ]}
           onCommit={(q, gesture) => void set({ margin: q.source }, gesture)}
           onCancelGesture={cancelGesture}
@@ -295,6 +296,7 @@ function ItemFields({
       label={label}
       kind="length"
       dense
+      stepKind="xy"
       defaultUnit={defaultUnit('length', units)}
       value={quantityOf(dto)}
       readOnly={readOnly}
@@ -309,6 +311,7 @@ function ItemFields({
     <>
       <QuantityInput
         label={m.centerX}
+        stepKind="xy"
         kind="length"
         dense
         defaultUnit={defaultUnit('length', units)}
@@ -320,6 +323,7 @@ function ItemFields({
       />
       <QuantityInput
         label={m.centerY}
+        stepKind="xy"
         kind="length"
         dense
         defaultUnit={defaultUnit('length', units)}

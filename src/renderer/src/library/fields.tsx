@@ -14,6 +14,7 @@ import {
   QuantityInput,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
 } from '../ui'
 import { displayQuantity, libraryUnit, type QDto } from './form'
 import styles from './LibraryForm.module.css'
@@ -132,7 +133,9 @@ export function QuantityField<K extends QuantityKind>({
   units,
   icon,
   messages,
-  note,
+  info,
+  stepKind,
+  stepMax,
   optional = false,
   placeholder,
   onChange,
@@ -145,7 +148,12 @@ export function QuantityField<K extends QuantityKind>({
   units: UnitSystem
   icon: FieldIconName
   messages: (field: string) => FieldMessage[]
-  note?: string | undefined
+  /** Static explanation: the (i) tip on the title row (inspector-layout.md § Info tips). */
+  info?: string | undefined
+  /** What the field measures, for its adjust steps (inspector-layout.md § Step kinds). */
+  stepKind: StepKind
+  /** The field's maximum (count fields): the step ladder stops at half of it. */
+  stepMax?: number
   /** Emptying it removes the value (an optional library field). */
   optional?: boolean
   /** Shown while empty (an optional field: what empty means, "0: pointed"). */
@@ -153,17 +161,17 @@ export function QuantityField<K extends QuantityKind>({
   onChange: (value: QDto<K> | undefined) => void
   onFocusField?: ((field: string | undefined) => void) | undefined
 }): React.JSX.Element {
-  const shown = [
-    ...messages(field),
-    ...(note === undefined ? [] : [{ id: `${field}-note`, severity: 'note' as const, text: note }]),
-  ]
   const common = {
     label,
     kind,
     defaultUnit: libraryUnit(kind, units),
     value: displayQuantity(value, units),
     illustration: <FieldIcon name={icon} />,
-    messages: shown,
+    messages: messages(field),
+    stepKind,
+    stepKey: `library.${field}`,
+    ...(stepMax !== undefined ? { stepMax } : {}),
+    ...(info !== undefined ? { info } : {}),
     ...(placeholder !== undefined ? { placeholder } : {}),
   }
   return (

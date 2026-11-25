@@ -20,6 +20,7 @@ import {
   Select,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { fieldMessages } from './fieldMessages'
@@ -65,6 +66,19 @@ const ICON: Partial<Record<StrategyKey, FieldIconName>> = {
   chipBreakBack: 'chipBreak',
   helixPitch: 'stepdown',
   breakthrough: 'breakthrough',
+}
+
+/** Adjust steps per strategy length (inspector-layout.md § Step assignment per field). */
+const STRATEGY_STEP: Partial<Record<StrategyKey, StepKind>> = {
+  overshoot: 'small',
+  helixDiameter: 'small',
+  rampAngle: 'angle',
+  finishAllowance: 'fit',
+  finishStepdown: 'stepdown',
+  peckDepth: 'stepdown',
+  chipBreakBack: 'fit',
+  helixPitch: 'stepdown',
+  breakthrough: 'depth',
 }
 
 function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
@@ -209,6 +223,8 @@ function CutDepthField({
   return (
     <QuantityInput
       label={s.cutDepth}
+      stepKind="depth"
+      stepKey="plan.cutDepth"
       kind="length"
       defaultUnit={defaultUnit('length', units)}
       value={strategyQuantity('breakthrough', throughDepth + breakthrough, units)}
@@ -301,16 +317,17 @@ function StrategyQuantity({
     stored !== undefined && !readOnly
       ? { label: s.useDefault, onApply: () => onSet(null) }
       : undefined
-  const note: FieldMessage = {
-    id: 'strategy.source',
-    severity: 'note',
-    text: stored !== undefined ? s.entered : s.default,
-  }
+  // a default is a tag on the title row; an entered value keeps its line with "Use default"
+  // (docs/conventions/inspector-layout.md#info-tips-df105 rule 3)
+  const note: FieldMessage = { id: 'strategy.source', severity: 'note', text: s.entered }
+  const tag = stored === undefined ? { text: s.defaultTag, title: s.default } : undefined
   // Only the top message shows its fix: a finding about the entered value carries "Use default".
   const host = fix === undefined ? -1 : findings.findIndex((m) => m.fix === undefined)
   const messages: FieldMessage[] =
     fix === undefined
-      ? [...findings, note]
+      ? stored === undefined
+        ? findings
+        : [...findings, note]
       : host < 0
         ? [...findings, { ...note, fix }]
         : [...findings.map((m, i) => (i === host ? { ...m, fix } : m)), note]
@@ -320,6 +337,9 @@ function StrategyQuantity({
       kind={angle ? 'angle' : 'length'}
       defaultUnit={angle ? 'deg' : defaultUnit('length', units)}
       value={value}
+      stepKind={STRATEGY_STEP[strategyKey] ?? (angle ? 'angle' : 'small')}
+      stepKey={`plan.strategy.${strategyKey}`}
+      {...(tag !== undefined ? { tag } : {})}
       illustration={<FieldIcon name={ICON[strategyKey] ?? 'length'} />}
       readOnly={readOnly}
       messages={messages}

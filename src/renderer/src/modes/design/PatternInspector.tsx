@@ -32,6 +32,7 @@ import {
   Switch,
   WarningList,
   type FieldMessage,
+  type StepKind,
 } from '../../ui'
 import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
@@ -226,6 +227,9 @@ export function PatternInspector({
         kind={kind}
         defaultUnit={defaultUnit(kind, units)}
         value={dto === undefined ? undefined : quantityOf(dto as QuantityDTO)}
+        stepKind={patternStep(path)}
+        stepKey={`pattern.${path}`}
+        {...(path === 'cell.sides' ? { stepMax: 12 } : {})}
         {...(placeholder === undefined ? {} : { placeholder })}
         onCommit={(q, gesture) => void update(commit(q.source), path, gesture)}
         onCancelGesture={cancelGesture}
@@ -409,6 +413,7 @@ export function PatternInspector({
             <div key={`origin.${i}`} data-feature-field={`origin.${i}`}>
               <QuantityInput
                 label={p.origin(i)}
+                stepKind="xy"
                 kind="length"
                 defaultUnit={defaultUnit('length', units)}
                 value={origin === undefined ? undefined : quantityOf(origin[i])}
@@ -528,11 +533,7 @@ export function PatternInspector({
             margin,
           }))}
           <div data-feature-field="fit">
-            <Field
-              label={p.fit}
-              kind="toggle"
-              messages={[...messagesAt('fit'), ...note('fit', p.fitDescription)]}
-            >
+            <Field label={p.fit} kind="toggle" messages={messagesAt('fit')} info={p.fitDescription}>
               <SegmentedControl<string>
                 label={p.fit}
                 options={['whole', 'clip'].map((v) => ({ value: v, label: p.fits[v] ?? v }))}
@@ -591,7 +592,8 @@ export function PatternInspector({
             <Field
               label={p.chamfer}
               kind="toggle"
-              messages={[...messagesAt('chamfer'), ...note('chamfer', p.chamferNote)]}
+              messages={messagesAt('chamfer')}
+              info={p.chamferNote}
             >
               <Switch
                 label={p.chamfer}
@@ -695,6 +697,17 @@ function poly(pts: Vec[]): Loop {
 const PRESET_THUMBS = new Map(PATTERN_PRESETS.map((preset) => [preset.id, presetThumb(preset)]))
 
 /** A window onto a preset's lattice, drawn as the mini outlines (`MiniOutline`'s look). */
+/** Adjust steps of a pattern field by its path (inspector-layout.md § Step assignment per field). */
+function patternStep(path: string): StepKind {
+  if (path === 'cell.sides') return 'count'
+  if (path === 'cell.cornerRadius' || path === 'spacing.gap' || path === 'chamfer.width')
+    return 'small'
+  if (path === 'chamfer.angle') return 'angle'
+  if (path === 'angle' || path.endsWith('rotation')) return 'rotation'
+  if (path === 'depth') return 'depth'
+  return 'xy'
+}
+
 function PresetThumb({
   cells,
 }: {

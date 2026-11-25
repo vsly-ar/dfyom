@@ -555,6 +555,13 @@ export const planMessages = {
         calculator: 'Recommended by the calculator.',
         strategy: 'Strategy default.',
       })[source],
+    /** The provenance tag on the field's title row; `source` is its tooltip (DF105). */
+    sourceTag: {
+      override: 'Entered',
+      preset: 'Preset',
+      calculator: 'Recommended',
+      strategy: 'Default',
+    } satisfies Record<FeedSource, string>,
     entered: (recommended: string) => `Entered by you. Recommended ${recommended}.`,
     useRecommended: (value: string) => `Use ${value}`,
     locked: 'Locked: the other values follow it.',
@@ -596,6 +603,8 @@ export const planMessages = {
         `A through cut goes at least through the material, ${material}.`,
       notForTool: (label: string) => `${label} (doesn’t fit the tool)`,
       default: 'Default.',
+      /** The provenance tag on a defaulted field's title row; `default` is its tooltip (DF105). */
+      defaultTag: 'Default',
       entered: 'Entered by you.',
       useDefault: 'Use default',
     },

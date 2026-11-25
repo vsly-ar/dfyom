@@ -38,6 +38,7 @@ import {
   useReorder,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
@@ -412,6 +413,14 @@ export function ShapeItemList({
 
 const KIND_OF: Record<string, QuantityKind> = { rotation: 'angle', sides: 'scalar' }
 
+/** Adjust steps by the item's field (inspector-layout.md § Step assignment, Shape Editor rows). */
+const STEP_OF: Record<string, StepKind> = {
+  rotation: 'rotation',
+  sides: 'count',
+  cornerRadius: 'small',
+  radius: 'small',
+}
+
 /** One quantity field of the selected item (`path` inside the item: `center.0`, `length`). */
 export function ItemQuantity({
   ctx,
@@ -445,6 +454,8 @@ export function ItemQuantity({
   const common = {
     label,
     kind,
+    stepKind: STEP_OF[String(path[0])] ?? STEP_OF[String(path.at(-1))] ?? 'xy',
+    ...(path[0] === 'sides' ? { stepMax: 12 } : {}),
     defaultUnit: defaultUnit(unitKind, ctx.part.units),
     value: dto === undefined ? undefined : quantityOf(dto),
     onCancelGesture: ctx.cancelGesture,
@@ -567,6 +578,7 @@ function StartFillet({ ctx }: { ctx: ItemEditContext }): React.JSX.Element | nul
     return (
       <QuantityInput
         label={t.startFillet}
+        stepKind="small"
         kind="length"
         defaultUnit={defaultUnit('length', ctx.part.units)}
         value={undefined}

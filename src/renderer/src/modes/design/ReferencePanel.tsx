@@ -278,7 +278,7 @@ function ReferenceBody({
     ...(notes ?? []).filter((w) => w.code !== 'reference.unitGuessed'),
   ]
   const anchorField = (
-    <Field label={t.anchor} kind="toggle" messages={[note('anchorHint', t.anchorHint)]}>
+    <Field label={t.anchor} kind="toggle" info={t.anchorHint}>
       <AnchorPicker
         label={t.anchor}
         value={anchor}
@@ -409,6 +409,7 @@ function ReferenceBody({
             <h3 className={styles['groupTitle']}>{t.scaleGroup}</h3>
             <QuantityInput
               label={t.scale}
+              stepKind="scale"
               kind="scalar"
               defaultUnit={defaultUnit('scalar', part.units)}
               value={quantityOf(ref.scale)}
@@ -446,6 +447,7 @@ function ReferenceBody({
               <div key={axis} className={styles['turnRow']}>
                 <QuantityInput
                   label={t.rotationAxis(axis)}
+                  stepKind="rotation"
                   kind="angle"
                   defaultUnit={defaultUnit('angle', part.units)}
                   value={quantityOf(ref.rotation[axis])}
@@ -477,6 +479,7 @@ function ReferenceBody({
               <QuantityInput
                 key={axis}
                 label={t.positionAxis(axis)}
+                stepKind="xy"
                 kind="length"
                 defaultUnit={defaultUnit('length', part.units)}
                 value={quantityOf(ref.position[axis])}
@@ -621,14 +624,16 @@ function ReferenceFit({
       </div>
       <QuantityInput
         label={f.margin}
+        stepKind="xy"
+        info={f.marginHint}
         kind="length"
         defaultUnit={defaultUnit('length', part.units)}
         value={margin}
         onCommit={(q) => setMargin(q)}
-        messages={[...messagesAt('fit.margin'), note('marginHint', f.marginHint)]}
+        messages={messagesAt('fit.margin')}
       />
       {anchorField}
-      <Field label={t.height} kind="toggle" messages={[note('heightHint', t.heightHint)]}>
+      <Field label={t.height} kind="toggle" info={t.heightHint}>
         <SegmentedControl
           label={t.height}
           size="sm"

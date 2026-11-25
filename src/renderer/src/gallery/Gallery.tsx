@@ -670,6 +670,7 @@ function QuantityFields(): React.JSX.Element {
           label="Width"
           kind="length"
           defaultUnit="mm"
+          stepKind="small"
           illustration={<FieldIcon name="width" />}
           inheritedTolerance={{ deviation: Rational.create(1n, 10n).unwrap(), scope: 'part' }}
           recommended={{ source: '2.00', text: '≥ 2.00 mm for the 2 mm tool' }}
@@ -679,7 +680,9 @@ function QuantityFields(): React.JSX.Element {
           label="Depth"
           kind="length"
           defaultUnit="mm"
-          step="0.1"
+          stepKind="depth"
+          info="Measured down from the face the operation starts on; empty = through the stock."
+          tag={{ text: 'Preset', title: 'From preset “Ply”.' }}
           illustration={<FieldIcon name="depth" />}
           {...depth}
         />
@@ -687,6 +690,7 @@ function QuantityFields(): React.JSX.Element {
           label="Floor"
           kind="length"
           defaultUnit="mm"
+          stepKind="depth"
           illustration={<FieldIcon name="depth" />}
           resolver={GALLERY_RESOLVER}
           references={GALLERY_REFERENCES}
@@ -706,6 +710,7 @@ function QuantityFields(): React.JSX.Element {
           label="Length"
           kind="length"
           defaultUnit="mm"
+          stepKind="xy"
           illustration={<FieldIcon name="length" />}
           {...tolerance}
         />
@@ -713,6 +718,7 @@ function QuantityFields(): React.JSX.Element {
           label="Feed"
           kind="feedRate"
           defaultUnit="mm/min"
+          stepKind="feed"
           illustration={<FieldIcon name="feed" />}
           readOnly
           {...feed}

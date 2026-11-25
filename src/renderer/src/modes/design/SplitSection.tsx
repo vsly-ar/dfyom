@@ -392,6 +392,7 @@ export function SplitSection({
             >
               <QuantityInput
                 label={t.lineAt(line.axis)}
+                stepKind="xy"
                 kind="length"
                 defaultUnit={unit}
                 value={quantityOf(line.at)}
@@ -433,6 +434,7 @@ export function SplitSection({
           >
             <QuantityInput
               label={t.levelAt}
+              stepKind="depth"
               kind="length"
               defaultUnit={unit}
               value={quantityOf(level)}
@@ -487,6 +489,7 @@ export function SplitSection({
       </div>
       <QuantityInput
         label={t.margin}
+        stepKind="small"
         kind="length"
         defaultUnit={unit}
         value={quantityOf(split.margin)}
@@ -505,11 +508,7 @@ export function SplitSection({
         <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
       ) : null}
       {/* the blanks after the cuts (U9 Q131): how the pieces are cut first, then from what */}
-      <Field
-        label={t.useStocks}
-        kind="toggle"
-        messages={[{ id: 'note', severity: 'note', text: t.useStocksHint }]}
-      >
+      <Field label={t.useStocks} kind="toggle" info={t.useStocksHint}>
         <Switch
           label={t.useStocks}
           hideLabel
@@ -621,7 +620,8 @@ function KeyFields({
               split.joint.clearance === undefined ? undefined : quantityOf(split.joint.clearance)
             }
             onCommit={(q, gesture) => send({ ...args, clearance: q.source }, gesture)}
-            messages={[{ id: 'note', severity: 'note', text: t.clearanceHint }]}
+            stepKind="fit"
+            info={t.clearanceHint}
           />
           {kind === 'halfLap' ? (
             <p className={styles['muted']}>
@@ -918,10 +918,12 @@ function DowelFields({
               const { depth: _, ...rest } = d
               send({ ...args, dowels: { ...rest, diameter: q.source } }, gesture)
             }}
-            messages={[{ id: 'note', severity: 'note', text: t.dowelHint(DOWEL_SIZES.join(', ')) }]}
+            stepKind="small"
+            info={t.dowelHint(DOWEL_SIZES.join(', '))}
           />
           <QuantityInput
             label={t.dowelDepth}
+            stepKind="depth"
             kind="length"
             defaultUnit={unit}
             value={quantityOf(dowels.depth)}
@@ -936,6 +938,7 @@ function DowelFields({
                     <QuantityInput
                       key={axis}
                       label={t.dowelAt(i + 1, axis)}
+                      stepKind="xy"
                       kind="length"
                       defaultUnit={unit}
                       value={quantityOf(h.at[a]!)}

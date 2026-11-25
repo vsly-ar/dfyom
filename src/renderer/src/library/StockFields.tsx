@@ -42,7 +42,8 @@ export function StockFields({
       units={units}
       icon={icon}
       messages={messages}
-      note={note}
+      stepKind={field === 'thickness' ? 'depth' : 'xy'}
+      info={note}
       onChange={(v) => {
         if (v !== undefined) set({ [field]: v })
       }}

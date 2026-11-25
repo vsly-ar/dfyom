@@ -199,6 +199,7 @@ export function AlignmentFields({
           <QuantityInput
             key={k}
             label={k === 0 ? m.zeroX : m.zeroY}
+            stepKind="xy"
             kind="length"
             defaultUnit={defaultUnit('length', units)}
             value={length(zero[k])}
@@ -412,6 +413,7 @@ export function AlignmentFields({
           {next === undefined ? null : (
             <QuantityInput
               label={m.aidInset}
+              stepKind="xy"
               kind="length"
               defaultUnit={defaultUnit('length', units)}
               value={

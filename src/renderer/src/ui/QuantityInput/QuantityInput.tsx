@@ -8,7 +8,10 @@
 // to the viewport) live here too. The adjust panel opens under the field on focus while the input
 // keeps focus (DF9; the input is a combobox controlling it); its steps are a live gesture: each
 // step commits with the session's gesture id (one undo step per session), Escape cancels it,
-// focus leaving keeps it.
+// focus leaving keeps it. Steps follow the field's step kind (DF104: ladder, preselected step,
+// stock/machine caps, integers, a remembered choice: ./steps.ts); static help is an (i) tip on
+// the title row (`info`, DF105) and a press on the title row focuses without the panel (DF111):
+// docs/conventions/inspector-layout.md.
 // v0.2 field rule (task P3): Enter commits and applies (the `ApplyScope`'s Apply), blur and Tab
 // commit only. Doc: docs/conventions/ui.md#quantity-and-expression-input, #field,
 // #selection-and-picking; docs/architecture/apply.md#field-rule;
@@ -36,6 +39,9 @@ import { Button } from '../Button/Button'
 import { Field, type FieldControlProps, type FieldMessage, type FieldProps } from '../Field/Field'
 import { FieldInput } from '../Field/FieldInput'
 import { SegmentedControl } from '../SegmentedControl/SegmentedControl'
+import { UNITS } from '../../../../core/quantity/units'
+import { useStepMemory, useStepScale } from './StepContext'
+import { stepLabel, stepsFor, unitSystemOf, type StepKind } from './steps'
 import {
   defaultPrecision,
   describeInherited,
@@ -51,6 +57,7 @@ import {
   stepSource,
   UNIT_LABEL,
   type InheritedTolerance,
+  type Reading,
 } from './reading'
 import styles from './QuantityInput.module.css'
 
@@ -58,9 +65,6 @@ import styles from './QuantityInput.module.css'
 export const ECHO_DELAY_MS = 150
 /** Errors appear on blur, Enter, or after this pause in typing – never mid-word. */
 export const ERROR_DELAY_MS = 600
-
-export const STEP_SIZES = ['0.001', '0.01', '0.1', '1', '10', '100'] as const
-export type StepSize = (typeof STEP_SIZES)[number]
 
 /** A reference the field offers while typing (surface of an earlier operation, tool parameter). */
 export interface ReferenceOption {
@@ -109,8 +113,24 @@ export interface QuantityInputBaseProps {
   validate?: (value: Quantity) => AppResult<Quantity>
   /** Display decimals in the display unit; default per unit (3 mm, 4 in). */
   precision?: number
-  /** Initial step of ↑/↓ and the adjust popover, in the source's unit. */
-  step?: StepSize
+  /**
+   * What the field measures, for its adjust steps (inspector-layout.md § Step kinds and the
+   * per-field assignment table); `xy` until every field names one (slice S6).
+   */
+  stepKind?: StepKind
+  /** The field's maximum (count fields): the ladder stops at half of it (DF104 rule 6). */
+  stepMax?: number
+  /** No stock or machine cap (a "no cap" row of the assignment table: setup heights, stock size). */
+  stepUncapped?: boolean
+  /**
+   * Role under which a chosen step is remembered for the session (`pocket.depth`); default
+   * `<stepKind>:<label>`.
+   */
+  stepKey?: string
+  /** Static explanation of the field: the (i) tip on the title row (DF105). */
+  info?: ReactNode
+  /** Provenance tag at the title row's end ("Preset", "Default"); `title` = the full sentence. */
+  tag?: FieldProps['tag']
   /** General tolerance an untoleranced value inherits, shown in the echo. */
   inheritedTolerance?: InheritedTolerance
   /** Shown while empty: what applies without a value ("None: values are exact"). */
@@ -190,7 +210,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     references = [],
     validate,
     precision,
-    step = '1',
+    stepKind = 'xy',
+    stepMax,
+    stepUncapped = false,
+    stepKey,
+    info,
+    tag,
     inheritedTolerance,
     placeholder,
     recommended,
@@ -221,7 +246,25 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const [focused, setFocused] = useState(false)
   const [errorsShown, setErrorsShown] = useState(false)
   const [echoText, setEchoText] = useState(stored)
-  const [stepSize, setStepSize] = useState<StepSize>(step)
+  const scale = useStepScale()
+  const memory = useStepMemory()
+  const memoryKey = stepKey ?? `${stepKind}:${label}`
+  /** The steps for a reading (the preselected step is fixed when focus arrives). */
+  const stepsNow = (r: AppResult<Reading>) => {
+    const magnitude = r.isOk()
+      ? r.unwrap().quantity.canonical / UNITS[defaultUnit].factor.toNumber()
+      : undefined
+    return stepsFor(stepKind, {
+      value: magnitude,
+      unitSystem: unitSystemOf(defaultUnit),
+      scale: stepUncapped ? undefined : scale,
+      max: stepMax,
+      remembered: memory.get(memoryKey),
+    })
+  }
+  const [stepSize, setStepSize] = useState<string>(
+    () => stepsNow(readSource(stored, ctx, resolver, validate)).initial,
+  )
   /** The adjust panel is open (on focus, ui.md#field). */
   const [adjustOpen, setAdjustOpen] = useState(false)
   /** An adjust session (live gesture) is running: its steps may still be landing. */
@@ -269,6 +312,9 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     () => readSource(text, ctx, resolver, validate),
     [text, ctx, resolver, validate],
   )
+  const ladder = stepsNow(reading)
+  /** The step in use: the chosen or preselected one while it fits the (scaled) ladder. */
+  const step = ladder.steps.includes(stepSize) ? stepSize : ladder.initial
   const echoReading = useMemo(
     () => (echoText === text ? reading : readSource(echoText, ctx, resolver, validate)),
     [echoText, text, reading, ctx, resolver, validate],
@@ -392,7 +438,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   /** ↑/↓ in the field change the text only; a panel step (`live`) commits it with the gesture. */
   function stepBy(direction: 1 | -1, multiplier: Rational = Rational.ONE, live = false): boolean {
-    const delta = stepRational(stepSize)
+    const delta = stepRational(step)
       .mul(multiplier)
       .mul(Rational.int(BigInt(direction)))
     const next = stepSource(text, ctx, delta, prec)
@@ -609,6 +655,11 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       return
     }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !readOnly) {
+      // integer fields have no fractional steps: Alt (×0.1) does nothing (DF104 rule 6)
+      if (e.altKey && !e.shiftKey && ladder.integer) {
+        e.preventDefault()
+        return
+      }
       const multiplier = e.shiftKey ? TEN : e.altKey ? TENTH : Rational.ONE
       if (stepBy(e.key === 'ArrowUp' ? 1 : -1, multiplier)) e.preventDefault()
       else if (e.key === 'ArrowDown' && !e.altKey && !e.shiftKey) {
@@ -721,9 +772,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
         label={quantityText.step()}
         size="sm"
         tabbable={false}
-        options={STEP_SIZES.map((s) => ({ value: s, label: s.replace(/^0\./, '.') }))}
-        value={stepSize}
-        onValueChange={setStepSize}
+        options={ladder.steps.map((s) => ({ value: s, label: stepLabel(s) }))}
+        value={step}
+        onValueChange={(s) => {
+          setStepSize(s)
+          memory.set(memoryKey, s)
+        }}
       />
       <div className={styles['adjust']}>
         <Button
@@ -812,6 +866,9 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     <Field
       label={label}
       illustration={illustration}
+      {...(info !== undefined ? { info } : {})}
+      {...(tag !== undefined ? { tag } : {})}
+      onLabelPress={returnToInput}
       {...(lock ? { lock } : {})}
       {...(echo !== undefined ? { echo } : {})}
       messages={[
@@ -850,9 +907,13 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               onClick={() => {
                 if (!adjustOpen) openAdjust()
               }}
-              onFocus={() => {
+              onFocus={(e) => {
                 setFocused(true)
                 setEchoText(text)
+                // focus arriving from outside the field preselects the step for the value now
+                const from = e.relatedTarget
+                const inside = from instanceof Node && (panelRef.current?.contains(from) ?? false)
+                if (!inside && session.current === null) setStepSize(ladder.initial)
                 if (!returning.current) openAdjust()
               }}
               onBlur={(e) => {

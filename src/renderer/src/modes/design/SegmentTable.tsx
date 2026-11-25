@@ -477,6 +477,7 @@ function FilletCell({
       kind="length"
       defaultUnit={defaultUnit('length', ctx.part.units)}
       value={undefined}
+      stepKind="xy"
       optional
       className={styles['cellInput']}
       dense

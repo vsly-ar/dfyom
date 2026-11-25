@@ -10,6 +10,7 @@ import { Rational } from '../../../../core/quantity/rational'
 import { fail, None, Ok, Some } from '../../../../shared/result'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { ECHO_DELAY_MS, QuantityInput, type QuantityInputBaseProps } from './QuantityInput'
+import { StepScaleProvider } from './StepContext'
 
 const MM: ParseContext = { kind: 'length', defaultUnit: 'mm' }
 
@@ -445,7 +446,7 @@ describe('QuantityInput: optional (empty = unset)', () => {
 
 describe('QuantityInput: steppers', () => {
   it('steps a plain literal in its own unit (Shift ×10, Alt ×0.1), keeping unit and tolerance', async () => {
-    const { user, input, onCommit } = setup({ step: '0.1', initial: '1.50 ±0.05' })
+    const { user, input, onCommit } = setup({ stepKind: 'depth', initial: '1.50 ±0.05' })
     await user.click(input)
     await user.keyboard('{ArrowUp}')
     expect(input).toHaveValue('1.60 ±0.05')
@@ -930,5 +931,76 @@ describe('QuantityInput: read-only', () => {
     await user.click(input)
     await user.keyboard('{ArrowUp}{Enter}')
     expect(onCommit).not.toHaveBeenCalled()
+  })
+})
+
+// docs/conventions/inspector-layout.md#field-step-model-df104, #title-row-click-df111
+describe('QuantityInput: step kinds (DF104)', () => {
+  const radio = (name: string) => screen.getByRole('radio', { name })
+
+  it('preselects the step for the value and ↑ uses it (facing depth 0.3 → .1)', async () => {
+    const { user, input } = setup({ stepKind: 'depth', initial: '0.3' })
+    await user.click(input)
+    expect(radio('.1')).toHaveAttribute('aria-checked', 'true')
+    await user.keyboard('{ArrowUp}')
+    expect(input).toHaveValue('0.4')
+  })
+
+  it('scales the ladder to the stock: a 10.1 mm board offers no 10 mm depth step', async () => {
+    const { user } = renderUi(
+      <StepScaleProvider scale={{ thickness: 10.1 }}>
+        <Harness stepKind="depth" initial="3" />
+      </StepScaleProvider>,
+    )
+    await user.click(screen.getByRole('combobox', { name: 'Width' }))
+    const steps = screen.getAllByRole('radio').map((r) => r.textContent)
+    expect(steps).toEqual(['.01', '.1', '.5', '1', '5'])
+  })
+
+  it('an integer field offers integer steps only, and Alt does not step it', async () => {
+    const { user, input } = setup({ stepKind: 'count', stepMax: 12, initial: '4' })
+    await user.click(input)
+    expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['1', '2', '5'])
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
+    expect(input).toHaveValue('4')
+    await user.keyboard('{ArrowUp}')
+    expect(input).toHaveValue('5')
+    await user.keyboard('{Shift>}{ArrowUp}{/Shift}')
+    expect(input).toHaveValue('15')
+  })
+
+  it('remembers a chosen step for the field’s role for the session', async () => {
+    const first = setup({ stepKind: 'depth', stepKey: 'pocket.depth', initial: '0.3' })
+    await first.user.click(first.input)
+    await first.user.click(radio('1'))
+    first.unmount()
+    const again = setup({ stepKind: 'depth', stepKey: 'pocket.depth', initial: '0.3' })
+    await again.user.click(again.input)
+    expect(radio('1')).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
+describe('QuantityInput: title row and info (DF105, DF111)', () => {
+  it('a press on the title row focuses the input without opening the adjust panel', async () => {
+    const { user, input } = setup()
+    await user.click(screen.getByText('Width'))
+    expect(input).toHaveFocus()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // a click in the input opens it
+    await user.click(input)
+    expect(await screen.findByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+  })
+
+  it('focus by Tab still opens the panel (DF9)', async () => {
+    const { user } = setup()
+    await user.tab()
+    expect(await screen.findByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+  })
+
+  it('the info is the field’s description, not text under it', async () => {
+    const { input } = setup({ info: 'Empty = through the stock.' })
+    expect(input).toHaveAccessibleDescription('Empty = through the stock.')
+    expect(screen.getByText('Empty = through the stock.')).not.toBeVisible()
+    await expectNoAxeViolations()
   })
 })

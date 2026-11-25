@@ -209,6 +209,7 @@ export function SettingsDialog(): React.JSX.Element {
           <div className={styles['settingPair']}>
             <QuantityInput
               label={m.snapGridMm}
+              stepKind="small"
               kind="length"
               defaultUnit="mm"
               value={gridValue(settings.snapGrid.mm, 'mm')}
@@ -217,6 +218,7 @@ export function SettingsDialog(): React.JSX.Element {
             />
             <QuantityInput
               label={m.snapGridInch}
+              stepKind="small"
               kind="length"
               defaultUnit="in"
               value={gridValue(settings.snapGrid.inch, 'in')}

@@ -1079,6 +1079,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           <div className={styles['sectionPanel']}>
             <QuantityInput
               label={sm.sectionDepth}
+              stepKind="depth"
               kind="length"
               defaultUnit={props.section.defaultUnit}
               value={props.section.depth}

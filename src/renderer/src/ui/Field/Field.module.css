@@ -40,6 +40,46 @@
   align-self: start;
 }
 
+/* (i): the info icon, a 24 × 24 px hit area centred on the label's line, no box; not a Tab stop */
+.info {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -6px -6px -6px -2px;
+  vertical-align: middle;
+  color: var(--text-muted);
+  cursor: help;
+  transition: color var(--motion-fast);
+}
+
+.info:hover {
+  color: var(--text);
+}
+
+.info svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.tip {
+  display: block;
+  max-width: 32ch;
+}
+
+/* provenance tag at the title row's end ("Preset", "Default"); its text comes from data-text
+   so the label's text stays the control's name */
+.tag {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.tag::before {
+  content: attr(data-text);
+}
+
 .field:focus-within .illustration [data-accent] {
   stroke-width: 1.6px;
 }

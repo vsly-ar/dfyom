@@ -26,6 +26,12 @@ function install(): void {
   window.addEventListener('blur', release)
 }
 
+/** A pointer is pressed now (a focus it causes is pointer focus, not keyboard focus). */
+export function pointerPressed(): boolean {
+  install()
+  return pressed
+}
+
 /** Start tracking presses (idempotent); call before the first press matters (Field mount). */
 export function trackPointer(): void {
   install()
