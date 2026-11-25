@@ -19,6 +19,7 @@ import {
   Button,
   ConfirmDialog,
   ErrorMessage,
+  Field,
   Icon,
   IconButton,
   Menu,
@@ -189,15 +190,18 @@ export function SplitSection({
     return (
       <section aria-label={t.title} className={styles['splitSection']}>
         <h3 className={styles['groupTitle']}>{t.title}</h3>
-        <Button
-          size="sm"
-          icon={<Icon name="split" />}
-          title={t.actionDescription}
-          disabled={stock === undefined}
-          onClick={() => void send(firstSplit(stock?.thickness.canonical ?? 0, units))}
-        >
-          {t.action}
-        </Button>
+        {/* full width, as Split to fit… under it and the editor's actions (design review U9) */}
+        <div className={styles['addRow']}>
+          <Button
+            size="sm"
+            icon={<Icon name="split" />}
+            title={t.actionDescription}
+            disabled={stock === undefined}
+            onClick={() => void send(firstSplit(stock?.thickness.canonical ?? 0, units))}
+          >
+            {t.action}
+          </Button>
+        </div>
         {stock === undefined ? null : (
           <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} />
         )}
@@ -221,6 +225,7 @@ export function SplitSection({
     void send(withLevels([...args.levels, cutSource(v, units)]))
   }
   const pieces = pieceViews(part.doc, part.dto.id)
+  const findingText = (w: DfmWarning) => dfmMessages.text(w, units, dfmNames(part.dto))
   const holes = dowelHoles(split)
   const knobs = (keys?.keys.keys ?? []).map((k) => keyPreviewPoints(k))
   const keysOn = (axis: 'x' | 'y', at: number) =>
@@ -248,12 +253,18 @@ export function SplitSection({
           </li>
         ))}
       </ul>
-      <Switch
+      <Field
         label={t.useStocks}
-        checked={split.useStocks === true}
-        onCheckedChange={(on) => void send({ ...args, useStocks: on })}
-      />
-      <p className={styles['muted']}>{t.useStocksHint}</p>
+        kind="toggle"
+        messages={[{ id: 'note', severity: 'note', text: t.useStocksHint }]}
+      >
+        <Switch
+          label={t.useStocks}
+          hideLabel
+          checked={split.useStocks === true}
+          onCheckedChange={(on) => void send({ ...args, useStocks: on })}
+        />
+      </Field>
       <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
       <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
         {split.lines.length === 0 && split.levels.length === 0 ? (
@@ -265,6 +276,7 @@ export function SplitSection({
             onFocus={() => setFocus({ kind: 'line', index: i })}
             onBlur={() => setFocus(null)}
             {...(keys === undefined ? {} : { note: t.keyCount(keysOn(line.axis, mmOf(line.at))) })}
+            text={findingText}
             findings={cutFindings(warnings, {
               kind: 'line',
               index: i,
@@ -300,6 +312,7 @@ export function SplitSection({
             {...(split.joint.dowels === undefined
               ? {}
               : { note: t.dowelCount(holes.filter((h) => h.level === i).length) })}
+            text={findingText}
             findings={cutFindings(warnings, {
               kind: 'level',
               index: i,
@@ -390,20 +403,21 @@ function KeyFields({
   const fmt = (v: number) => `${+v.toFixed(2)}`
   return (
     <div className={styles['splitGroup']} role="group" aria-label={t.lineJoint}>
-      <SegmentedControl
-        label={t.lineJoint}
-        size="sm"
-        options={[
-          { value: 'butt', label: t.jointButt },
-          { value: 'puzzle', label: t.jointPuzzle },
-          { value: 'dovetail', label: t.jointDovetail },
-        ]}
-        value={kind}
-        onValueChange={(v) => {
-          const { joint: _, clearance: _c, ...rest } = args
-          send(v === 'puzzle' || v === 'dovetail' ? { ...rest, joint: v } : rest)
-        }}
-      />
+      <Field label={t.lineJoint} kind="toggle">
+        <SegmentedControl
+          label={t.lineJoint}
+          options={[
+            { value: 'butt', label: t.jointButt },
+            { value: 'puzzle', label: t.jointPuzzle },
+            { value: 'dovetail', label: t.jointDovetail },
+          ]}
+          value={kind}
+          onValueChange={(v) => {
+            const { joint: _, clearance: _c, ...rest } = args
+            send(v === 'puzzle' || v === 'dovetail' ? { ...rest, joint: v } : rest)
+          }}
+        />
+      </Field>
       {kind === 'butt' ? null : (
         <>
           <QuantityInput
@@ -414,8 +428,8 @@ function KeyFields({
               split.joint.clearance === undefined ? undefined : quantityOf(split.joint.clearance)
             }
             onCommit={(q, gesture) => send({ ...args, clearance: q.source }, gesture)}
+            messages={[{ id: 'note', severity: 'note', text: t.clearanceHint }]}
           />
-          <p className={styles['muted']}>{t.clearanceHint}</p>
           {keys === undefined ? null : (
             <p className={styles['muted']}>
               {placed.length === 0
@@ -623,19 +637,20 @@ function DowelFields({
   })
   return (
     <div className={styles['splitGroup']} role="group" aria-label={t.levelJoint}>
-      <SegmentedControl
-        label={t.levelJoint}
-        size="sm"
-        options={[
-          { value: 'butt', label: t.jointButt },
-          { value: 'dowels', label: t.jointDowels },
-        ]}
-        value={dowels === undefined ? 'butt' : 'dowels'}
-        onValueChange={(v) => {
-          const { dowels: _, ...rest } = args
-          send(v === 'dowels' ? { ...rest, dowels: {} } : rest)
-        }}
-      />
+      <Field label={t.levelJoint} kind="toggle">
+        <SegmentedControl
+          label={t.levelJoint}
+          options={[
+            { value: 'butt', label: t.jointButt },
+            { value: 'dowels', label: t.jointDowels },
+          ]}
+          value={dowels === undefined ? 'butt' : 'dowels'}
+          onValueChange={(v) => {
+            const { dowels: _, ...rest } = args
+            send(v === 'dowels' ? { ...rest, dowels: {} } : rest)
+          }}
+        />
+      </Field>
       {dowels === undefined || d === undefined ? null : (
         <>
           <QuantityInput
@@ -647,8 +662,8 @@ function DowelFields({
               const { depth: _, ...rest } = d
               send({ ...args, dowels: { ...rest, diameter: q.source } }, gesture)
             }}
+            messages={[{ id: 'note', severity: 'note', text: t.dowelHint(DOWEL_SIZES.join(', ')) }]}
           />
-          <p className={styles['muted']}>{t.dowelHint(DOWEL_SIZES.join(', '))}</p>
           <QuantityInput
             label={t.dowelDepth}
             kind="length"
@@ -718,12 +733,15 @@ function DowelFields({
 function CutRow({
   children,
   findings,
+  text,
   note,
   onFocus,
   onBlur,
 }: {
   children: React.ReactNode
   findings: readonly DfmWarning[]
+  /** A finding's text, as the warning list words it (design review U9: not the core's message). */
+  text: (w: DfmWarning) => string
   /** A read-out under the field (a level's dowel count, 4b). */
   note?: string
   onFocus: () => void
@@ -749,7 +767,7 @@ function CutRow({
           {shown.map((f, k) => (
             <li key={k}>
               <Icon name="warning" />
-              <span>{f.message}</span>
+              <span>{text(f)}</span>
             </li>
           ))}
           {sorted.length > shown.length ? (

@@ -205,4 +205,52 @@ describe('dfm messages', () => {
       'Piece 2: its blank 130 mm × 98.5 mm × 40 mm fits no library stock; Board is 3 mm short. It uses its own blank.',
     )
   })
+
+  it('words the joint findings (keys, dowels, a doweled or key-neck thin joint), never the fallback (design review U9)', () => {
+    const split = (params: DfmWarning['params']): DfmWarning => {
+      const { suggestion: _, ...rest } = w({ code: 'design.split', operation: 'split1', params })
+      return rest
+    }
+    const text = (params: DfmWarning['params']) => dfmMessages.text(split(params), 'mm', names)
+    expect(
+      text({
+        rule: 'keyFit',
+        reason: 'near',
+        axis: 'x',
+        at: 125,
+        run: [11.5, 100],
+        pieces: [1, 2],
+        tool: 6,
+      }),
+    ).toBe(
+      'No key on the line at X 125 mm between pieces 1 and 2 at Y 11.5 mm–100 mm: a feature or the part edge is within one tool Ø (6 mm) of every place.',
+    )
+    expect(
+      text({
+        rule: 'keyFit',
+        reason: 'short',
+        axis: 'y',
+        at: 50,
+        run: [0, 12],
+        pieces: [3, 4],
+        tool: 6,
+      }),
+    ).toBe(
+      'The run of 12 mm on the line at Y 50 mm between pieces 3 and 4 is too short for a key: a butt joint there.',
+    )
+    expect(text({ rule: 'dowelFit', reason: 'count', level: 0, count: 1, pieces: [1, 2] })).toBe(
+      'The glue face at level 1 between pieces 1 and 2 has 1 dowel: 2 or more keep the pieces from turning.',
+    )
+    expect(text({ rule: 'dowelNear', hole: 2, level: 0, wall: 0.8, limit: 1.5 })).toBe(
+      'Dowel hole 2 leaves 0.8 mm of wall, less than 1.5 mm, to an edge or a feature. Move the hole.',
+    )
+    expect(text({ rule: 'thinJoint', level: -40, width: 6.99, limit: 10, dowel: 6 })).toBe(
+      'The glue face at the level at Z -40 mm is 6.99 mm wide at its narrowest, less than 10 mm: Ø6 mm dowels fit only where it is wider.',
+    )
+    expect(
+      text({ rule: 'thinJoint', axis: 'x', at: 125, width: 4, limit: 18, what: 'keyNeck' }),
+    ).toMatch(/^The key neck on the line at X 125 mm is 4 mm wide, less than 18 mm/)
+    for (const rule of ['keyFit', 'dowelFit', 'dowelNear'])
+      expect(text({ rule })).not.toBe('A split finding on this part.')
+  })
 })

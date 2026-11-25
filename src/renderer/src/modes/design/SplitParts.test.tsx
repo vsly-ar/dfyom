@@ -91,9 +91,13 @@ describe('split part (split parts 4a)', () => {
     expect(within(section).getByLabelText('Level at Z', { selector: 'input' })).toBeVisible()
     // the level's findings under its field (4a polish), at most three and a count
     expect(
-      within(section).getByText(/^The glue face at level -10 is about 4 mm wide/),
+      within(section).getByText(/^The glue face at the level at Z -10 mm is 4 mm wide/),
     ).toBeVisible()
     expect(within(section).getByText('2 more in Warnings')).toBeVisible()
+    // the warning list names the split, not an "Unknown operation" (design review U9)
+    const list = screen.getByRole('region', { name: 'Warnings' })
+    await waitFor(() => expect(within(list).getAllByText('Split').length).toBeGreaterThan(0))
+    expect(within(list).queryByText('Unknown operation')).toBeNull()
     // focus in its field highlights the level in the viewport preview
     within(section).getByLabelText('Level at Z', { selector: 'input' }).focus()
     expect(t.shell.ui.getState().splitFocus).toEqual({ kind: 'level', index: 0 })

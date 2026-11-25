@@ -225,6 +225,7 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
   const size = (v: unknown) =>
     Array.isArray(v) ? (v as number[]).map((x) => L(x)).join(' × ') : '?'
   const piece = `Piece ${num(p['piece'])}`
+  const line = `the line at ${String(p['axis']).toUpperCase()} ${L(p['at'])}`
   switch (p['rule']) {
     case 'noOutline':
       return 'The part has no through outline profile, so the pieces are cut along the stock edges. Add the outline first.'
@@ -239,12 +240,39 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
       return `${op} lies within ${L(p['limit'])} of ${at.length > 0 ? list(at) : 'a split'}: a thin wall at the joint. Move the split.`
     }
     case 'thinJoint': {
-      const where =
-        typeof p['level'] === 'number'
-          ? `the level at Z ${L(p['level'])}`
-          : `the line at ${String(p['axis']).toUpperCase()} ${L(p['at'])}`
-      return `The glue face at ${where} is ${L(p['width'])} wide at its narrowest, less than ${L(p['limit'])}: a weak butt joint. Move the split.`
+      if (p['what'] === 'keyNeck')
+        return `The key neck on ${line} is ${L(p['width'])} wide, less than ${L(p['limit'])} (3 × the outline tool's Ø): a weak key. Move the split.`
+      const where = typeof p['level'] === 'number' ? `the level at Z ${L(p['level'])}` : line
+      return typeof p['dowel'] === 'number'
+        ? `The glue face at ${where} is ${L(p['width'])} wide at its narrowest, less than ${L(p['limit'])}: Ø${L(p['dowel'])} dowels fit only where it is wider.`
+        : `The glue face at ${where} is ${L(p['width'])} wide at its narrowest, less than ${L(p['limit'])}: a weak butt joint. Move the split.`
     }
+    // design review U9: these three fell back to "A split finding on this part."
+    case 'keyFit': {
+      const ab = Array.isArray(p['pieces']) ? (p['pieces'] as number[]).map(num) : []
+      const pair = `pieces ${ab[0] ?? '?'} and ${ab[1] ?? '?'}`
+      const r = Array.isArray(p['run']) ? (p['run'] as number[]).map(num) : [Number.NaN, Number.NaN]
+      const run = `${p['axis'] === 'x' ? 'Y' : 'X'} ${L(r[0])}–${L(r[1])}`
+      if (p['reason'] === 'near')
+        return `No key on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${L(p['tool'])}) of every place.`
+      if (p['reason'] === 'tool')
+        return `The run of ${L(r[1]! - r[0]!)} on ${line} between ${pair} holds a key only for a tool of Ø${L(p['maxTool'])} or smaller (the outline's is Ø${L(p['tool'])}): no key there.`
+      return `The run of ${L(r[1]! - r[0]!)} on ${line} between ${pair} is too short for a key: a butt joint there.`
+    }
+    case 'dowelFit': {
+      const level = `level ${num(p['level']) + 1}`
+      if (p['reason'] === 'outside')
+        return `Dowel hole ${num(p['hole'])} is on no glue face of ${level}: it is left out.`
+      if (p['reason'] === 'depth')
+        return `The dowel holes at ${level} are ${L(p['depth'])} deep, more than the pieces there hold: they are cut shallower.`
+      const ab = Array.isArray(p['pieces']) ? (p['pieces'] as number[]).map(num) : []
+      const n = num(p['count'])
+      return `The glue face at ${level} between pieces ${ab[0] ?? '?'} and ${ab[1] ?? '?'} has ${n} dowel${n === 1 ? '' : 's'}: 2 or more keep the pieces from turning.`
+    }
+    case 'dowelNear':
+      return num(p['wall']) <= 0
+        ? `Dowel hole ${num(p['hole'])} breaks into a feature or out of the glue face at level ${num(p['level']) + 1}. Place the dowels again or move the hole.`
+        : `Dowel hole ${num(p['hole'])} leaves ${L(p['wall'])} of wall, less than ${L(p['limit'])}, to an edge or a feature. Move the hole.`
     case 'sliver':
       return `${piece} is a sliver: ${L(p['narrow'])} at its narrowest, ${Math.round(num(p['share']) * 1000) / 10} % of the part. Move or remove a split.`
     case 'noStock':

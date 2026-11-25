@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { SPLIT_CODE } from '../../../../core/design/split/pieces'
 import { applyMessages } from '../../messages/apply'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
@@ -97,6 +98,7 @@ export function warningView(
 ): WarningView {
   // a finding names an operation, or a feature (F5: Clones notes carry the feature id)
   const names = dfmNames(part.dto)
+  const split = w.code === SPLIT_CODE
   const source = dfmMessages.suggestionSource(w, part.units)
   const elsewhere = fixIn?.(w)
   if (elsewhere !== undefined || featureOfWarning(part, w) !== undefined) apply = undefined // an owned operation is fixed in its feature, never directly
@@ -105,8 +107,11 @@ export function warningView(
     tier: pendingApply(w) ? 'soft' : dfmMessages.tier(w),
     ...(pendingApply(w) ? { pendingApply: applyMessages.warningPending } : {}),
     text: dfmMessages.text(w, part.units, names),
-    subject: names.item(w.operation),
-    ...(onSelect && w.operation !== 'stock' ? { onSelect: () => onSelect(w.operation) } : {}),
+    // a split finding names the split, not an operation (design review U9: was "Unknown operation")
+    subject: split ? designMessages.split.title : names.item(w.operation),
+    ...(onSelect && w.operation !== 'stock' && !split
+      ? { onSelect: () => onSelect(w.operation) }
+      : {}),
     ...(apply && source !== undefined && w.suggestion
       ? {
           fix: {
