@@ -472,6 +472,7 @@ export function ReferenceTools({
         <h3 className={styles['groupTitle']}>{t.section}</h3>
         <QuantityInput
           label={t.depth}
+          stepKind="depth"
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={lengthQuantity(depth, units)}
@@ -521,11 +522,12 @@ export function ReferenceTools({
         {round ? (
           <QuantityInput
             label={t.roundInside}
+            stepKind="small"
             kind="length"
             defaultUnit={defaultUnit('length', units)}
             value={radius}
             onCommit={(q) => setRoundRadius(q)}
-            messages={[{ id: 'roundHint', severity: 'note', text: t.roundHint }]}
+            info={t.roundHint}
           />
         ) : null}
         <div className={styles['setupActions']}>

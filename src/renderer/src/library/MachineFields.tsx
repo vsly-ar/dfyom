@@ -6,12 +6,22 @@ import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
-import { Field, SegmentedControl, Select, Switch, type FieldIconName } from '../ui'
+import { Field, SegmentedControl, Select, Switch, type FieldIconName, type StepKind } from '../ui'
 import { AXES, type Axis, type MachineDraft, type QDto } from './form'
 import { FixedField, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import styles from './LibraryForm.module.css'
 
 const m = libraryMessages.machine
+
+/** Adjust steps per machine field (inspector-layout.md § Step assignment per field). */
+function machineStep(field: string): StepKind {
+  if (field.startsWith('travel.')) return 'xy'
+  if (field.startsWith('maxFeedRate.')) return 'feed'
+  if (field.startsWith('acceleration.') || field.startsWith('stepsPerMm.')) return 'machine'
+  if (field === 'junctionDeviation' || field === 'arcTolerance') return 'tolerance'
+  if (field.startsWith('spindle.')) return 'rpm'
+  return 'depth'
+}
 const g = libraryMessages.window.groups
 const AXIS_ICON: Record<Axis, FieldIconName> = { x: 'length', y: 'width', z: 'depth' }
 
@@ -75,18 +85,19 @@ export function MachineFields({
     value: QuantityDTO | undefined,
     icon: FieldIconName,
     onValue: (v: QDto<K> | undefined) => void,
-    opts: { optional?: boolean; note?: string } = {},
+    opts: { optional?: boolean; info?: string } = {},
   ) => (
     <QuantityField
       key={field}
       field={field}
+      stepKind={machineStep(field)}
       label={label}
       kind={kind}
       value={value}
       units={units}
       icon={icon}
       messages={messages}
-      note={opts.note}
+      info={opts.info}
       optional={opts.optional ?? false}
       onChange={onValue}
     />
@@ -118,7 +129,7 @@ export function MachineFields({
           values[field]?.[a],
           AXIS_ICON[a],
           (v) => set({ [field]: { ...values[field], [a]: v } }),
-          i === 0 ? { optional: true, note } : { optional: true },
+          i === 0 ? { optional: true, info: note } : { optional: true },
         ),
       )}
       {messages(field).map((e) => (
@@ -154,7 +165,7 @@ export function MachineFields({
           values.noseToTable,
           'clearance',
           (noseToTable) => set({ noseToTable }),
-          { optional: true, note: m.noseToTableNote },
+          { optional: true, info: m.noseToTableNote },
         )}
         {q(
           'spoilboardThickness',
@@ -163,7 +174,7 @@ export function MachineFields({
           values.spoilboardThickness,
           'depth',
           (spoilboardThickness) => set({ spoilboardThickness }),
-          { optional: true, note: m.spoilboardThicknessNote },
+          { optional: true, info: m.spoilboardThicknessNote },
         )}
         {/* DF69: room for the touch plate at the Z touch-off spot */}
         {q(
@@ -173,7 +184,7 @@ export function MachineFields({
           values.probePlateSize,
           'width',
           (probePlateSize) => set({ probePlateSize }),
-          { optional: true, note: m.probePlateSizeNote },
+          { optional: true, info: m.probePlateSizeNote },
         )}
         {/* M4: Run's "Probe Z" sets Z0 at the contact minus the plate thickness */}
         {q(
@@ -183,17 +194,15 @@ export function MachineFields({
           values.probePlateThickness,
           'depth',
           (probePlateThickness) => set({ probePlateThickness }),
-          { optional: true, note: m.probePlateThicknessNote },
+          { optional: true, info: m.probePlateThicknessNote },
         )}
       </Group>
       {full ? (
         <Group title={m.homing}>
           <Field
             label={m.homingCorner}
-            messages={[
-              ...messages('homingCorner'),
-              { id: 'homingCornerNote', severity: 'note', text: m.homingCornerNote },
-            ]}
+            messages={messages('homingCorner')}
+            info={m.homingCornerNote}
           >
             <Select
               options={HOMING_CORNERS.map((c) => ({ value: c, label: m.homingCorners[c] }))}
@@ -208,7 +217,7 @@ export function MachineFields({
             values.pullOff,
             'depth',
             (pullOff) => set({ pullOff }),
-            { optional: true, note: m.pullOffNote },
+            { optional: true, info: m.pullOffNote },
           )}
           <Switch
             label={m.softLimits}
@@ -229,7 +238,7 @@ export function MachineFields({
             values.junctionDeviation,
             'corner',
             (junctionDeviation) => set({ junctionDeviation }),
-            { optional: true, note: m.junctionDeviationNote },
+            { optional: true, info: m.junctionDeviationNote },
           )}
           {q(
             'arcTolerance',
@@ -238,7 +247,7 @@ export function MachineFields({
             values.arcTolerance,
             'arcTolerance',
             (arcTolerance) => set({ arcTolerance }),
-            { optional: true, note: m.arcToleranceNote },
+            { optional: true, info: m.arcToleranceNote },
           )}
         </Group>
       ) : null}
@@ -271,7 +280,7 @@ export function MachineFields({
           values.spindle.minSpeed,
           'spindle',
           (minSpeed) => spindle({ minSpeed }),
-          { optional: true, note: m.minSpeedNote },
+          { optional: true, info: m.minSpeedNote },
         )}
         {values.spindle.control === 'gcode' ? (
           <>
@@ -282,7 +291,7 @@ export function MachineFields({
               values.spindle.controllerMinSpeed,
               'spindle',
               (controllerMinSpeed) => spindle({ controllerMinSpeed }),
-              { optional: true, note: m.controllerRangeNote },
+              { optional: true, info: m.controllerRangeNote },
             )}
             {q(
               'spindle.controllerMaxSpeed',
@@ -302,7 +311,7 @@ export function MachineFields({
           values.spindle.power,
           'tool',
           (power) => spindle({ power }),
-          { optional: true, note: m.powerNote },
+          { optional: true, info: m.powerNote },
         )}
       </Group>
       <Field label={m.rigidity} messages={messages('rigidity')}>

@@ -28,6 +28,7 @@ import {
   Switch,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
 } from '../../ui'
 import { ChamferInspector } from './ChamferInspector'
 import { isOpenNamed } from './operation-shape'
@@ -170,7 +171,14 @@ export function OperationFields({
             t.groups.depth,
             <>
               <OnField ctx={ctx} />
-              <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
+              <ParamField
+                ctx={ctx}
+                path="depth"
+                stepKind="depth"
+                label={t.depth}
+                kind="length"
+                icon="depth"
+              />
             </>,
           )}
           {toolGroup}
@@ -184,7 +192,14 @@ export function OperationFields({
             t.groups.depth,
             <>
               <OnField ctx={ctx} />
-              <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
+              <ParamField
+                ctx={ctx}
+                path="depth"
+                stepKind="depth"
+                label={t.depth}
+                kind="length"
+                icon="depth"
+              />
             </>,
           )}
           {toolGroup}
@@ -195,6 +210,7 @@ export function OperationFields({
                 <ParamField
                   ctx={ctx}
                   path="shape.cornerRadius"
+                  stepKind="small"
                   label={t.cornerRadius}
                   kind="length"
                   icon="corner"
@@ -203,6 +219,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="floorRadius"
+                stepKind="small"
                 label={t.floorRadius}
                 kind="length"
                 icon="floorRadius"
@@ -220,6 +237,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="center.0"
+                stepKind="xy"
                 label={t.position('Centre', axes(ctx).u)}
                 kind="length"
                 icon="positionX"
@@ -227,6 +245,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="center.1"
+                stepKind="xy"
                 label={t.position('Centre', axes(ctx).v)}
                 kind="length"
                 icon="positionY"
@@ -241,6 +260,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="diameter"
+                stepKind="small"
                 label={t.diameter}
                 kind="length"
                 icon="diameter"
@@ -267,12 +287,20 @@ export function OperationFields({
                 />
               </Field>
               {op.bottom !== 'through' ? (
-                <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
+                <ParamField
+                  ctx={ctx}
+                  path="depth"
+                  stepKind="depth"
+                  label={t.depth}
+                  kind="length"
+                  icon="depth"
+                />
               ) : null}
               {op.bottom === 'drillPoint' ? (
                 <ParamField
                   ctx={ctx}
                   path="pointAngle"
+                  stepKind="angle"
                   label={t.pointAngle}
                   kind="angle"
                   icon="chamfer"
@@ -334,6 +362,7 @@ export function OperationFields({
             <ParamField
               ctx={ctx}
               path="slotWidth"
+              stepKind="small"
               label={t.slotWidth}
               kind="length"
               icon="slotWidth"
@@ -346,6 +375,7 @@ export function OperationFields({
                 <ParamField
                   ctx={ctx}
                   path="tabs.count"
+                  stepKind="count"
                   label={t.tabsCount}
                   kind="scalar"
                   icon="tabs"
@@ -354,6 +384,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="tabs.width"
+                stepKind="small"
                 label={t.tabsWidth}
                 kind="length"
                 icon="tabWidth"
@@ -361,6 +392,7 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="tabs.thickness"
+                stepKind="depth"
                 label={t.tabsThickness}
                 kind="length"
                 icon="tabThickness"
@@ -417,6 +449,7 @@ function ShapeGroup({
       <ParamField
         ctx={ctx}
         path="shape.center.0"
+        stepKind="xy"
         label={t.position('Position', names.u)}
         kind="length"
         icon="positionX"
@@ -424,6 +457,7 @@ function ShapeGroup({
       <ParamField
         ctx={ctx}
         path="shape.center.1"
+        stepKind="xy"
         label={t.position('Position', names.v)}
         kind="length"
         icon="positionY"
@@ -433,6 +467,7 @@ function ShapeGroup({
           <ParamField
             ctx={ctx}
             path="shape.length"
+            stepKind="xy"
             label={t.lengthAlong(names.u)}
             kind="length"
             icon="length"
@@ -440,6 +475,7 @@ function ShapeGroup({
           <ParamField
             ctx={ctx}
             path="shape.width"
+            stepKind="xy"
             label={t.widthAlong(names.v)}
             kind="length"
             icon="width"
@@ -449,6 +485,7 @@ function ShapeGroup({
         <ParamField
           ctx={ctx}
           path="shape.diameter"
+          stepKind="xy"
           label={t.diameter}
           kind="length"
           icon="diameter"
@@ -458,6 +495,7 @@ function ShapeGroup({
         <ParamField
           ctx={ctx}
           path="shape.cornerRadius"
+          stepKind="small"
           label={t.cornerRadius}
           kind="length"
           icon="corner"
@@ -501,6 +539,7 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
       <ParamField
         ctx={ctx}
         path="shape.rotation"
+        stepKind="rotation"
         label={t.picker.rotation}
         kind="angle"
         icon="rotation"
@@ -528,6 +567,8 @@ function GrooveDepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.E
       value={op.depth === undefined ? undefined : quantityOf(op.depth)}
       placeholder={t.grooveThrough}
       optional
+      stepKind="depth"
+      stepKey="profile.depth"
       illustration={<FieldIcon name="depth" />}
       messages={messages}
       readOnly={ctx.readOnly}
@@ -595,6 +636,8 @@ export function ParamField({
   kind,
   icon,
   placeholder,
+  stepKind,
+  info,
 }: {
   ctx: OperationFieldsContext
   path: string
@@ -602,6 +645,10 @@ export function ParamField({
   kind: FieldKind
   icon: FieldIconName
   placeholder?: string
+  /** What the field measures, for its adjust steps (inspector-layout.md § Step kinds). */
+  stepKind: StepKind
+  /** Static explanation: the (i) tip (inspector-layout.md § Info tips). */
+  info?: string
 }): React.JSX.Element {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
@@ -644,6 +691,9 @@ export function ParamField({
       defaultUnit={defaultUnit(kind, ctx.units)}
       value={quantityAt(op, path)}
       onCommit={(q, gesture) => commit(ctx, path, q.source, gesture)}
+      stepKind={stepKind}
+      stepKey={`${op.kind}.${path}`}
+      {...(info !== undefined ? { info } : {})}
       onCancelGesture={ctx.cancelGesture}
       illustration={<FieldIcon name={icon} />}
       messages={messages}

@@ -32,6 +32,8 @@ import {
   StatusChip,
   WarningList,
   type WarningView,
+  StepScaleProvider,
+  stockStepScale,
 } from '../../ui'
 import styles from './Design.module.css'
 import { featureOfWarning, operationUnits, ownerFeature } from './feature-view'
@@ -129,7 +131,19 @@ export function warningView(
   }
 }
 
+/**
+ * The Design inspector; value fields scale their adjust steps to the shown part's stock
+ * (docs/conventions/inspector-layout.md#field-step-model-df104 rule 5).
+ */
 export function DesignInspector({ part }: { part: DesignPart | undefined }): React.JSX.Element {
+  return (
+    <StepScaleProvider scale={stockStepScale(part?.loaded?.stock)}>
+      <DesignInspectorBody part={part} />
+    </StepScaleProvider>
+  )
+}
+
+function DesignInspectorBody({ part }: { part: DesignPart | undefined }): React.JSX.Element {
   const [selected] = useDesignSelection()
   const warnings = useDesignWarnings(part)
   const draft = useUi((s) => s.clonesDraft)
@@ -246,6 +260,7 @@ function PartInspector({
         ) : null}
         <QuantityInput
           label={t.generalTolerance}
+          stepKind="tolerance"
           kind="length"
           defaultUnit={defaultUnit('length', part.units)}
           value={tolerance === undefined ? undefined : quantityOf(tolerance)}

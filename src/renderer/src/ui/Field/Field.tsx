@@ -2,7 +2,10 @@
 // looks pulled out from under it (echo, the highest-severity status with its fix, further notes
 // collapsed; a dismissed soft warning collapses to "1 dismissed · Show"). Wires the control's
 // id, aria-describedby and aria-invalid. Structure only: the quantity behaviour is QuantityInput
-// (task 3.4). Doc: docs/conventions/ui.md#field, severities: ui.md#warnings-and-dfm (decision 21)
+// (task 3.4). Doc: docs/conventions/ui.md#field, severities: ui.md#warnings-and-dfm (decision 21).
+// The title row carries the static explanation as an (i) tip (`info`) and a provenance tag
+// (`tag`); a press on it can focus without side effects (`onLabelPress`):
+// docs/conventions/inspector-layout.md#info-tips-df105, #title-row-click-df111
 import { Icon } from '../icons/Icon'
 import {
   cloneElement,
@@ -20,7 +23,10 @@ import {
 import { Button } from '../Button/Button'
 import { Tooltip } from '../Tooltip/Tooltip'
 import styles from './Field.module.css'
-import { afterPointerRelease, trackPointer } from './pointerRelease'
+import { afterPointerRelease, pointerPressed, trackPointer } from './pointerRelease'
+
+/** A keyboard-focus tip stays this long unless typing starts first (DF105 rule 5). */
+export const INFO_FOCUS_MS = 4000
 
 /**
  * The id of an element saying why the fields inside are read-only ("Part of Hole 1: change it in
@@ -115,6 +121,19 @@ export interface FieldProps {
    * and Tab order.
    */
   popup?: ReactNode
+  /**
+   * Static explanation of the field (what it means, how it is measured, what empty means): an
+   * (i) icon after the label with a hover tip, opened too when the control gets keyboard focus,
+   * and always in the control's accessible description. Value-dependent text stays a message.
+   */
+  info?: ReactNode
+  /** Provenance at the title row's end: a short muted tag ("Preset"), its tooltip the sentence. */
+  tag?: { text: string; title: string } | undefined
+  /**
+   * A press on the title row: replaces the label's own activation (focus the control). The
+   * QuantityInput focuses without opening its adjust panel (DF111).
+   */
+  onLabelPress?: () => void
   /** Layout only; appended to the wrapper's class. */
   className?: string | undefined
 }
@@ -129,6 +148,9 @@ export function Field({
   kind = 'value',
   children,
   popup,
+  info,
+  tag,
+  onLabelPress,
   className,
 }: FieldProps): React.JSX.Element {
   const base = useId()
@@ -138,6 +160,8 @@ export function Field({
   const statusId = `${base}-status`
   const moreId = `${base}-more`
   const lockReasonId = `${base}-lock-reason`
+  const infoId = `${base}-info`
+  const tagId = `${base}-tag`
   const lockName = lock?.name ?? (typeof label === 'string' ? `Lock ${label}` : 'Lock value')
   const lockDisabled = lock?.disabledReason !== undefined
 
@@ -209,8 +233,36 @@ export function Field({
   const invalid = messages.some((m) => m.severity === 'error')
   const tier = primary && RANK[primary.severity] <= RANK.soft ? primary.severity : 'none'
 
+  // the (i) tip: on hover, and for a while when the control gets keyboard focus (DF105)
+  const [infoHover, setInfoHover] = useState(false)
+  const [infoFocus, setInfoFocus] = useState(false)
+  useEffect(() => {
+    if (!infoFocus) return
+    const t = setTimeout(() => setInfoFocus(false), INFO_FOCUS_MS)
+    return () => clearTimeout(t)
+  }, [infoFocus])
+  const focusHandlers =
+    info === undefined
+      ? {}
+      : {
+          onFocus: (e: React.FocusEvent<HTMLDivElement>) => {
+            const from = e.relatedTarget
+            const fromInside = from instanceof Node && e.currentTarget.contains(from)
+            if (!fromInside && !pointerPressed() && isFocusVisible(e.target)) setInfoFocus(true)
+          },
+          onBlur: (e: React.FocusEvent<HTMLDivElement>) => {
+            const to = e.relatedTarget
+            if (!(to instanceof Node && e.currentTarget.contains(to))) setInfoFocus(false)
+          },
+          onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+            if (e.key !== 'Tab' && e.key !== 'Shift') setInfoFocus(false)
+          },
+        }
+
   const describedBy = [
     children.props['aria-describedby'],
+    info !== undefined ? infoId : undefined,
+    tag !== undefined ? tagId : undefined,
     shown !== undefined ? echoId : undefined,
     primary ? statusId : undefined,
     readOnly ? readOnlyReason : undefined,
@@ -237,11 +289,62 @@ export function Field({
       data-invalid={invalid || undefined}
       ref={fieldRef}
       className={[styles['field'], className].filter(Boolean).join(' ')}
+      {...focusHandlers}
     >
-      <label htmlFor={controlId} className={styles['label']}>
+      <label
+        htmlFor={controlId}
+        className={styles['label']}
+        {...(onLabelPress
+          ? {
+              onClick: (e: React.MouseEvent<HTMLLabelElement>) => {
+                e.preventDefault()
+                onLabelPress()
+              },
+            }
+          : {})}
+      >
         {illustration ? <span className={styles['illustration']}>{illustration}</span> : null}
         {label}
+        {info !== undefined ? (
+          <Tooltip
+            content={<span className={styles['tip']}>{info}</span>}
+            side="top"
+            align="start"
+            open={infoHover || infoFocus}
+            onOpenChange={setInfoHover}
+          >
+            <span
+              className={styles['info']}
+              aria-hidden="true"
+              data-testid="field-info"
+              // a press on (i) neither focuses the control nor opens anything (DF105 rule 6)
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
+            >
+              <Icon name="info" />
+            </span>
+          </Tooltip>
+        ) : null}
+        {tag !== undefined ? (
+          <Tooltip content={tag.title} side="top">
+            {/* the text is drawn by CSS: the label's text (the control's name) stays the label */}
+            <span className={styles['tag']} aria-hidden="true" data-text={tag.text} />
+          </Tooltip>
+        ) : null}
       </label>
+      {info !== undefined ? (
+        <span id={infoId} hidden>
+          {info}
+        </span>
+      ) : null}
+      {tag !== undefined ? (
+        <span id={tagId} hidden>
+          {tag.title}
+        </span>
+      ) : null}
       {lock ? (
         <Tooltip content={lock.disabledReason ?? lockName}>
           <button
@@ -373,6 +476,15 @@ export function Field({
       {popup}
     </div>
   )
+}
+
+/** `:focus-visible` where the engine knows it (keyboard focus), else true. */
+function isFocusVisible(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible')
+  } catch {
+    return true
+  }
 }
 
 /** Motion token in ms from the root style; 0 when reduced motion zeroes it or it is unset. */

@@ -98,6 +98,7 @@ export function ZRefFields({
         <>
           <QuantityInput
             label={m.zSpotX}
+            stepKind="xy"
             kind="length"
             defaultUnit={unit}
             value={feedQuantity('stepdown', z.at[0], units)}
@@ -107,6 +108,7 @@ export function ZRefFields({
           />
           <QuantityInput
             label={m.zSpotY}
+            stepKind="xy"
             kind="length"
             defaultUnit={unit}
             value={feedQuantity('stepdown', z.at[1], units)}

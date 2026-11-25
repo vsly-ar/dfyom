@@ -15,6 +15,7 @@ export interface TooltipProps {
   /** One focusable element; it becomes the trigger (Radix `asChild`). */
   children: ReactElement
   side?: 'top' | 'right' | 'bottom' | 'left'
+  align?: 'start' | 'center' | 'end'
   /** Rich tooltip: a block of several lines (title, explanation, list), wider (Apply button). */
   rich?: boolean
   /** Controlled open state (the gallery shows tooltips open). */
@@ -30,6 +31,7 @@ export function Tooltip({
   shortcut,
   children,
   side = 'bottom',
+  align = 'center',
   rich = false,
   open,
   onOpenChange,
@@ -70,6 +72,7 @@ export function Tooltip({
         <RadixTooltip.Content
           className={styles['content']}
           side={side}
+          align={align}
           sideOffset={6}
           data-rich={rich || undefined}
         >

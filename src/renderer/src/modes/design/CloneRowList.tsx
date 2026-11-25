@@ -127,9 +127,8 @@ export function rowFieldText(kind: CloneRowKind, key: string, axes: AxisNames): 
   }
 }
 
-/** The hint as the field's (i) note, after its errors. */
-const hintOf = (t: RowFieldText, path: string): FieldMessage[] =>
-  t.hint === '' ? [] : [{ id: `${path}-hint`, severity: 'note', text: t.hint }]
+/** The hint as the field's (i) tip (docs/conventions/inspector-layout.md#info-tips-df105). */
+const infoOf = (t: RowFieldText): { info?: string } => (t.hint === '' ? {} : { info: t.hint })
 
 const NO_REFERENCES: ReferenceResolver = { resolve: () => None }
 
@@ -290,7 +289,8 @@ export function CloneRowList({
           key="shape"
           label={shapeText.label}
           illustration={<FieldIcon name={shapeText.icon} />}
-          messages={[...messagesAt(`rows.${i}.shapeId`), ...hintOf(shapeText, `rows.${i}.shapeId`)]}
+          messages={messagesAt(`rows.${i}.shapeId`)}
+          {...infoOf(shapeText)}
         >
           <Select
             options={paths.map((s) => ({ value: s.id, label: s.name }))}
@@ -331,12 +331,11 @@ export function CloneRowList({
             value={countValue(row['count'])}
             validate={whole}
             onCommit={(q) => setField(i, 'count', q.canonical)}
+            stepKind="count"
+            stepMax={100}
+            {...infoOf(countText)}
             illustration={<FieldIcon name={countText.icon} />}
-            messages={[
-              ...messagesAt(`rows.${i}.count`),
-              ...overAt(i, 'count'),
-              ...hintOf(countText, `rows.${i}.count`),
-            ]}
+            messages={[...messagesAt(`rows.${i}.count`), ...overAt(i, 'count')]}
           />
         ) : (
           <QuantityInput
@@ -346,13 +345,11 @@ export function CloneRowList({
             kind="length"
             defaultUnit={fieldContext('length', units).defaultUnit}
             value={quantity(row['spacing'], 'length')}
+            stepKind="xy"
+            {...infoOf(spacingText)}
             onCommit={(q, gesture) => setField(i, 'spacing', q.source, gesture)}
             onCancelGesture={onCancelGesture}
-            messages={[
-              ...messagesAt(`rows.${i}.spacing`),
-              ...overAt(i, 'spacing'),
-              ...hintOf(spacingText, `rows.${i}.spacing`),
-            ]}
+            messages={[...messagesAt(`rows.${i}.spacing`), ...overAt(i, 'spacing')]}
             {...(resolver ? { resolver } : {})}
           />
         ),
@@ -363,7 +360,8 @@ export function CloneRowList({
       const label = text.label
       const illustration = <FieldIcon name={text.icon} />
       const path = `rows.${i}.${f.key}`
-      const messages = [...messagesAt(path), ...overAt(i, f.key), ...hintOf(text, path)]
+      const messages = [...messagesAt(path), ...overAt(i, f.key)]
+      const info = infoOf(text)
       if (f.kind === 'count')
         out.push(
           <QuantityInput
@@ -375,6 +373,9 @@ export function CloneRowList({
             value={countValue(row[f.key])}
             validate={whole}
             onCommit={(q) => setField(i, f.key, q.canonical)}
+            stepKind="count"
+            stepMax={100}
+            {...info}
             messages={messages}
           />,
         )
@@ -387,6 +388,8 @@ export function CloneRowList({
             kind="length"
             defaultUnit={fieldContext('length', units).defaultUnit}
             value={quantity(row['start'], 'length')}
+            stepKind="xy"
+            {...info}
             optional
             placeholder="0"
             onCommit={(q, gesture) => {
@@ -412,6 +415,8 @@ export function CloneRowList({
             kind={f.kind}
             defaultUnit={fieldContext(f.kind, units).defaultUnit}
             value={quantity(row[f.key], f.kind)}
+            stepKind={f.kind === 'angle' ? 'rotation' : 'xy'}
+            {...info}
             onCommit={(q, gesture) => setField(i, f.key, q.source, gesture)}
             onCancelGesture={onCancelGesture}
             messages={messages}

@@ -87,12 +87,18 @@ export {
   ERROR_DELAY_MS,
   QuantityInput,
   newGestureId,
-  STEP_SIZES,
   type QuantityCommitProps,
   type QuantityInputProps,
   type ReferenceOption,
-  type StepSize,
 } from './QuantityInput/QuantityInput'
+export {
+  STEP_LADDERS,
+  stepsFor,
+  stockStepScale,
+  type StepKind,
+  type StepScale,
+} from './QuantityInput/steps'
+export { StepMemoryProvider, StepScaleProvider, type StepMemory } from './QuantityInput/StepContext'
 export type { InheritedTolerance } from './QuantityInput/reading'
 export {
   DRAG_THRESHOLD_PX,

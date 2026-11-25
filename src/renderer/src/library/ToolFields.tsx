@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
-import { Field, FieldInput, Select } from '../ui'
+import { Field, FieldInput, Select, type StepKind } from '../ui'
 import {
   followDraft,
   quantityText,
@@ -22,6 +22,15 @@ import styles from './LibraryForm.module.css'
 
 const m = libraryMessages.tool
 const NO_MATERIAL = 'none'
+/** Adjust steps per tool field (inspector-layout.md § Step assignment per field); others `small`. */
+const TOOL_STEP: Partial<Record<string, StepKind>> = {
+  fluteLength: 'xy',
+  stickout: 'xy',
+  overallLength: 'xy',
+  fluteCount: 'count',
+  angle: 'angle',
+  pointAngle: 'angle',
+}
 
 /** Every field key of the tool form (issue mapping, focus on the first invalid one). */
 export const TOOL_FIELDS: readonly string[] = [
@@ -106,17 +115,19 @@ export function ToolFields({
     field: keyof ToolDraft & string,
     kind: 'length' | 'scalar' | 'angle',
     icon: Parameters<typeof QuantityField>[0]['icon'],
-    opts: { optional?: boolean; note?: string; placeholder?: string } = {},
+    opts: { optional?: boolean; info?: string; placeholder?: string } = {},
   ) => (
     <QuantityField
       field={field}
+      stepKind={TOOL_STEP[field] ?? 'small'}
+      {...(field === 'fluteCount' ? { stepMax: 12 } : {})}
       label={m[field as keyof typeof m] as string}
       kind={kind}
       value={values[field] as QuantityDTO | undefined}
       units={units}
       icon={icon}
       messages={messages}
-      note={opts.note}
+      info={opts.info}
       optional={opts.optional ?? false}
       placeholder={opts.placeholder}
       onChange={(v) => set({ [field]: v })}
@@ -155,7 +166,7 @@ export function ToolFields({
           under Details */}
       {quantity('stickout', 'length', 'stickout', {
         optional: true,
-        note: m.stickoutNote,
+        info: m.stickoutNote,
         placeholder: m.stickoutPlaceholder(
           values.fluteLength === undefined || values.fluteLength.source.trim() === ''
             ? undefined
@@ -163,7 +174,7 @@ export function ToolFields({
         ),
       })}
       {full
-        ? quantity('shankDiameter', 'length', 'shank', { optional: true, note: m.shankNote })
+        ? quantity('shankDiameter', 'length', 'shank', { optional: true, info: m.shankNote })
         : null}
       {quantity('fluteCount', 'scalar', 'tool')}
       {values.type === 'drill' ? quantity('pointAngle', 'angle', 'chamfer') : null}
@@ -232,7 +243,7 @@ export function ToolFields({
           summary: detailsSummary,
         }}
       >
-        {quantity('overallLength', 'length', 'overallLength', { note: m.overallLengthNote })}
+        {quantity('overallLength', 'length', 'overallLength', { info: m.overallLengthNote })}
         {material}
         <Field
           label={m.coating}

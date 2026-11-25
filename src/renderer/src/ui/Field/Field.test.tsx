@@ -1,5 +1,5 @@
 import { Icon } from '../icons/Icon'
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
@@ -279,5 +279,60 @@ describe('Field', () => {
       </div>,
     )
     await expectNoAxeViolations()
+  })
+})
+
+// docs/conventions/inspector-layout.md#info-tips-df105
+describe('Field: (i) info tip and provenance tag', () => {
+  const INFO = 'Measured from the stock top.'
+  const tip = () => screen.queryByRole('tooltip')
+
+  function setup() {
+    return renderUi(
+      <div>
+        <input aria-label="Before" />
+        <Field label="Depth" info={INFO} tag={{ text: 'Preset', title: 'From preset “Ply”.' }}>
+          <FieldInput defaultValue="3.00" unit="mm" />
+        </Field>
+      </div>,
+    )
+  }
+
+  it('puts the info and the provenance in the description, not under the field', async () => {
+    setup()
+    const input = screen.getByRole('textbox', { name: 'Depth' })
+    expect(input).toHaveAccessibleDescription(`${INFO} From preset “Ply”.`)
+    expect(screen.getByText(INFO)).not.toBeVisible()
+    expect(document.querySelector('[data-text="Preset"]')).toBeInTheDocument()
+    await expectNoAxeViolations()
+  })
+
+  it('opens the tip on keyboard focus only, and closes it when typing starts', async () => {
+    const { user } = setup()
+    const input = screen.getByRole('textbox', { name: 'Depth' })
+    await user.click(input)
+    expect(tip()).toBeNull()
+    await user.click(screen.getByRole('textbox', { name: 'Before' }))
+    await user.tab()
+    expect(input).toHaveFocus()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(INFO)
+    await user.keyboard('4')
+    await waitFor(() => expect(tip()).toBeNull())
+  })
+
+  it('a press on (i) neither focuses the control nor is a Tab stop', async () => {
+    const { user } = setup()
+    const input = screen.getByRole('textbox', { name: 'Depth' })
+    await user.click(screen.getByTestId('field-info'))
+    expect(input).not.toHaveFocus()
+    await user.click(screen.getByRole('textbox', { name: 'Before' }))
+    await user.tab()
+    expect(input).toHaveFocus()
+  })
+
+  it('shows the tip on hover of (i)', async () => {
+    const { user } = setup()
+    await user.hover(screen.getByTestId('field-info'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(INFO)
   })
 })

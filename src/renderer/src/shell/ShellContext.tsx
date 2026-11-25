@@ -24,6 +24,7 @@ import { createReferenceMeshes, type ReferenceMeshes } from '../state/reference-
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
+import { StepMemoryProvider, type StepMemory } from '../ui/QuantityInput/StepContext'
 import { createProjectFiles, type ProjectFiles } from './project/files'
 
 export interface Shell {
@@ -97,7 +98,17 @@ export function ShellProvider({
       stopBound()
     }
   }, [shell])
-  return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>
+  // a step chosen in a field's adjust panel is remembered in the ui store for the session
+  // (docs/conventions/inspector-layout.md#field-step-model-df104 rule 4)
+  const [stepMemory] = useState<StepMemory>(() => ({
+    get: (key) => shell.ui.getState().steps[key],
+    set: (key, step) => shell.ui.getState().rememberStep(key, step),
+  }))
+  return (
+    <ShellContext.Provider value={shell}>
+      <StepMemoryProvider memory={stepMemory}>{children}</StepMemoryProvider>
+    </ShellContext.Provider>
+  )
 }
 
 export function useShell(): Shell {

@@ -32,6 +32,7 @@ import {
   WarningList,
   type FieldIconName,
   type FieldMessage,
+  type StepKind,
 } from '../../ui'
 import { holeSection } from '../../viewport/hole-section'
 import { SketchView } from '../../viewport/SketchView'
@@ -92,6 +93,17 @@ const FIELD_LABEL: Record<HoleSizeField, string> = {
   csAngle: h.csAngle,
   csStepdown: h.csStepdown,
   headSink: h.headSink,
+}
+/** Adjust steps per size field (inspector-layout.md § Step assignment per field). */
+const FIELD_STEP: Record<HoleSizeField, StepKind> = {
+  diameter: 'small',
+  depth: 'depth',
+  cbDiameter: 'small',
+  cbDepth: 'depth',
+  csDiameter: 'small',
+  csAngle: 'angle',
+  csStepdown: 'stepdown',
+  headSink: 'depth',
 }
 const FIELD_ICON: Record<HoleSizeField, FieldIconName> = {
   diameter: 'diameter',
@@ -313,6 +325,8 @@ export function HoleInspector({
           defaultUnit={defaultUnit(angle ? 'angle' : 'length', units)}
           value={dto === undefined ? undefined : quantityOf(dto)}
           onCommit={(q, gesture) => void update({ [field]: q.source }, field, gesture)}
+          stepKind={FIELD_STEP[field]}
+          stepKey={`hole.${field}`}
           onCancelGesture={cancelGesture}
           illustration={<FieldIcon name={FIELD_ICON[field]} />}
           messages={messagesAt(field)}
@@ -329,6 +343,8 @@ export function HoleInspector({
       <div className={styles['holeField']} {...track(path)}>
         <QuantityInput
           label={t.position('Centre', i === 0 ? names.u : names.v)}
+          stepKind="xy"
+          stepKey={`hole.${path}`}
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(hole.center[i])}

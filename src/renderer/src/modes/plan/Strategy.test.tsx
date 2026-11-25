@@ -96,7 +96,8 @@ describe('Plan inspector: strategy', () => {
     const g = within(group)
     const allowance = g.getByLabelText('Finishing allowance', { selector: 'input' })
     expect(allowance).toHaveValue('0.2 mm')
-    expect(g.getAllByText('Default.').length).toBeGreaterThan(0)
+    // a default is a tag on the title row, its sentence the field's description (DF105)
+    expect(allowance).toHaveAccessibleDescription(/Default\./)
     expect(g.getByLabelText('Finish stepdown', { selector: 'input' })).toBeInTheDocument()
 
     // no finishing pass: the finish stepdown goes

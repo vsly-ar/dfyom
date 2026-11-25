@@ -262,6 +262,18 @@ Each slice keeps `npm run check` green, updates the docs it touches and the [har
 
 Order: S1 → S2 → S3 → S4 → S5 → S6; S3–S6 may run in parallel lanes after S2. Each inspector slice ends with hidden light/dark captures of its inspectors for the user's review (no visible windows).
 
+## S1 implementation notes
+
+Built 2026-11-25 (provisional, awaits the user's review of the captures):
+
+- **Steps:** `ui/QuantityInput/steps.ts` holds the ladder table and `stepsFor` (rules 3–6); `QuantityInput` takes `stepKind`, `stepMax` (count fields: Columns/Rows 100, sides and flute count 12), `stepUncapped` (setup clearance/retract/clamp heights may exceed the stock) and `stepKey` (the remembered-step key; default `${stepKind}:${label}`, operation fields use `<op kind>.<path>`). Caps come from `StepScaleProvider`: the Design inspector gives the part's stock, the Plan inspector the plan part's stock and the machine snapshot's max XY feed and spindle speed.
+- **Remembered step:** the ui store (`steps`, `rememberStep`) through `StepMemoryProvider` in the shell; outside a shell (tests, gallery) a module-level session map.
+- **Every app value field has a `stepKind`** already (Design and Plan inspectors, library forms, Stock dialog, Reference panel/tools, Shape Editor, Settings snap grid, gallery). The prop stays optional with the `xy` fallback; making it required is all that is left of S6's step work.
+- **(i) tip:** the icon is `aria-hidden` and not a Tab stop; its text is a hidden span in the control's `aria-describedby`. Keyboard focus (`:focus-visible`, not after a pointer press) opens it for 4 s or until a key other than Tab/Shift. Static hints moved into tips in this slice for every inspector (not only in S3–S6): Chamfer (4), Clones row hints, Pattern (2), Split (3), Reference panel/tools (4), Setup rotation, Aid size hints, Workholding margin, library tool/machine/stock notes. Value-dependent notes (cut depth, alignment zero/inset with their fixes) stay inline.
+- **Provenance tag:** `tag {text, title}` on the title row; the text is drawn by CSS (`attr(data-text)`) so the label stays the control's accessible name, the title is a tooltip and part of the description. Feed fields tag preset, calculator and strategy sources; strategy parameters tag "Default". An entered value keeps its inline "Entered by you." line with the Use default / recommendation fix, since that line carries an action.
+- **DF111:** the label's click is prevented and focuses the input the way Escape-from-panel does (no panel); the doc's pointerdown flag was not needed.
+- **Structure untouched:** no inspector was restructured (S2+).
+
 ## Open questions
 
 None blocking (D70: recommended options taken). Revisit after S3 dogfood: the `depth` default `.1` for deep pockets; whether the (i) tip on keyboard focus is wanted or noisy; whether the Plan operation's Design tab should be a closed accordion instead.

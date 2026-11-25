@@ -105,6 +105,8 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
           <div key={i} className={styles['tabRow']}>
             <QuantityInput
               label={tt.position(i + 1)}
+              stepKind="xy"
+              stepKey="profile.tabs.position"
               kind="length"
               defaultUnit={defaultUnit('length', ctx.units)}
               value={quantityOf(q)}

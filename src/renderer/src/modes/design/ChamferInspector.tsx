@@ -134,12 +134,26 @@ export function ChamferInspector({
         ) : null}
         {target(
           'width',
-          <ParamField ctx={ctx} path="width" label={t.width} kind="length" icon="length" />,
+          <ParamField
+            ctx={ctx}
+            path="width"
+            stepKind="small"
+            label={t.width}
+            kind="length"
+            icon="length"
+          />,
         )}
         {target('depth', <DepthField ctx={ctx} />)}
         {target(
           'angle',
-          <ParamField ctx={ctx} path="angle" label={t.angle} kind="angle" icon="chamfer" />,
+          <ParamField
+            ctx={ctx}
+            path="angle"
+            stepKind="angle"
+            label={t.angle}
+            kind="angle"
+            icon="chamfer"
+          />,
         )}
         {target('diameter', <DiameterField ctx={ctx} />)}
         <CornerLiftField ctx={ctx} />
@@ -167,7 +181,6 @@ function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
     ...ctx.errors
       .filter((e) => e.path === 'depth')
       .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    { id: 'derived', severity: 'note', text: t.depthNote },
   ]
   return (
     <QuantityInput
@@ -177,6 +190,9 @@ function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
       value={value}
       onCommit={(q, gesture) => ctx.send({ depth: q.source }, 'depth', gesture)}
       onCancelGesture={ctx.cancelGesture}
+      stepKind="depth"
+      stepKey="chamfer.depth"
+      info={t.depthNote}
       illustration={<FieldIcon name="depth" />}
       messages={messages}
       readOnly={ctx.readOnly}
@@ -196,7 +212,7 @@ function DiameterField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
       label={t.diameter}
       illustration={<FieldIcon name="diameter" />}
       readOnly
-      messages={[{ id: 'derived', severity: 'note', text: t.diameterNote }]}
+      info={t.diameterNote}
     >
       <FieldInput
         readOnly
@@ -288,10 +304,15 @@ function SideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element 
     ...ctx.errors
       .filter((e) => e.path === 'on')
       .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    { id: 'note', severity: 'note', text: t.sideNote },
   ]
   return (
-    <Field label={t.side} kind="toggle" messages={messages} readOnly={ctx.readOnly}>
+    <Field
+      label={t.side}
+      kind="toggle"
+      messages={messages}
+      info={t.sideNote}
+      readOnly={ctx.readOnly}
+    >
       <SegmentedControl<'top' | 'bottom'>
         label={t.side}
         options={(['top', 'bottom'] as const).map((v) => ({ value: v, label: t.sides[v] }))}
@@ -313,10 +334,15 @@ function CornerLiftField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.El
     ...ctx.errors
       .filter((e) => e.path === 'cornerLift')
       .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    { id: 'note', severity: 'note', text: t.cornerLiftNote },
   ]
   return (
-    <Field label={t.cornerLift} kind="toggle" messages={messages} readOnly={ctx.readOnly}>
+    <Field
+      label={t.cornerLift}
+      kind="toggle"
+      messages={messages}
+      info={t.cornerLiftNote}
+      readOnly={ctx.readOnly}
+    >
       <Switch
         label={t.cornerLift}
         hideLabel

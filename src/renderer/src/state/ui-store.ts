@@ -149,6 +149,12 @@ export interface UiState {
    */
   readonly rotationGuide: string | null
   setRotationGuide(operationId: string | null): void
+  /**
+   * Adjust steps the user chose, per field role (`pocket.depth`), for the session; never saved
+   * (docs/conventions/inspector-layout.md#field-step-model-df104 rule 4).
+   */
+  readonly steps: Readonly<Record<string, string>>
+  rememberStep(key: string, step: string): void
   /** The last SVG import's report (task U2), reopened from the shape inspector; not persisted. */
   readonly lastImport: LastImport | null
   setLastImport(last: LastImport | null): void
@@ -368,6 +374,8 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setRemovedToast: (removedToast) => set({ removedToast }),
     rotationGuide: null,
     setRotationGuide: (rotationGuide) => set({ rotationGuide }),
+    steps: {},
+    rememberStep: (key, step) => set((s) => ({ steps: { ...s.steps, [key]: step } })),
     lastImport: null,
     setLastImport: (lastImport) => set({ lastImport }),
     measuring: false,

@@ -309,6 +309,7 @@ export function StockSetup({
       kind="length"
       defaultUnit={defaultUnit('length', units)}
       value={size[i]}
+      stepKind={i === 2 ? 'depth' : 'xy'}
       illustration={<FieldIcon name={SIZE_ICONS[i]} />}
       messages={issueMessages(issues, SIZE_FIELDS[i])}
       onCommit={(q) => {

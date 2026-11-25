@@ -275,7 +275,7 @@ describe('reference model UI', () => {
     // the anchor sits with the scale, with its hint; scale 2 about the centre: 40 × 20 × 10 with
     // the centre (50, 30) and the top (0) kept → min corner (30, 20, −10), one undo step
     const anchors = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
-    expect(within(inspector()).getByText(/stays in place when the scale changes/)).toBeVisible()
+    expect(anchors).toHaveAccessibleDescription(/stays in place when the scale changes/)
     const before = d.history.undoable.length
     await retype(user, field('Scale'), '2{Enter}')
     await waitFor(() => expect(ref().scale.source).toBe('2'))
@@ -316,7 +316,9 @@ describe('reference model UI', () => {
     )
     expect(ui().referencePreview!.placement.position).toEqual({ x: 10, y: 10, z: -20 })
     await user.click(within(region).getByRole('radio', { name: 'Bottom' }))
-    expect(within(region).getByText(/Which face of the model lines up/)).toBeVisible()
+    expect(within(region).getByRole('radiogroup', { name: 'Height' })).toHaveAccessibleDescription(
+      /Which face of the model lines up/,
+    )
     // Cancel: no command, preview dropped, focus back on Fit to stock…
     const calls = commandsOf(bridge).length
     await user.click(within(region).getByRole('button', { name: 'Cancel' }))

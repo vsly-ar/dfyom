@@ -171,7 +171,8 @@ describe('Plan mode', () => {
     await within(insp).findByRole('heading', { name: 'Facing 1' })
     const feed = await within(insp).findByLabelText('Feed rate', { selector: 'input' })
     expect(feed).toHaveValue('800 mm/min')
-    expect(within(insp).getAllByText('From preset “Alu finish”.').length).toBeGreaterThan(0)
+    // provenance is a tag on the title row, its sentence the field's description (DF105)
+    expect(feed).toHaveAccessibleDescription(/From preset “Alu finish”\./)
     // the tool picker offers the ranked suggestions and names why
     expect(within(insp).getByRole('combobox', { name: 'Tool' })).toHaveTextContent('Flat 6')
     expect(within(insp).getByRole('list', { name: 'Why this tool' })).toBeInTheDocument()
@@ -214,7 +215,9 @@ describe('Plan mode', () => {
     for (const name of ['Lock Feed rate', 'Lock Stepdown', 'Lock Stepover'])
       expect(within(insp).getByRole('button', { name })).toBeInTheDocument()
     expect(within(insp).queryByRole('button', { name: 'Lock Plunge rate' })).toBeNull()
-    expect(within(insp).getAllByText('Recommended by the calculator.').length).toBeGreaterThan(0)
+    expect(
+      within(insp).getByLabelText('Feed rate', { selector: 'input' }),
+    ).toHaveAccessibleDescription(/Recommended by the calculator\./)
 
     // locking pins the shown value
     await t.user.click(spindleLock)
