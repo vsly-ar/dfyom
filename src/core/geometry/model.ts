@@ -173,6 +173,8 @@ export type OperationGeometry = FacePlacement &
         readonly floorRadius: number
         /** Patterns P4: cleared through the opposite face (no floor); absent = blind. */
         readonly through?: true
+        /** DF108: a pattern's roughing pocket (no removal of its own, no finishing ring). */
+        readonly roughing?: true
         /**
          * A through pocket's depth below the stock face when an earlier setup already cleared
          * material under its whole region from the opposite face (DF50 for through pockets,

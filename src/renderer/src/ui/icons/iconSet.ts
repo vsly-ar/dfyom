@@ -159,16 +159,22 @@ export const ICON_SET = {
       { d: 'M7 3.5h2M12.5 7v2', a: true, dash: '0 2' },
     ],
   },
-  // patterns P1: a staggered lattice of round cells inside a face outline (patterns.md § UI)
+  // DF109 (patterns.md § Icon (DF109)): a honeycomb of small cells sharing their walls, no frame:
+  // two rows of two about the middle cell (the accent), the middle row's outer cells cut by the
+  // box (wall stubs at the sides). Was round cells in a face outline, which read as a face.
   pattern: {
     label: 'Pattern',
     group: 'feature',
     src: 'b22',
     parts: [
-      { rect: [1.5, 1.5, 13, 13, 1.5] },
-      { circle: [5, 5.5, 1.6], a: true },
-      { circle: [11, 5.5, 1.6], a: true },
-      { circle: [8, 10.5, 1.6], a: true },
+      {
+        d: 'M5.75 1.5L8 2.8v2.6L5.75 6.7L3.5 5.4V2.8zM10.25 1.5l2.25 1.3v2.6l-2.25 1.3L8 5.4V2.8z',
+      },
+      {
+        d: 'M5.75 9.3L8 10.6v2.6l-2.25 1.3l-2.25-1.3v-2.6zM10.25 9.3l2.25 1.3v2.6l-2.25 1.3L8 13.2v-2.6z',
+      },
+      { d: 'M3.5 5.4L1.5 6.55M3.5 10.6L1.5 9.45M12.5 5.4l2 1.15M12.5 10.6l2-1.15' },
+      { d: 'M8 5.4l2.25 1.3v2.6L8 10.6L5.75 9.3V6.7z', a: true },
     ],
   },
   // Clones path-row kinds (the Add row menu): dots in the row's layout; may fall back to the label

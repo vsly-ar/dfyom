@@ -129,6 +129,11 @@ export interface Pattern extends FeatureBase {
   readonly through: boolean
   /** P3: Some = the owned chamfer `<id>_chamfer` on the pocket's edge (off by default). */
   readonly chamfer: Option<PatternChamfer>
+  /**
+   * DF108: the owned roughing pocket `<id>_roughing` before the pocket, with its own (bigger)
+   * tool; the pocket then cuts only what it left (rest machining). Off by default.
+   */
+  readonly roughing: boolean
 }
 
 export const ownedShapeId = (featureId: string): string => `${featureId}_cells`
@@ -184,6 +189,7 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   invert: z.boolean().optional(),
   depth: length(),
   through: z.boolean().optional(),
+  roughing: z.literal(true).optional(),
   chamfer: z
     .object({ width: length(), angle: angle(), side: z.enum(['bottom', 'both']).optional() })
     .optional(),
@@ -287,6 +293,7 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       invert: d.invert ?? false,
       depth: depth!,
       through: d.through ?? false,
+      roughing: d.roughing ?? false,
       chamfer:
         chq.length === 0
           ? None
@@ -360,6 +367,7 @@ function patternToDTO(p: Pattern): FeatureDTO {
     ...(p.invert ? { invert: true } : {}),
     depth: p.depth.toDTO(),
     ...(p.through ? { through: true } : {}),
+    ...(p.roughing ? { roughing: true } : {}),
     ...(p.chamfer.isSome()
       ? {
           chamfer: {
@@ -450,27 +458,30 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
   // P4: a through pocket's depth is the material below `on` (readers that matter re-read it)
   const depth = p.through ? derivedLength(materialBelow(p.on, ctx), ctx.units) : Ok(p.depth)
   if (depth.isErr()) return depth
-  return derivedLength(ZERO, ctx.units).map((zero): ExpandedOperation[] => [
-    {
-      role: 'pocket',
-      operation: {
-        kind: 'pocket' as const,
-        on: p.on,
-        shape: {
-          kind: 'named' as const,
-          center: [zero, zero] as const,
-          anchor: MIN_ANCHOR,
-          shapeId: ownedShapeId(p.id),
-          rotation: None,
-          mirror: false,
-        },
-        depth: depth.unwrap(),
-        floorRadius: zero,
-        ...(p.through ? { through: true } : {}),
+  return derivedLength(ZERO, ctx.units).map((zero): ExpandedOperation[] => {
+    const pocket = (roughing: boolean): ExpandedOperation['operation'] => ({
+      kind: 'pocket' as const,
+      on: p.on,
+      shape: {
+        kind: 'named' as const,
+        center: [zero, zero] as const,
+        anchor: MIN_ANCHOR,
+        shapeId: ownedShapeId(p.id),
+        rotation: None,
+        mirror: false,
       },
-    },
-    ...chamfers(p, ctx),
-  ])
+      depth: depth.unwrap(),
+      floorRadius: zero,
+      ...(p.through ? { through: true } : {}),
+      ...(roughing ? { roughing: true } : {}),
+    })
+    return [
+      // DF108: the roughing pocket first, so the pocket's tool cuts only the rest
+      ...(p.roughing ? [{ role: 'roughing', operation: pocket(true) }] : []),
+      { role: 'pocket', operation: pocket(false) },
+      ...chamfers(p, ctx),
+    ]
+  })
 }
 
 /**
@@ -525,7 +536,8 @@ export function stackedOn(on: string, before: readonly Operation[]): string | un
   const m = /^(.+)\.floor$/.exec(on)
   if (m === null) return undefined
   const op = before.find((o) => o.id === m[1])
-  if (op?.kind !== 'pocket' || op.through === true || op.shape.kind !== 'named') return undefined
+  if (op?.kind !== 'pocket' || op.through === true || op.roughing === true) return undefined
+  if (op.shape.kind !== 'named') return undefined
   const owner = op.owner.isSome() ? op.owner.unwrap().featureId : undefined
   return owner !== undefined && op.shape.shapeId === ownedShapeId(owner)
     ? op.shape.shapeId
@@ -665,7 +677,7 @@ function patternFieldOf(role: string, path: IssuePath): IssuePath | undefined {
     if (head === 'width' || head === 'angle') return ['chamfer', head]
     return head === 'edgeOf' || head === 'depth' ? ['chamfer', 'width'] : undefined
   }
-  if (role !== 'pocket') return undefined
+  if (role !== 'pocket' && role !== 'roughing') return undefined
   const head = String(path[0])
   if (head === 'depth' || head === 'on') return [head, ...path.slice(1)]
   // the owned shape's resolution (layout.ts) names the pattern's own fields

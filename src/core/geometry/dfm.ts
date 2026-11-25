@@ -179,8 +179,11 @@ export function parameterChecks(
     const tool =
       own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure)
     // `dfm.shapeHeavy`: a general shape's chords over the evaluation budget (G1, D29)
+    // DF108: a pattern's roughing pocket leaves rest on purpose; the pattern's pocket reports the
+    // shape's corners, width and size
+    const roughing = op.kind === 'pocket' && op.roughing === true
     const heavy =
-      (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op)
+      (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op) && !roughing
         ? shapeHeavy(op)
         : []
     switch (op.kind) {
@@ -188,9 +191,11 @@ export function parameterChecks(
         return [...facing(op, options.unitSystem), ...tool]
       case 'pocket':
         return [
-          ...(isAnalyticOperation(op)
-            ? pocket(op, stock, lib)
-            : shapePocket(op, stock, lib, measure)),
+          ...(roughing
+            ? []
+            : isAnalyticOperation(op)
+              ? pocket(op, stock, lib)
+              : shapePocket(op, stock, lib, measure)),
           ...reach(op, stock, lib, own, options.unitSystem, measure),
           ...heavy,
           ...tool,
@@ -283,7 +288,8 @@ function ownTool(
       ),
     )
   // rest material needs a tool of the right type that enters the region (corners are their rule's)
-  if (measure !== undefined && (unfit === undefined || !NO_REST_RULES.has(unfit.rule)))
+  const roughing = op.kind === 'pocket' && op.roughing === true
+  if (measure !== undefined && !roughing && (unfit === undefined || !NO_REST_RULES.has(unfit.rule)))
     out.push(...restMaterial(op, own, measure))
   if (own.generalized && matching(own.tool, lib).length === 0) {
     const t = own.tool

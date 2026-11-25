@@ -22,7 +22,7 @@ import { evaluateOperation, planFindings } from './evaluate'
 import type { ResolvedFeeds } from './feeds'
 import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
-import { loadPlan, setupOf } from './plan'
+import { loadPlan, setupOf, type LoadedPlan } from './plan'
 import { planMaterialBands, planThroughDepths } from './through'
 import type { MaterialBand, MaterialCover } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
@@ -32,6 +32,8 @@ import type { ResolvedStrategy } from './strategy'
 import type { KeepOut } from '../toolpath/keep-out'
 import { setupWorkholding } from './workholding/setup'
 import { aidGeometry, type AidGeometry } from './aids'
+import { ownedOperationId } from '../design/feature'
+import type { RestAfter } from '../toolpath/region-pocket'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
 export interface PlanOperationInput {
@@ -96,6 +98,13 @@ export interface PlanOperationInput {
    * Doc: docs/modes/alignment.md#implementation-slice-2
    */
   readonly aid?: AidGeometry
+  /**
+   * A pattern's pocket machined after its roughing pocket (DF108): the roughing's tool radius,
+   * corner radius and finishing allowance, so the pocket cuts only the rest. Absent without an
+   * earlier roughing.
+   * Doc: docs/modes/patterns.md#roughing-df108
+   */
+  readonly restAfter?: RestAfter
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -235,6 +244,7 @@ export function planOperationInputs(
             op.aid,
             e.strategy.kind === 'chamfer' ? e.strategy.cutDepth : undefined,
           )
+    const restAfter = e.kind === 'pocket' ? roughingBefore(plan, e.ops[0], index) : undefined
     out.push({
       planId,
       planOperationId: op.id,
@@ -255,9 +265,37 @@ export function planOperationInputs(
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       ...(keepOut === undefined ? {} : { keepOut }),
       ...(aid === undefined ? {} : { aid }),
+      ...(restAfter === undefined ? {} : { restAfter }),
       // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
       inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })
   })
   return Ok(out)
+}
+
+/**
+ * DF108: what the roughing pocket of a pattern's pocket `op` cleared, by its tool and finishing
+ * allowance, when a plan operation before `index` machines it; undefined otherwise (no roughing,
+ * or the pocket moved before it: it then clears every cell itself).
+ */
+function roughingBefore(
+  plan: LoadedPlan,
+  op: Operation | undefined,
+  index: number,
+): RestAfter | undefined {
+  if (op?.kind !== 'pocket' || op.roughing === true || op.owner.isNone()) return undefined
+  const { featureId, role } = op.owner.unwrap()
+  if (role !== 'pocket') return undefined
+  const id = ownedOperationId(featureId, 'roughing')
+  const at = plan.operations.findIndex((p) => p.designOperationIds.includes(id))
+  if (at < 0 || at >= index) return undefined
+  const e = evaluateOperation(plan, plan.operations[at]!)
+  if (e.tool.isNone() || e.strategy.kind !== 'pocket') return undefined
+  const tool = e.tool.unwrap()
+  return {
+    radius: tool.diameter.canonical / 2,
+    cornerRadius:
+      tool.type === 'bullNoseEndMill' ? tool.cornerRadius.mapOr(0, (q) => q.canonical) : 0,
+    allowance: e.strategy.finishAllowance,
+  }
 }

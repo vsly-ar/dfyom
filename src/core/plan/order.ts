@@ -4,6 +4,7 @@
  */
 import { isGeneralShape, type Operation, type Part, type Shape } from '../design/operation'
 import { shapeCentre } from '../design/anchor'
+import { ownedOperationId } from '../design/feature'
 import type { OperationKind } from '../design/part.dto'
 import { placeShape } from '../design/placement'
 import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
@@ -71,6 +72,13 @@ export function edgeDependencies(op: Operation): string[] {
   return op.kind === 'chamfer' ? [op.edgeOf] : []
 }
 
+/** A pattern's roughing pocket, which its pocket follows (DF108, rest machining). */
+export function restDependencies(op: Operation): string[] {
+  if (op.kind !== 'pocket' || op.roughing === true || op.owner.isNone()) return []
+  const { featureId, role } = op.owner.unwrap()
+  return role === 'pocket' ? [ownedOperationId(featureId, 'roughing')] : []
+}
+
 interface Info {
   readonly op: PlanOperationDTO
   readonly rank: number
@@ -79,6 +87,11 @@ interface Info {
   readonly deps: ReadonlySet<string>
   /** Of them, the plan operations cutting a chamfer's edge. */
   readonly edgeDeps: ReadonlySet<string>
+  /**
+   * The roughing plan operation a pattern's pocket follows (DF108): ordered first by the default
+   * and repaired order, never an order finding (the pocket then clears every cell itself).
+   */
+  readonly rest: ReadonlySet<string>
   /**
    * The edge plan operation a chamfer shares its tool with (a stepped countersink's bore, F7):
    * the chamfer is kept right after it, so no other tool comes between them.
@@ -98,10 +111,16 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
     })
     const deps = new Set<string>()
     const edgeDeps = new Set<string>()
+    const rest = new Set<string>()
     for (const o of ops) {
       for (const d of onDependencies(o)) {
         const q = owner.get(d)
         if (q !== undefined && q !== p.id) deps.add(q)
+      }
+      // DF108: a pattern's pocket after its roughing (rest machining), not an order error
+      for (const d of restDependencies(o)) {
+        const q = owner.get(d)
+        if (q !== undefined && q !== p.id) rest.add(q)
       }
       for (const d of edgeDependencies(o)) {
         const q = owner.get(d)
@@ -118,8 +137,9 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
             : RANK.profile + 1
           : RANK[ops[0]?.kind ?? 'profile'],
       designIndex: Math.min(...p.designOperationIds.map((d) => index.get(d) ?? Infinity)),
-      deps: new Set([...deps, ...edgeDeps]),
+      deps: new Set([...deps, ...edgeDeps, ...rest]),
       edgeDeps,
+      rest,
       follows:
         p.tool === undefined ? undefined : [...edgeDeps].find((d) => toolOf.get(d) === p.tool),
     }
@@ -550,7 +570,7 @@ export function orderFindings(
   const list = infos(planOps, part)
   list.forEach((x, i) => {
     for (const d of x.deps)
-      if ((position.get(d) ?? -1) > i)
+      if (!x.rest.has(d) && (position.get(d) ?? -1) > i)
         out.push(
           x.edgeDeps.has(d)
             ? {

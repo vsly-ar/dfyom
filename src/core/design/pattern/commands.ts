@@ -1,10 +1,11 @@
 /**
- * `design.pattern.add` / `.update` (patterns P1, P2, P3: `chamfer`, P4: `through`): the pattern kind's arguments and how they
+ * `design.pattern.add` / `.update` (patterns P1, P2, P3: `chamfer`, P4: `through`, DF108:
+ * `roughing`): the pattern kind's arguments and how they
  * build a pattern. Kept terse for `tools/list` (llm-api.md § Implementation): `update` lists its
  * geometry args as sketches ("As add").
  * Doc: docs/modes/patterns.md#agent-api, docs/modes/patterns.md#implementation-p1,
  * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p3,
- * docs/modes/patterns.md#implementation-p4
+ * docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#roughing-df108
  */
 import { z } from 'zod'
 import { None, Some, type Option } from '../../../shared/result'
@@ -78,6 +79,7 @@ const params = {
   invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
   through: z.boolean().describe('Cells cut through the stock'),
+  roughing: z.boolean().describe('Bigger tool clears cells first (<id>_roughing)'),
   chamfer: z
     .object({
       width: Src.optional(),
@@ -226,6 +228,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       invert: a.invert ?? prev?.invert ?? false,
       depth: len('depth', prev?.depth, 'patternDepth'),
       through: a.through ?? prev?.through ?? false,
+      roughing: a.roughing ?? prev?.roughing ?? false,
       chamfer: chamfer(),
     }
   },

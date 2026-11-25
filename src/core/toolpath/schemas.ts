@@ -176,7 +176,16 @@ export const PocketInputSchema: z.ZodType<PocketInput> = z.object({
 export const RegionPocketInputSchema: z.ZodType<RegionPocketInput> = z.object({
   ...base,
   cutting: CuttingSchema,
-  operation: z.object({ region: RegionSchema, onZ: z.number(), depth: z.number() }),
+  operation: z.object({
+    region: RegionSchema,
+    onZ: z.number(),
+    depth: z.number(),
+    // DF108: a pattern's roughing pocket; rest machining after it
+    roughing: z.literal(true).optional(),
+    restAfter: z
+      .object({ radius: z.number(), cornerRadius: z.number(), allowance: z.number() })
+      .optional(),
+  }),
   strategy: PocketStrategySchema,
 })
 

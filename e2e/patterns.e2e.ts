@@ -2,10 +2,11 @@
 // on the stock top, the minimal inspector shows the cell read-out, and its Lattice and Cell
 // fields update the pattern (one `design.pattern.update` each). P2: a preset, the Polar lattice,
 // Clip and Invert. P3: the Chamfer switch and its width. P4: the Through switch. P5: the chamfer's
-// Edges (Both shows the bottom V-bit) and the Triangles preset's Flip. Windows stay hidden
-// (app.fixture.ts).
+// Edges (Both shows the bottom V-bit) and the Triangles preset's Flip. DF107: the Presets dialog
+// (preview cards, Current, arrow keys, Enter applies). DF108: the Roughing switch and its tool.
+// Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, #implementation-p3, #implementation-p4,
-// #implementation-p5,
+// #implementation-p5, #implementation-df107df109,
 // docs/conventions/ui.md
 import type { Locator } from '@playwright/test'
 import { expect, test } from './app.fixture'
@@ -69,13 +70,51 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
 
   // ── P2: the Grille preset (Ø 3, hex, gap 1.5) packs many more cells ────────────────────────
   const large = Number((await readout.textContent())?.split(' ')[0])
-  await inspector.getByRole('button', { name: 'Presets' }).click()
-  // U9 P5: every preset carries a thumbnail of a few cells
-  for (const item of await page.getByRole('menuitem').all())
-    await expect(item.locator('svg path').first()).toBeAttached()
-  await page.getByRole('menuitem', { name: 'Grille' }).click()
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  // DF107: a dialog of preview cards, one radio group; every card draws its lattice
+  const presets = page.getByRole('dialog', { name: 'Pattern presets' })
+  const cards = presets.getByRole('radio')
+  await expect(cards).toHaveCount(13)
+  for (const card of await cards.all())
+    await expect(card.locator('svg path').first()).toBeAttached()
+  // the default pattern is no preset: nothing Current, the first card focused
+  await expect(presets.getByText('Current')).toHaveCount(0)
+  await expect(cards.first()).toBeFocused()
+  // arrows move the focus (Down a row of 4), Escape closes without a change
+  await page.keyboard.press('ArrowRight')
+  await expect(presets.getByRole('radio', { name: 'Honeycomb', exact: true })).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(presets.getByRole('radio', { name: 'Slots', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(presets).toBeHidden()
+  await expect(readout).toHaveText(`${large} cells`)
+  // Enter applies the focused card and closes (one update)
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  await presets.getByRole('radio', { name: 'Grille', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(presets).toBeHidden()
   await expect(readout).not.toHaveText(`${large} cells`)
   expect(Number((await readout.textContent())?.split(' ')[0])).toBeGreaterThan(large * 3)
+  // reopened: Grille is Current and has focus
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  const grille = presets.getByRole('radio', { name: 'Grille', exact: true })
+  await expect(grille).toHaveAttribute('aria-checked', 'true')
+  await expect(grille).toBeFocused()
+  await expect(grille.getByText('Current')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // ── DF108: Roughing adds the roughing tool's field; off removes it ─────────────────────────
+  const roughing = inspector.getByRole('switch', { name: 'Roughing' })
+  const roughingTool = inspector.locator('[data-feature-field="roughing.tool"]')
+  await expect(roughing).not.toBeChecked()
+  await expect(roughingTool).toBeHidden()
+  await roughing.click()
+  await expect(roughing).toBeChecked()
+  await expect(roughingTool).toBeVisible()
+  await expect(inspector.getByText(/A bigger tool clears the cells first/)).toBeVisible()
+  await roughing.click()
+  await expect(roughing).not.toBeChecked()
+  await expect(roughingTool).toBeHidden()
 
   // ── Polar rings, cells clipped at the border, then inverted (islands) ──────────────────────
   await inspector.getByRole('radio', { name: 'Polar' }).click()
@@ -129,8 +168,11 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   // ── P5: the Triangles preset turns every other cell (Flip) ─────────────────────────────────
   const flip = inspector.getByRole('switch', { name: 'Flip every other cell' })
   await expect(flip).not.toBeChecked()
-  await inspector.getByRole('button', { name: 'Presets' }).click()
-  await page.getByRole('menuitem', { name: 'Triangles' }).click()
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  await page
+    .getByRole('dialog', { name: 'Pattern presets' })
+    .getByRole('radio', { name: 'Triangles', exact: true })
+    .click()
   await expect(flip).toBeChecked()
   await expect(inspector.getByText(/so triangles nest/)).toBeVisible()
   await flip.click()

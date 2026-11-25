@@ -10,7 +10,13 @@
  * inputs.ts); v0.1 rectangle/circle pockets keep `generatePocket` (plan-v0.3.md#wiring-t1-t2).
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
-import { chainBounds, regionLoops, type Bounds2, type Region } from '../geometry/2d/model'
+import {
+  chainBounds,
+  regionArea,
+  regionLoops,
+  type Bounds2,
+  type Region,
+} from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
@@ -37,7 +43,30 @@ export interface RegionPocketOperation {
   /** Z of the surface the pocket starts on. */
   readonly onZ: number
   readonly depth: number
+  /**
+   * A pattern's roughing pocket (DF108): roughing levels only, leaving `finishAllowance` on the
+   * walls; no finishing ring. Pieces its tool does not fit get no rings.
+   */
+  readonly roughing?: true | undefined
+  /**
+   * Rest machining after a roughing pocket of the same region (DF108): that pocket's tool radius,
+   * corner radius and finishing allowance. Ring-tree nodes whose tool-centre region lies where
+   * the roughing cleared (`restInside`) are skipped with their children.
+   */
+  readonly restAfter?: RestAfter | undefined
 }
+
+/** What an earlier roughing pocket of the same region cleared, by its tool (DF108). */
+export interface RestAfter {
+  readonly radius: number
+  readonly cornerRadius: number
+  readonly allowance: number
+}
+
+/** The skip test keeps this much (mm) off the roughed area's edge (2D library epsilons). */
+const REST_MARGIN = 0.01
+/** A node left over by less than this (mm²) counts as wholly in the roughed area. */
+const REST_AREA = 1e-6
 
 export type RegionPocketInput = GeneratorInput<RegionPocketOperation, PocketStrategy>
 
@@ -137,7 +166,14 @@ export function generateRegionPocket(
   const step = clearingStep(tool, cutting.stepover)
   const treeR = ringTree(port, roots, R + a, step, steps)
   if (treeR.isErr()) return Err(treeR.unwrapErr())
-  const tree = treeR.unwrap()
+  let tree = treeR.unwrap()
+  if (op.restAfter !== undefined) {
+    const inside = restInside(port, op.region, op.restAfter, R)
+    if (inside.isErr()) return Err(inside.unwrapErr())
+    const pruned = pruneCleared(port, tree, inside.unwrap())
+    if (pruned.isErr()) return Err(pruned.unwrapErr())
+    tree = pruned.unwrap()
+  }
 
   const cw = st.direction === 'conventional'
   const ringsOf = new Map<RingNode, Seg[][]>()
@@ -203,7 +239,7 @@ export function generateRegionPocket(
 
   // over the material earlier cuts left (DF61): no passes wholly in air
   const roughZ = cutLevels(op.onZ, floor, cutting.stepdown, input.material)
-  const finishing = finishPieces.length > 0
+  const finishing = finishPieces.length > 0 && op.roughing !== true
   const finishZ = finishing ? cutLevels(op.onZ, floor, st.finishStepdown, input.material) : []
   const pass = passSteps(steps, roughZ.length + finishZ.length)
 
@@ -319,7 +355,8 @@ export function generateRegionPocket(
   }
 
   let top = cutTop(op.onZ, floor, input.material)
-  for (const [k, z] of roughZ.entries()) {
+  // DF108: rest machining may leave no ring to cut (the roughing cleared every node)
+  for (const [k, z] of (tree.length === 0 ? [] : roughZ).entries()) {
     const s = pass(k)
     if (s.isErr()) return Err(s.unwrapErr())
     b.pass('rough')
@@ -385,9 +422,83 @@ export function generateRegionPocket(
       b.rapid([pos[0], pos[1], retract])
     }
   }
-  const end = b.position!
-  b.rapid([end[0], end[1], heights.clearanceHeight])
+  const end = b.position
+  if (end !== undefined) b.rapid([end[0], end[1], heights.clearanceHeight])
   return Ok(toolpath(input, b.build()))
+}
+
+/**
+ * The tool-centre positions (radius `R`) whose disc lies wholly in what a roughing pocket of
+ * `region` cleared (DF108): the region shrunk by the roughing tool's radius + allowance (its
+ * tool-centre region, as `generateRegionPocket` roughs it) grown back by its flat radius, then
+ * shrunk by `R` + `REST_MARGIN`. Pieces the roughing tool does not fit add nothing.
+ */
+export function restInside(
+  port: Region2dPort,
+  region: Region,
+  rough: RestAfter,
+  R: number,
+): AppResult<Region> {
+  return port
+    .offset(region, rough.radius + rough.allowance)
+    .andThen((centres) =>
+      centres.pieces.length === 0
+        ? Ok(centres)
+        : port.offset(centres, -(rough.radius - rough.cornerRadius)),
+    )
+    .andThen((cleared) =>
+      cleared.pieces.length === 0 ? Ok(cleared) : port.offset(cleared, R + REST_MARGIN),
+    )
+}
+
+/**
+ * The ring tree without the nodes whose tool-centre region lies in `inside` (DF108): their rings
+ * would cut only air the roughing cleared, and so would their children's (each lies in its
+ * parent). A node is one piece, so it lies in at most one piece of `inside`: the pieces whose box
+ * holds the node's box are tried.
+ */
+export function pruneCleared(
+  port: Region2dPort,
+  tree: readonly RingNode[],
+  inside: Region,
+): AppResult<RingNode[]> {
+  const boxes = inside.pieces.map((p) => chainBounds(p.outer.elements))
+  const holds = (b: Bounds2 | undefined, n: Bounds2 | undefined) =>
+    b !== undefined &&
+    n !== undefined &&
+    b.min[0] <= n.min[0] + BOX_SLACK &&
+    b.min[1] <= n.min[1] + BOX_SLACK &&
+    b.max[0] >= n.max[0] - BOX_SLACK &&
+    b.max[1] >= n.max[1] - BOX_SLACK
+  const covered = (n: RingNode): AppResult<boolean> => {
+    const box = chainBounds(n.piece.outer.elements)
+    for (const [i, piece] of inside.pieces.entries()) {
+      if (!holds(boxes[i], box)) continue
+      const left = port.difference(n.region, { pieces: [piece] })
+      if (left.isErr()) return Err(left.unwrapErr())
+      if (regionArea(left.unwrap()) < REST_AREA) return Ok(true)
+    }
+    return Ok(false)
+  }
+  const prune = (n: RingNode): AppResult<RingNode | undefined> => {
+    const c = covered(n)
+    if (c.isErr()) return Err(c.unwrapErr())
+    if (c.unwrap()) return Ok(undefined)
+    const children: RingNode[] = []
+    for (const child of n.children) {
+      const k = prune(child)
+      if (k.isErr()) return Err(k.unwrapErr())
+      if (k.unwrap() !== undefined) children.push(k.unwrap()!)
+    }
+    return Ok(children.length === n.children.length ? n : { ...n, children })
+  }
+  const out: RingNode[] = []
+  for (const root of tree) {
+    const k = prune(root)
+    if (k.isErr()) return Err(k.unwrapErr())
+    if (k.unwrap() !== undefined) out.push(k.unwrap()!)
+  }
+  return Ok(out)
 }
 
 /** Pieces (ring tree roots, finishing loops) cut between two abort points within a level. */

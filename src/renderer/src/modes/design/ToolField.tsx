@@ -196,6 +196,8 @@ export function autoChangeReason(
       return w.reach(from)
     case 'flutes':
       return w.flutes(from)
+    case 'roughingWidth':
+      return w.roughingWidth(from)
     case 'libraryFits':
       return w.libraryFits(from)
     case 'libraryRemoved':
@@ -236,6 +238,8 @@ export function unfitWhy(
       return w.flutes(L(entry.fluteLength), L(entry.depth))
     case 'angle':
       return w.angle
+    case 'roughingWidth':
+      return w.roughingWidth
     default:
       return w.other
   }

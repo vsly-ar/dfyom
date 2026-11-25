@@ -44,8 +44,11 @@ export interface DialogProps {
    * Radix from focusing the body.
    */
   onCloseAutoFocus?: (event: Event) => void
-  /** Width: `md` 420 px (default); `lg` 560 px for reports with a list beside a picture (DF48). */
-  size?: 'md' | 'lg'
+  /**
+   * Width: `md` 420 px (default); `lg` 560 px for reports with a list beside a picture (DF48);
+   * `xl` 720 px for a grid of picture cards (DF107: pattern presets).
+   */
+  size?: 'md' | 'lg' | 'xl'
 }
 
 export function Dialog({

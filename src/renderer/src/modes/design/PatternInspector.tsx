@@ -2,16 +2,16 @@
 // and Presets, then the groups Cell (kind with thumbnails, its sizes, rotation), Layout (lattice
 // incl. Polar, gap or pitch, angle, origin: empty = the area's centre), Area (On, the boundary:
 // Whole face or a closed shape with its centre and rotation, margin, Whole/Clip, Invert), Cut
-// (P4: Through, else depth; the pocket's tool), Chamfer (P3: a switch, then width, angle and the
-// chamfer's tool). P4: on another pattern's floor the Boundary's face option names its cells.
+// (P4: Through, else depth; the pocket's tool; DF108: Roughing and its tool), Chamfer (P3: a
+// switch, then width, angle and the chamfer's tool). P4: on another pattern's floor the
+// Boundary's face option names its cells. DF107: Presets… opens the Presets dialog.
 // Every edit is one `design.pattern.update` (one undo step); errors
 // and findings show at their field, the rest under Findings.
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1,
-// docs/modes/patterns.md#implementation-p4
+// docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#implementation-df107df109
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
-import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
@@ -21,10 +21,8 @@ import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import { useRegion2d } from '../../shell/ShellContext'
 import {
-  Button,
   ErrorMessage,
   Field,
-  Menu,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -39,7 +37,7 @@ import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
 import { placeErrors, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
-import { presetThumb, THUMB } from './pattern-thumbs'
+import { PatternPresetsDialog } from './PatternPresetsDialog'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -169,6 +167,7 @@ export function PatternInspector({
     'invert',
     'depth',
     'through',
+    'roughing',
     'chamfer',
     'tool',
   ])
@@ -257,6 +256,9 @@ export function PatternInspector({
   const chamfer = feature['chamfer'] as
     { width: QuantityDTO; angle: QuantityDTO; side?: 'bottom' | 'both' } | undefined
   const pocketOp = owned.find((o) => o.id === `${feature.id}_pocket`)
+  // DF108: the bigger tool's pass before the pocket
+  const roughing = feature['roughing'] === true
+  const roughingOp = owned.find((o) => o.id === `${feature.id}_roughing`)
   const chamferOp = owned.find((o) => o.id === `${feature.id}_chamfer`)
   // P5: the through cells' bottom edges, from a flipped setup
   const bottomChamferOp = owned.find((o) => o.id === `${feature.id}_bottomChamfer`)
@@ -281,17 +283,10 @@ export function PatternInspector({
                   facts.dropped,
                 )}
           </p>
-          <Menu
-            label={p.presets}
-            items={PATTERN_PRESETS.map((preset) => ({
-              label: p.presetNames[preset.id] ?? preset.id,
-              // U9 P5: a few cells in the preset's lattice, as the Cell options' thumbnails
-              icon: <PresetThumb cells={PRESET_THUMBS.get(preset.id) ?? []} />,
-              onSelect: () => void update({ ...preset.args }, 'cell'),
-            }))}
-          >
-            <Button size="sm">{p.presets}</Button>
-          </Menu>
+          <PatternPresetsDialog
+            feature={feature}
+            onApply={(preset) => void update({ ...preset.args }, 'cell')}
+          />
         </div>
 
         <Group title={p.groups.cell}>
@@ -584,6 +579,33 @@ export function PatternInspector({
               />
             </div>
           )}
+          <div data-feature-field="roughing">
+            <Field
+              label={p.roughing}
+              kind="toggle"
+              messages={[
+                ...messagesAt('roughing'),
+                ...note('roughing', roughing ? p.roughingNote : undefined),
+              ]}
+            >
+              <Switch
+                label={p.roughing}
+                hideLabel
+                checked={roughing}
+                onCheckedChange={(on) => void update({ roughing: on }, 'roughing')}
+              />
+            </Field>
+          </div>
+          {roughingOp === undefined ? null : (
+            <div data-feature-field="roughing.tool">
+              <ToolField
+                part={part}
+                op={roughingOp}
+                warnings={warnings.warnings.filter((w) => w.operation === roughingOp.id)}
+                label={p.roughingTool}
+              />
+            </div>
+          )}
         </Group>
 
         <Group title={p.groups.chamfer}>
@@ -689,31 +711,6 @@ function poly(pts: Vec[]): Loop {
     closed: true,
     elements: pts.map((a, i) => ({ kind: 'line' as const, a, b: pts[(i + 1) % pts.length]! })),
   }
-}
-
-/** The Presets menu's thumbnails (U9 P5), computed once. */
-const PRESET_THUMBS = new Map(PATTERN_PRESETS.map((preset) => [preset.id, presetThumb(preset)]))
-
-/** A window onto a preset's lattice, drawn as the mini outlines (`MiniOutline`'s look). */
-function PresetThumb({
-  cells,
-}: {
-  cells: readonly (readonly (readonly [number, number])[])[]
-}): React.JSX.Element {
-  const r = (v: number) => Math.round(v * 10) / 10
-  const d = cells.map((c) => `M${c.map(([x, y]) => `${r(x)} ${r(y)}`).join('L')}Z`).join('')
-  return (
-    <svg
-      className={styles['miniOutline']}
-      width={THUMB.w}
-      height={THUMB.h}
-      viewBox={`0 0 ${THUMB.w} ${THUMB.h}`}
-      aria-hidden="true"
-    >
-      <path className={styles['miniFill']} d={d} />
-      <path className={styles['miniEdge']} d={d} />
-    </svg>
-  )
 }
 
 /** A primitive cell kind's mini outline (the Cell select's thumbnails; not to scale). */
