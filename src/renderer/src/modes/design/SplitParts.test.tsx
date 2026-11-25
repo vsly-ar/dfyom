@@ -80,10 +80,16 @@ describe('split part (split parts 4a)', () => {
     expect(within(section).getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
     expect(within(section).getByRole('group', { name: 'Split preview' })).toBeVisible()
     expect(within(section).getByRole('img', { name: 'Split preview: Top' })).toBeVisible()
+    // U9 Q132: one row per blank, a numbered chip per piece named by its whole chip text
+    const chipList = within(section).getByRole('list', { name: '2 pieces' })
+    expect(within(chipList).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(chipList).getAllByRole('listitem')[0]!.textContent).toMatch(
+      /^12.* × 10 mm · own blank$/,
+    )
     expect(
-      within(within(section).getByRole('list', { name: '2 pieces' }))
-        .getAllByRole('listitem')
-        .map((li) => li.textContent),
+      within(chipList)
+        .getAllByRole('button')
+        .map((b) => b.getAttribute('aria-label')),
     ).toEqual([
       expect.stringMatching(/^1 · .* × 10 mm · own blank$/),
       expect.stringMatching(/^2 · .* × 10 mm · own blank$/),
@@ -415,7 +421,8 @@ describe('split part (split parts 4a)', () => {
     ])
     const chips = () =>
       within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('button')
-    expect(chips().map((c) => c.textContent)).toEqual([
+    const name = (c: HTMLElement) => c.getAttribute('aria-label')
+    expect(chips().map(name)).toEqual([
       '1 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
       '2 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
     ])
@@ -435,11 +442,15 @@ describe('split part (split parts 4a)', () => {
       ]),
     )
     await waitFor(() =>
-      expect(chips()[0]!.textContent).toBe('1 · 200 × 100 × 20 mm · Plate 200 × 100 × 20'),
+      expect(name(chips()[0]!)).toBe('1 · 200 × 100 × 20 mm · Plate 200 × 100 × 20'),
     )
     // library stocks off: the chosen blank stays, the other piece is back on its own block
     await t.user.click(within(t.split()).getByRole('switch', { name: 'Use library stocks' }))
-    await waitFor(() => expect(chips()[1]!.textContent).toMatch(/^2 · .* · own blank$/))
-    expect(chips()[0]!.textContent).toMatch(/Plate 200 × 100 × 20$/)
+    await waitFor(() => expect(name(chips()[1]!)).toMatch(/^2 · .* · own blank$/))
+    expect(name(chips()[0]!)).toMatch(/Plate 200 × 100 × 20$/)
+    // two blanks: two rows
+    expect(
+      within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('listitem'),
+    ).toHaveLength(2)
   })
 })

@@ -200,10 +200,15 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     })
     expect(box).toBeCloseTo(vb, 1)
   }
-  await expect(split.getByRole('list', { name: '2 pieces' }).getByRole('listitem')).toHaveText([
-    '1 · 259.5 × 187 × 40 mm · own blank',
-    '2 · 259.5 × 187 × 40 mm · own blank',
-  ])
+  // U9 Q132: one row for the shared blank, a numbered chip per piece named by its chip text
+  const twoPieces = split.getByRole('list', { name: '2 pieces' })
+  await expect(twoPieces.getByRole('listitem')).toHaveText(['12259.5 × 187 × 40 mm · own blank'])
+  await expect(
+    twoPieces.getByRole('button', { name: '1 · 259.5 × 187 × 40 mm · own blank' }),
+  ).toBeVisible()
+  await expect(
+    twoPieces.getByRole('button', { name: '2 · 259.5 × 187 × 40 mm · own blank' }),
+  ).toBeVisible()
 
   // ── the viewport's exploded preview: drag the level; one undo step; the field follows ────
   const viewport = page.getByRole('region', { name: '3D viewport' })
@@ -312,9 +317,13 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await split.getByRole('button', { name: 'Split to fit…' }).click()
   await page.getByRole('menuitem', { name: /^Block 200 × 100\.1 × 40 · / }).click()
   await expect(split.getByRole('switch', { name: 'Use library stocks' })).toBeChecked()
-  await expect(split.getByRole('list', { name: '8 pieces' }).getByRole('listitem')).toHaveText(
-    Array<RegExp>(8).fill(/^\d · 200 × 100\.1 × 40 mm · Block 200 × 100\.1 × 40$/),
-  )
+  const eight = split.getByRole('list', { name: '8 pieces' })
+  // U9 Q132: the eight pieces on one blank are one row of numbered chips
+  await expect(eight.getByRole('listitem')).toHaveText([
+    /^12345678200 × 100\.1 × 40 mm · Block 200 × 100\.1 × 40$/,
+  ])
+  for (const chip of await eight.getByRole('button').all())
+    await expect(chip).toHaveAccessibleName(/^\d · 200 × 100\.1 × 40 mm · Block 200 × 100\.1 × 40$/)
   await render(page, 'split-exploded-8')
   menu = await openParts()
   await expect(menu.getByRole('menuitemradio')).toHaveCount(9)

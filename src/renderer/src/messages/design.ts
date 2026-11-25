@@ -536,6 +536,8 @@ export const designMessages = {
     front: 'Front',
     /** "3 · 135 × 98.5 × 40 · own blank", "3 · 200 × 100.1 × 40 · Block 200 × 100.1 × 40" */
     chip: (n: number, size: string, blank: string) => `${n} · ${size} · ${blank}`,
+    /** The blank of a row of piece chips (U9 Q132): "135 × 98.5 × 40 mm · own blank" */
+    blankLine: (size: string, blank: string) => `${size} · ${blank}`,
     ownBlank: 'own blank',
     /** Blanks on library stocks (split parts 4c). */
     turned: (name: string) => `${name} · turned`,

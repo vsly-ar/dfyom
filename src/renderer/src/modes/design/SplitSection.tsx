@@ -89,6 +89,19 @@ function useLibraryStocks(): readonly LibraryStockView[] {
   return stocks
 }
 
+/** Pieces grouped by their blank's words, in piece order (U9 Q132: one row per blank). */
+function blankGroups(
+  pieces: readonly PieceView[],
+  words: (p: PieceView) => string,
+): { blank: string; pieces: PieceView[] }[] {
+  const groups = new Map<string, PieceView[]>()
+  for (const p of pieces) {
+    const k = words(p)
+    groups.set(k, [...(groups.get(k) ?? []), p])
+  }
+  return [...groups].map(([blank, ps]) => ({ blank, pieces: ps }))
+}
+
 /** A piece's blank in words: the library stock (turned) or "own blank". */
 const blankName = (p: PieceView): string =>
   p.stock === undefined ? t.ownBlank : p.stock.turned ? t.turned(p.stock.name) : p.stock.name
@@ -237,21 +250,38 @@ export function SplitSection({
       </h3>
       <p className={styles['muted']}>{t.intro}</p>
       <SplitPreview part={part} pieces={pieces} holes={holes} knobs={knobs} />
+      {/* U9 Q132 (provisional): pieces with the same blank in one row, a small numbered chip per
+          piece (each opens its blank menu, named by the whole chip text) and the blank once */}
       <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
-        {pieces.map((p) => (
-          <li key={p.id}>
-            <BlankMenu
-              piece={p}
-              need={info?.needs.get(p.n)}
-              stocks={stocks}
-              materialClass={stock.material.class}
-            >
-              <button type="button" className={styles['splitChip']}>
-                {t.chip(p.n, blankText(p.blank, units), blankName(p))}
-              </button>
-            </BlankMenu>
-          </li>
-        ))}
+        {blankGroups(pieces, (p) => t.blankLine(blankText(p.blank, units), blankName(p))).map(
+          (g) => (
+            <li key={g.pieces[0]!.id} className={styles['splitChipGroup']}>
+              <div className={styles['splitChipNumbers']}>
+                {g.pieces.map((p) => (
+                  <BlankMenu
+                    key={p.id}
+                    piece={p}
+                    need={info?.needs.get(p.n)}
+                    stocks={stocks}
+                    materialClass={stock.material.class}
+                  >
+                    <button
+                      type="button"
+                      className={styles['splitChip']}
+                      aria-label={t.chip(p.n, blankText(p.blank, units), blankName(p))}
+                      title={t.chip(p.n, blankText(p.blank, units), blankName(p))}
+                    >
+                      {p.n}
+                    </button>
+                  </BlankMenu>
+                ))}
+              </div>
+              <span className={styles['splitChipBlank']} aria-hidden="true">
+                {g.blank}
+              </span>
+            </li>
+          ),
+        )}
       </ul>
       <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
         {split.lines.length === 0 && split.levels.length === 0 ? (

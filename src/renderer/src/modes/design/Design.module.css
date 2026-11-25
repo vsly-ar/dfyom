@@ -1837,17 +1837,40 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* U9 Q132: one row per blank, its pieces as small numbered chips, the blank once after them */
 .splitChips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.splitChipGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+.splitChipNumbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.splitChipBlank {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .splitChip {
-  padding: 1px 6px;
+  min-width: 22px;
+  padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: none;
@@ -1856,8 +1879,11 @@
   line-height: var(--lh-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  text-align: start;
+  text-align: center;
   cursor: pointer;
+  transition:
+    border-color var(--motion-fast),
+    color var(--motion-fast);
 }
 
 /* The chip opens the piece's blank menu (split parts 4c). */
