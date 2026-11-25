@@ -4,6 +4,7 @@
  * Doc: docs/modes/plan-v0.1.md#plans-are-snapshots
  */
 import { fail, Ok, type AppResult } from '../../shared/result'
+import { enabledPart } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { LibraryItemKind } from '../library/item'
 import {
@@ -51,8 +52,12 @@ export function takeDesignSnapshot(
   partId: string,
   takenAt: string,
   where: string,
+  /** The plan's own disabled list (DF106): left out of `part`, kept in `taken`. */
+  planDisabled: readonly string[] = [],
 ): AppResult<{ design: DesignSnapshotDTO; stock: SnapshotDTO; tools: SnapshotDTO[] }> {
-  const part = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
+  const record = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
+  // DF106: the plan copies the enabled part; items disabled in the design are not in it
+  const part = record === undefined ? undefined : enabledPart(record)
   if (part === undefined)
     return fail('input.malformed', `part ${partId} does not exist`, {
       issues: [{ path: ['partId'], rule: 'unknownPart', message: 'no such part' }],
@@ -72,7 +77,13 @@ export function takeDesignSnapshot(
     return s?.kind === 'tool' ? [copy(s)] : []
   })
   return Ok({
-    design: { partId, takenAt, hash: hashPart(part), taken: copy(part), part: copy(part) },
+    design: {
+      partId,
+      takenAt,
+      hash: hashPart(part),
+      taken: copy(part),
+      part: copy(enabledPart(part, planDisabled)),
+    },
     stock: copy(stock),
     tools,
   })
@@ -130,9 +141,7 @@ export function planStale(
   lookup: ItemLookup | undefined,
   port?: Region2dPort,
 ): PlanStale {
-  const current = Object.hasOwn(doc.parts, plan.design.partId)
-    ? doc.parts[plan.design.partId]
-    : undefined
+  const current = designPart(plan, doc)
   const operations: OperationStale[] = []
   const kept = new Set(
     plan.setups.flatMap((s) =>
@@ -241,13 +250,25 @@ function shapeChanged(
  * (updated per item), so only a different stock snapshot id counts, through `part.stock`.
  */
 export function designChanged(plan: PlanDTO, doc: ProjectDoc): boolean {
-  const part = Object.hasOwn(doc.parts, plan.design.partId)
-    ? doc.parts[plan.design.partId]
-    : undefined
+  const part = designPart(plan, doc)
   return part !== undefined && !sameValue(plan.design.taken, part)
 }
 
-/** Whether any operation carries plan-only edits (compared by value). */
+/**
+ * The plan's part in the current design as a snapshot would take it: without the items disabled
+ * in the design (DF106); undefined when the part is gone.
+ */
+export function designPart(plan: PlanDTO, doc: ProjectDoc): PartDTO | undefined {
+  const part = Object.hasOwn(doc.parts, plan.design.partId)
+    ? doc.parts[plan.design.partId]
+    : undefined
+  return part === undefined ? undefined : enabledPart(part)
+}
+
+/**
+ * Whether any operation carries plan-only edits (compared by value). Items disabled in this plan
+ * only (DF106) are no edits: they are left out of both sides.
+ */
 export function hasPlanEdits(plan: PlanDTO): boolean {
-  return !sameValue(plan.design.taken, plan.design.part)
+  return !sameValue(enabledPart(plan.design.taken, plan.disabled ?? []), plan.design.part)
 }

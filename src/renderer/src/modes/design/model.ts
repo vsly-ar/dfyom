@@ -3,6 +3,7 @@
 // of a new operation and the surfaces a field may reference or pick. Commands do the checking;
 // this only builds what the UI shows and sends. Doc: docs/modes/design.md#commands-and-queries-v01,
 // docs/conventions/ui.md#panels-and-inspectors
+import { disabledState, type DisabledState } from '../../../../core/design/disabled'
 import { loadPart, type LoadedPart } from '../../../../core/design/load'
 import { fieldContext, type FieldKind } from '../../../../core/design/operation'
 import type {
@@ -38,6 +39,17 @@ export interface DesignPart {
 }
 
 const cache = new WeakMap<ProjectDoc, Map<string, DesignPart>>()
+
+const offCache = new WeakMap<PartDTO, DisabledState>()
+/**
+ * What is off in the part (hardening DF106, docs/modes/design.md#disabling-operations-and-features-df106):
+ * switched off and following; memoized per immutable part record.
+ */
+export function disabledOf(part: Pick<DesignPart, 'dto'>): DisabledState {
+  let hit = offCache.get(part.dto)
+  if (hit === undefined) offCache.set(part.dto, (hit = disabledState(part.dto)))
+  return hit
+}
 
 /**
  * The part Design shows: `partId` while the document has it, else the first part (split parts S0:

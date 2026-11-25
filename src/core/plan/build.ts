@@ -12,11 +12,13 @@ import {
   type Operation,
   type Part,
 } from '../design/operation'
+import { enabledPart } from '../design/disabled'
+import type { PartDTO } from '../design/part.dto'
 import { designToolToDTO } from '../design/tool'
 import { stableJson } from '../project/layout'
 import { NAME_MAX } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
-import { deepEqual, takeSnapshot } from '../library/snapshot'
+import { deepEqual, takeSnapshot, type SnapshotDTO } from '../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { Direction } from '../geometry/face'
@@ -341,8 +343,15 @@ export function rebuildPlan(
   doc: ProjectDoc,
   c: BuildContext,
   where: string,
+  /**
+   * DF106: rebuild from the plan's own snapshot (its plan edits kept) instead of the current
+   * design, after its own disabled list changed: Design changes are not taken.
+   */
+  own = false,
 ): AppResult<PlanDTO> {
-  const taken = takeDesignSnapshot(doc, current.design.partId, c.now, where)
+  const taken = own
+    ? Ok(ownSnapshot(current, doc))
+    : takeDesignSnapshot(doc, current.design.partId, c.now, where, current.disabled)
   if (taken.isErr()) return Err(taken.unwrapErr())
   const { design, stock, tools } = taken.unwrap()
   const plan = copy(current)
@@ -477,6 +486,32 @@ export function rebuildPlan(
     s.operations = keepWithEdge(placedByTool, part.unwrap(), new Set(resolved))
   }
   return Ok(plan)
+}
+
+/**
+ * The plan's own design snapshot with its disabled list applied again (DF106): `taken` and the
+ * snapshot time stay; `part` is `taken` with the plan's edits (its version of each operation it
+ * still has) minus the plan's disabled items. Tool snapshots of re-enabled operations come from
+ * the document when the plan no longer holds them.
+ */
+function ownSnapshot(
+  plan: PlanDTO,
+  doc: ProjectDoc,
+): { design: PlanDTO['design']; stock: PlanDTO['snapshots'][number]; tools: SnapshotDTO[] } {
+  const edited = new Map(plan.design.part.operations.map((o) => [o.id, o]))
+  const merged: PartDTO = {
+    ...plan.design.taken,
+    operations: plan.design.taken.operations.map((o) => edited.get(o.id) ?? o),
+  }
+  const part = copy(enabledPart(merged, plan.disabled ?? []))
+  const stock = plan.snapshots.find((x) => x.id === part.stock)!
+  const tools = part.operations.flatMap((o) => {
+    const id = o.tool?.kind === 'specific' ? o.tool.snapshotId : undefined
+    if (id === undefined || plan.snapshots.some((x) => x.id === id)) return []
+    const t = Object.hasOwn(doc.snapshots, id) ? doc.snapshots[id] : undefined
+    return t?.kind === 'tool' ? [copy(t)] : []
+  })
+  return { design: { ...plan.design, part }, stock, tools }
 }
 
 /** Deep copy with a new id; status `settledDesign` (docs/modes/plan-v0.1.md#plan-status). */

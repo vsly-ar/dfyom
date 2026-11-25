@@ -21,7 +21,7 @@ import type { SnapshotDTO } from '../../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Fields, invalid, load, PartArg, Src, withWarnings, Warnings } from '../commands'
 import { baseOf, isFrozenRecord } from '../frozen-memo'
-import { loadPart, unknownPart, type LoadedPart } from '../load'
+import { loadEnabledPart, loadPart, unknownPart, type LoadedPart } from '../load'
 import { isShapeLine, type PartDTO, PartIdSchema, type SplitDTO, SPLIT_JOINTS } from '../part.dto'
 import { ShapeIdSchema } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
@@ -176,7 +176,8 @@ export function regeneratePieces(
     if (removed.isErr()) return removed
     return Ok({ pieces: [], removedPlans: removed.unwrap(), findings: [] })
   }
-  const loaded = load(draft, sourceId, where)
+  // DF106: pieces are cut from the enabled source (disabled items are in no piece)
+  const loaded = loadEnabledPart(draft as ProjectDoc, sourceId, where)
   if (loaded.isErr()) return loaded
   const port = requirePort(ctx.services.region2d, where)
   if (port.isErr()) return port

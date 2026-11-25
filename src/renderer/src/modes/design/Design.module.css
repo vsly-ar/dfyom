@@ -262,6 +262,25 @@
   color: var(--danger);
 }
 
+/* DF106: a disabled row stays in the list, muted, with its "Off" marker */
+.op[data-off] .opName,
+.op[data-off] .featureReadout {
+  color: var(--text-muted);
+}
+
+.op[data-off] .opSelect > svg {
+  opacity: 0.5;
+}
+
+.opOff {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .opBadge svg,
 .opFailed svg {
   width: var(--icon-sm);

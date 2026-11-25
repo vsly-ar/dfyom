@@ -1,17 +1,20 @@
 // The design navigator's row menu (dogfood DF16): the actions on a row's item – Chamfer on a
 // drilling, circle pocket or inside circle profile (its edge), Make Clones… on anything that can be
-// a Clones source, Remove on top-level rows. On a pattern's pocket Chamfer turns the pattern's
-// chamfer on (patterns P3). The same entries open by right-click, Shift+F10 / the
+// a Clones source, Disable / Enable and Remove on top-level rows. On a pattern's pocket Chamfer
+// turns the pattern's chamfer on (patterns P3). A row that is off (DF106) offers nothing that
+// builds on it: no Chamfer, no Make Clones…. The same entries open by right-click, Shift+F10 / the
 // Menu key and the row's actions (…) button; only applicable items are listed.
-// Doc: docs/conventions/ui.md#feature-rows-and-add (Row menu), #clones
+// Doc: docs/conventions/ui.md#feature-rows-and-add (Row menu), #clones,
+// docs/modes/design.md#disabling-operations-and-features-df106
 import { useCallback } from 'react'
+import { isDisabled } from '../../../../core/design/disabled'
 import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
 import { Icon, type MenuEntry, type MenuItem } from '../../ui'
 import { isChamferEdge } from './chamfer-view'
 import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
 import { clonesSource } from './feature-view'
-import type { DesignPart } from './model'
+import { disabledOf, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 
 const m = designMessages
@@ -56,8 +59,23 @@ export function useRowActions(part: DesignPart): RowActions {
     [call, partId, select],
   )
 
+  // DF106: one design.part.update with the new list (one undo step)
+  const setDisabled = useCallback(
+    (list: readonly string[]) => void call('design.part.update', { partId, disabled: list }),
+    [call, partId],
+  )
+
   return (id, remove) => {
     const items: MenuItem[] = []
+    const off = disabledOf(part)
+    const toggle =
+      remove === undefined
+        ? []
+        : disableItems(part.dto.disabled ?? [], id, off.roots.has(id), setDisabled)
+    if (isDisabled(off, id)) {
+      if (remove === undefined) return []
+      return [...toggle, 'separator', removeItem(remove)]
+    }
     const op = part.dto.operations.find((o) => o.id === id)
     const pattern =
       op?.featureRole === 'pocket'
@@ -101,13 +119,43 @@ export function useRowActions(part: DesignPart): RowActions {
         },
       })
     if (remove === undefined) return items
-    const removeItem: MenuItem = {
-      label: m.navigator.removeItem,
-      icon: <Icon name="delete" />,
-      danger: true,
-      onSelect: remove.onRemove,
-      disabledReason: remove.blocked,
-    }
-    return items.length > 0 ? [...items, 'separator', removeItem] : [removeItem]
+    return [...items, ...toggle, 'separator', removeItem(remove)]
   }
+}
+
+function removeItem(remove: RowRemove): MenuItem {
+  return {
+    label: m.navigator.removeItem,
+    icon: <Icon name="delete" />,
+    danger: true,
+    onSelect: remove.onRemove,
+    disabledReason: remove.blocked,
+  }
+}
+
+/**
+ * Disable, or Enable on a row switched off itself (DF106). A row off only as a dependant may be
+ * switched off itself too (it then stays off when what it builds on is enabled).
+ */
+function disableItems(
+  list: readonly string[],
+  id: string,
+  root: boolean,
+  set: (list: readonly string[]) => void,
+): MenuItem[] {
+  if (root)
+    return [
+      {
+        label: m.navigator.enableItem,
+        icon: <Icon name="eye" />,
+        onSelect: () => set(list.filter((x) => x !== id)),
+      },
+    ]
+  return [
+    {
+      label: m.navigator.disableItem,
+      icon: <Icon name="eye-off" />,
+      onSelect: () => set([...list, id]),
+    },
+  ]
 }

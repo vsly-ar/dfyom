@@ -323,6 +323,15 @@ export const PartDtoSchema = z.object({
   shapes: z.array(ShapeDtoSchema).optional().describe('Named shapes operations place'),
   /** Features (v0.4, docs/modes/features.md#persistence-high-level); absent = none. */
   features: z.array(FeatureDtoSchema).optional().describe('Features owning operations'),
+  /**
+   * Operations and features the user switched off (hardening DF106,
+   * docs/modes/design.md#disabling-operations-and-features-df106): top-level ids in design order;
+   * absent = none. Their dependants are off too (design/disabled.ts, derived, never stored).
+   */
+  disabled: z
+    .array(OperationIdSchema)
+    .optional()
+    .describe('Switched-off operation and feature ids'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
   /** Split parts 4a (docs/modes/split-parts.md#model): on a source part; absent = not split. */
   split: SplitDtoSchema.optional(),

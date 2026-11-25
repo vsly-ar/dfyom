@@ -22,6 +22,7 @@ import {
 } from '../commands/define'
 import type { PlanApply } from '../commands/apply'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
+import { checkDisabledList } from '../design/disabled'
 import { fieldContext, partFromDTO } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
 import { ItemIdSchema, NAME_MAX, type LibraryItemKind } from '../library/item'
@@ -358,14 +359,43 @@ const planUpdate = defineCommand({
   kind: 'document',
   name: 'plan.update',
   summary: 'Rename a plan.',
-  title: () => 'Rename plan',
+  title: (a) => (a.disabled !== undefined ? 'Disable in plan' : 'Rename plan'),
   machine: false,
-  args: z.object({ ...PlanArg, name: z.string().min(1).max(NAME_MAX) }),
+  args: z.object({
+    ...PlanArg,
+    name: z.string().min(1).max(NAME_MAX).optional(),
+    disabled: z.array(z.string().min(1)).optional().describe('Design ids off in this plan only'),
+  }),
   result: Empty,
-  run(draft, args) {
-    const plan = planFor(draft, args.planId, 'plan.update')
-    if (plan.isErr()) return plan
-    draft.plans[args.planId]!.name = args.name
+  run(draft, args, ctx) {
+    const where = 'plan.update'
+    const found = planFor(draft, args.planId, where)
+    if (found.isErr()) return found
+    if (args.disabled !== undefined) {
+      // DF106 (plan-v0.4.md#disabling-in-a-plan-df106): checked against the plan's own snapshot,
+      // applied by rebuilding from it (never from the current design)
+      const current = found.unwrap()
+      const { list, issues } = checkDisabledList(current.design.taken, args.disabled, 'disabled')
+      const unknown = issues.filter((i) => i.rule === 'unknownItem')
+      if (unknown.length > 0)
+        return fail('input.malformed', issueSummary(unknown), { issues: unknown, where })
+      if (issues.length > 0) return fail('model.invariant', issueSummary(issues), { issues, where })
+      if (!sameValue(current.disabled ?? [], list)) {
+        const plan = plainCopy(current)
+        if (list.length === 0) delete plan.disabled
+        else plan.disabled = list
+        const rebuilt = rebuildPlan(
+          plan,
+          draft as ProjectDoc,
+          buildContext(ctx, draft.unitSystem),
+          where,
+          true,
+        )
+        if (rebuilt.isErr()) return rebuilt
+        writePlan(draft, rebuilt.unwrap())
+      }
+    }
+    if (args.name !== undefined) draft.plans[args.planId]!.name = args.name
     return Ok({})
   },
 })

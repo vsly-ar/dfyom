@@ -16,6 +16,7 @@
 // #reordering-lists-d45, #panels-and-inspectors, #confirmations, row menu in #feature-rows-and-add;
 // docs/modes/design.md#ordering-and-composition
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { isDisabled, type DisabledState } from '../../../../core/design/disabled'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -49,7 +50,7 @@ import {
   type FeatureUnit,
   type OperationUnit,
 } from './feature-view'
-import { axisNames, surfaceDirection, type DesignPart } from './model'
+import { axisNames, disabledOf, surfaceDirection, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 import { useRowActions } from './row-actions'
 import { useSkipToggle } from './ClonesInspector'
@@ -126,6 +127,8 @@ interface ListContext {
    * (the core refuses them with `derivedPart`; the source is edited).
    */
   readonly readOnly: boolean
+  /** What is off in the part (DF106): those rows are muted with an "Off" marker. */
+  readonly off: DisabledState
 }
 
 export function OperationList({
@@ -291,6 +294,7 @@ export function OperationList({
 
   const ctx: ListContext = {
     part,
+    off: disabledOf(part),
     warnings,
     failedAt,
     selected,
@@ -414,6 +418,18 @@ function RowGrip({ actions }: { actions: RowActions | undefined }): React.JSX.El
   ) : null
 }
 
+/** The "Off" marker of a disabled row (DF106); its tooltip says whether it follows another item. */
+function OffMarker({ ctx, id }: { ctx: ListContext; id: string }): React.JSX.Element | null {
+  if (!isDisabled(ctx.off, id)) return null
+  const title = ctx.off.dependants.has(id) ? m.navigator.offFollows : m.navigator.offTitle
+  return (
+    <span className={styles['opOff']} title={title}>
+      {m.navigator.off}
+      <span className={styles['srOnly']}>{`: ${title}`}</span>
+    </span>
+  )
+}
+
 function RowMarkers({ failed, count }: { failed: boolean; count: number }): React.JSX.Element {
   return (
     <>
@@ -455,6 +471,7 @@ function OperationRow({
         {...actions?.item}
         className={styles['op']}
         data-nested={actions === undefined ? '' : undefined}
+        data-off={isDisabled(ctx.off, op.id) ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
         data-selected={ctx.selected === op.id ? '' : undefined}
       >
@@ -472,6 +489,7 @@ function OperationRow({
           <span className={styles['opName']} title={op.name}>
             {op.name}
           </span>
+          <OffMarker ctx={ctx} id={op.id} />
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
       </li>
@@ -524,6 +542,7 @@ function FeatureRow({
       <RowMenu ctx={ctx} id={feature.id} name={feature.name} items={menu}>
         <div
           className={styles['op']}
+          data-off={isDisabled(ctx.off, feature.id) ? '' : undefined}
           data-row-menu={menu.length > 0 ? '' : undefined}
           data-selected={selected === feature.id ? '' : undefined}
         >
@@ -542,7 +561,7 @@ function FeatureRow({
               actions !== undefined,
               blocked !== undefined ? reasonId : undefined,
             )}
-            aria-label={name}
+            aria-label={isDisabled(ctx.off, feature.id) ? `${name}, ${m.navigator.off}` : name}
             onClick={() => ctx.select(feature.id)}
             onKeyDown={(e) => ctx.key(e, feature.id)}
           >
@@ -556,6 +575,7 @@ function FeatureRow({
                 <span className={styles['featureReadout']}>{readout}</span>
               ) : null}
             </span>
+            <OffMarker ctx={ctx} id={feature.id} />
             <RowMarkers failed={failed} count={count} />
           </button>
           {blocked !== undefined ? (
@@ -625,6 +645,7 @@ function OwnedRow({
       <li
         className={styles['op']}
         data-owned=""
+        data-off={isDisabled(ctx.off, op.id) ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
         data-selected={ctx.selected === op.id ? '' : undefined}
       >
@@ -633,7 +654,7 @@ function OwnedRow({
           ref={ctx.rowRef(op.id)}
           className={styles['opSelect']}
           aria-pressed={ctx.selected === op.id}
-          aria-label={f.ownedName(op.name, featureName)}
+          aria-label={`${f.ownedName(op.name, featureName)}${isDisabled(ctx.off, op.id) ? `, ${m.navigator.off}` : ''}`}
           {...rowKeys(ctx, 'Alt+ArrowUp Alt+ArrowDown ArrowLeft', menu, false)}
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
@@ -642,6 +663,7 @@ function OwnedRow({
           <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
             {roleLabel(featureName, op.name)}
           </span>
+          <OffMarker ctx={ctx} id={op.id} />
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
       </li>

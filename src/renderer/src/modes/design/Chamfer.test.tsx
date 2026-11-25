@@ -119,7 +119,7 @@ describe('chamfer UI (U4)', () => {
     const add = await openAdd()
     expect(within(add).queryByRole('menuitem', { name: /Chamfer/ })).toBeNull()
     await user.keyboard('{Escape}')
-    // a facing: neither Chamfer nor Make Clones…, only Remove
+    // a facing: neither Chamfer nor Make Clones…, only Disable and Remove
     const facing = await within(navigator()).findByRole('button', { name: /^Facing 1/ })
     await user.pointer({ keys: '[MouseRight]', target: facing })
     const menu = await screen.findByRole('menu', { name: 'Actions for Facing 1' })
@@ -127,7 +127,7 @@ describe('chamfer UI (U4)', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((i) => i.textContent),
-    ).toEqual(['Remove'])
+    ).toEqual(['Disable', 'Remove'])
     await user.keyboard('{Escape}')
     // focus goes back to the row
     await waitFor(() => expect(facing).toHaveFocus())
@@ -226,6 +226,42 @@ describe('chamfer UI (U4)', () => {
     await waitFor(() => expect(chamfer().edgeOf).toBe(part().operations[1]!.id))
     expect(chamfer().width.source).toMatch(/^0\.8/)
     await waitFor(() => expect(input('Diameter')).toHaveValue('Ø 11.6 mm'))
+  })
+
+  it('disables a pocket with its chamfer from the row menu, and enables it back (DF106)', async () => {
+    const { user, part } = await renderDesign(async (d) => {
+      const id = partId(d)
+      ;(
+        await d.dispatch(
+          'design.pocket.add',
+          {
+            partId: id,
+            shape: { kind: 'circle', center: ['30', '30'], diameter: '10' },
+            depth: '3',
+          },
+          ui,
+        )
+      ).unwrap()
+      ;(await d.dispatch('design.chamfer.add', { partId: id, edgeOf: 'pocket1' }, ui)).unwrap()
+    })
+    const pocket = await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: pocket })
+    let menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Disable' }))
+    await waitFor(() => expect(part().disabled).toEqual(['pocket1']))
+    // both rows stay, muted with "Off"; the chamfer follows its edge
+    const chamferRow = within(navigator()).getByRole('button', { name: /^Chamfer 1/ })
+    expect(pocket).toHaveTextContent(/Off/)
+    expect(chamferRow).toHaveTextContent(/Off: it builds on a disabled item/)
+    expect(pocket.closest('[data-off]')).not.toBeNull()
+    // nothing builds on a disabled row: no Chamfer, no Make Clones…
+    await user.pointer({ keys: '[MouseRight]', target: pocket })
+    menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    expect(within(menu).queryByRole('menuitem', { name: 'Chamfer' })).toBeNull()
+    expect(within(menu).queryByRole('menuitem', { name: /Make Clones/ })).toBeNull()
+    await user.click(within(menu).getByRole('menuitem', { name: 'Enable' }))
+    await waitFor(() => expect(part()).not.toHaveProperty('disabled'))
+    expect(pocket.closest('[data-off]')).toBeNull()
   })
 
   it('chamfers a rectangle pocket from its row menu: Edge by name, Depth, no Diameter (edge chamfers E1)', async () => {

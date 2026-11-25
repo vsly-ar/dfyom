@@ -26,7 +26,7 @@ import { planGeometryInput, unknownPlan } from '../plan/plan'
 import { hashJson } from '../plan/snapshot'
 import type { ProjectDoc } from '../project/document'
 import { geometryEvaluate } from '../workers/tasks'
-import { loadPart, partGeometryInput, unknownPart } from './load'
+import { loadEnabledPart, partGeometryInput, unknownPart } from './load'
 import { PartIdSchema } from './part.dto'
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 
@@ -654,7 +654,7 @@ export const partEvaluate = defineCommand({
     const evaluations = ctx.services.evaluations
     if (evaluations === undefined)
       return fail('internal.unexpected', 'no evaluation service configured', { where })
-    const loaded = loadPart(doc, args.partId, where)
+    const loaded = loadEnabledPart(doc, args.partId, where)
     if (loaded.isErr()) return Err(loaded.unwrapErr())
     const state = await evaluations.evaluate(args.partId, ctx.signal)
     if (state.isErr()) return Err(state.unwrapErr())
