@@ -127,4 +127,4 @@ Status: implemented. The user asked to see a setup's tool changes in the Plan in
 
 ## Later
 
-Chamfers along general loops and outside edges (offset at the tool's contact Z, after spike S7); spot drilling as a separate role; deburring passes; helical thread milling; travel-order optimisation across clone positions.
+Chamfers along general loops and outside edges (offset at the tool's contact Z, after spike S7; drafted in [edge-chamfers.md](edge-chamfers.md#toolpath-plan)); spot drilling as a separate role; deburring passes; helical thread milling; travel-order optimisation across clone positions.

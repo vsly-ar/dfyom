@@ -1,0 +1,13 @@
+// Spike S7 (docs/research/2026-11-25-spike-s7-edge-chamfers.md): vitest-run TypeScript against
+// src/core, not part of the app build. Run: `npx vitest run -c spikes/chamfers/vitest.config.mts`;
+// typecheck: `npx tsc -p spikes/chamfers`.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["*.ts", "*.mts"]
+}
