@@ -44,6 +44,18 @@ export const chamferMessages = {
     `Section: chamfer ${p.width} wide at ${p.angle}, ${p.depth} deep, along ${p.side === 'outside' ? 'the outline of' : 'the wall of'} ${p.edgeName}, ${p.edgeBottom}.`,
   /** An Edge option for a general edge (E3): "Profile 1 · outline", "Pocket 2 · rim". */
   edgeLoopOption: (name: string, role: 'rim' | 'opening' | 'outline') => `${name} · ${role}`,
+  /** E4a: the Loops group of a general edge with several loops, one checkbox per loop. */
+  loops: 'Loops',
+  /** A piece's outer loop by the edge's role: "Rim", "Rim 2", "Opening", "Outline". */
+  loopRole:
+    (role: 'rim' | 'opening' | 'outline') =>
+    (n: number): string =>
+      `${{ rim: 'Rim', opening: 'Opening', outline: 'Outline' }[role]}${n > 1 ? ` ${n}` : ''}`,
+  island: (n: number) => `Island ${n}`,
+  loopsNote: 'The loops this chamfer bevels; at least one.',
+  /** E4a: the corner lift switch. */
+  cornerLift: 'Corner lift',
+  cornerLiftNote: 'Lift the V-bit into sharp inside corners for a crisp mitre.',
   edgeThrough: 'through',
   edgeDeep: (depth: string) => `${depth} deep`,
 } as const

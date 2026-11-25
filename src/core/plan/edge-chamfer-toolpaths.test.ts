@@ -115,15 +115,34 @@ describe('edge chamfers in a plan (E1)', () => {
     expect(e.issues.map((i) => i.rule)).toEqual(['loopEntry'])
   })
 
-  it('no library mill covers a 3.5 bevel (none chosen); the 6 mm one assigned: slant', async () => {
+  it('E4a: a 3.5 bevel wider than the 6 mm mill cuts in levels: chosen, no finding', async () => {
     const t = await edgePlan({ width: '3.5' })
-    expect(t.errors().map((w) => `${w.field}:${w.rule}`)).toEqual(['tool:noTool'])
-    await t.s.run('plan.tool.assign', {
-      planId: t.planId,
-      planOperationId: t.chamfer,
-      toolLibraryItemId: t.cm,
-    })
-    expect(t.errors().map((w) => `${w.field}:${w.rule}`)).toContain('tool:slant')
+    expect(t.s.op('chamfer1').tool).toMatchObject({ kind: 'specific' })
+    expect(t.errors()).toEqual([])
+    const generated = await t.generate()
+    expect(generated.operations.every((o) => o.status === 'generated')).toBe(true)
+    const tp = t.toolpath()
+    expect(new Set(tp.passes.map((p) => p.kind))).toEqual(new Set(['rough', 'finish']))
+    const zs = tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])))
+    expect(Math.min(...zs)).toBeCloseTo(-3.5, 9)
+  })
+
+  it('E4a: corner lift and chosen loops go through the design and the plan', async () => {
+    const t = await edgePlan({ loops: [0], cornerLift: true })
+    expect(t.s.op('chamfer1')).toMatchObject({ loops: [0], cornerLift: true })
+    expect(t.errors()).toEqual([])
+    await t.generate()
+    // the rim's ring only (R3 corners: nothing to lift), the island stays sharp
+    const xs = t
+      .toolpath()
+      .passes.flatMap((p) => p.moves.flatMap((m) => (m.kind === 'drill' ? [] : [m.to[0]])))
+    expect(Math.min(...xs)).toBeLessThan(31)
+    const plunges = t
+      .toolpath()
+      .passes.flatMap((p) =>
+        p.moves.filter((m, k) => m.kind === 'line' && p.moves[k - 1]?.kind === 'rapid'),
+      )
+    expect(plunges).toHaveLength(1)
   })
 
   it('E1 exit: generated, exported and streamed through the virtual machine', async () => {

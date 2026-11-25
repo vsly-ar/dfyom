@@ -5,12 +5,13 @@
 import { describe, expect, it } from 'vitest'
 import { numberRegion } from '../geometry/2d/place'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
-import { regionLoops, type Region } from '../geometry/2d/model'
+import { line, regionLoops, type Region } from '../geometry/2d/model'
 import type { Vec2 } from '../geometry/model'
 import { Ok } from '../../shared/result'
 import { circleLoop, roundedRectLoop } from '../geometry/testing/shape-regions'
-import type { ToolpathTool } from './model'
+import type { Toolpath, ToolpathTool } from './model'
 import {
+  edgeChamferPasses,
   edgeChamferTipZ,
   generateEdgeChamfer,
   type EdgeChamferInput,
@@ -18,7 +19,7 @@ import {
 } from './edge-chamfer'
 import { generateRequest, GeneratorRequestSchema } from './request'
 import { chamferMill, HEIGHTS, RATES } from './testing/fixtures'
-import { Heightmap, render } from './testing/oracles'
+import { Heightmap, render, samples, steps } from './testing/oracles'
 import { violations } from './testing/rules'
 
 const port = nodeRegion2d()
@@ -114,14 +115,18 @@ describe('generateEdgeChamfer', () => {
     for (const z of plunges) expect(z).toBeCloseTo(-1, 9)
   })
 
-  it('refuses a drill, a wrong angle and a cutting edge shorter than the slant', () => {
+  it('refuses a drill, a wrong angle and a tool without a cutting edge', () => {
     const rules = (i: EdgeChamferInput) =>
       generateEdgeChamfer(i, port)
         .unwrapErr()
         .issues.map((x) => x.rule)
     expect(rules(input({ ...chamferMill(6), type: 'drill' }))).toContain('toolType')
     expect(rules(input(chamferMill(6, 60)))).toContain('angle')
-    expect(rules(input(chamferMill(6, 90, 0), { width: 3.5 }))).toContain('slant')
+    // E4a: a bevel wider than the cutting edge is cut in levels; no cutting edge at all is refused
+    expect(rules(input(chamferMill(6, 90, 6)))).toContain('slant')
+    expect(generateEdgeChamfer(input(chamferMill(6, 90, 0), { width: 3.5 }), port).isOk()).toBe(
+      true,
+    )
   })
 
   it('goes through the request schema and the generator switch', () => {
@@ -231,5 +236,206 @@ describe('generateEdgeChamfer (E2, outside edges)', () => {
     await expect(
       render(generateEdgeChamfer(input(undefined, outside()), port).unwrap()),
     ).toMatchFileSnapshot('__golden__/edge-chamfer-outside.txt')
+  })
+})
+
+// ── E4a: several passes, corner lift, chosen loops (docs/modes/edge-chamfers.md#implementation-e4a)
+
+/** A sharp 40 × 24 pocket at (10..50, 8..32) with a Ø 8 island at its centre. */
+const SHARP: Region = numberRegion({
+  pieces: [
+    {
+      outer: {
+        elements: [
+          line([10, 8], [50, 8]),
+          line([50, 8], [50, 32]),
+          line([50, 32], [10, 32]),
+          line([10, 32], [10, 8]),
+        ],
+      },
+      holes: [circleLoop([30, 20], 4, false)],
+    },
+  ],
+})
+
+const sharp = (
+  over: Partial<EdgeChamferOperation['edge']> = {},
+): Partial<EdgeChamferOperation> => ({
+  edge: {
+    shape: { center: [0, 0], contour: { kind: 'region', region: SHARP } },
+    side: 'inside',
+    ...over,
+  },
+})
+
+/** Material beyond the rim: its distance outside the rectangle, Euclidean or (mitre) Chebyshev. */
+function rimDistance(p: Vec2, mitre: boolean): number {
+  const dx = Math.max(0, 10 - p[0], p[0] - 50)
+  const dy = Math.max(0, 8 - p[1], p[1] - 32)
+  return mitre ? Math.max(dx, dy) : Math.hypot(dx, dy)
+}
+
+/**
+ * The heightmap after `tp` (tip and cone, no shank) against a bevel given by the material
+ * distance `d` of a cell (undefined = air or not checked): gouges and material left over `tol`.
+ * With `shank`, also every cell under the tool above its cutting edge (the shank would rub it).
+ */
+function bevelErrors(
+  i: EdgeChamferInput,
+  tp: Toolpath,
+  d: (p: Vec2) => number | undefined,
+  tol: number,
+): string[] {
+  const o = i.operation
+  const map = new Heightmap(stock.length, stock.width, 0.08)
+  map.z.fill(o.onZ)
+  const tan = Math.tan((o.angle * Math.PI) / 360)
+  const R = i.tool.diameter / 2
+  const edge = (i.tool.diameter - (i.tool.tipDiameter ?? 0)) / 2 / tan
+  const wrong: string[] = []
+  for (const s of steps(tp)) {
+    if (s.move.kind === 'rapid') continue
+    for (const p of samples(s, 0.04)) {
+      // the shank: nothing above the cutting edge within DC (before this sample cuts)
+      const a0 = Math.max(0, Math.floor((p[0] - R) / map.cell))
+      const a1 = Math.min(map.nx - 1, Math.ceil((p[0] + R) / map.cell))
+      const b0 = Math.max(0, Math.floor((p[1] - R) / map.cell))
+      const b1 = Math.min(map.ny - 1, Math.ceil((p[1] + R) / map.cell))
+      for (let a = a0; a <= a1; a++)
+        for (let b = b0; b <= b1; b++) {
+          const [x, y] = map.center(a, b)
+          if (Math.hypot(x - p[0], y - p[1]) > R - map.cell) continue
+          if (map.z[b * map.nx + a]! > p[2] + edge + 0.05 && wrong.length < 3)
+            wrong.push(`shank at ${x},${y} over ${p.join(',')}`)
+        }
+      map.stamp(i.tool, p)
+    }
+  }
+  for (let a = 0; a < map.nx; a++)
+    for (let b = 0; b < map.ny; b++) {
+      const [x, y] = map.center(a, b)
+      const dist = d([x, y])
+      if (dist === undefined) continue
+      const h = map.z[b * map.nx + a]!
+      const bevel = dist >= o.width ? o.onZ : o.onZ - (o.width - dist) / tan
+      if (h < bevel - 1e-6) wrong.push(`gouge at ${x},${y}: ${h} < ${bevel}`)
+      if (h > bevel + tol) wrong.push(`left at ${x},${y}: ${h} > ${bevel}`)
+    }
+  return wrong.slice(0, 3)
+}
+
+describe('generateEdgeChamfer (E4a)', () => {
+  it('edgeChamferPasses: one ring when the cutting edge covers the bevel, else levels', () => {
+    const r3 = (x: number) => Math.round(x * 1e9) / 1e9 + 0
+    const view = (ls: ReturnType<typeof edgeChamferPasses>) =>
+      ls.map((l) => l.map((r) => [r3(r.offset), r3(r.depth), r.bevel]))
+    expect(view(edgeChamferPasses({ width: 3, angle: 90 }, { diameter: 6 }))).toEqual([
+      [[0, 3, true]],
+    ])
+    // c = 2, cusp 1, Δ = 1: three levels, each from the edge out to the bevel ring
+    expect(view(edgeChamferPasses({ width: 3, angle: 90 }, { diameter: 4 }))).toEqual([
+      [
+        [0, 1, false],
+        [-2, 1, true],
+      ],
+      [
+        [0, 2, false],
+        [-1, 2, true],
+      ],
+      [[0, 3, true]],
+    ])
+    // a tip: the edge ring dt/2 in the air, the last level the E1 ring
+    const tipped = edgeChamferPasses({ width: 2, angle: 90 }, { diameter: 3, tipDiameter: 0.4 })
+    expect(view([tipped.at(-1)!])).toEqual([[[0.2, 2, true]]])
+    for (const l of tipped) {
+      expect(l[0]!.offset).toBe(0.2)
+      for (let j = 1; j < l.length; j++)
+        expect(l[j - 1]!.offset - l[j]!.offset).toBeLessThanOrEqual(1.3 + 1e-9)
+    }
+    expect(edgeChamferPasses({ width: 1, angle: 90 }, { diameter: 2, tipDiameter: 2 })).toEqual([])
+  })
+
+  it('a 3 mm bevel with a Ø 4 V-bit: three levels, rough and finish, the bevel exact, no shank rub', () => {
+    const i = input(chamferMill(4, 90, 0), { width: 3 })
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    // per level the edge ring (rough), then the bevel ring (finish); the last level one ring
+    expect(tp.passes.map((p) => p.kind)).toEqual(['rough', 'finish', 'rough', 'finish'])
+    const zs = tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])))
+    expect(Math.min(...zs)).toBeCloseTo(-3, 9)
+    const d = (p: Vec2) => (port.contains(AIR, p) ? undefined : edgeDistance(p))
+    expect(bevelErrors(i, tp, d, 0.15)).toEqual([])
+  })
+
+  it('a tipped 60° bit in levels, conventional: the bevel exact, no shank rub', () => {
+    const i = input(chamferMill(3, 60, 0.4), { angle: 60, width: 1.6 }, 'conventional')
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    const d = (p: Vec2) => (port.contains(AIR, p) ? undefined : edgeDistance(p))
+    expect(bevelErrors(i, tp, d, 0.2)).toEqual([])
+  })
+
+  it('corner lift: the sharp corners meet in a mitre; without it the cone stays', () => {
+    const rim = (p: Vec2) =>
+      Math.hypot(p[0] - 30, p[1] - 20) < 4 + 1.2 || port.contains(SHARP, p)
+        ? undefined
+        : rimDistance(p, true)
+    const lifted = input(chamferMill(6, 90, 0), { ...sharp(), cornerLift: true })
+    const tp = generateEdgeChamfer(lifted, port).unwrap()
+    expect(bevelErrors(lifted, tp, rim, 0.12)).toEqual([])
+    // four lifts up to the face on the rim, none round the island
+    const tops = tp.passes.flatMap((p) =>
+      p.moves.flatMap((m) => (m.kind === 'line' && m.to[2] === 0 ? [m] : [])),
+    )
+    expect(tops).toHaveLength(4)
+    expect(tops.map((m) => m.to.slice(0, 2))).toContainEqual([9, 7])
+    const plain = input(chamferMill(6, 90, 0), sharp())
+    const left = bevelErrors(plain, generateEdgeChamfer(plain, port).unwrap(), rim, 0.12)
+    expect(left.some((e) => e.startsWith('left'))).toBe(true)
+  })
+
+  it('corner lift in levels with a tip: the mitre exact, no shank rub', () => {
+    const i = input(chamferMill(3, 90, 0.4), { ...sharp(), width: 2, cornerLift: true })
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    const rim = (p: Vec2) =>
+      Math.hypot(p[0] - 30, p[1] - 20) < 4 + 2.5 || port.contains(SHARP, p)
+        ? undefined
+        : rimDistance(p, true)
+    expect(bevelErrors(i, tp, rim, 0.15)).toEqual([])
+  })
+
+  it('chosen loops: the rim only leaves the island sharp, the island only the rim', () => {
+    const island = (p: Vec2) => Math.hypot(p[0] - 30, p[1] - 20) <= 4
+    const rimOnly = input(chamferMill(6, 90, 0), sharp({ loops: [0] }))
+    const tp = generateEdgeChamfer(rimOnly, port).unwrap()
+    const map = new Heightmap(stock.length, stock.width, 0.08)
+    map.sweep(rimOnly.tool, tp, 0.04)
+    let islandCut = 0
+    for (let a = 0; a < map.nx; a++)
+      for (let b = 0; b < map.ny; b++)
+        if (island(map.center(a, b)) && map.z[b * map.nx + a]! < -1e-9) islandCut++
+    expect(islandCut).toBe(0)
+    expect(
+      bevelErrors(
+        rimOnly,
+        tp,
+        (p) => (port.contains(SHARP, p) || island(p) ? undefined : rimDistance(p, false)),
+        0.12,
+      ),
+    ).toEqual([])
+    const islandOnly = generateEdgeChamfer(
+      input(chamferMill(6, 90, 0), sharp({ loops: [1] })),
+      port,
+    )
+    const xs = islandOnly
+      .unwrap()
+      .passes.flatMap((p) => p.moves.flatMap((m) => (m.kind === 'drill' ? [] : [m.to[0]])))
+    expect(Math.min(...xs)).toBeGreaterThan(25)
+    expect(Math.max(...xs)).toBeLessThan(35)
+  })
+
+  it('golden: several passes, corner lift, the rim of a pocket with an island', async () => {
+    const i = input(chamferMill(4, 90, 0), { ...sharp({ loops: [0] }), width: 3, cornerLift: true })
+    await expect(render(generateEdgeChamfer(i, port).unwrap())).toMatchFileSnapshot(
+      '__golden__/edge-chamfer-passes.txt',
+    )
   })
 })

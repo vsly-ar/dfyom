@@ -19,7 +19,7 @@ import {
   type Region,
 } from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
-import { loopChamferRegion, pocketRegion } from './outline'
+import { chosenLoopsBand, choosesEveryLoop, loopChamferRegion, pocketRegion } from './outline'
 import {
   frameMap,
   holeRegion,
@@ -83,8 +83,10 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
         // the bevel's width on both sides of the part's loop
         const r = loopChamferRegion(op)
         const grown = port.offset(r, -op.width)
-        const band =
-          op.edge.side === 'inside'
+        // E4a: chosen loops only, the band within the width of each
+        const band = !choosesEveryLoop(op)
+          ? chosenLoopsBand(op, port, op.width)
+          : op.edge.side === 'inside'
             ? grown
             : grown.andThen((g) => port.offset(r, op.width).andThen((s) => port.difference(g, s)))
         const region = band.mapOr(undefined, (x) => x)

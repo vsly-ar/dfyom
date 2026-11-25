@@ -16,10 +16,11 @@ import { useRef, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { chamferMessages } from '../../messages/chamfer'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
-import { useUi } from '../../shell/ShellContext'
+import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { fieldContext } from '../../../../core/design/operation'
 import { Quantity } from '../../../../core/quantity/quantity'
 import {
+  Checkbox,
   Field,
   FieldIcon,
   FieldInput,
@@ -27,6 +28,7 @@ import {
   IconButton,
   QuantityInput,
   Select,
+  Switch,
   type FieldMessage,
 } from '../../ui'
 import {
@@ -39,6 +41,7 @@ import {
   chamferDepthValue,
   chamferDiameter,
   chamferSectionValues,
+  edgeLoopLabels,
   edgeOptions,
   isLoopEdge,
   wallSectionValues,
@@ -136,7 +139,9 @@ export function ChamferInspector({
           <ParamField ctx={ctx} path="angle" label={t.angle} kind="angle" icon="chamfer" />,
         )}
         {target('diameter', <DiameterField ctx={ctx} />)}
+        <CornerLiftField ctx={ctx} />
       </Group>
+      <LoopsGroup ctx={ctx} level={level} />
       {tool}
     </>
   )
@@ -261,5 +266,82 @@ function EdgeField({
         />
       ) : null}
     </div>
+  )
+}
+
+/** E4a: a general edge's corner lift (`cornerLift`), a switch; none on a circular edge. */
+function CornerLiftField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'chamfer') return null
+  const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
+  if (edge === undefined || !isLoopEdge(edge)) return null
+  const messages: FieldMessage[] = [
+    ...ctx.errors
+      .filter((e) => e.path === 'cornerLift')
+      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+    { id: 'note', severity: 'note', text: t.cornerLiftNote },
+  ]
+  return (
+    <Field label={t.cornerLift} kind="toggle" messages={messages} readOnly={ctx.readOnly}>
+      <Switch
+        label={t.cornerLift}
+        hideLabel
+        checked={op.cornerLift === true}
+        disabled={ctx.readOnly}
+        onCheckedChange={(cornerLift) => ctx.send({ cornerLift }, 'cornerLift')}
+      />
+    </Field>
+  )
+}
+
+/**
+ * E4a: the loops of a general edge with more than one loop, one checkbox each (all checked = every
+ * loop, sent as `loops: null`); the last checked one cannot be unchecked.
+ */
+function LoopsGroup({
+  ctx,
+  level,
+}: {
+  ctx: OperationFieldsContext
+  level: 3 | 4
+}): React.JSX.Element | null {
+  const port = useRegion2d()
+  const op = ctx.op
+  if (op.kind !== 'chamfer') return null
+  const labels = edgeLoopLabels(ctx.part, op, port)
+  if (labels.length < 2) return null
+  const chosen = new Set(op.loops ?? labels.map((_, i) => i))
+  const toggle = (i: number, on: boolean) => {
+    const next = new Set(chosen)
+    if (on) next.add(i)
+    else next.delete(i)
+    if (next.size === 0) return
+    ctx.send(
+      { loops: next.size === labels.length ? null : [...next].sort((a, b) => a - b) },
+      'loops',
+    )
+  }
+  const errors = ctx.errors.filter((e) => e.path === 'loops')
+  return (
+    <Group title={t.loops} level={level}>
+      <ul className={own['loops']} aria-label={t.loops}>
+        {labels.map((label, i) => (
+          <li key={i}>
+            <Checkbox
+              label={label}
+              checked={chosen.has(i)}
+              disabled={ctx.readOnly || (chosen.has(i) && chosen.size === 1)}
+              onCheckedChange={(v) => toggle(i, v === true)}
+            />
+          </li>
+        ))}
+      </ul>
+      <p className={own['loopsNote']}>{t.loopsNote}</p>
+      {errors.map((e, i) => (
+        <p key={i} className={styles['fieldError']} role="alert">
+          {e.text}
+        </p>
+      ))}
+    </Group>
   )
 }

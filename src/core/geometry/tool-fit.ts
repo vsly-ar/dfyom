@@ -363,15 +363,16 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
     }
   const tip = tool.tipDiameter ?? 0
   if (c.edgeDiameter === undefined) {
-    // a general edge (edge-chamfers.md § Tool): one ring, the cutting edge covers the bevel,
-    // (DC − dt) / 2 ≥ width; no tip rule (the air beside the edge is the finding's business)
+    // a general edge (edge-chamfers.md § Implementation (E4a)): any cutting edge, DC > dt (a
+    // bevel wider than it is cut in levels); no tip rule (the air beside the edge is the
+    // finding's business)
     const edge = coneSlant(tip, tool.diameter, tool.angle)
     const slant = coneSlant(0, 2 * c.width, c.angle)
-    return edge + TOL >= slant
+    return tool.diameter - tip > 2 * TOL
       ? undefined
       : {
           rule: 'slant',
-          detail: `cutting edge ${mm(edge)} is shorter than the chamfer's slant ${mm(slant)}`,
+          detail: `the tool has no cutting edge (tip Ø${mm(tip)}, DC ${mm(tool.diameter)})`,
           values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, width: c.width },
         }
   }

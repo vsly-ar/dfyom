@@ -369,6 +369,28 @@ export function operationIssues(
           'chamferStepped',
           'a stepped chamfer needs a circular edge',
         )
+      // E4a: chosen loops and the corner lift are for a general edge only
+      if (edgeKind === 'circle') {
+        c.check(op.loops.isNone(), 'loops', 'chamferLoops', 'a circular edge has one loop')
+        c.check(!op.cornerLift, 'cornerLift', 'chamferLift', 'a circular edge has no corners')
+      }
+      if (
+        edgeKind === 'loop' &&
+        op.loops.isSome() &&
+        (edge?.kind === 'pocket' || edge?.kind === 'profile')
+      ) {
+        const count =
+          edge.kind === 'profile' && edge.side === 'outside' ? 1 : factsOf(edge, shapeFacts).loops
+        const loops = op.loops.unwrap()
+        if (count !== undefined)
+          c.check(
+            loops.every((i) => i < count),
+            'loops',
+            'chamferLoops',
+            `must be loop indices 0 to ${count - 1} of ${edge.name}`,
+            { max: count - 1, actual: Math.max(...loops) },
+          )
+      }
       if (edge !== undefined)
         c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.name}`, {
           allowed: [edge.on],

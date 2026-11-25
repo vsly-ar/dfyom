@@ -195,6 +195,13 @@ export const ChamferDtoSchema = z.object({
       within: z.object({ min: PointDtoSchema, max: PointDtoSchema }),
     })
     .optional(),
+  /**
+   * A general edge's chosen loops (edge-chamfers.md E4a): indices into its loops, per piece the
+   * outer loop then its islands; absent = every loop.
+   */
+  loops: z.array(z.number().int().nonnegative()).min(1).optional(),
+  /** E4a: lift the V-bit into sharp inside corners (a mitre); absent = off. */
+  cornerLift: z.literal(true).optional(),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [
