@@ -231,7 +231,13 @@ export function operationOutline(
       ])
     case 'chamfer': {
       const edge = chamferEdge(ops, op.edgeOf)
-      if (edge === undefined) return []
+      if (edge === undefined) {
+        // a general edge (edge-chamfers.md E1): the edge's loops at the face
+        const loop = ops.find((o) => o.id === op.edgeOf)
+        return loop?.kind === 'pocket' || loop?.kind === 'profile'
+          ? place(face, shapeLoops(loop.shape, face.w, ctx))
+          : []
+      }
       const [cu, cv] = edge.center
       // D45: the chamfer stores its width; its diameter at the face follows the edge
       const d = edge.diameter + 2 * op.width.canonical
@@ -267,7 +273,11 @@ export function markerPoint(
       return at(op.center[0].canonical, op.center[1].canonical)
     case 'chamfer': {
       const edge = chamferEdge(ops, op.edgeOf)
-      return edge === undefined ? at(0, 0) : at(...edge.center)
+      if (edge !== undefined) return at(...edge.center)
+      const loop = ops.find((o) => o.id === op.edgeOf)
+      return loop?.kind === 'pocket' || loop?.kind === 'profile'
+        ? at(...shapeCentre(loop.shape))
+        : at(0, 0)
     }
   }
 }

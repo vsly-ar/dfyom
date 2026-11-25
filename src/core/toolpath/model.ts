@@ -7,6 +7,7 @@
  */
 import type {
   AnalyticOperation,
+  CircleChamferGeometry,
   OperationGeometry,
   StockGeometry,
   Vec2,
@@ -235,7 +236,8 @@ export type DrillingOperation = Extract<OperationGeometry, { kind: 'drilling' }>
 /** v0.1 contours, `outside` / `inside` only; general loops go through generateRegionProfile. */
 export type ProfileOperation = AnalyticOperation<'profile'>
 
-export type ChamferOperation = Extract<OperationGeometry, { kind: 'chamfer' }>
+/** A circular chamfer (v0.4); general edges go through generateEdgeChamfer (`edgeChamfer`, E1). */
+export type ChamferOperation = CircleChamferGeometry
 
 export type FacingInput = GeneratorInput<FacingOperation, FacingStrategy>
 export type PocketInput = GeneratorInput<PocketOperation, PocketStrategy>

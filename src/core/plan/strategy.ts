@@ -8,11 +8,17 @@
 import { z } from 'zod'
 import type { Issue } from '../../shared/errors/app-error'
 import { collect, fail, None, type AppResult, type Option } from '../../shared/result'
-import { chamferDiameter, fieldContext, isGeneralShape, type Operation } from '../design/operation'
+import {
+  chamferDiameter,
+  fieldContext,
+  isGeneralShape,
+  isLoopChamferOp,
+  type Operation,
+} from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import { chamferEdge } from '../design/geometry-input'
 import { SurfaceTable } from '../design/surfaces'
-import { chamferDepth, chamferTerraces } from '../geometry/model'
+import { chamferDepth, chamferTerraces, loopChamferDepth } from '../geometry/model'
 import type { MaterialClass } from '../library/item'
 import type { Stock } from '../library/stock'
 import type { CuttingPreset, Tool } from '../library/tool'
@@ -327,14 +333,18 @@ export function resolveStrategy(
       // F7: terraces by a flat end mill; the feeds see one terrace's height
       const terraces =
         op?.kind === 'chamfer' && op.stepdown.isSome() ? steppedTerraces(op, c.allOps) : null
+      // a general edge (edge-chamfers.md E1) enters in the air beside the edge: `contour` only
+      const loop = op?.kind === 'chamfer' && isLoopChamferOp(op, c.allOps)
       const entry =
         terraces !== null
           ? 'stepped'
-          : s.entry === 'plunge' || s.entry === 'contour'
-            ? s.entry
-            : plunge
-              ? 'plunge'
-              : 'contour'
+          : loop
+            ? 'contour'
+            : s.entry === 'plunge' || s.entry === 'contour'
+              ? s.entry
+              : plunge
+                ? 'plunge'
+                : 'contour'
       const cut =
         op?.kind === 'chamfer' && tool !== undefined
           ? chamferCuts(op, c.allOps, c.stock, tool)
@@ -346,11 +356,13 @@ export function resolveStrategy(
         cutDepth:
           terraces !== null
             ? (terraces?.height ?? 0)
-            : cut === undefined
-              ? 0
-              : entry === 'plunge'
-                ? cut.plungeDepth
-                : cut.contourDepth,
+            : loop
+              ? loopChamferDepth({ width: op.width.canonical, angle: op.angle.canonical })
+              : cut === undefined
+                ? 0
+                : entry === 'plunge'
+                  ? cut.plungeDepth
+                  : cut.contourDepth,
       }
     }
   }
@@ -379,6 +391,20 @@ function steppedTerraces(
     },
     op.stepdown.unwrap().canonical,
   )
+}
+
+/**
+ * The tip depth below its face of a chamfer along a general edge (edge-chamfers.md E1): width /
+ * tan(α / 2), whatever the tool (one ring in the air beside the edge); undefined for a circular
+ * chamfer (`chamferCuts`).
+ */
+export function loopCut(
+  op: Extract<Operation, { kind: 'chamfer' }>,
+  allOps: readonly Operation[],
+): number | undefined {
+  return isLoopChamferOp(op, allOps)
+    ? loopChamferDepth({ width: op.width.canonical, angle: op.angle.canonical })
+    : undefined
 }
 
 /** A chamfer's cuts with `tool` (mm below its face); undefined when the edge is not round. */
@@ -448,6 +474,16 @@ export function strategyIssues(
     bad('entry', 'notForKind', 'a chamfer is plunged or contoured')
   if (r.kind === 'chamfer' && r.entry === 'stepped' && s.entry !== undefined)
     bad('entry', 'stepped', 'a stepped chamfer is cut in terraces (no plunge or contour)')
+  if (
+    kind === 'chamfer' &&
+    s.entry === 'plunge' &&
+    c.ops.some((op) => op.kind === 'chamfer' && isLoopChamferOp(op, c.allOps))
+  )
+    bad(
+      'entry',
+      'loopEntry',
+      'a chamfer along a general edge enters in the air beside the edge (contour), not by a plunge',
+    )
   if ('rampAngle' in r && (r.rampAngle < 0.5 || r.rampAngle > 30))
     bad('rampAngle', 'range', 'must be 0.5° to 30°', { min: 0.5, max: 30 })
   if ('finishAllowance' in r && r.finishAllowance < 0)

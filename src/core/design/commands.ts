@@ -194,7 +194,7 @@ const profileParams = {
 }
 
 const chamferParams = {
-  edgeOf: OperationIdSchema.describe('Earlier drilling, circle pocket or inside circle profile'),
+  edgeOf: OperationIdSchema.describe('Earlier drilling, pocket or inside profile'),
   width: Src.describe('At the face (1.5 × 45°: 1.5); default 0.5 mm'),
   depth: Src.describe('Instead of width'),
   angle: Src.describe('Default 90°'),

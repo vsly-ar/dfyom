@@ -140,7 +140,7 @@ describe('design.chamfer.add / update', () => {
     expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
   })
 
-  it('refuses a missing or non-circular edge, a width of 0 and an angle out of range', async () => {
+  it('refuses a missing edge, a width of 0 and an angle out of range', async () => {
     const s = await designSetup()
     await drill(s)
     await s.run('design.pocket.add', {
@@ -158,15 +158,9 @@ describe('design.chamfer.add / update', () => {
         ),
       ),
     ).toContain('chamferEdge')
-    expect(
-      rule(
-        await s.fail(
-          'design.chamfer.add',
-          { partId: s.partId, edgeOf: 'pocket1' },
-          'model.invariant',
-        ),
-      ),
-    ).toContain('chamferEdge')
+    // a rectangle pocket's rim is a general edge (edge-chamfers.md E1): accepted, not stepped
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'pocket1' })
+    await s.run('design.operation.remove', { partId: s.partId, operationId: 'chamfer1' })
     expect(
       rule(
         await s.fail(

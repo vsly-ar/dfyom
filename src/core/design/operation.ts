@@ -189,6 +189,23 @@ export function circularEdgeDiameter(op: Operation | undefined): Quantity | unde
 }
 
 /**
+ * The edge a chamfer can bevel (design-v0.4.md rule `chamferEdge`, widened by edge-chamfers.md
+ * E1): `circle` for the circular mouths of v0.4 (exact cone, `circularEdgeDiameter`), `loop` for
+ * the top edge of a pocket of any other shape or an `inside` profile of any other shape (every
+ * loop, islands included); undefined for any other operation (facings, `on` and, until E2,
+ * `outside` profiles, chamfers).
+ */
+export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | undefined {
+  if (circularEdgeDiameter(op) !== undefined) return 'circle'
+  if (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side === 'inside')) return 'loop'
+  return undefined
+}
+
+/** A chamfer along a general edge (edge-chamfers.md E1): its `edgeOf` among `ops` is a `loop` edge. */
+export const isLoopChamferOp = (op: Chamfer, ops: readonly Operation[]): boolean =>
+  chamferEdgeKind(ops.find((o) => o.id === op.edgeOf)) === 'loop'
+
+/**
  * A chamfer's diameter in the face plane, mm exact: the edge's Ø + 2 × `width` (D45,
  * design-v0.4.md § Chamfer operation); undefined when the edge is not a circular edge.
  */

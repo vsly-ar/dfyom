@@ -10,7 +10,10 @@ import { chainBounds, type Bounds2 } from '../geometry/2d/model'
 import { faceFrame, localStock, toPartFrame } from '../geometry/face'
 import {
   chamferDepth,
+  isLoopChamfer,
+  loopChamferDepth,
   type OperationGeometry,
+  type Shape,
   type StockGeometry,
   type Vec2,
   type Vec3,
@@ -56,37 +59,52 @@ function outline(g: OperationGeometry, stock: StockGeometry): Bounds2 {
     }
     case 'drilling':
       return disc(g.center, g.diameter)
-    case 'chamfer':
-      return disc(g.center, g.diameter)
-    case 'pocket':
-    case 'profile': {
-      const { center, contour } = g.shape
-      let b: Bounds2 | undefined
-      if (contour.kind === 'circle') return disc(center, contour.radius * 2)
-      if (contour.kind === 'rectangle')
-        b = {
-          min: [-contour.length / 2, -contour.width / 2],
-          max: [contour.length / 2, contour.width / 2],
-        }
-      else if (contour.kind === 'path') b = chainBounds(contour.path.elements)
-      else
-        for (const piece of contour.region.pieces) {
-          const p = chainBounds(piece.outer.elements)
-          if (p === undefined) continue
-          b =
-            b === undefined
-              ? p
-              : {
-                  min: [Math.min(b.min[0], p.min[0]), Math.min(b.min[1], p.min[1])],
-                  max: [Math.max(b.max[0], p.max[0]), Math.max(b.max[1], p.max[1])],
-                }
-        }
-      b ??= { min: [0, 0], max: [0, 0] }
+    case 'chamfer': {
+      if (!isLoopChamfer(g)) return disc(g.center, g.diameter)
+      // a general edge: its shape grown by the bevel's width
+      const b = shapeBounds(g.edge.shape)
       return {
-        min: [center[0] + b.min[0], center[1] + b.min[1]],
-        max: [center[0] + b.max[0], center[1] + b.max[1]],
+        min: [b.min[0] - g.width, b.min[1] - g.width],
+        max: [b.max[0] + g.width, b.max[1] + g.width],
       }
     }
+    case 'pocket':
+    case 'profile':
+      return shapeBounds(g.shape)
+  }
+}
+
+/** A placed shape's bounds in its face frame. */
+function shapeBounds(shape: Shape): Bounds2 {
+  const disc = (c: Vec2, d: number): Bounds2 => ({
+    min: [c[0] - d / 2, c[1] - d / 2],
+    max: [c[0] + d / 2, c[1] + d / 2],
+  })
+  const { center, contour } = shape
+  let b: Bounds2 | undefined
+  if (contour.kind === 'circle') return disc(center, contour.radius * 2)
+  if (contour.kind === 'rectangle')
+    b = {
+      min: [-contour.length / 2, -contour.width / 2],
+      max: [contour.length / 2, contour.width / 2],
+    }
+  else if (contour.kind === 'path') b = chainBounds(contour.path.elements)
+  else
+    for (const piece of contour.region.pieces) {
+      const p = chainBounds(piece.outer.elements)
+      if (p === undefined) continue
+      b =
+        b === undefined
+          ? p
+          : {
+              min: [Math.min(b.min[0], p.min[0]), Math.min(b.min[1], p.min[1])],
+              max: [Math.max(b.max[0], p.max[0]), Math.max(b.max[1], p.max[1])],
+            }
+    }
+  b ??= { min: [0, 0], max: [0, 0] }
+  return {
+    min: [center[0] + b.min[0], center[1] + b.min[1]],
+    max: [center[0] + b.max[0], center[1] + b.max[1]],
   }
 }
 
@@ -119,7 +137,7 @@ function depthRange(g: OperationGeometry, stock: StockGeometry): readonly [numbe
         0,
       ]
     case 'chamfer':
-      return [g.onZ - chamferDepth(g), g.onZ]
+      return [g.onZ - (isLoopChamfer(g) ? loopChamferDepth(g) : chamferDepth(g)), g.onZ]
   }
 }
 

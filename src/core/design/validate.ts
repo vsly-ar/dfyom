@@ -12,7 +12,7 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import { circularEdgeDiameter, type Operation, type Part, type Shape } from './operation'
+import { chamferEdgeKind, type Operation, type Part, type Shape } from './operation'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -353,14 +353,22 @@ export function operationIssues(
     }
     case 'chamfer': {
       const edge = ops.slice(0, index).find((o) => o.id === op.edgeOf)
-      const edgeDiameter = circularEdgeDiameter(edge)
+      const edgeKind = chamferEdgeKind(edge)
       c.check(
-        edgeDiameter !== undefined,
+        edgeKind !== undefined,
         'edgeOf',
         'chamferEdge',
-        'must be an earlier drilling, circle pocket or inside circle profile',
+        `must be an earlier drilling, pocket or inside profile${chamferEdgeWhyNot(edge)}`,
         { actual: op.edgeOf },
       )
+      // F7 terraces stay circular (edge-chamfers.md § Model)
+      if (edgeKind === 'loop')
+        c.check(
+          op.stepdown.isNone(),
+          'stepdown',
+          'chamferStepped',
+          'a stepped chamfer needs a circular edge',
+        )
       if (edge !== undefined)
         c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.name}`, {
           allowed: [edge.on],
@@ -416,4 +424,18 @@ export function checkOperations(
     issues,
     where: 'checkOperations',
   })
+}
+
+/**
+ * Why `edge` cannot take a chamfer, as a suffix of the `chamferEdge` message
+ * (edge-chamfers.md § Agent API): empty when it is missing or not earlier.
+ */
+function chamferEdgeWhyNot(edge: Operation | undefined): string {
+  if (edge?.kind === 'facing') return ' (a facing has no edge)'
+  if (edge?.kind === 'chamfer') return ' (not another chamfer)'
+  if (edge?.kind === 'profile' && edge.side === 'on')
+    return ' (an "on" profile cuts a groove with two edges)'
+  if (edge?.kind === 'profile' && edge.side === 'outside')
+    return ' (outside edges are not chamfered yet)'
+  return ''
 }

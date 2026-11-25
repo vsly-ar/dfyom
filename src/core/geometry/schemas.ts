@@ -139,12 +139,32 @@ export const ChamferGeometrySchema = z.object({
   stepdown: z.number().exactOptional(),
 })
 
-export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.discriminatedUnion('kind', [
-  FacingGeometrySchema,
-  PocketGeometrySchema,
-  DrillingGeometrySchema,
-  ProfileGeometrySchema,
-  ChamferGeometrySchema,
+/** Edge chamfer (E1): a bevel along a general edge (docs/modes/edge-chamfers.md#implementation-e1). */
+export const LoopChamferGeometrySchema = z.object({
+  kind: z.literal('chamfer'),
+  id: z.string(),
+  direction,
+  onZ: z.number(),
+  edgeOf: z.string(),
+  edge: z.object({
+    shape: ShapeSchema,
+    side: z.literal('inside'),
+    depth: z.number().exactOptional(),
+  }),
+  width: z.number(),
+  angle: z.number(),
+})
+
+// two chamfer shapes share `kind`: the circular one first (it needs `center`), then the loop one
+export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.union([
+  z.discriminatedUnion('kind', [
+    FacingGeometrySchema,
+    PocketGeometrySchema,
+    DrillingGeometrySchema,
+    ProfileGeometrySchema,
+    ChamferGeometrySchema,
+  ]),
+  LoopChamferGeometrySchema,
 ])
 
 export const PartGeometryInputSchema: z.ZodType<PartGeometryInput> = z.object({

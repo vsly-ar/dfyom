@@ -18,7 +18,7 @@ import {
   type Region,
 } from './2d/model'
 import { translatePath, translateRegion } from './2d/place'
-import type { OperationGeometry, Shape } from './model'
+import type { LoopChamferGeometry, OperationGeometry, Shape } from './model'
 
 /** A shape placed in its face frame: a region (closed) or one open path, in mm. */
 export type Outline =
@@ -105,4 +105,16 @@ export function tabCentres(
   if (tabs.positions !== undefined) return [...tabs.positions]
   const n = Number.isInteger(tabs.count) && tabs.count > 0 ? tabs.count : 0
   return Array.from({ length: n }, (_, i) => ((i + 0.5) * length) / n)
+}
+
+/**
+ * The air side of a loop chamfer's edge (edge-chamfers.md E1): its edge operation's shape region
+ * (a pocket's region with its islands as holes, an inside profile's opening), in the face frame,
+ * or about the shape's centre with `local`. The toolpath (`generateEdgeChamfer`) and the removal
+ * solid (`chamfer-solids.ts`) both offset this region.
+ */
+export function loopChamferAir(op: Pick<LoopChamferGeometry, 'edge'>, local = false): Region {
+  const shape = local ? { center: [0, 0] as const, contour: op.edge.shape.contour } : op.edge.shape
+  const o = shapeOutline(shape)
+  return o.kind === 'region' ? o.region : { pieces: [] }
 }

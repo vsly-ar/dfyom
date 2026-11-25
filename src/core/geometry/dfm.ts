@@ -28,6 +28,9 @@ import {
 } from './face'
 import {
   chamferDepth,
+  isLoopChamfer,
+  loopChamferDepth,
+  type CircleChamferGeometry,
   CHORD_TOLERANCE,
   EPSILON,
   type DfmSuggestion,
@@ -637,14 +640,16 @@ function chamfer(
         : edge?.kind === 'profile'
           ? (edge.depth ?? op.onZ + stock.thickness)
           : undefined
-  const depth = chamferDepth(op)
+  const loop = isLoopChamfer(op)
+  const depth = loop ? loopChamferDepth(op) : chamferDepth(op)
   const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
   // the widest chamfer that stays above each limit (D45: sized by width); the smallest wins
   const limits: { width: number; edgeDepth: number; edgeOf: string; floor: boolean }[] = []
   if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON)
     limits.push({ width: edgeDepth * tan, edgeDepth, edgeOf: op.edgeOf, floor: false })
   // B4: a through edge can still end in a thin floor left by a cut from the opposite face
-  if (through)
+  // (circular edges; a general edge's floors below are not checked yet, edge-chamfers.md E1)
+  if (through && !loop)
     for (const f of floorsUnder(op, all, partStock)) {
       const outside = Math.max(0, f.radius - op.edgeDiameter / 2)
       if (
@@ -680,7 +685,17 @@ function chamfer(
         { suggestion: atMost(limit.width) },
       ),
     )
-  if (!lib.empty && candidates(op, lib).length === 0)
+  if (!lib.empty && candidates(op, lib).length === 0 && loop)
+    out.push(
+      warning(
+        'dfm.chamferNoTool',
+        op,
+        'angle',
+        `no chamfer mill of ${op.angle}° in the library has a cutting edge for a ${mm(op.width)} bevel`,
+        { angle: op.angle, width: op.width },
+      ),
+    )
+  else if (!lib.empty && !loop && candidates(op, lib).length === 0)
     out.push(
       warning(
         'dfm.chamferNoTool',
@@ -709,7 +724,7 @@ function chamfer(
  * farther than the chamfer's outer radius are left out.
  */
 function floorsUnder(
-  op: Op<'chamfer'>,
+  op: CircleChamferGeometry,
   all: readonly OperationGeometry[],
   stock: StockGeometry,
 ): { id: string; thickness: number; radius: number }[] {

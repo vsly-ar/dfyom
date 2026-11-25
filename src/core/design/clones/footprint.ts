@@ -110,7 +110,10 @@ export function sourceFootprint(
       case 'drilling':
         return [box(op.center[0], op.center[1], 0, 0, op.diameter / 2)]
       case 'chamfer':
-        return [box(op.center[0], op.center[1], 0, 0, op.diameter / 2)]
+        // a loop chamfer (E1): its edge's shape grown by the bevel's width
+        return op.edge !== undefined
+          ? shapePart(op.edge.shape, op.width, port)
+          : [box(op.center[0], op.center[1], 0, 0, op.diameter / 2)]
       case 'pocket':
         return shapePart(op.shape, 0, port)
       case 'profile': {

@@ -1,5 +1,6 @@
 // Pure helpers of the chamfer UI (v0.4 task U4): which operations can be a chamfer's edge (a
-// drilling, a circle pocket or an inside circle profile), the edge the Add menu's Chamfer uses (the selected one, else the
+// drilling, a pocket of any shape or an inside profile; edge chamfers E1 widened the circular
+// edges of v0.4 to general loops), the edge the Add menu's Chamfer uses (the selected one, else the
 // last in design order, else disabled with the reason), the Edge field's options ("Drilling 2 ·
 // Ø 3.4 mm", earlier operations only), the derived diameter and depth (D45: a chamfer stores its
 // width) and the section illustration's values from the part.
@@ -29,8 +30,17 @@ function edgeDiameterDto(op: OperationDTO) {
   return undefined
 }
 
-/** Whether a chamfer can break this operation's edge (design-v0.4.md rule `chamferEdge`). */
-export const isChamferEdge = (op: OperationDTO): boolean => edgeDiameterDto(op) !== undefined
+/**
+ * Whether a chamfer can break this operation's edge (design-v0.4.md rule `chamferEdge`, widened
+ * by edge-chamfers.md E1): a drilling, any pocket, any inside profile.
+ */
+export const isChamferEdge = (op: OperationDTO): boolean =>
+  edgeDiameterDto(op) !== undefined || isLoopEdge(op)
+
+/** A general edge (edge-chamfers.md E1): a pocket or inside profile that is not round. */
+export const isLoopEdge = (op: OperationDTO): boolean =>
+  edgeDiameterDto(op) === undefined &&
+  (op.kind === 'pocket' || (op.kind === 'profile' && op.side === 'inside'))
 
 /** The edge's diameter in mm (NaN when not round or not loadable). */
 export function edgeDiameter(op: OperationDTO): number {
@@ -92,7 +102,9 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
   const before = index < 0 ? part.operations : part.operations.slice(0, index)
   const options = before.filter(isChamferEdge).map((o) => ({
     value: o.id,
-    label: chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
+    label: isLoopEdge(o)
+      ? o.name
+      : chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
   }))
   if (!options.some((o) => o.value === chamfer.edgeOf))
     options.push({
@@ -100,6 +112,13 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
       label: chamferMessages.edgeMissing(itemName(part, chamfer.edgeOf)),
     })
   return options
+}
+
+/** The chamfer's depth below the face (mm) from its stored width and angle; undefined while either doesn't load. */
+export function chamferDepthValue(chamfer: ChamferDTO): number | undefined {
+  const width = quantityOf(chamfer.width)?.canonical
+  const angle = quantityOf(chamfer.angle)?.canonical
+  return width === undefined || angle === undefined ? undefined : chamferDepthOf(width, angle)
 }
 
 /**
@@ -116,6 +135,8 @@ export function chamferSectionValues(
   const width = quantityOf(chamfer.width)?.canonical
   const angle = quantityOf(chamfer.angle)?.canonical
   if (edge === undefined || width === undefined || angle === undefined) return undefined
+  // a general edge (E1) has no section illustration yet: its section is the same bevel at every
+  // point of the loop, but the illustration draws a round edge's Ø
   const edgeD = edgeDiameter(edge)
   if (!Number.isFinite(edgeD)) return undefined
   const diameter = edgeD + 2 * width

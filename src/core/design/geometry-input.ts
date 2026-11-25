@@ -17,6 +17,7 @@ import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
   chamferDiameter,
+  chamferEdgeKind,
   circularEdgeDiameter,
   isGeneralShape,
   type Operation,
@@ -203,6 +204,30 @@ function operationGeometry(
         },
       }))
     case 'chamfer': {
+      const edgeOp = ops.slice(0, index).find((o) => o.id === op.edgeOf)
+      // a general edge (edge-chamfers.md E1): the bevel follows every loop of its shape
+      if (
+        chamferEdgeKind(edgeOp) === 'loop' &&
+        (edgeOp?.kind === 'pocket' || edgeOp?.kind === 'profile')
+      )
+        return shapeGeometry(edgeOp.shape, shapes, port).map((shape) => ({
+          kind: 'chamfer',
+          id: op.id,
+          ...direction,
+          onZ: on.faceZ.toNumber(),
+          edgeOf: op.edgeOf,
+          edge: {
+            shape,
+            side: 'inside',
+            ...(edgeOp.kind === 'pocket'
+              ? { depth: edgeOp.depth.canonical }
+              : edgeOp.depth.isSome()
+                ? { depth: edgeOp.depth.unwrap().canonical }
+                : {}),
+          },
+          width: op.width.canonical,
+          angle: op.angle.canonical,
+        }))
       const edge = chamferEdge(ops.slice(0, index), op.edgeOf)
       if (edge === undefined) return bug(op, `edge ${op.edgeOf} is not an earlier round operation`)
       return Ok({

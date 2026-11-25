@@ -14,7 +14,7 @@ import type { Tool } from '../library/tool'
 import type { Quantity } from '../quantity/quantity'
 import type { ResolvedFeeds } from './feeds'
 import type { ResolvedStrategy } from './strategy'
-import { chamferCuts, holeDepth } from './strategy'
+import { chamferCuts, holeDepth, loopCut } from './strategy'
 import { chamferFit } from '../geometry/tool-fit'
 import { localStock, type Direction } from '../geometry/face'
 import { rectangleWallCorner } from '../geometry/open-sides'
@@ -304,6 +304,27 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       case 'chamfer': {
         // plan-v0.4.md § Tool checks for chamfer mills: the design's fit row (angle, tip, slant
         // when contoured), then reach to the tip of the resolved entry
+        const loop = loopCut(op, part.operations)
+        if (loop !== undefined) {
+          // a general edge (edge-chamfers.md § Tool): angle and slant (one ring), then reach
+          const unfit = chamferFit(
+            {
+              type: tool.type,
+              diameter: D,
+              ...(tool.angle.isSome() ? { angle: tool.angle.unwrap().canonical } : {}),
+              tipDiameter: tool.tipDiameterMm,
+            },
+            { width: op.width.canonical, angle: op.angle.canonical },
+          )
+          if (unfit !== undefined) add('tool', unfit.rule, unfit.detail, numeric(unfit.values))
+          const depth = belowTop(table, op.on) + loop
+          if (depth > i.stickout + EPS)
+            add('stickout', 'reach', 'chamfer depth must be at most the stickout', {
+              depth,
+              stickout: i.stickout,
+            })
+          break
+        }
         const cut = chamferCuts(op, part.operations, stock, tool)
         if (cut === undefined) break
         const unfit = chamferFit(
@@ -371,6 +392,8 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
       return op.depth.mapOr(material + breakthrough, (d) => d.canonical)
     }
     case 'chamfer': {
+      const loop = loopCut(op, part.operations)
+      if (loop !== undefined) return belowTop(table, op.on) + loop
       const cut = chamferCuts(op, part.operations, stock, tool)
       if (cut === undefined) return 0
       const plunged = i.strategy.kind === 'chamfer' && i.strategy.entry === 'plunge'

@@ -178,7 +178,10 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.chamferNoTool': (p, L) =>
     p['stepped'] === 1
       ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
-      : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
+      : // an edge chamfer along a general edge (edge-chamfers.md E1)
+        p['width'] !== undefined
+        ? `The library has no ${num(p['angle'])}° chamfer mill with a cutting edge for a ${L(p['width'])} bevel.`
+        : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
 }
 
 /** Why a split cuts a feature (`params.reason` of `design.split` rule `cutsFeature`). */
