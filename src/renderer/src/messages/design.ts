@@ -398,7 +398,18 @@ export const designMessages = {
     removeLine: (axis: 'x' | 'y', at: string) => `Remove line at ${axis.toUpperCase()} ${at}`,
     removeLevel: (at: string) => `Remove level at Z ${at}`,
     margin: 'Blank margin',
-    joint: 'Lines: butt joint (glue faces)',
+    /** Keys on lines (split parts 4b-2). */
+    lineJoint: 'Lines joined by',
+    jointPuzzle: 'Puzzle',
+    jointDovetail: 'Dovetail',
+    clearance: 'Key clearance',
+    clearanceHint:
+      'Goes on the socket only; the knob keeps its size. Try 0.1–0.3 mm on a scrap first.',
+    keyCount: (n: number) => (n === 1 ? '1 key' : `${n} keys`),
+    /** "2 keys · neck 18 mm · Ø6.3 mm tool or smaller" */
+    keySummary: (n: number, neck: string, tool: string) =>
+      `${n === 1 ? '1 key' : `${n} keys`} · neck ${neck} mm · needs a tool of Ø${tool} mm or smaller (the outline's)`,
+    noKeys: 'No key fits yet: see the findings under each line.',
     /** Dowels on levels (split parts 4b). */
     levelJoint: 'Levels joined by',
     jointButt: 'Butt',

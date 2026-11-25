@@ -34,6 +34,8 @@ import {
   type Rect,
 } from './layout'
 import { dowelOperations } from './dowels'
+import { keyItem, planKeys, type KeyPlan, type PathItem } from './keys'
+import { removals } from './removals'
 
 /** Rounding of computed lengths: 1 µm (exact rationals over 10⁶). */
 const MICRO = 1_000_000
@@ -52,6 +54,7 @@ export type SplitRule =
   | 'fitsWhole'
   | 'dowelNear'
   | 'dowelFit'
+  | 'keyFit'
 
 export function splitFinding(
   splitId: string,
@@ -86,6 +89,10 @@ export interface PiecesResult {
   readonly layout: Layout
   readonly pieces: readonly PiecePlan[]
   readonly findings: readonly DfmWarning[]
+  /** The keys on the lines (4b-2) and why a run has none. */
+  readonly keys: KeyPlan
+  /** The outline's tool Ø (mm) the keys are sized for. */
+  readonly outlineTool: number
 }
 
 // ── quantities ────────────────────────────────────────────────────────────────────────────
@@ -325,6 +332,7 @@ function clippedShape(
   grow: number,
   delta: readonly [number, number],
   b: PieceBuild,
+  extra: readonly PathItem[] = [],
 ): AppResult<OperationShapeDTO | undefined> {
   const def = shapeDefinition(op.shape, c.loaded.part.shapes)
   if (def.isErr()) return def
@@ -351,7 +359,15 @@ function clippedShape(
     cornerRadius: 0,
     ...(Math.abs(rot) > 1e-9 ? { rotation: rot } : {}),
   }
-  const def2: ShapeDefinition = [...def.unwrap(), cut]
+  // key items (4b-2) from the face frame into the shape frame
+  const framed = extra.map((it) =>
+    framePath(
+      it,
+      (p) => unorient([p[0] - origin[0], p[1] - origin[1]], o.rotation, o.mirror),
+      o.mirror,
+    ),
+  )
+  const def2: ShapeDefinition = [...def.unwrap(), cut, ...framed]
   const clipped = orientedShape(c.port, def2, o)
   if (clipped.isErr()) return Ok(undefined)
   const bb = clipped.unwrap().bounds
@@ -393,6 +409,7 @@ function clippedShape(
     cornerRadius: L(0),
     ...(cut.rotation === undefined ? {} : { rotation: angleDTO(cut.rotation) }),
   })
+  for (const it of framed) items.push(pathDTO(it, L))
   const id = `shape${b.nextShape++}`
   b.shapes.push({ id, name: `${op.name} · piece`, items })
   const rotation =
@@ -406,6 +423,89 @@ function clippedShape(
     ...(rotation === undefined ? {} : { rotation: literal(rotation, c.units) }),
     ...(s.kind === 'named' && s.mirror ? { mirror: true as const } : {}),
   })
+}
+
+/** A path item with its points mapped by `to` (arcs turn the other way when `mirror`). */
+function framePath(
+  it: PathItem,
+  to: (p: readonly [number, number]) => [number, number],
+  mirror: boolean,
+): PathItem {
+  return {
+    ...it,
+    start: to(it.start),
+    segments: it.segments.map((s) =>
+      s.kind === 'arc' ? { ...s, to: to(s.to), cw: mirror ? !s.cw : s.cw } : { ...s, to: to(s.to) },
+    ),
+  }
+}
+
+/** A path item as a record. */
+function pathDTO(it: PathItem, L: (mm: number) => LengthDTO): ShapeItemDTO {
+  const P = (p: readonly [number, number]): [LengthDTO, LengthDTO] => [L(p[0]), L(p[1])]
+  return {
+    kind: 'path',
+    op: it.op,
+    start: P(it.start),
+    segments: it.segments.map((s) =>
+      s.kind === 'arc'
+        ? {
+            kind: 'arc',
+            to: P(s.to),
+            radius: L(s.radius),
+            cw: s.cw,
+            ...(s.large ? { large: true } : {}),
+          }
+        : { kind: 'line', to: P(s.to) },
+    ),
+    closed: true,
+    ...(it.fillets === undefined
+      ? {}
+      : { fillets: it.fillets.map((f) => ({ vertex: f.vertex, radius: L(f.radius) })) }),
+  }
+}
+
+/**
+ * The cell rectangle with key items (4b-2) as a named shape of the piece (a source without an
+ * outline): shape frame = part frame, placed by its bounds' centre.
+ */
+function keyedRectangle(
+  c: Ctx,
+  cell: Cell,
+  delta: readonly [number, number],
+  b: PieceBuild,
+  extra: readonly PathItem[],
+): AppResult<OperationShapeDTO> {
+  const L = (mm: number) => lengthDTO(mm, c.units)
+  const bb = cell.bounds
+  const centre: [number, number] = [(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2]
+  const rect = {
+    kind: 'rectangle' as const,
+    op: 'add' as const,
+    center: centre,
+    length: bb.max[0] - bb.min[0],
+    width: bb.max[1] - bb.min[1],
+    cornerRadius: 0,
+  }
+  const resolved = orientedShape(c.port, [rect, ...extra], { rotation: 0, mirror: false })
+  if (resolved.isErr()) return resolved
+  const at = centreOf(resolved.unwrap().bounds)
+  const id = `shape${b.nextShape++}`
+  b.shapes.push({
+    id,
+    name: 'Piece outline · piece',
+    items: [
+      {
+        ...rect,
+        center: [L(centre[0]), L(centre[1])],
+        length: L(rect.length),
+        width: L(rect.width),
+        cornerRadius: L(0),
+      },
+      ...extra.map((it) => pathDTO(it, L)),
+    ],
+  })
+  return Ok({ kind: 'named', shapeId: id, center: [L(at[0] + delta[0]), L(at[1] + delta[1])] })
 }
 
 /** The shape shifted by `delta` (face frame), as a record. */
@@ -429,12 +529,20 @@ function outlineOperation(
   outline: Extract<Operation, { kind: 'profile' }> | undefined,
   outlineDto: Extract<OperationDTO, { kind: 'profile' }> | undefined,
   outlineGeometry: Extract<OperationGeometry, { kind: 'profile' }> | undefined,
+  keys: readonly PathItem[],
 ): AppResult<OperationDTO> {
   const L = (mm: number) => lengthDTO(mm, c.units)
   const id = `${c.split.id}_outline`
   const delta: [number, number] = [offset[0], offset[1]]
   let shape: OperationShapeDTO
-  if (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) {
+  if (
+    (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) &&
+    keys.length > 0
+  ) {
+    const keyed = keyedRectangle(c, cell, delta, b, keys)
+    if (keyed.isErr()) return keyed
+    shape = keyed.unwrap()
+  } else if (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) {
     const bb = cell.bounds
     shape = {
       kind: 'rectangle',
@@ -447,10 +555,10 @@ function outlineOperation(
       cornerRadius: L(0),
     }
   } else {
-    const whole = inside(c.footprintBounds, cell.rect)
+    const whole = inside(c.footprintBounds, cell.rect) && keys.length === 0
     if (whole) shape = shiftedShape(literal(outlineDto.shape, c.units), delta, c.units)
     else {
-      const clipped = clippedShape(c, outline, outlineGeometry, '+z', cell.rect, 0, delta, b)
+      const clipped = clippedShape(c, outline, outlineGeometry, '+z', cell.rect, 0, delta, b, keys)
       if (clipped.isErr()) return clipped
       if (clipped.unwrap() === undefined)
         return fail('internal.unexpected', `piece ${cell.n} has no outline`, {
@@ -657,6 +765,68 @@ function shapeBounds(
   return r === undefined ? undefined : regionBounds(r)
 }
 
+/**
+ * The keys of a split (4b-2) on the source's layout: sized for the outline's tool (the chosen
+ * one, else its slot; 6 mm / 1/4" without an outline), clear of the removals between the facings.
+ */
+function keysOf(
+  loaded: LoadedPart,
+  geometry: readonly OperationGeometry[],
+  layout: Layout,
+  split: SplitDTO,
+  toolDiameter: (op: Operation) => number,
+): { readonly keys: KeyPlan; readonly outlineTool: number } {
+  const T = loaded.stock.thickness.canonical
+  const at = layout.footprint.outline
+  const rs = removals(loaded, geometry, at)
+  let top = 0
+  let bottom = -T
+  for (const r of rs)
+    if (r.mode === 'all') {
+      if (r.dir === '+z') top = Math.min(top, r.zlo)
+      else bottom = Math.max(bottom, r.zhi)
+    }
+  const outlineTool =
+    at === undefined
+      ? loaded.units === 'inch'
+        ? 6.35
+        : 6
+      : toolDiameter(loaded.part.operations[at]!)
+  const W = loaded.stock.width.canonical
+  return { keys: planKeys(layout, split, rs, W, outlineTool, top, bottom), outlineTool }
+}
+
+/**
+ * The keys of a split on a loaded source part (4b-2), for the Split section's preview and
+ * read-out; the pieces themselves come from `planPieces`.
+ */
+export function splitKeys(
+  loaded: LoadedPart,
+  split: SplitDTO,
+  port: Region2dPort,
+): AppResult<{ readonly keys: KeyPlan; readonly outlineTool: number }> {
+  const input = toGeometryInput(loaded.part, loaded.stock, port)
+  if (input.isErr()) return Err(input.unwrapErr().withContext('splitKeys'))
+  const geometry = input.unwrap().operations
+  const stock = {
+    length: loaded.stock.length.canonical,
+    width: loaded.stock.width.canonical,
+    thickness: loaded.stock.thickness.canonical,
+  }
+  const layout = splitLayout(port, splitNumbers(split), stock, loaded.part.operations, geometry)
+  if (layout.isErr()) return Err(layout.unwrapErr().withContext('splitKeys'))
+  const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
+  return Ok(
+    keysOf(
+      loaded,
+      geometry,
+      layout.unwrap(),
+      split,
+      (op) => tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
+    ),
+  )
+}
+
 /** The default piece name, "<source> · <n>". */
 export const pieceName = (source: string, n: number): string => `${source} · ${n}`
 
@@ -728,13 +898,24 @@ export function planPieces(
     0,
     ...(loaded.dto.shapes ?? []).map((s) => Number(s.id.slice('shape'.length))),
   )
+  // keys on the lines (4b-2)
+  const { keys, outlineTool } = keysOf(loaded, geometry, L, split, c.toolDiameter)
   const pieces: PiecePlan[] = []
   for (const cell of L.cells) {
     const m = numbers.margin
+    const knobs = keys.keys.filter((k) => k.male === cell)
+    const sockets = keys.keys.filter((k) => k.female === cell)
+    const items = [
+      ...knobs.map((k) => keyItem(k, 'male')),
+      ...sockets.map((k) => keyItem(k, 'female')),
+    ]
+    // a knob reaches past the cell (the male is the lower piece: towards +x or +y)
+    const reach = (axis: 'x' | 'y') =>
+      Math.max(0, ...knobs.filter((k) => k.axis === axis).map((k) => k.at + k.size.depth))
     const bx0 = round(cell.bounds.min[0])
     const by0 = round(cell.bounds.min[1])
-    const bx1 = round(cell.bounds.max[0])
-    const by1 = round(cell.bounds.max[1])
+    const bx1 = round(Math.max(cell.bounds.max[0], reach('x')))
+    const by1 = round(Math.max(cell.bounds.max[1], reach('y')))
     const blank = {
       length: round(bx1 - bx0 + 2 * m),
       width: round(by1 - by0 + 2 * m),
@@ -750,7 +931,7 @@ export function planPieces(
     }
     for (let i = 0; i < loaded.part.operations.length; i++) {
       if (i === outlineAt) {
-        const o = outlineOperation(c, cell, offset, b, outline, outlineDto, outlineGeometry)
+        const o = outlineOperation(c, cell, offset, b, outline, outlineDto, outlineGeometry, items)
         if (o.isErr()) return Err(o.unwrapErr())
         b.ops.push(o.unwrap())
         continue
@@ -760,7 +941,7 @@ export function planPieces(
       if (mapped.unwrap() !== undefined) b.ops.push(mapped.unwrap()!)
     }
     if (outlineAt === undefined) {
-      const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined)
+      const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined, items)
       if (o.isErr()) return Err(o.unwrapErr())
       b.ops.push(o.unwrap())
     }
@@ -782,7 +963,7 @@ export function planPieces(
       shapes: b.shapes,
     })
   }
-  return Ok({ layout: L, pieces, findings: [...findings.values()] })
+  return Ok({ layout: L, pieces, findings: [...findings.values()], keys, outlineTool })
 }
 
 /** The piece part record (without the id and stock, which the writer gives). */

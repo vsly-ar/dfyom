@@ -32,6 +32,7 @@ import { splitWarnings } from './findings'
 import { derivedPartError } from './derived'
 import { completeDowels } from './dowels'
 import { DOWEL_DEPTH_MAX, DOWEL_DIAMETER_MAX, DOWEL_DIAMETER_MIN } from '../dowel'
+import { isKeyKind, KEY_CLEARANCE_DEFAULT, KEY_CLEARANCE_MAX } from './keys'
 
 export { derivedPartError }
 
@@ -244,6 +245,7 @@ const SplitArg = z
       .describe('Horizontal cuts: part-frame z, between -thickness and 0; default none'),
     margin: Src.optional().describe('Blank margin per side; default 5 mm'),
     joint: z.enum(SPLIT_JOINTS).optional().describe("Lines' joint; default butt"),
+    clearance: Src.optional().describe('Key socket clearance; default 0.15 mm'),
     dowels: z
       .object({
         diameter: Src.optional().describe('Dowel Ø; default: fits'),
@@ -346,6 +348,18 @@ function parseSplit(
   }))
   const levels = (a.levels ?? []).map((s, i) => f.q(`split.levels.${i}`, 'length', s))
   const margin = f.q('split.margin', 'length', a.margin ?? (l.units === 'inch' ? '0.2"' : '5 mm'))
+  // keys (4b-2): the clearance given, else the previous one, else the default
+  const kind = a.joint ?? 'butt'
+  const clearance = isKeyKind(kind)
+    ? a.clearance !== undefined
+      ? f.q('split.clearance', 'length', a.clearance)
+      : prev?.joint.clearance === undefined
+        ? f.q('split.clearance', 'length', `${KEY_CLEARANCE_DEFAULT} mm`)
+        : undefined
+    : undefined
+  const clearanceDto =
+    (clearance?.toDTO() as SplitDTO['margin'] | undefined) ??
+    (isKeyKind(kind) ? prev?.joint.clearance : undefined)
   // dowels: the Ø and depth given, else the previous ones (the depth while the Ø is unchanged)
   const dw = a.dowels ?? undefined
   const before = prev?.joint.dowels
@@ -408,6 +422,22 @@ function parseSplit(
   })
   if (margin.canonical < 0)
     issues.push({ path: ['split', 'margin'], rule: 'nonNegative', message: 'must be ≥ 0' })
+  if (a.clearance !== undefined && !isKeyKind(kind))
+    issues.push({
+      path: ['split', 'clearance'],
+      rule: 'keysOnly',
+      message: 'a clearance needs a puzzle or dovetail joint',
+    })
+  if (
+    clearance !== undefined &&
+    !(clearance.canonical >= 0 && clearance.canonical <= KEY_CLEARANCE_MAX)
+  )
+    issues.push({
+      path: ['split', 'clearance'],
+      rule: 'range',
+      message: `must be between 0 and ${KEY_CLEARANCE_MAX} mm`,
+      params: { min: 0, max: KEY_CLEARANCE_MAX },
+    })
   if (
     dia !== undefined &&
     !(dia.canonical >= DOWEL_DIAMETER_MIN && dia.canonical <= DOWEL_DIAMETER_MAX)
@@ -454,7 +484,11 @@ function parseSplit(
       lines: lines.map((x) => ({ axis: x.axis, at: D(x.at) })),
       levels: levels.map(D),
       margin: D(margin),
-      joint: { kind: a.joint ?? 'butt', ...(dowels === undefined ? {} : { dowels }) },
+      joint: {
+        kind,
+        ...(clearanceDto === undefined ? {} : { clearance: clearanceDto }),
+        ...(dowels === undefined ? {} : { dowels }),
+      },
     },
     diameter: diaDto === undefined ? undefined : mmOf(diaDto),
     depth: depthDto === undefined ? undefined : mmOf(depthDto),
