@@ -33,6 +33,7 @@ import { autoChangeReason } from './ToolField'
 import { OperationList } from './OperationList'
 import { operationUnits } from './feature-view'
 import { stockReadout } from './PartSetupDialogs'
+import { partMenuOrder, piecesOf } from './split-view'
 import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
@@ -117,7 +118,10 @@ function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
   const [confirm, setConfirm] = useState(false)
   const pm = m.parts
   const parts = Object.values(part.doc.parts)
-  const plans = Object.values(part.doc.plans).filter((p) => p.design.partId === part.dto.id)
+  // a source's plans and its pieces' go with it (split parts 4a)
+  const gone = new Set([part.dto.id, ...piecesOf(part.doc, part.dto.id).map((p) => p.id)])
+  const plans = Object.values(part.doc.plans).filter((p) => gone.has(p.design.partId))
+  const piece = part.dto.derivedFrom !== undefined
   const inUse = plans.find((p) => p.status === 'inUse')
   const remove = async () => {
     const r = await call('design.part.remove', {
@@ -131,9 +135,11 @@ function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
   const items: MenuEntry[] = [
     {
       group: pm.group,
-      items: parts.map((p) => ({
+      // pieces of a split indented under their source (split parts 4a)
+      items: partMenuOrder(part.doc).map(({ part: p, inset }) => ({
         id: p.id,
         label: p.name,
+        inset,
         checked: p.id === part.dto.id,
         onSelect: () => setPart(p.id),
       })),
@@ -144,7 +150,11 @@ function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
       label: pm.remove(part.dto.name),
       icon: <Icon name="delete" />,
       danger: true,
-      disabledReason: inUse === undefined ? undefined : pm.inUse(inUse.name),
+      disabledReason: piece
+        ? m.split.readOnly(part.doc.parts[part.dto.derivedFrom!.partId]?.name ?? '')
+        : inUse === undefined
+          ? undefined
+          : pm.inUse(inUse.name),
       onSelect: () => (plans.length > 0 ? setConfirm(true) : void remove()),
     },
   ]
@@ -216,6 +226,11 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   ]
 
   const readout = stockReadout(part)
+  // a split piece (4a): read-only, named by its source
+  const piece =
+    part.dto.derivedFrom === undefined
+      ? undefined
+      : (part.doc.parts[part.dto.derivedFrom.partId]?.name ?? '')
   // the list's rows: plain operations and features (a hole's or a Clones' operations nest)
   const rows = operationUnits(part).length
   const openDialog = useUi((st) => st.setDesignDialog)
@@ -254,11 +269,14 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           ) : undefined
         }
         actions={
-          <Menu label={m.addMenu} items={addItems}>
-            <IconButton label={m.addMenu} icon={<Icon name="add" />} />
-          </Menu>
+          piece === undefined ? (
+            <Menu label={m.addMenu} items={addItems}>
+              <IconButton label={m.addMenu} icon={<Icon name="add" />} />
+            </Menu>
+          ) : undefined
         }
       />
+      {piece !== undefined ? <p className={styles['note']}>{m.split.readOnly(piece)}</p> : null}
       {ops.length === 0 ? (
         <div className={styles['emptyOps']}>
           <EmptyState

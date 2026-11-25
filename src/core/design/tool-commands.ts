@@ -570,8 +570,10 @@ function rechoices(doc: ProjectDoc, services: CommandContext['services']): reado
     hit.library.every((item, i) => item === library[i])
   )
     return hit.changes
+  // split pieces take their operations' tools from the source on Apply (split-parts.md §
+  // Implementation (4a)): a piece's own choice would never settle against the copied tool
   const all: PendingChange[] = Object.values(doc.parts).flatMap((part) =>
-    part.operations.map((op) => ({
+    (part.derivedFrom === undefined ? part.operations : []).map((op) => ({
       kind: 'design' as const,
       partId: part.id,
       operationId: op.id,

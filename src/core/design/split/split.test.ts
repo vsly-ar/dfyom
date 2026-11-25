@@ -234,4 +234,35 @@ describe('design.split.set (4a)', () => {
     // x = 50 runs within 2 × Ø of the rim hole at x = 44.5
     expect(split).toContain('featureNear')
   })
+
+  it('Apply settles: tools chosen once, nothing pending after it (pieces with plans)', async () => {
+    const s = await enclosure()
+    await s.run('library.tool.add', {
+      values: {
+        name: 'Flat 6',
+        type: 'flatEndMill',
+        diameter: '6',
+        fluteLength: '45',
+        overallLength: '90',
+        fluteCount: '2',
+        toolMaterial: 'carbide',
+        presets: [],
+      },
+    })
+    await s.run('design.split.set', {
+      partId: s.partId,
+      split: { levels: [ENCLOSURE_LEVEL], lines: [{ axis: 'x', at: '125' }] },
+    })
+    await s.run('project.apply', {})
+    const before = s.d.doc
+    const pending = expectOk(s.d.query('project.pending.get', {}, uiSource())).value as {
+      count: number
+      changes: unknown[]
+    }
+    expect(pending.changes).toEqual([])
+    await s.run('project.apply', {})
+    expect(s.d.doc.parts).toBe(before.parts)
+    // generated outlines got a tool by the auto choice and keep it
+    expect(pieces(s).every((p) => p.operations.at(-1)!.tool !== undefined)).toBe(true)
+  })
 })

@@ -175,8 +175,10 @@ describe('dfm messages', () => {
   })
 
   it('renders split findings by rule in the project units (split parts 4a)', () => {
-    const split = (params: DfmWarning['params']) =>
-      w({ code: 'design.split', operation: 'split1', params, suggestion: undefined })
+    const split = (params: DfmWarning['params']): DfmWarning => {
+      const { suggestion: _, ...rest } = w({ code: 'design.split', operation: 'split1', params })
+      return rest
+    }
     expect(
       dfmMessages.text(
         split({ rule: 'thinJoint', axis: 'x', at: 25.4, width: 5.08, limit: 10 }),

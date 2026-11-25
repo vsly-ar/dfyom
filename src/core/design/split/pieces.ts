@@ -617,8 +617,7 @@ function mapOperation(
         if (z.capped) {
           delete p.depth
           p.on = STOCK_FACE[dir]
-        }
-        else if (z.fromFace && p.depth !== undefined) p.depth = L(z.depth)
+        } else if (z.fromFace && p.depth !== undefined) p.depth = L(z.depth)
         if (p.tabs.positions !== undefined && shape !== base.shape) {
           const { positions: _, ...tabs } = p.tabs
           p.tabs = tabs

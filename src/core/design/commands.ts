@@ -64,6 +64,7 @@ import {
   OperationDtoSchema,
   type OperationDTO,
   OperationIdSchema,
+  DerivedFromDtoSchema,
   PartDtoSchema,
   type PartDTO,
   PartIdSchema,
@@ -1383,9 +1384,24 @@ const partList = defineQuery({
   name: 'design.part.list',
   summary: 'List the parts of the project with their ids.',
   args: z.object({}),
-  result: z.object({ parts: z.array(z.object({ id: PartIdSchema, name: z.string() })) }),
+  result: z.object({
+    parts: z.array(
+      z.object({
+        id: PartIdSchema,
+        name: z.string(),
+        // a split piece (split parts 4a): its source and number
+        derivedFrom: DerivedFromDtoSchema.optional(),
+      }),
+    ),
+  }),
   run(doc) {
-    return Ok({ parts: Object.values(doc.parts).map((p) => ({ id: p.id, name: p.name })) })
+    return Ok({
+      parts: Object.values(doc.parts).map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.derivedFrom === undefined ? {} : { derivedFrom: p.derivedFrom }),
+      })),
+    })
   },
 })
 
