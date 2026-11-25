@@ -1227,6 +1227,80 @@
   stroke-linejoin: round;
 }
 
+/* The pattern's Presets dialog (DF107): a grid of preview cards, one radio group. */
+.presetGrid {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.presetCard {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-control);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard);
+}
+
+.presetCard:hover {
+  background: var(--bg-hover);
+}
+
+.presetCard:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.presetCard[aria-checked='true'] {
+  border-color: var(--accent-border);
+}
+
+.presetPreview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 132 / 84;
+  margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-muted);
+}
+
+.presetName {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  font-weight: var(--weight-bold);
+}
+
+.presetCurrent {
+  color: var(--text-accent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+.presetDescription {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.presetNumbers {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .pickerActions {
   display: flex;
   gap: var(--space-1);

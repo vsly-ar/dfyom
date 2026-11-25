@@ -1,7 +1,7 @@
 // The Presets menu's thumbnails (design review U9 P5): a window onto each preset's lattice.
 import { describe, expect, it } from 'vitest'
 import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
-import { cellPoints, presetThumb, THUMB } from './pattern-thumbs'
+import { cellPoints, presetThumb, PREVIEW, THUMB } from './pattern-thumbs'
 
 const preset = (id: string) => PATTERN_PRESETS.find((p) => p.id === id)!
 const centre = (pts: readonly (readonly [number, number])[]) => {
@@ -50,5 +50,34 @@ describe('preset thumbnails (U9 P5)', () => {
     const pts = cellPoints({ kind: 'rectangle', length: '8 mm', width: '8 mm', rotation: '45°' })
     const xs = pts.map((p) => p[0])
     expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(8 * Math.SQRT2, 1)
+  })
+
+  it("DF107: at the dialog's PREVIEW size every preset shows more cells, about its box", () => {
+    for (const p of PATTERN_PRESETS) {
+      const cells = presetThumb(p, PREVIEW)
+      expect(cells.length).toBeGreaterThan(presetThumb(p).length)
+      for (const c of cells) {
+        const [x, y] = centre(c)
+        expect(x).toBeGreaterThan(-PREVIEW.w / 2)
+        expect(x).toBeLessThan(1.5 * PREVIEW.w)
+        expect(y).toBeGreaterThan(-PREVIEW.h / 2)
+        expect(y).toBeLessThan(1.5 * PREVIEW.h)
+      }
+      expect(width(cells[0]!)).toBeGreaterThan(6)
+    }
+  })
+
+  it('DF107: a polar preset is a centre cell and rings an equal step apart', () => {
+    const cells = presetThumb(preset('speakerGrille'), PREVIEW)
+    const [cx, cy] = centre(cells[0]!)
+    expect(cx).toBeCloseTo(PREVIEW.w / 2)
+    expect(cy).toBeCloseTo(PREVIEW.h / 2)
+    const radii = cells.map((c) => {
+      const [x, y] = centre(c)
+      return Math.hypot(x! - cx!, y! - cy!)
+    })
+    const rings = [...new Set(radii.map((r) => Math.round(r * 10) / 10))].sort((a, b) => a - b)
+    expect(rings.length).toBeGreaterThanOrEqual(3)
+    expect(rings[2]! - rings[1]!).toBeCloseTo(rings[1]! - rings[0]!, 0)
   })
 })

@@ -77,7 +77,8 @@ export function shapeFindings(plan: LoadedPlan, port: Region2dPort): PlanWarning
           })
         }
       }
-      if (g.kind !== 'pocket') continue
+      // DF108: a pattern's roughing leaves rest on purpose (its pocket cuts it)
+      if (g.kind !== 'pocket' || g.roughing === true) continue
       // a pocket on the stock edge is cut as its open region (DF61): its rest inside the stock
       const R = tool.diameter / 2
       const face = localStock(g.direction ?? '+z', geometry.unwrap().stock)

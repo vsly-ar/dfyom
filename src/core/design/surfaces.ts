@@ -205,7 +205,9 @@ export class SurfaceTable {
         case 'pocket':
           // a through pocket (patterns P4): its "floor" is the opposite stock face, nothing
           // stands on it (docs/modes/patterns.md#implementation-p4)
-          if (op.through === true)
+          // DF108: a roughing pocket's floor is the pattern pocket's; nothing stands on it
+          if (op.roughing === true && op.through !== true) below(op.on, op.depth, 'floor', false)
+          else if (op.through === true)
             on(op.on).map((e) =>
               put(
                 `${op.id}.floor`,

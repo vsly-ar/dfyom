@@ -99,6 +99,12 @@ export const designMessages = {
       fitDescription: 'Clip cuts the cells crossing the boundary; slivers under 1 mm are dropped.',
       invert: 'Invert (cells as islands)',
       presets: 'Presets',
+      /** DF107: the button that opens the Presets dialog. */
+      presetsButton: 'Presets…',
+      presetsTitle: 'Pattern presets',
+      presetsDescription:
+        'Sets the cell, lattice, gap and Flip; the area, depth and tools stay. Arrow keys move, Enter applies.',
+      presetCurrent: 'Current',
       presetNames: {
         staggeredHoles: 'Staggered holes',
         honeycomb: 'Honeycomb',
@@ -107,7 +113,56 @@ export const designMessages = {
         triangles: 'Triangles',
         slots: 'Slots',
         grille: 'Grille',
+        circleGrid: 'Circle grid',
+        waffle: 'Waffle',
+        octagons: 'Octagons',
+        louvres: 'Louvres',
+        speakerGrille: 'Speaker grille',
+        lighteningHoles: 'Lightening holes',
       } as Record<string, string>,
+      /** DF107: each preset's one-line description in the dialog. */
+      presetDescriptions: {
+        staggeredHoles: 'Round holes, every other row shifted half a pitch.',
+        honeycomb: 'Rounded hexagons nested 60° apart: strong, light webs.',
+        roundedSquares: 'Squares with soft corners in aligned rows.',
+        diamonds: 'Squares turned 45° on staggered rows.',
+        triangles: 'Every other triangle flipped so they nest.',
+        slots: 'Upright slots on staggered rows: a vent.',
+        grille: 'Small holes packed tight: a fine mesh.',
+        circleGrid: 'Round holes in aligned rows and columns.',
+        waffle: 'Square cells with thin even webs, like a waffle.',
+        octagons: 'Octagons in a grid: wider webs at the corners.',
+        louvres: 'Long slots in aligned rows: vent louvres.',
+        speakerGrille: 'Small holes on rings about the centre.',
+        lighteningHoles: 'Large holes on a hex lattice to take weight out.',
+      } as Record<string, string>,
+      /** The key numbers' words (`presetNumbers`). */
+      presetWords: {
+        cell: (kind: string, sides: number) =>
+          kind === 'polygon'
+            ? ((
+                { 3: 'triangle', 4: 'square', 6: 'hexagon', 8: 'octagon' } as Record<number, string>
+              )[sides] ?? `${sides}-gon`)
+            : kind === 'rectangle'
+              ? 'rectangle'
+              : kind === 'obround'
+                ? 'slot'
+                : kind === 'circle'
+                  ? 'hole'
+                  : kind,
+        across: (corners: boolean) => (corners ? 'across corners' : 'across flats'),
+        lattice: { square: 'square', staggered: 'staggered', hex: 'hex', polar: 'polar' } as Record<
+          string,
+          string
+        >,
+        gap: 'gap',
+        flip: 'flipped',
+      },
+      /** DF108: the roughing pass and its tool (Cut group). */
+      roughing: 'Roughing',
+      roughingNote:
+        'A bigger tool clears the cells first; the pocket’s tool then cuts only what it left (corners, small cells) and the walls.',
+      roughingTool: 'Roughing tool',
       depth: 'Depth',
       through: 'Through',
       throughNote:
@@ -856,6 +911,8 @@ export const designMessages = {
           ? `${fluteLength} flutes, too short for the ${depth} walls`
           : 'flutes too short for the walls',
       angle: 'another angle',
+      /** DF108: a pattern's roughing tool over 0.6 × the widest cell. */
+      roughingWidth: 'too wide to rough the cells',
       other: 'too small for the chamfer',
     },
     /** `dfm.toolNotInLibrary`'s fix: the library's nearest tool of the type (DF42). */
@@ -899,6 +956,7 @@ export const designMessages = {
       type: (tool: string, kind: string) => `the ${tool} can’t make a ${kind}`,
       reach: (tool: string) => `the ${tool} didn’t reach the depth`,
       flutes: (tool: string) => `the flutes of the ${tool} were too short for the walls`,
+      roughingWidth: (tool: string) => `the ${tool} was too wide to rough the cells`,
       unresolved: 'the previous tool could not be read',
       /** DF54: a fitting generalized tool gave way to a library tool. */
       libraryFits: (tool: string) => `a library tool fits now instead of the ${tool}`,

@@ -3,8 +3,10 @@
  * sets `cell`, `lattice`, `spacing` and (P5) `alternate` (one `design.pattern.update`) and nothing
  * else. Sizes are metric sources; the core parses units. UI only: an agent sets those fields
  * directly.
+ * DF107: six more, still only a cell, a lattice, a gap and Flip (what the layout draws exactly);
+ * picked in the Presets dialog.
  * Doc: docs/modes/patterns.md#ui, docs/modes/patterns.md#implementation-p2,
- * docs/modes/patterns.md#implementation-p5
+ * docs/modes/patterns.md#implementation-p5, docs/modes/patterns.md#presets-dialog-and-more-presets-df107
  */
 
 export interface PatternPreset {
@@ -99,6 +101,67 @@ export const PATTERN_PRESETS: readonly PatternPreset[] = [
       cell: { kind: 'circle', diameter: '3 mm' },
       lattice: 'hex',
       spacing: { gap: '1.5 mm' },
+      alternate: 'none',
+    },
+  },
+  // DF107
+  {
+    id: 'circleGrid',
+    args: {
+      cell: { kind: 'circle', diameter: '8 mm' },
+      lattice: 'square',
+      spacing: { gap: '3 mm' },
+      alternate: 'none',
+    },
+  },
+  {
+    id: 'waffle',
+    args: {
+      cell: { kind: 'rectangle', length: '8 mm', width: '8 mm', cornerRadius: '0.5 mm' },
+      lattice: 'square',
+      spacing: { gap: '2 mm' },
+      alternate: 'none',
+    },
+  },
+  {
+    id: 'octagons',
+    args: {
+      cell: {
+        kind: 'polygon',
+        sides: '8',
+        diameter: '10 mm',
+        across: 'flats',
+        cornerRadius: '0.5 mm',
+      },
+      lattice: 'square',
+      spacing: { gap: '2 mm' },
+      alternate: 'none',
+    },
+  },
+  {
+    id: 'louvres',
+    args: {
+      cell: { kind: 'obround', length: '30 mm', width: '4 mm' },
+      lattice: 'square',
+      spacing: { gap: '4 mm' },
+      alternate: 'none',
+    },
+  },
+  {
+    id: 'speakerGrille',
+    args: {
+      cell: { kind: 'circle', diameter: '4 mm' },
+      lattice: 'polar',
+      spacing: { gap: '2 mm' },
+      alternate: 'none',
+    },
+  },
+  {
+    id: 'lighteningHoles',
+    args: {
+      cell: { kind: 'circle', diameter: '20 mm' },
+      lattice: 'hex',
+      spacing: { gap: '5 mm' },
       alternate: 'none',
     },
   },

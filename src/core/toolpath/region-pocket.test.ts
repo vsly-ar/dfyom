@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Vec2, Vec3 } from '../geometry/model'
 import {
+  chainBounds,
   line,
   regionArea,
   regionLoops,
@@ -18,6 +19,8 @@ import { segLength, segPoint, type Seg } from './path'
 import {
   clearingStep,
   generateRegionPocket,
+  pruneCleared,
+  restInside,
   stepoverClamped,
   type RegionPocketInput,
 } from './region-pocket'
@@ -487,5 +490,77 @@ describe('rest material (plan.restMaterial finding)', () => {
     expect(findRestMaterial(port, norm(star(200)), R).unwrap()).toEqual([])
     expect(findRestMaterial(port, norm(twoIslands()), R).unwrap()).toEqual([])
     expect(findRestMaterial(port, norm([dumbbell(5)]), R).unwrap()).toEqual([])
+  })
+})
+
+describe('roughing and rest machining (DF108)', () => {
+  // a 30 × 20 cell with R 1 corners and a 4 × 4 one the Ø 6 cannot enter, 2 mm deep
+  const loops = () => placeLoops([rect(0, 0, 30, 20, 1), rect(36, 0, 4, 4, 1)])
+  const D2 = endMill(2)
+  const rough = { radius: 3, cornerRadius: 0, allowance: 0.2 }
+  const pocket = (tool: ToolpathTool, extra: object) => {
+    const { loops: ls, size } = loops()
+    const region = norm(ls)
+    const inp = input(region, { tool, depth: 2 })
+    return {
+      region,
+      size,
+      inp: { ...inp, operation: { ...inp.operation, ...extra } } as RegionPocketInput,
+    }
+  }
+
+  it('the roughing pass: rough levels only, none in the cell its tool cannot enter', () => {
+    const { inp } = pocket(D6, { roughing: true })
+    const tp = generateRegionPocket(inp, port).unwrap()
+    expect(tp.passes.length).toBeGreaterThan(0)
+    expect(tp.passes.every((p) => p.kind === 'rough')).toBe(true)
+    // nothing past x = 5 + 30 (the small cell starts at 41)
+    for (const p of tp.passes)
+      for (const m of p.moves)
+        if (m.kind !== 'drill' && m.to[2] < 0) expect(m.to[0]).toBeLessThan(36)
+  })
+
+  it('rest machining skips what the roughing cleared and leaves nothing reachable uncut', () => {
+    const r = pocket(D6, { roughing: true })
+    const roughTp = generateRegionPocket(r.inp, port).unwrap()
+    const plain = generateRegionPocket(pocket(D2, {}).inp, port).unwrap()
+    const restIn = pocket(D2, { restAfter: rough })
+    const rest = generateRegionPocket(restIn.inp, port).unwrap()
+    expect(rest.stats.cutLength).toBeLessThan(0.7 * plain.stats.cutLength)
+    // the finishing ring stays: the walls get the small tool's finish
+    expect(rest.passes.some((p) => p.kind === 'finish')).toBe(true)
+    expect(checkRules(restIn.inp, rest)).toEqual([])
+    // both passes together: nothing the Ø 2 reaches is left above the floor, no gouge
+    const c0 = port.offset(r.region, 1).unwrap()
+    const cov = regionCoverage(r.region, c0, rest, D2, r.size, -2, 0.1, 0.01, undefined, [
+      { tool: D6, tp: roughTp },
+    ])
+    expect(cov.gouge).toBe(0)
+    expect(cov.belowFloor).toBe(0)
+    expect(cov.leftover).toBeLessThan(0.05)
+  })
+
+  it('pruneCleared keeps every node of a cell the roughing never entered', () => {
+    const { region } = pocket(D2, {})
+    const inside = restInside(port, region, rough, 1).unwrap()
+    // only the big cell has a roughed inside
+    expect(inside.pieces).toHaveLength(1)
+    // the Ø 2's tool-centre region (R + allowance in), rings 0.8 apart
+    const tree = ringTree(port, port.offset(region, 1.2).unwrap(), 1.2, 0.8).unwrap()
+    const pruned = pruneCleared(port, tree, inside).unwrap()
+    const count = (ns: readonly RingNode[]): number =>
+      ns.reduce((n, x) => n + 1 + count(x.children), 0)
+    expect(count(pruned)).toBeLessThan(count(tree))
+    // the small cell's piece (x > 36) keeps all its nodes
+    const small = (ns: readonly RingNode[]): number =>
+      ns.reduce(
+        (n, x) =>
+          n +
+          (chainBounds(x.region.pieces[0]!.outer.elements)!.min[0] > 36 ? 1 : 0) +
+          small(x.children),
+        0,
+      )
+    expect(small(pruned)).toBe(small(tree))
+    expect(small(tree)).toBeGreaterThan(0)
   })
 })

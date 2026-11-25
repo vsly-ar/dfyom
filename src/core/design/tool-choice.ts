@@ -168,6 +168,8 @@ export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined 
 /** Whether a fitting tool leaves rest material in the operation's general shape. */
 export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
   const m = measureOf(input)
+  // DF108: every roughing tool of a pattern leaves rest (the pattern's pocket cuts it)
+  if (input.geometry.kind === 'pocket' && input.geometry.roughing === true) return false
   return (
     m !== undefined && isEndMillType(tool.type) && m.rest(tool.diameter / 2 - FIT_SLACK).length > 0
   )

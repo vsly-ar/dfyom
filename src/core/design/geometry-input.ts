@@ -177,6 +177,7 @@ function operationGeometry(
           ? { depth: on.faceZ.add(table.extent(on.direction)).toNumber(), through: true as const }
           : { depth: op.depth.canonical }),
         floorRadius: op.floorRadius.canonical,
+        ...(op.roughing === true ? { roughing: true as const } : {}),
       }))
     case 'drilling': {
       const base = {

@@ -4,14 +4,19 @@
 // preset's proportions and rotation, its neighbours at the lattice's pitch (cell extent + gap);
 // the window is about 2.4 pitches wide, so a cell is a readable few pixels and the arrangement
 // shows, the cells at its edges cut by the box. P5: a flipped preset (Triangles) turns every other
-// cell and nests them about half a cell apart.
-// Doc: docs/conventions/ui.md#pattern-inspector-p1
+// cell and nests them about half a cell apart. DF107: drawn at any size (the Presets dialog's
+// previews), and a polar preset as rings of cells about the window's centre.
+// Doc: docs/conventions/ui.md#pattern-inspector-p1, docs/modes/patterns.md#presets-dialog-and-more-presets-df107
 import type { PatternPreset } from '../../../../core/design/pattern/presets'
 
 type Vec = [number, number]
 
 /** The thumbnail's size in px (MiniOutline's). */
 export const THUMB = { w: 28, h: 18 } as const
+/** The Presets dialog's preview size in px (DF107). */
+export const PREVIEW = { w: 132, h: 84 } as const
+
+type Box = { readonly w: number; readonly h: number }
 
 /** "6 mm", "30°", "6" → the number (presets use mm and ° only). */
 const num = (source: string | undefined, fallback = 0): number => {
@@ -82,11 +87,11 @@ export function cellPoints(cell: Readonly<Record<string, string>>): Vec[] {
 }
 
 /**
- * The cells of the preset's lattice that meet the thumbnail's window, in px (y down, THUMB box).
- * Rows are the cell's height plus the gap apart (hex: at least √3/2 of the pitch), every other
- * row shifted half a pitch (staggered, hex).
+ * The cells of the preset's lattice that meet the thumbnail's window, in px (y down, `box`:
+ * THUMB by default). Rows are the cell's height plus the gap apart (hex: at least √3/2 of the
+ * pitch), every other row shifted half a pitch (staggered, hex). Polar: rings about the centre.
  */
-export function presetThumb(preset: PatternPreset): Vec[][] {
+export function presetThumb(preset: PatternPreset, box: Box = THUMB): Vec[][] {
   const { cell, lattice, spacing, alternate } = preset.args
   const pts = cellPoints(cell)
   const xs = pts.map((p) => p[0])
@@ -94,14 +99,17 @@ export function presetThumb(preset: PatternPreset): Vec[][] {
   const w = Math.max(...xs) - Math.min(...xs)
   const h = Math.max(...ys) - Math.min(...ys)
   const gap = num(spacing.gap)
+  if (lattice === 'polar') return polarThumb(pts, Math.max(w, h) + gap, box)
   // P5: flipped neighbours nest (about half a cell apart, as triangles), every other cell turned
   const flip = alternate === 'flip'
   const px = flip ? w / 2 + gap : w + gap
   const py = lattice === 'hex' ? Math.max((px * Math.sqrt(3)) / 2, h + gap) : h + gap
   const shift = lattice === 'square' ? 0 : px / 2
   // the window: about 2.4 pitches across (a tall cell: one cell high), the thumbnail's aspect
-  const scale = Math.min(THUMB.w / (2.4 * px), THUMB.h / (1.05 * h))
-  const [ww, wh] = [THUMB.w / scale, THUMB.h / scale]
+  // (a wider box shows more pitches: its width over THUMB's, as many again)
+  const across = 2.4 * Math.max(1, box.w / THUMB.w / 2)
+  const scale = Math.min(box.w / (across * px), box.h / (1.05 * h))
+  const [ww, wh] = [box.w / scale, box.h / scale]
   const out: Vec[][] = []
   for (let row = -1; row * py < wh + py; row++)
     for (let col = -1; col * px < ww + px; col++) {
@@ -112,5 +120,29 @@ export function presetThumb(preset: PatternPreset): Vec[][] {
       const turn = flip && (((row + col) % 2) + 2) % 2 === 1 ? -1 : 1
       out.push(pts.map(([x, y]) => [(turn * x + ox) * scale, (turn * y + oy) * scale] as Vec))
     }
+  return out
+}
+
+/**
+ * A polar lattice: one cell at the centre, then rings `pitch` apart, each with as many cells as
+ * fit at the pitch along it (the layout's rule, P2), scaled so 1.4 rings fill half the height
+ * (a wider box: as many more as the row lattices show).
+ */
+function polarThumb(pts: readonly Vec[], pitch: number, box: Box): Vec[][] {
+  const rings = 1.4 * Math.max(1, box.w / THUMB.w / 2)
+  const scale = box.h / (2 * rings * pitch)
+  const [cx, cy] = [box.w / 2, box.h / 2]
+  const reach = Math.hypot(box.w, box.h) / 2 / scale + pitch
+  const out: Vec[][] = []
+  for (let ring = 0; ring * pitch < reach; ring++) {
+    const r = ring * pitch
+    const n = ring === 0 ? 1 : Math.max(1, Math.floor((2 * Math.PI * r) / pitch))
+    for (let k = 0; k < n; k++) {
+      const a = (2 * Math.PI * k) / n
+      const [ox, oy] = [cx + r * Math.cos(a) * scale, cy + r * Math.sin(a) * scale]
+      const cell = pts.map(([x, y]) => [ox + x * scale, oy + y * scale] as Vec)
+      if (cell.some(([x, y]) => x >= 0 && x <= box.w && y >= 0 && y <= box.h)) out.push(cell)
+    }
+  }
   return out
 }

@@ -439,6 +439,11 @@ export function toGeneratorInputs(
               : outline
           const R = tool.diameter / 2
           const reach = openReach(R, s.finishAllowance)
+          // DF108: a pattern's roughing pocket, and its pocket's rest machining after it
+          const rest = {
+            ...(op.roughing === true ? { roughing: true as const } : {}),
+            ...(input.restAfter === undefined ? {} : { restAfter: input.restAfter }),
+          }
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
           // tool runs past the edge there
           const open = region2d !== undefined && opensStock(region2d, placed.region, stock)
@@ -462,7 +467,7 @@ export function toGeneratorInputs(
                     ...base,
                     ...material,
                     cutting: c,
-                    operation: { ...placed, region: around.region },
+                    operation: { ...placed, region: around.region, ...rest },
                     strategy,
                   },
                 ],
@@ -473,17 +478,17 @@ export function toGeneratorInputs(
             return (
               open ? openRegion(region2d, placed.region, stock, reach) : Ok(placed.region)
             ).map((region): GeneratorRequest => {
-              const whole = { ...placed, region }
+              const whole = { ...placed, region, ...rest }
               // partly cleared (DF61 follow-up): the uncovered part down to the cleared level,
               // then the whole region from there; no split when it could skip material
-              const rest =
+              const uncovered =
                 partial === undefined
                   ? undefined
                   : uncoveredRegion(region2d, region, partial.region, reach, R)
               if (
                 partial === undefined ||
-                rest === undefined ||
-                !splitSaves(region, rest, placed, partial.level, band, c.stepdown)
+                uncovered === undefined ||
+                !splitSaves(region, uncovered, placed, partial.level, band, c.stepdown)
               )
                 return {
                   kind: 'regionPocket',
@@ -492,13 +497,18 @@ export function toGeneratorInputs(
                 }
               const below = { material: { ...band, top: partial.level } }
               const lower = { ...base, ...below, cutting: c, operation: whole, strategy }
-              if (rest.pieces.length === 0)
+              if (uncovered.pieces.length === 0)
                 return { kind: 'regionPocket', ...turned, inputs: [lower] }
               const upper = {
                 ...base,
                 ...material,
                 cutting: c,
-                operation: { region: rest, onZ: placed.onZ, depth: placed.onZ - partial.level },
+                operation: {
+                  region: uncovered,
+                  onZ: placed.onZ,
+                  depth: placed.onZ - partial.level,
+                  ...rest,
+                },
                 strategy,
               }
               return { kind: 'regionPocket', ...turned, inputs: [upper, lower] }
@@ -506,7 +516,7 @@ export function toGeneratorInputs(
           // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2
           // output); general shapes go to the region generator in the face frame (T1 wiring)
           return Ok(
-            isAnalyticOperation(op) && op.through !== true
+            isAnalyticOperation(op) && op.through !== true && Object.keys(rest).length === 0
               ? {
                   kind: 'pocket',
                   ...turned,
@@ -515,7 +525,15 @@ export function toGeneratorInputs(
               : {
                   kind: 'regionPocket',
                   ...turned,
-                  inputs: [{ ...base, ...material, cutting: c, operation: placed, strategy }],
+                  inputs: [
+                    {
+                      ...base,
+                      ...material,
+                      cutting: c,
+                      operation: { ...placed, ...rest },
+                      strategy,
+                    },
+                  ],
                 },
           )
         }),

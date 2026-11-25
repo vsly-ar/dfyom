@@ -129,6 +129,8 @@ export function evaluatePart(
     ...(region2d === undefined ? {} : { region2d }),
   }
   for (const op of input.operations) {
+    // DF108: a pattern's roughing pocket removes a part of what the pattern's pocket removes
+    if (op.kind === 'pocket' && op.roughing === true) continue
     const fresh = () => operationSolids(op, input.stock, context)
     const key = cache === undefined ? undefined : operationKey(op, input.stock)
     const r = key === undefined ? fresh() : cache!.solids(key, fresh)

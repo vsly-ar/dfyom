@@ -565,3 +565,83 @@ describe('patterns P5 exit', () => {
     }
   })
 })
+
+describe('patterns DF108 exit', () => {
+  /** A honeycomb of 10 mm hexagons (R 1) 3 mm deep; with roughing a Ø 6 clears them first. */
+  async function honeycomb(roughing: boolean) {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const s = await planSetup({ part: false, services: svc, stock: LID })
+    await s.run('library.tool.add', { values: libraryInput(flat2()) })
+    const out = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Honeycomb',
+      lattice: 'hex',
+      cell: {
+        kind: 'polygon',
+        sides: '6',
+        diameter: '10',
+        across: 'flats',
+        cornerRadius: '1',
+        rotation: '30',
+      },
+      spacing: { gap: '2' },
+      margin: '5',
+      depth: '3',
+      roughing,
+    })) as { cells: number; operationIds: string[]; warnings: { code: string }[] }
+    await s.run('project.apply', {})
+    const { lines, planId } = await planExportRun(s, svc)
+    const ops = opsOf(s.plan(planId))
+    const paths = ops.map(
+      (o) =>
+        (s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as { toolpath: Toolpath })
+          .toolpath,
+    )
+    const seconds = paths.reduce((a, t) => a + t.stats.estimatedSeconds, 0)
+    const snapshots = loadPlan(s.d.doc, planId, 'test').unwrap().dto.snapshots
+    const diameters = ops.map(
+      (o) =>
+        (snapshots.find((x) => x.id === o.tool)?.values as { diameter?: { source?: string } })
+          ?.diameter?.source,
+    )
+    return { out, lines, ops, paths, seconds, diameters }
+  }
+
+  it('a honeycomb with Ø 2 finishing and Ø 6 roughing: order, tools, rest, golden, machine, time', async () => {
+    const plain = await honeycomb(false)
+    const rough = await honeycomb(true)
+    expect(rough.out.operationIds).toEqual(['pattern1_roughing', 'pattern1_pocket'])
+    expect(rough.out.cells).toBe(plain.out.cells)
+    expect(rough.out.warnings).toEqual([])
+    // the roughing first with the Ø 6, then the pocket with the Ø 2: a tool change between
+    expect(rough.ops.map((o) => o.designOperationIds.join('+'))).toEqual([
+      'pattern1_roughing',
+      'pattern1_pocket',
+    ])
+    expect(rough.diameters).toEqual(['6', '2'])
+    expect(plain.diameters).toEqual(['2'])
+    // rest machining: the Ø 2 keeps its outer ring and finishing pass (58 % of its cut alone)
+    expect(rough.paths[1]!.stats.cutLength).toBeLessThan(0.65 * plain.paths[0]!.stats.cutLength)
+    // and the plan takes less time with both tools than with the Ø 2 alone
+    expect(rough.seconds).toBeLessThan(plain.seconds)
+    await expect(rough.lines.join('\n') + '\n').toMatchFileSnapshot(
+      '__golden__/pattern-honeycomb-roughing.nc',
+    )
+  })
+})
+
+/** A 2 mm flat end mill without presets (the honeycomb's R 1 corners). */
+const flat2 = () => ({
+  name: 'Flat 2',
+  type: 'flatEndMill' as const,
+  diameter: len('2'),
+  fluteLength: len('8'),
+  overallLength: len('40'),
+  fluteCount: num('2'),
+  toolMaterial: 'carbide' as const,
+  presets: [],
+})

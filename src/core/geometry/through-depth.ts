@@ -239,7 +239,8 @@ function clearsOf(
     if (o === op || !before(o, op) || (o.direction ?? '+z') !== direction) continue
     if (o.kind === 'facing') out.push({ id: o.id, top: 0, bottom: o.depth, region: 'face' })
     else if (port === undefined) continue
-    else if (o.kind === 'pocket') {
+    // DF108: a roughing pocket clears only part of its region (the pattern's pocket counts)
+    else if (o.kind === 'pocket' && o.roughing !== true) {
       const p = o
       const own = () => {
         const r = pocketRegion(p).region

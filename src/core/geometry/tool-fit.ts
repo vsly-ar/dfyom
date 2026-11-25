@@ -36,6 +36,8 @@ export type FitRule =
   | 'reach'
   // the flutes do not cut the wall's depth and the shank is not narrower (hardening DF89)
   | 'flutes'
+  // a pattern's roughing tool over ROUGHING_SHARE of the widest cell's width (DF108)
+  | 'roughingWidth'
   // chamfer (design-v0.4.md § Chamfer operation, Fit)
   | 'angle'
   | 'tip'
@@ -129,6 +131,13 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
     : [op.bottom.depth - op.onZ, 'depth']
 }
 
+/**
+ * DF108: a pattern's roughing tool is at most this share of the widest cell's narrowest width, so
+ * it clears the cells' middles (a Ø 6 mm in a 10 mm hexagon) rather than a centre line.
+ * Doc: docs/modes/patterns.md#roughing-df108
+ */
+export const ROUGHING_SHARE = 0.6
+
 const endMill = (t: DfmTool) => t.type === 'flatEndMill' || t.type === 'bullNoseEndMill'
 
 /**
@@ -188,24 +197,38 @@ export function toolFit(
           values: { needs: 'endMill' },
         }
       const c = op.shape.contour
+      // DF108: a roughing pocket's tool fits some cell and is at most ROUGHING_SHARE of the widest
+      // cell's narrowest width (a tool that only just fits clears a centre line); no corner rule
+      if (op.roughing === true && measure !== undefined)
+        unfit = !measure.fits(dc / 2 - FIT_SLACK)
+          ? wider(Math.min(measure.narrowest(), dc - 2 * TOL), 'pocket at its narrowest', 'pocket')
+          : dc <= ROUGHING_SHARE * measure.narrowest() + TOL
+            ? undefined
+            : {
+                rule: 'roughingWidth',
+                detail: `Ø${mm(dc)} is over ${ROUGHING_SHARE} × the widest cell (${mm(measure.narrowest())}): it would clear little`,
+                need: { relation: 'atMost', value: ROUGHING_SHARE * measure.narrowest() },
+                values: { toolDiameter: dc, size: measure.narrowest(), share: ROUGHING_SHARE },
+              }
       // general shapes: the region's width (eroded by the tool radius it is empty) and the
       // smallest inside corner, from the 2D layer
-      unfit =
-        c.kind === 'rectangle' || c.kind === 'circle'
-          ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
-            // a corner on or beyond the stock edge is open (DF61 follow-up)
-            (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock)
-              ? corner(c.cornerRadius)
-              : undefined))
-          : measure === undefined
-            ? undefined
-            : measure.fits(dc / 2 - FIT_SLACK)
-              ? shapeCorner(measure)
-              : wider(
-                  Math.min(measure.narrowest(), dc - 2 * TOL),
-                  'pocket at its narrowest',
-                  'pocket',
-                )
+      else
+        unfit =
+          c.kind === 'rectangle' || c.kind === 'circle'
+            ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
+              // a corner on or beyond the stock edge is open (DF61 follow-up)
+              (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock)
+                ? corner(c.cornerRadius)
+                : undefined))
+            : measure === undefined
+              ? undefined
+              : measure.fits(dc / 2 - FIT_SLACK)
+                ? shapeCorner(measure)
+                : wider(
+                    Math.min(measure.narrowest(), dc - 2 * TOL),
+                    'pocket at its narrowest',
+                    'pocket',
+                  )
       if (unfit !== undefined) return unfit
       const f = op.floorRadius
       const re = tool.type === 'bullNoseEndMill' ? (tool.cornerRadius ?? 0) : 0

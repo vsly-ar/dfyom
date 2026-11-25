@@ -79,8 +79,11 @@ export function regionCoverage(
   cell = 0.1,
   tol = 0.01,
   tabs?: CoverageTabs,
+  /** Toolpaths cut before `tp` (DF108: a roughing pass before the rest machining). */
+  before: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[] = [],
 ): Coverage {
   const hm = new Heightmap(size.length, size.width, cell)
+  for (const b of before) hm.sweep(b.tool, b.tp, cell)
   hm.sweep(tool, tp, cell)
   const regionPolys = regionLoops(region).map((l) => flattenLoop(l, 0.001))
   const c0Polys = regionLoops(c0).map((l) => flattenLoop(l, 0.001))

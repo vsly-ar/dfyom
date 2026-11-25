@@ -132,6 +132,14 @@ export interface Pocket extends Common {
    * Doc: docs/modes/patterns.md#implementation-p4
    */
   readonly through?: boolean | undefined
+  /**
+   * A pattern's roughing pocket (DF108, set only by a pattern's `roughing`): its tool clears the
+   * cells it fits, leaving the finishing allowance, with no finishing ring; the pattern's pocket
+   * then cuts only the rest. It removes nothing of its own in the geometry (a subset of the
+   * pattern's pocket), its floor is no face target and material bands ignore it. Absent = a pocket.
+   * Doc: docs/modes/patterns.md#roughing-df108
+   */
+  readonly roughing?: boolean | undefined
 }
 export interface Drilling extends Common {
   readonly kind: 'drilling'
@@ -581,6 +589,7 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         depth: depth.unwrap(),
         floorRadius: floorRadius.unwrap(),
         ...(dto.through === true ? { through: true } : {}),
+        ...(dto.roughing === true ? { roughing: true } : {}),
       }))
     }
     case 'drilling': {
@@ -731,6 +740,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         depth: op.depth.toDTO(),
         floorRadius: op.floorRadius.toDTO(),
         ...(op.through === true ? { through: true } : {}),
+        ...(op.roughing === true ? { roughing: true } : {}),
       } as OperationDTO
     case 'drilling':
       return {

@@ -373,6 +373,11 @@ function toolUnfitText(p: DfmWarning['params'], L: (mm: unknown) => string): str
       if (has('fluteLength'))
         return `The ${tool} has ${L(p['fluteLength'])} flutes; the walls are ${L(p['depth'])} deep (${L(p['margin'])} kept spare) and its shank ${has('shankDiameter') ? `(Ø ${L(p['shankDiameter'])}) is not narrower than the cutter` : 'Ø is not in the library'}, so the shank would rub the wall. Use a tool with longer flutes.`
       break
+    // DF108: a pattern's roughing tool clears the cells' middles, so it is well under their width
+    case 'roughingWidth':
+      if (has('size'))
+        return `The ${tool} is too wide to rough the cells: at most ${L(num(p['size']) * num(p['share']))} (${num(p['share'])} × the widest cell, ${L(p['size'])}).`
+      break
   }
   return `The ${tool} does not fit.`
 }
