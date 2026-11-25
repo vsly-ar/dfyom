@@ -19,10 +19,10 @@ import type { SplitDTO } from '../part.dto'
 import { toGeometryInput } from '../geometry-input'
 import { operationTools } from '../tool-choice'
 import { baseOf, isFrozenRecord } from '../frozen-memo'
-import { EPS, regionBounds, splitNumbers } from './layout'
+import { chainPoints, EPS, regionBounds, splitNumbers } from './layout'
 import { materialAt, removals } from './removals'
 import { dowelFindings, dowelNumbers } from './dowels'
-import type { Key } from './keys'
+import { keyPoint, type Key } from './keys'
 import { lapLength } from './laps'
 import { DOWEL_WALL_MIN } from '../dowel'
 import { planPieces, splitFinding, type PiecesResult } from './pieces'
@@ -230,8 +230,12 @@ function geometricDfm(
         'The part has no through outline profile: the pieces are cut along the stock edges. Add the outline first.',
       ),
     )
-  const anyCut = nums.xs.length + nums.ys.length + nums.levels.length > 0
+  const anyCut = split.lines.length + nums.levels.length > 0
   const dowels = dowelNumbers(split)
+  // shape lines (4e): their paths, densified (a feature's distance to them)
+  const shapePaths = (layout.paths ?? []).flatMap((lp) =>
+    lp.shapeId === undefined ? [] : [{ index: lp.index, pts: densePoints(lp.path.elements) }],
+  )
   // ── cutsFeature: lines through holes and chamfers; side-face operations ─────────────────
   const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
   loaded.part.operations.forEach((op, i) => {
@@ -259,7 +263,8 @@ function geometricDfm(
       dir === '+z' ? [g.center[0], g.center[1]] : [g.center[0], W - g.center[1]]
     const crossed =
       nums.xs.some((x) => Math.abs(c[0] - x) < r - EPS) ||
-      nums.ys.some((y) => Math.abs(c[1] - y) < r - EPS)
+      nums.ys.some((y) => Math.abs(c[1] - y) < r - EPS) ||
+      shapePaths.some((sp) => polylineDistance(sp.pts, c) < r - EPS)
     if (crossed)
       out.push(
         splitFinding(
@@ -302,6 +307,19 @@ function geometricDfm(
         nearY.push(y)
       }
     }
+    // shape lines (4e): the nearest point of the path to the feature's box
+    const nearLines: number[] = []
+    for (const sp of shapePaths) {
+      const d = Math.min(
+        ...sp.pts.map((p) =>
+          Math.hypot(gap(b.min[0], b.max[0], p[0]), gap(b.min[1], b.max[1], p[1])),
+        ),
+      )
+      if (d > EPS && d < limit) {
+        near.push(`split line ${sp.index + 1}`)
+        nearLines.push(sp.index)
+      }
+    }
     if (r.mode === 'in')
       for (const z of nums.levels) {
         const floor = r.dir === '+z' ? r.zlo : r.zhi
@@ -319,7 +337,9 @@ function geometricDfm(
           'featureNear',
           'warning',
           `${r.name} lies within ${fmt(limit)} mm (2 × its tool Ø) of ${near.join(', ')}: a thin wall at the joint`,
-          { operationId: r.id, nearX, nearY, nearZ, limit },
+          nearLines.length > 0
+            ? { operationId: r.id, nearX, nearY, nearZ, nearLines, limit }
+            : { operationId: r.id, nearX, nearY, nearZ, limit },
         ),
       )
   }
@@ -454,10 +474,7 @@ function geometricDfm(
             {
               operationId: op.id,
               reason: 'chamferKey',
-              keys: nicked.flatMap((k) => [
-                k.axis === 'x' ? k.at : k.u,
-                k.axis === 'x' ? k.u : k.at,
-              ]),
+              keys: nicked.flatMap((k) => keyPoint(k, 0, 0)),
             },
           ),
         )
@@ -503,8 +520,7 @@ export function bevelNicksKey(
   const u1 = k.u + k.size.half + width
   const w0 = 0
   const w1 = Math.min(k.size.depth, reach) + width
-  const at = (u: number, w: number): [number, number] =>
-    k.axis === 'x' ? [k.at + w, u] : [u, k.at + w]
+  const at = (u: number, w: number) => keyPoint(k, u - k.u, w)
   const steps = (lo: number, hi: number) => {
     const n = Math.max(1, Math.ceil((hi - lo) / 0.5))
     return Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n)
@@ -514,6 +530,55 @@ export function bevelNicksKey(
     ...steps(w0, w1).flatMap((w) => [at(u0, w), at(u1, w)]),
   ]
   return rim.some((p) => !materialAt(footprint, [], 0, p[0], p[1], 0))
+}
+
+/** A key's line in words: `x = 305`, or `split line 2` on a shape line (4e). */
+const lineText = (k: {
+  axis: string
+  at: number
+  line?: number | undefined
+  shape?: string | undefined
+}) => (k.shape === undefined ? `${k.axis} = ${fmt(k.at)}` : `split line ${k.line! + 1}`)
+
+/** A key's line as finding params: axis and at, or (4e) the line's index and its shape. */
+const lineParams = (k: {
+  axis: 'x' | 'y'
+  at: number
+  line?: number | undefined
+  shape?: string | undefined
+}) => (k.shape === undefined ? { axis: k.axis, at: k.at } : { line: k.line!, shapeId: k.shape })
+
+/** Points along a chain no more than 1 mm apart (a shape line's distance checks, 4e). */
+function densePoints(els: Parameters<typeof chainPoints>[0]): [number, number][] {
+  const pts = chainPoints(els)
+  const out: [number, number][] = [[pts[0]![0], pts[0]![1]]]
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!
+    const b = pts[i]!
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1])))
+    for (let k = 1; k <= n; k++)
+      out.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])
+  }
+  return out
+}
+
+/** The distance from `p` to a polyline. */
+function polylineDistance(
+  pts: readonly (readonly [number, number])[],
+  p: readonly number[],
+): number {
+  let d = Infinity
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!
+    const b = pts[i]!
+    const vx = b[0] - a[0]
+    const vy = b[1] - a[1]
+    const l2 = vx * vx + vy * vy
+    const t =
+      l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0]! - a[0]) * vx + (p[1]! - a[1]) * vy) / l2))
+    d = Math.min(d, Math.hypot(a[0] + t * vx - p[0]!, a[1] + t * vy - p[1]!))
+  }
+  return d
 }
 
 /**
@@ -531,13 +596,28 @@ function keyFindings(
   // fingers and half laps (4d) say so; keys keep their 4b-2 wording
   const joint = kind === 'finger' || kind === 'halfLap' ? { joint: kind } : {}
   for (const k of planned.keys.issues) {
-    const line = `${k.axis} = ${fmt(k.at)}`
+    const line = lineText(k)
     const pair = `${name(k.male.n)} and ${name(k.female.n)}`
-    const run = `${k.axis === 'x' ? 'Y' : 'X'} ${fmt(k.run[0])}–${fmt(k.run[1])}`
+    const run =
+      k.shape === undefined
+        ? `${k.axis === 'x' ? 'Y' : 'X'} ${fmt(k.run[0])}–${fmt(k.run[1])}`
+        : `${fmt(k.run[0])}–${fmt(k.run[1])} mm along it`
+    if (k.reason === 'curved') {
+      // 4e: keys go on straight segments only
+      out.push(
+        splitFinding(
+          id,
+          'keyFit',
+          'warning',
+          `No ${kind === 'finger' ? 'finger joint' : 'key'} on ${line} between ${pair}: they meet along arcs only, and joints go on straight segments: a butt joint there`,
+          { reason: 'curved', ...lineParams(k), pieces: [k.male.n, k.female.n], tool, ...joint },
+        ),
+      )
+      continue
+    }
     const params = {
       reason: k.reason,
-      axis: k.axis,
-      at: k.at,
+      ...lineParams(k),
       run: [k.run[0], k.run[1]],
       pieces: [k.male.n, k.female.n],
       tool,
@@ -572,7 +652,7 @@ function keyFindings(
   const limit = Math.max(THIN_JOINT_MM, 3 * tool)
   const narrowest = new Map<string, (typeof planned.keys.keys)[number]>()
   for (const k of planned.keys.keys) {
-    const key = `${k.axis}:${k.at}`
+    const key = k.line !== undefined ? `line:${k.line}` : `${k.axis}:${k.at}`
     const prev = narrowest.get(key)
     if (prev === undefined || k.size.neck < prev.size.neck) narrowest.set(key, k)
   }
@@ -584,11 +664,10 @@ function keyFindings(
           'thinJoint',
           'warning',
           kind === 'finger'
-            ? `The fingers on ${k.axis} = ${fmt(k.at)} are ${fmt(k.size.neck)} mm wide (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): weak fingers`
-            : `The key neck on ${k.axis} = ${fmt(k.at)} is ${fmt(k.size.neck)} mm (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): a weak key`,
+            ? `The fingers on ${lineText(k)} are ${fmt(k.size.neck)} mm wide (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): weak fingers`
+            : `The key neck on ${lineText(k)} is ${fmt(k.size.neck)} mm (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): a weak key`,
           {
-            axis: k.axis,
-            at: k.at,
+            ...lineParams(k),
             width: k.size.neck,
             limit,
             what: kind === 'finger' ? 'fingerWidth' : 'keyNeck',
@@ -609,7 +688,7 @@ function stockDfm(
 ): DfmWarning[] {
   const id = split.id
   const nums = splitNumbers(split)
-  const anyCut = nums.xs.length + nums.ys.length + nums.levels.length > 0
+  const anyCut = split.lines.length + nums.levels.length > 0
   const { pieces } = planned
   const { fb, partHeight } = g
   const out: DfmWarning[] = []

@@ -8,7 +8,7 @@
  */
 import type { Bounds2 } from '../../geometry/2d/model'
 import { STOCK_FACE } from '../../geometry/face'
-import type { OperationDTO, SplitDTO } from '../part.dto'
+import { isShapeLine, type OperationDTO, type SplitDTO } from '../part.dto'
 import { EPS, type Cell, type Layout, type Rect } from './layout'
 import { keyClearance, KEY_NECK_MIN, type KeyIssue } from './keys'
 import { materialAt, type Removal } from './removals'
@@ -74,6 +74,7 @@ export function planLaps(
   const issues: KeyIssue[] = []
   const seen = new Set<string>()
   for (const l of split.lines) {
+    if (isShapeLine(l)) continue
     const axis = l.axis
     const at = Number(BigInt(l.at.exact.num)) / Number(BigInt(l.at.exact.den))
     if (seen.has(`${axis}:${at}`)) continue

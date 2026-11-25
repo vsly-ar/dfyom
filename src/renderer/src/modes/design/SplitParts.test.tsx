@@ -243,6 +243,39 @@ describe('split part (split parts 4a)', () => {
     expect(within(t.split()).getByRole('button', { name: 'Split part…' })).toBeVisible()
   })
 
+  it('Add curved line (4e): a new open shape and a line along it in one undo step', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    const entries = t.s.d.history.undoable.length
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Add curved line' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(4))
+    const add = t.bridge.calls.filter((c) => c.name === 'design.shape.add').at(-1)!
+    const set = t.bridge.calls.filter((c) => c.name === 'design.split.set').at(-1)!
+    expect(add.gesture).toEqual(expect.any(String))
+    expect(set.gesture).toBe(add.gesture)
+    expect(set.args).toMatchObject({ split: { lines: [{ shape: 'shape1' }] } })
+    expect(t.s.d.history.undoable).toHaveLength(entries + 1)
+    // the row: the shape picked by name, Edit shape and remove; the preview draws its path
+    const section = t.split()
+    expect(within(section).getByRole('combobox', { name: 'Line along shape' })).toHaveTextContent(
+      'Split curve 1',
+    )
+    expect(within(section).getByRole('button', { name: 'Edit shape' })).toBeVisible()
+    expect(
+      within(section).getByRole('button', { name: 'Remove line along Split curve 1' }),
+    ).toBeVisible()
+    // its only shape is used: no "Line along shape" to add
+    expect(within(section).queryByRole('button', { name: 'Line along shape' })).toBeNull()
+    await expectNoAxeViolations()
+    await t.user.click(
+      within(section).getByRole('button', { name: 'Remove line along Split curve 1' }),
+    )
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    // the shape stays: it can be a line again
+    expect(within(t.split()).getByRole('button', { name: 'Line along shape' })).toBeVisible()
+  })
+
   it('dowels on the level (4b): the joint control, Ø and depth, positions, Place again', async () => {
     const t = await renderSplit()
     await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))

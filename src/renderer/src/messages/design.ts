@@ -495,6 +495,16 @@ export const designMessages = {
     addLevel: 'Add level',
     removeLine: (axis: 'x' | 'y', at: string) => `Remove line at ${axis.toUpperCase()} ${at}`,
     removeLevel: (at: string) => `Remove level at Z ${at}`,
+    /** Split lines as shapes (split parts 4e). */
+    addCurvedLine: 'Add curved line',
+    addCurvedLineDescription:
+      'A new open shape across the part and a line along it; edit its points in the Shape Editor',
+    addLineAlong: 'Line along shape',
+    lineAlongDescription: 'A line along one of this part’s open shapes, edge to edge',
+    lineAlong: 'Line along shape',
+    editLineShape: 'Edit shape',
+    removeShapeLine: (shape: string) => `Remove line along ${shape}`,
+    curveName: (n: number) => `Split curve ${n}`,
     margin: 'Blank margin',
     /** Keys on lines (split parts 4b-2). */
     lineJoint: 'Lines joined by',

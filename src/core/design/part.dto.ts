@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { ItemIdSchema, NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
 import { FeatureDtoSchema, FeatureIdSchema, FeatureRoleSchema } from './feature.dto'
-import { ShapeDtoSchema, StoredShapeIdSchema } from './shape.dto'
+import { ShapeDtoSchema, ShapeIdSchema, StoredShapeIdSchema } from './shape.dto'
 
 const length = () => quantityDto('length')
 
@@ -237,8 +237,17 @@ export type SplitJoint = (typeof SPLIT_JOINTS)[number]
  * A straight vertical split line through the whole part (4a): `axis` is the coordinate it fixes,
  * `{ axis: 'x', at: 125 }` is the plane x = 125 (it runs along Y).
  */
-export const SplitLineDtoSchema = z.object({ axis: z.enum(['x', 'y']), at: length() })
+export const StraightSplitLineDtoSchema = z.object({ axis: z.enum(['x', 'y']), at: length() })
+/**
+ * A split line along an open named shape of the source part, read in the part frame's top view,
+ * edge to edge (split parts 4e, docs/modes/split-parts.md#implementation-4e).
+ */
+export const ShapeSplitLineDtoSchema = z.object({ shape: ShapeIdSchema })
+export const SplitLineDtoSchema = z.union([StraightSplitLineDtoSchema, ShapeSplitLineDtoSchema])
 export type SplitLineDTO = z.output<typeof SplitLineDtoSchema>
+export type StraightSplitLineDTO = z.output<typeof StraightSplitLineDtoSchema>
+export const isShapeLine = (l: SplitLineDTO): l is z.output<typeof ShapeSplitLineDtoSchema> =>
+  'shape' in l
 
 /**
  * The split of a source part (docs/modes/split-parts.md#split): lines and levels (part-frame z,

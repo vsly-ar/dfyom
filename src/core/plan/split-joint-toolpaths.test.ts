@@ -1,4 +1,5 @@
-// Split parts 4d (docs/modes/split-parts.md#implementation-4d), the toolpaths of the new joints:
+// Split parts 4d (docs/modes/split-parts.md#implementation-4d), the toolpaths of the new joints
+// (and 4e, a shape line):
 // a 190 × 90 board of 12 mm plywood split across by one line with a finger joint, then with a
 // half lap. Every piece is planned with no error, generated, exported setup by setup (goldens) and
 // streamed through the virtual machine; the outline tool reaches every finger corner (T-bones),
@@ -60,6 +61,7 @@ async function runPieces({ s, svc }: Setup, label: string) {
     .filter((p) => p.derivedFrom?.partId === s.partId)
     .sort((a, b) => a.derivedFrom!.index - b.derivedFrom!.index)
   expect(pieces).toHaveLength(2)
+  const outlines: string[][] = []
   const lowest = new Map<string, number>()
   const directions: string[][] = []
   for (const piece of pieces) {
@@ -86,6 +88,12 @@ async function runPieces({ s, svc }: Setup, label: string) {
       const zs = tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])))
       lowest.set(`${piece.derivedFrom!.index}:${op.designOperationIds[0]}`, Math.min(...zs))
     }
+    // the outline's shape items (op:kind)
+    const outline = piece.operations.find((o) => o.id === 'split1_outline')
+    const shape = outline !== undefined && 'shape' in outline ? outline.shape : undefined
+    const named =
+      shape?.kind === 'named' ? piece.shapes?.find((x) => x.id === shape.shapeId) : undefined
+    outlines.push(named?.items.map((i) => `${i.op}:${i.kind}`) ?? [shape?.kind ?? 'none'])
     const setups = s.plan(planId).setups
     directions.push(setups.map((x) => x.direction ?? '+z'))
     const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
@@ -99,7 +107,7 @@ async function runPieces({ s, svc }: Setup, label: string) {
       )
     }
   }
-  return { lowest, directions }
+  return { lowest, directions, outlines }
 }
 
 describe('split parts 4d: joint toolpaths', () => {
@@ -127,5 +135,41 @@ describe('split parts 4d: joint toolpaths', () => {
     // both lap pockets end on the lap plane, 6 mm from their face
     expect(lowest.get('1:split1_lap1')).toBeCloseTo(-6, 6)
     expect(lowest.get('2:split1_lap1')).toBeCloseTo(-6, 6)
+  }, 60_000)
+
+  // 4e (docs/modes/split-parts.md#implementation-4e): a line along an open shape, a slanted
+  // straight run (a puzzle key in its frame) and a tangent arc (no key): the outline intersects
+  // the cut, arcs and all
+  it('a shape line with a key on its slanted run: both from the top, goldens, machine', async () => {
+    const b = await board()
+    await b.s.run('design.shape.add', {
+      partId: b.s.partId,
+      name: 'Split curve',
+      items: [
+        {
+          kind: 'path',
+          start: ['78', '0'],
+          segments: [
+            { kind: 'line', to: ['96', '75'] },
+            { kind: 'tangentArc', to: ['100', '100'] },
+          ],
+          closed: false,
+        },
+      ],
+    })
+    const r = (await b.s.run('design.split.set', {
+      partId: b.s.partId,
+      split: { lines: [{ shape: 'shape1' }], joint: 'puzzle' },
+    })) as { findings: { params: Record<string, unknown> }[] }
+    expect(r.findings.filter((f) => f.params['rule'] === 'keyFit')).toEqual([])
+    const { lowest, directions, outlines } = await runPieces(b, 'curve')
+    expect(directions).toEqual([['+z'], ['+z']])
+    // the cut, then the knob (male, left of the line) or the socket (female)
+    expect(outlines).toEqual([
+      ['add:rectangle', 'intersect:rectangle', 'intersect:path', 'add:path'],
+      ['add:rectangle', 'intersect:rectangle', 'intersect:path', 'subtract:path'],
+    ])
+    expect(lowest.get('1:split1_outline')).toBeLessThan(-11.9)
+    expect(lowest.get('2:split1_outline')).toBeLessThan(-11.9)
   }, 60_000)
 })

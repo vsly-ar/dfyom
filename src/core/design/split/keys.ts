@@ -7,10 +7,12 @@
  * issues `keyFit` reports. Pure.
  * Doc: docs/modes/split-parts.md#implementation-4b, docs/modes/split-parts.md#joints
  */
+import { regionContains } from '../../geometry/2d/measure'
+import { arcRadius, arcSweep, elementLength, type ArcElement } from '../../geometry/2d/model'
 import type { Vec2 } from '../../geometry/model'
 import type { ShapeItem, ShapeSegment } from '../shape.dto'
-import type { SplitDTO } from '../part.dto'
-import { EPS, type Cell, type Layout } from './layout'
+import { isShapeLine, type SplitDTO } from '../part.dto'
+import { EPS, type Cell, type Layout, type LinePath } from './layout'
 import { materialAt, type Removal } from './removals'
 
 /** A key's socket clearance when none is set (mm): socket side only, the knob keeps its size. */
@@ -184,11 +186,27 @@ function largestTool(
   return undefined
 }
 
+/**
+ * A key's frame on a line drawn as a path (4e): `u` runs from `o` along the unit `t`, `w` along
+ * `n`, the right normal (into the female piece).
+ */
+export interface KeyFrame {
+  readonly o: Vec2
+  readonly t: Vec2
+  readonly n: Vec2
+}
+
 /** One key: on the line `axis` = `at`, centred at `u` along it, between two pieces of a band. */
 export interface Key {
+  /** A straight line's axis and value (on a shape line, 4e: `x` and NaN; see `shape`). */
   readonly axis: 'x' | 'y'
   readonly at: number
   readonly u: number
+  /** 4e, in a split with a shape line: the segment's frame, `u` measured from its origin. */
+  readonly frame?: KeyFrame | undefined
+  /** 4e: the line's index in `split.lines`, and its shape id on a shape line. */
+  readonly line?: number | undefined
+  readonly shape?: string | undefined
   readonly male: Cell
   readonly female: Cell
   readonly size: KeySize
@@ -201,12 +219,18 @@ export interface Key {
 export interface KeyIssue {
   readonly axis: 'x' | 'y'
   readonly at: number
+  /** 4e: the line's index and its shape id on a shape line (as `Key`). */
+  readonly line?: number | undefined
+  readonly shape?: string | undefined
   readonly male: Cell
   readonly female: Cell
   /** The run along the line (mm). */
   readonly run: readonly [number, number]
-  /** `short`: no key fits; `tool`: one fits a smaller tool (`maxTool`); `near`: no place clear. */
-  readonly reason: 'short' | 'tool' | 'near'
+  /**
+   * `short`: no key fits; `tool`: one fits a smaller tool (`maxTool`); `near`: no place clear;
+   * `curved` (4e): the pieces meet along arcs only, which take no key.
+   */
+  readonly reason: 'short' | 'tool' | 'near' | 'curved'
   readonly maxTool?: number
   /** The tool Ø the keys were sized for. */
   readonly tool: number
@@ -230,6 +254,20 @@ export function keyClearance(split: SplitDTO): number {
 /** Local (u along the line, w across) → part frame, for the line `axis` = `at`. */
 const toPart = (axis: 'x' | 'y', at: number, u: number, w: number): Vec2 =>
   axis === 'x' ? [at + w, u] : [u, at + w]
+
+/** A point of a key's local frame (`du` from its centre along the line, `w` across) in the part frame. */
+export function keyPoint(key: Key, du: number, w: number): Vec2 {
+  const f = key.frame
+  if (f === undefined) return toPart(key.axis, key.at, key.u + du, w)
+  const u = key.u + du
+  return [f.o[0] + u * f.t[0] + w * f.n[0], f.o[1] + u * f.t[1] + w * f.n[1]]
+}
+
+/** Whether a key's local frame is a mirror of the part frame (arcs turn the other way). */
+const mirroredKey = (key: Key) =>
+  key.frame === undefined
+    ? key.axis === 'x'
+    : key.frame.t[0] * key.frame.n[1] - key.frame.t[1] * key.frame.n[0] < 0
 
 const inRect = (c: Cell, p: Vec2) =>
   p[0] >= c.rect.x0 - EPS &&
@@ -255,14 +293,17 @@ export function planKeys(
 ): KeyPlan {
   const kind = split.joint.kind
   if (!isKeyKind(kind)) return { keys: [], issues: [] }
+  if (layout.paths !== undefined)
+    return planPathKeys(layout, layout.paths, split, kind, rs, W, tool, top, bottom)
   const c = keyClearance(split)
   const fp = layout.footprint.region
   const keys: Key[] = []
   const issues: KeyIssue[] = []
-  const lines = split.lines.map((l) => ({
-    axis: l.axis,
-    at: Number(BigInt(l.at.exact.num)) / Number(BigInt(l.at.exact.den)),
-  }))
+  const lines = split.lines.flatMap((l) =>
+    isShapeLine(l)
+      ? []
+      : [{ axis: l.axis, at: Number(BigInt(l.at.exact.num)) / Number(BigInt(l.at.exact.den)) }],
+  )
   const seen = new Set<string>()
   for (const line of lines) {
     const key = `${line.axis}:${line.at}`
@@ -291,91 +332,273 @@ export function planKeys(
         .flatMap((z, i) => (z - zBreaks[i]! > EPS ? [(z + zBreaks[i]!) / 2] : []))
       const solid = (p: Vec2) => zs.every((z) => materialAt(fp, rs, W, p[0], p[1], z))
       const [lo, hi] = axis === 'x' ? [male.rect.y0, male.rect.y1] : [male.rect.x0, male.rect.x1]
-      for (const run of runs(lo, hi, (u) => solidAcross(fp, axis, at, u))) {
-        const length = run[1] - run[0]
-        const base = { axis, at, male, female, run, tool, height: zt - zb }
-        let count = Math.min(KEYS_MAX, Math.max(1, Math.round(length / KEYS_PER)))
-        let size: KeySize | undefined
-        // fingers (4d): the whole run, in one layout
-        const fingers = kind === 'finger' ? fingerLayout(tool, c, zt - zb, length) : undefined
-        if (kind === 'finger') size = fingers?.size
-        else
-          for (; count >= 1; count--) {
-            size = keySize(kind, tool, c, zt - zb, length / count)
-            if (size !== undefined) break
-          }
-        if (size === undefined) {
-          const maxTool = largestTool(kind, tool, c, zt - zb, length)
-          issues.push(
-            maxTool === undefined
-              ? { ...base, reason: 'short' }
-              : { ...base, reason: 'tool', maxTool },
-          )
-          continue
-        }
-        const s = size
-        const wall = tool
-        // a column across the line at u: solid from a wall below the line to a wall past the key
-        const ws: number[] = []
-        for (let w = -wall; w < s.depth + c + wall; w += 1) ws.push(w)
-        ws.push(s.depth + c + wall)
-        const memo = new Map<number, boolean>()
-        const column = (u: number) => {
-          const k = Math.round(u / STEP)
-          let v = memo.get(k)
-          if (v === undefined) {
-            const uu = k * STEP
-            v = ws.every((w) => {
-              const p = toPart(axis, at, uu, w)
-              return inRect(w < 0 ? male : female, p) && solid(p)
-            })
-            memo.set(k, v)
-          }
-          return v
-        }
-        const reach = s.half + wall
-        const clear = (u: number) => {
-          for (let x = u - reach; x <= u + reach + EPS; x += STEP) if (!column(x)) return false
-          return column(u + reach)
-        }
-        if (fingers !== undefined) {
-          // every finger clear, else none on this run (a butt joint there)
-          const us = fingers.at.map((d) => Math.round((run[0] + d) * 100) / 100)
-          if (us.every((u) => clear(u)))
-            for (const u of us)
-              keys.push({ axis, at, u, male, female, size: s, clearance: c, height: zt - zb })
-          else issues.push({ ...base, reason: 'near' })
-          continue
-        }
-        const share = length / count
-        for (let i = 0; i < count; i++) {
-          const segLo = run[0] + i * share
-          const segHi = segLo + share
-          const mid = (segLo + segHi) / 2
-          let found: number | undefined
-          for (
-            let d = 0;
-            mid - d >= segLo + s.half - EPS || mid + d <= segHi - s.half + EPS;
-            d += STEP
-          ) {
-            const tries = d === 0 ? [mid] : [mid - d, mid + d]
-            for (const u of tries) {
-              if (u - s.half < segLo - EPS || u + s.half > segHi + EPS) continue
-              if (clear(u)) {
-                found = Math.round(u * 100) / 100
-                break
-              }
-            }
-            if (found !== undefined) break
-          }
-          if (found === undefined) issues.push({ ...base, run: [segLo, segHi], reason: 'near' })
-          else
-            keys.push({ axis, at, u: found, male, female, size: s, clearance: c, height: zt - zb })
-        }
-      }
+      for (const run of runs(lo, hi, (u) => solidAcross(fp, axis, at, u)))
+        placeRun(
+          {
+            kind,
+            c,
+            tool,
+            height: zt - zb,
+            run,
+            male,
+            female,
+            pt: (u, w) => toPart(axis, at, u, w),
+            inCell: inRect,
+            solid,
+            key: (u, size) => ({ axis, at, u, male, female, size, clearance: c, height: zt - zb }),
+            base: { axis, at, male, female, run, tool, height: zt - zb },
+          },
+          keys,
+          issues,
+        )
     }
   }
   return { keys, issues }
+}
+
+/** One run of a line between two pieces, for `placeRun`. */
+interface RunCtx {
+  readonly kind: KeyKind
+  readonly c: number
+  readonly tool: number
+  readonly height: number
+  readonly run: readonly [number, number]
+  readonly male: Cell
+  readonly female: Cell
+  /** (u along the line, w across into the female) → part frame. */
+  readonly pt: (u: number, w: number) => Vec2
+  readonly inCell: (cell: Cell, p: Vec2) => boolean
+  readonly solid: (p: Vec2) => boolean
+  readonly key: (u: number, size: KeySize) => Key
+  readonly base: Omit<KeyIssue, 'reason' | 'maxTool'>
+}
+
+/**
+ * The keys (or fingers) on one run: sized for the run, each at the middle of its share else the
+ * nearest clear place; the issues where none fits or none is clear.
+ */
+function placeRun(r: RunCtx, keys: Key[], issues: KeyIssue[]): void {
+  const { kind, c, tool, run, male, female, base } = r
+  const length = run[1] - run[0]
+  let count = Math.min(KEYS_MAX, Math.max(1, Math.round(length / KEYS_PER)))
+  let size: KeySize | undefined
+  // fingers (4d): the whole run, in one layout
+  const fingers = kind === 'finger' ? fingerLayout(tool, c, r.height, length) : undefined
+  if (kind === 'finger') size = fingers?.size
+  else
+    for (; count >= 1; count--) {
+      size = keySize(kind, tool, c, r.height, length / count)
+      if (size !== undefined) break
+    }
+  if (size === undefined) {
+    const maxTool = largestTool(kind, tool, c, r.height, length)
+    issues.push(
+      maxTool === undefined ? { ...base, reason: 'short' } : { ...base, reason: 'tool', maxTool },
+    )
+    return
+  }
+  const s = size
+  const wall = tool
+  // a column across the line at u: solid from a wall below the line to a wall past the key
+  const ws: number[] = []
+  for (let w = -wall; w < s.depth + c + wall; w += 1) ws.push(w)
+  ws.push(s.depth + c + wall)
+  const memo = new Map<number, boolean>()
+  const column = (u: number) => {
+    const k = Math.round(u / STEP)
+    let v = memo.get(k)
+    if (v === undefined) {
+      const uu = k * STEP
+      v = ws.every((w) => {
+        const p = r.pt(uu, w)
+        return r.inCell(w < 0 ? male : female, p) && r.solid(p)
+      })
+      memo.set(k, v)
+    }
+    return v
+  }
+  const reach = s.half + wall
+  const clear = (u: number) => {
+    for (let x = u - reach; x <= u + reach + EPS; x += STEP) if (!column(x)) return false
+    return column(u + reach)
+  }
+  if (fingers !== undefined) {
+    // every finger clear, else none on this run (a butt joint there)
+    const us = fingers.at.map((d) => Math.round((run[0] + d) * 100) / 100)
+    if (us.every((u) => clear(u))) for (const u of us) keys.push(r.key(u, s))
+    else issues.push({ ...base, reason: 'near' })
+    return
+  }
+  const share = length / count
+  for (let i = 0; i < count; i++) {
+    const segLo = run[0] + i * share
+    const segHi = segLo + share
+    const mid = (segLo + segHi) / 2
+    let found: number | undefined
+    for (let d = 0; mid - d >= segLo + s.half - EPS || mid + d <= segHi - s.half + EPS; d += STEP) {
+      const tries = d === 0 ? [mid] : [mid - d, mid + d]
+      for (const u of tries) {
+        if (u - s.half < segLo - EPS || u + s.half > segHi + EPS) continue
+        if (clear(u)) {
+          found = Math.round(u * 100) / 100
+          break
+        }
+      }
+      if (found !== undefined) break
+    }
+    if (found === undefined) issues.push({ ...base, run: [segLo, segHi], reason: 'near' })
+    else keys.push(r.key(found, s))
+  }
+}
+
+/** A sample's step (mm) along an arc when finding the pieces on its two sides (4e). */
+const SIDE_STEP = 1
+
+/**
+ * The keys of a split with a shape line (4e): per line, per straight segment, per band, the runs
+ * where the same two pieces meet across it (the left one male), placed as on a straight line in
+ * the segment's frame; arcs take no key, so a pair of pieces that meets along arcs only gets a
+ * `curved` issue. Straight lines are paths here too (drawn so their lower piece is the left one).
+ */
+function planPathKeys(
+  layout: Layout,
+  paths: readonly LinePath[],
+  split: SplitDTO,
+  kind: KeyKind,
+  rs: readonly Removal[],
+  W: number,
+  tool: number,
+  top: number,
+  bottom: number,
+): KeyPlan {
+  const c = keyClearance(split)
+  const fp = layout.footprint.region
+  const keys: Key[] = []
+  const issues: KeyIssue[] = []
+  const mm = (q: { exact: { num: string; den: string } }) =>
+    Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
+  const inCell = (cell: Cell, p: Vec2) => regionContains(cell.cut ?? cell.region, p)
+  const bands = [...new Set(layout.cells.map((x) => x.iz))]
+  for (const lp of paths) {
+    const l = split.lines[lp.index]!
+    const named = isShapeLine(l)
+      ? { axis: 'x' as const, at: Number.NaN, line: lp.index, shape: l.shape }
+      : { axis: l.axis, at: mm(l.at), line: lp.index }
+    for (const iz of bands) {
+      const cells = layout.cells.filter((x) => x.iz === iz)
+      const first = cells[0]
+      if (first === undefined) continue
+      const zb = Math.max(first.band.zb, bottom)
+      const zt = Math.min(first.band.zt, top)
+      if (zt - zb <= EPS) continue
+      const zBreaks = [zb, ...new Set(rs.flatMap((r) => [r.zlo, r.zhi]))]
+        .filter((z) => z >= zb - EPS && z <= zt + EPS)
+        .concat([zt])
+        .sort((p, q) => p - q)
+      const zs = zBreaks
+        .slice(1)
+        .flatMap((z, i) => (z - zBreaks[i]! > EPS ? [(z + zBreaks[i]!) / 2] : []))
+      const solid = (p: Vec2) => zs.every((z) => materialAt(fp, rs, W, p[0], p[1], z))
+      // pairs that meet along the line: keyed somewhere, or along arcs
+      const keyed = new Set<string>()
+      const curved = new Map<string, { male: Cell; female: Cell; run: [number, number] }>()
+      const pairAt = (p: Vec2, n: Vec2) => {
+        const a: Vec2 = [p[0] - 0.01 * n[0], p[1] - 0.01 * n[1]]
+        const b: Vec2 = [p[0] + 0.01 * n[0], p[1] + 0.01 * n[1]]
+        if (!materialAt(fp, [], 0, a[0], a[1], 0) || !materialAt(fp, [], 0, b[0], b[1], 0))
+          return undefined
+        const male = cells.find((x) => inCell(x, a))
+        const female = cells.find((x) => inCell(x, b))
+        return male === undefined || female === undefined || male === female
+          ? undefined
+          : { male, female }
+      }
+      let along = 0
+      for (const e of lp.path.elements) {
+        const len = elementLength(e)
+        if (e.kind === 'arc') {
+          // arcs take no key: note the pairs that meet along them
+          const n = Math.max(2, Math.ceil(len / SIDE_STEP))
+          for (let k = 0; k < n; k++) {
+            const { p, nrm } = arcSample(e, (k + 0.5) / n)
+            const pair = pairAt(p, nrm)
+            if (pair === undefined) continue
+            const id = `${pair.male.n}:${pair.female.n}`
+            if (!curved.has(id)) curved.set(id, { ...pair, run: [along, along + len] })
+          }
+          along += len
+          continue
+        }
+        if (len < EPS) continue
+        const t: Vec2 = [(e.b[0] - e.a[0]) / len, (e.b[1] - e.a[1]) / len]
+        const nrm: Vec2 = [t[1], -t[0]]
+        const frame: KeyFrame = { o: e.a, t, n: nrm }
+        const pt = (u: number, w: number): Vec2 => [
+          e.a[0] + u * t[0] + w * nrm[0],
+          e.a[1] + u * t[1] + w * nrm[1],
+        ]
+        // runs of one pair along the segment
+        const n = Math.max(1, Math.ceil(len / STEP))
+        const h = len / n
+        let cur: { male: Cell; female: Cell; u0: number } | undefined
+        const close = (u1: number) => {
+          if (cur === undefined) return
+          const { male, female, u0 } = cur
+          cur = undefined
+          keyed.add(`${male.n}:${female.n}`)
+          placeRun(
+            {
+              kind,
+              c,
+              tool,
+              height: zt - zb,
+              run: [u0, u1],
+              male,
+              female,
+              pt,
+              inCell,
+              solid,
+              key: (u, size) => ({
+                ...named,
+                u,
+                frame,
+                male,
+                female,
+                size,
+                clearance: c,
+                height: zt - zb,
+              }),
+              base: { ...named, male, female, run: [u0, u1], tool, height: zt - zb },
+            },
+            keys,
+            issues,
+          )
+        }
+        for (let i = 0; i < n; i++) {
+          const pair = pairAt(pt((i + 0.5) * h, 0), nrm)
+          if (cur !== undefined && (pair?.male !== cur.male || pair.female !== cur.female))
+            close(i * h)
+          if (pair !== undefined && cur === undefined) cur = { ...pair, u0: i * h }
+        }
+        close(len)
+        along += len
+      }
+      for (const [id, p] of curved)
+        if (!keyed.has(id)) issues.push({ ...named, ...p, tool, height: zt - zb, reason: 'curved' })
+    }
+  }
+  return { keys, issues }
+}
+
+/** A point at fraction `f` of an arc and the right normal of its direction there. */
+function arcSample(e: ArcElement, f: number): { p: Vec2; nrm: Vec2 } {
+  const a0 = Math.atan2(e.a[1] - e.centre[1], e.a[0] - e.centre[0])
+  const r = arcRadius(e)
+  const a = a0 + arcSweep(e) * f
+  const radial: Vec2 = [Math.cos(a), Math.sin(a)]
+  // a counter-clockwise arc's right normal points out from its centre, a clockwise one's in
+  const nrm: Vec2 = e.ccw ? radial : [-radial[0], -radial[1]]
+  return { p: [e.centre[0] + r * radial[0], e.centre[1] + r * radial[1]], nrm }
 }
 
 /** Both sides of the line `axis` = `at` are inside the footprint at `u`. */
@@ -501,9 +724,9 @@ const micro = (v: number) => Math.round(v * 1e6) / 1e6
 export function keyItem(key: Key, side: 'male' | 'female'): PathItem {
   const local = keyLocalPath(key.size, key.clearance, side)
   // a line along y maps (u, w) → (at + w, u): a mirror, so arcs turn the other way
-  const mirrored = key.axis === 'x'
+  const mirrored = mirroredKey(key)
   const P = (p: Vec2): [number, number] => {
-    const q = toPart(key.axis, key.at, key.u + p[0], p[1])
+    const q = keyPoint(key, p[0], p[1])
     return [micro(q[0]), micro(q[1])]
   }
   const segments: ShapeSegment<number>[] = local.segments.map((s) =>
@@ -576,13 +799,13 @@ export function keyItems(key: Key, side: 'male' | 'female'): PathItem[] {
   const item = keyItem(key, side)
   if (key.size.kind !== 'finger') return [item]
   const P = (p: Vec2): [number, number] => {
-    const q = toPart(key.axis, key.at, key.u + p[0], p[1])
+    const q = keyPoint(key, p[0], p[1])
     return [micro(q[0]), micro(q[1])]
   }
   return [
     item,
     ...tBoneCentres(key.size, key.clearance, side).map((c) =>
-      circlePath(c, key.size.fillet, 'subtract', P, key.axis === 'x'),
+      circlePath(c, key.size.fillet, 'subtract', P, mirroredKey(key)),
     ),
   ]
 }
@@ -598,7 +821,7 @@ export function keyPreviewPoints(key: Key): Vec2[] {
       [-q, d],
       [-q, 0],
     ]
-    return corners.map((p) => toPart(key.axis, key.at, key.u + p[0], p[1]))
+    return corners.map((p) => keyPoint(key, p[0], p[1]))
   }
   const local = keyLocalPath(key.size, key.clearance, 'male')
   const pts: Vec2[] = []
@@ -617,5 +840,5 @@ export function keyPreviewPoints(key: Key): Vec2[] {
       }
     }
   }
-  return pts.map((p) => toPart(key.axis, key.at, key.u + p[0], p[1]))
+  return pts.map((p) => keyPoint(key, p[0], p[1]))
 }

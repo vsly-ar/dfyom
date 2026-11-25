@@ -8,7 +8,15 @@
  */
 import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import type { Region2dPort } from '../../geometry/2d/port'
-import { chainBounds, type Bounds2 } from '../../geometry/2d/model'
+import { regionContains } from '../../geometry/2d/measure'
+import {
+  arcRadius,
+  arcSweep,
+  chainBounds,
+  regionArea,
+  type Bounds2,
+  type Region,
+} from '../../geometry/2d/model'
 import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
@@ -24,17 +32,20 @@ import type { UnitSystem } from '../../project/document'
 import type { QuantityDTO } from '../../quantity/quantity.dto'
 import { parseLiteral } from '../../quantity/parse'
 import {
+  chainPoints,
   EPS,
   regionBounds,
+  rectRegion,
   shapeRegion,
   splitLayout,
   splitNumbers,
+  splitNumbersOf,
   type Cell,
   type Layout,
   type Rect,
 } from './layout'
 import { dowelOperations } from './dowels'
-import { keyItems, planKeys, type KeyPlan, type PathItem } from './keys'
+import { keyItems, keyPreviewPoints, planKeys, type KeyPlan, type PathItem } from './keys'
 import { lapBounds, lapOperations, lapRect, planLaps, type Lap } from './laps'
 import { removals } from './removals'
 
@@ -246,6 +257,58 @@ const centreOf = (b: Bounds2): [number, number] => [
   (b.min[1] + b.max[1]) / 2,
 ]
 
+/**
+ * A cell's cut (4e) as a closed path item of the part frame: `intersect` on the piece outline's
+ * shape, before its keys. Lengths to 1 µm; an arc's radius rounded up, so it still spans its chord.
+ */
+function cutItem(cut: Region): PathItem {
+  const loop = cut.pieces[0]!.outer
+  const P = (p: readonly [number, number]): [number, number] => [micro(p[0]), micro(p[1])]
+  const segments: PathItem['segments'] = []
+  let at = P(loop.elements[0]!.a)
+  for (const e of loop.elements) {
+    const to = P(e.b)
+    if (Math.hypot(to[0] - at[0], to[1] - at[1]) < 1e-3) continue
+    segments.push(
+      e.kind === 'line'
+        ? { kind: 'line', to }
+        : {
+            kind: 'arc',
+            to,
+            radius: Math.ceil(arcRadius(e) * 1e6) / 1e6,
+            cw: !e.ccw,
+            large: Math.abs(arcSweep(e)) > Math.PI,
+          },
+    )
+    at = to
+  }
+  return { kind: 'path', op: 'intersect', start: P(loop.elements[0]!.a), segments, closed: true }
+}
+
+const micro = (v: number) => Math.round(v * 1e6) / 1e6
+
+/** A rectangle holding any centre (a general cell's drilling is placed by its cut, 4e). */
+const bigRect: Rect = { x0: -Infinity, x1: Infinity, y0: -Infinity, y1: Infinity }
+
+/**
+ * An operation's part-frame bounds against a cell's cut (4e): `inside` it, `miss` (not within its
+ * tool Ø of it) or `cross`.
+ */
+function cutRelation(
+  port: Region2dPort,
+  cut: Region,
+  b: Bounds2,
+  tool: number,
+): 'inside' | 'miss' | 'cross' {
+  const box = rectRegion({ x0: b.min[0], x1: b.max[0], y0: b.min[1], y1: b.max[1] })
+  const out = port.difference(box, cut)
+  if (out.isOk() && regionArea(out.unwrap()) < 1e-6) return 'inside'
+  const grown = port.offset(cut, -tool)
+  const meet = grown.isOk() ? port.intersect(box, grown.unwrap()) : undefined
+  if (meet !== undefined && meet.isOk() && regionArea(meet.unwrap()) < 1e-6) return 'miss'
+  return 'cross'
+}
+
 // ── mapping ───────────────────────────────────────────────────────────────────────────────
 
 interface Ctx {
@@ -258,6 +321,8 @@ interface Ctx {
   readonly split: ReturnType<typeof splitNumbers>
   readonly units: UnitSystem
   readonly footprintBounds: Bounds2
+  /** Every cell of the layout (4e: a drilling goes to the first cut holding its centre). */
+  readonly cells: readonly Cell[]
   readonly toolDiameter: (op: Operation) => number
   readonly finding: (op: Operation, key: string, message: string) => void
   /** The source's outline operation id (replaced by `<split>_outline` in each piece). */
@@ -594,7 +659,7 @@ function outlineOperation(
   outline: Extract<Operation, { kind: 'profile' }> | undefined,
   outlineDto: Extract<OperationDTO, { kind: 'profile' }> | undefined,
   outlineGeometry: Extract<OperationGeometry, { kind: 'profile' }> | undefined,
-  keys: readonly PathItem[],
+  keyItemsIn: readonly PathItem[],
   /** The cell grown over its half laps (4d), else the cell's own rectangle and bounds. */
   lap: { readonly rect: Rect; readonly bounds: Bounds2 } | undefined,
 ): AppResult<OperationDTO> {
@@ -602,6 +667,8 @@ function outlineOperation(
   const id = `${c.split.id}_outline`
   const delta: [number, number] = [offset[0], offset[1]]
   const rect = lap?.rect ?? cell.rect
+  // shape lines (4e): the cut, exact, before the keys
+  const keys = cell.cut === undefined ? keyItemsIn : [cutItem(cell.cut), ...keyItemsIn]
   let shape: OperationShapeDTO
   if (
     (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) &&
@@ -713,7 +780,28 @@ function mapOperation(
         g.kind === 'drilling' ? g.center[0] : 0,
         g.kind === 'drilling' ? g.center[1] : 0,
       ])
-      const { x0, x1, y0, y1 } = cell.rect
+      if (cell.cut !== undefined) {
+        // shape lines (4e): the first cell of the band whose cut holds the centre; a centre on a
+        // line (a cut holds its boundary) goes to the piece past it in +X, else +Y, as in 4a
+        const owner = [
+          [1e-3, 0],
+          [0, 1e-3],
+          [-1e-3, 0],
+          [0, -1e-3],
+          [0, 0],
+        ]
+          .map(([dx, dy]) =>
+            c.cells.find(
+              (k) =>
+                k.iz === cell.iz &&
+                k.cut !== undefined &&
+                regionContains(k.cut, [centre[0] + dx!, centre[1] + dy!]),
+            ),
+          )
+          .find((k) => k !== undefined)
+        if (owner !== cell) return Ok(undefined)
+      }
+      const { x0, x1, y0, y1 } = cell.cut === undefined ? cell.rect : bigRect
       const lastX = Math.abs(x1 - c.loaded.stock.length.canonical) < EPS
       const lastY = Math.abs(y1 - c.W) < EPS
       const inX =
@@ -744,8 +832,17 @@ function mapOperation(
       const region = shapeBounds(gs)
       const bounds = region === undefined ? undefined : partBounds(dir, c.W, region)
       if (bounds !== undefined && !overlaps(cell.rect, bounds)) return Ok(undefined)
+      // shape lines (4e): by the bounds against the cut; a crossing one clips to the cut's bounds
+      const vsCut =
+        cell.cut === undefined || bounds === undefined
+          ? undefined
+          : cutRelation(c.port, cell.cut, bounds, c.toolDiameter(op))
+      if (vsCut === 'miss') return Ok(undefined)
       let shape: OperationShapeDTO
-      if (bounds !== undefined && inside(bounds, cell.rect))
+      if (
+        bounds !== undefined &&
+        (vsCut === undefined ? inside(bounds, cell.rect) : vsCut === 'inside')
+      )
         shape = shiftedShape(base.shape, delta, c.units)
       else {
         const open = gs.shape.contour.kind === 'path'
@@ -937,6 +1034,10 @@ export function splitKeys(
   readonly outline: number | undefined
   /** Each piece's need by its number (4c): what a library stock must hold. */
   readonly needs: ReadonlyMap<number, readonly [number, number, number]>
+  /** With a shape line (4e): each piece's footprint in the top view, by its number (part frame). */
+  readonly outlines?: ReadonlyMap<number, readonly (readonly [number, number])[]>
+  /** With a shape line (4e): every line's path as points, by its index in `split.lines`. */
+  readonly paths?: ReadonlyMap<number, readonly (readonly [number, number])[]>
 }> {
   const input = toGeometryInput(loaded.part, loaded.stock, port)
   if (input.isErr()) return Err(input.unwrapErr().withContext('splitKeys'))
@@ -946,7 +1047,9 @@ export function splitKeys(
     width: loaded.stock.width.canonical,
     thickness: loaded.stock.thickness.canonical,
   }
-  const layout = splitLayout(port, splitNumbers(split), stock, loaded.part.operations, geometry)
+  const numbers = splitNumbersOf(port, split, loaded.dto.shapes, stock)
+  if (numbers.isErr()) return Err(numbers.unwrapErr().withContext('splitKeys'))
+  const layout = splitLayout(port, numbers.unwrap(), stock, loaded.part.operations, geometry)
   if (layout.isErr()) return Err(layout.unwrapErr().withContext('splitKeys'))
   const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
   const k = keysOf(
@@ -957,8 +1060,20 @@ export function splitKeys(
     (op) => tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
   )
   const margin = splitNumbers(split).margin
+  const paths = layout.unwrap().paths
   return Ok({
     ...k,
+    ...(paths === undefined
+      ? {}
+      : {
+          outlines: new Map(
+            layout.unwrap().cells.flatMap((c) => {
+              const outer = c.region.pieces[0]?.outer
+              return outer === undefined ? [] : [[c.n, chainPoints(outer.elements)] as const]
+            }),
+          ),
+          paths: new Map(paths.map((p) => [p.index, chainPoints(p.path.elements)] as const)),
+        }),
     outline: layout.unwrap().footprint.outline,
     needs: new Map(
       layout.unwrap().cells.map((c) => [c.n, cellNeed(c, k.keys, k.laps, margin).need]),
@@ -973,15 +1088,24 @@ export function splitKeys(
 function cellNeed(cell: Cell, keys: KeyPlan, laps: readonly Lap[], margin: number) {
   const knobs = keys.keys.filter((k) => k.male === cell)
   const reach = (axis: 'x' | 'y') =>
-    Math.max(0, ...knobs.filter((k) => k.axis === axis).map((k) => k.at + k.size.depth))
+    Math.max(0, ...knobs.filter((k) => k.axis === axis && !k.frame).map((k) => k.at + k.size.depth))
   // half laps (4d): the male's tongue past the line, the female's back over it
   const lap = lapRect(cell, laps)
   const grownMin = (v: number, r: number, cellR: number) => (r < cellR - EPS ? Math.min(v, r) : v)
   const grownMax = (v: number, r: number, cellR: number) => (r > cellR + EPS ? Math.max(v, r) : v)
-  const bx0 = round(grownMin(cell.bounds.min[0], lap.x0, cell.rect.x0))
-  const by0 = round(grownMin(cell.bounds.min[1], lap.y0, cell.rect.y0))
-  const bx1 = round(grownMax(Math.max(cell.bounds.max[0], reach('x')), lap.x1, cell.rect.x1))
-  const by1 = round(grownMax(Math.max(cell.bounds.max[1], reach('y')), lap.y1, cell.rect.y1))
+  let bx0 = round(grownMin(cell.bounds.min[0], lap.x0, cell.rect.x0))
+  let by0 = round(grownMin(cell.bounds.min[1], lap.y0, cell.rect.y0))
+  let bx1 = round(grownMax(Math.max(cell.bounds.max[0], reach('x')), lap.x1, cell.rect.x1))
+  let by1 = round(grownMax(Math.max(cell.bounds.max[1], reach('y')), lap.y1, cell.rect.y1))
+  // knobs on a path's segment (4e) reach any way: their outlines' bounds
+  for (const k of knobs)
+    if (k.frame !== undefined)
+      for (const p of keyPreviewPoints(k)) {
+        bx0 = Math.min(bx0, round(p[0]))
+        by0 = Math.min(by0, round(p[1]))
+        bx1 = Math.max(bx1, round(p[0]))
+        by1 = Math.max(by1, round(p[1]))
+      }
   const need = [
     round(bx1 - bx0 + 2 * margin),
     round(by1 - by0 + 2 * margin),
@@ -1014,12 +1138,14 @@ export function planPieces(
   const input = toGeometryInput(loaded.part, loaded.stock, port)
   if (input.isErr()) return Err(input.unwrapErr().withContext(where))
   const geometry = input.unwrap().operations
-  const numbers = splitNumbers(split)
   const stock = {
     length: loaded.stock.length.canonical,
     width: loaded.stock.width.canonical,
     thickness: loaded.stock.thickness.canonical,
   }
+  const nums = splitNumbersOf(port, split, loaded.dto.shapes, stock)
+  if (nums.isErr()) return Err(nums.unwrapErr().withContext(where))
+  const numbers = nums.unwrap()
   const layout = splitLayout(port, numbers, stock, loaded.part.operations, geometry)
   if (layout.isErr()) return Err(layout.unwrapErr().withContext(where))
   const fb = regionBounds(layout.unwrap().footprint.region) ?? {
@@ -1038,6 +1164,7 @@ export function planPieces(
     split: numbers,
     units: loaded.units,
     footprintBounds: fb,
+    cells: layout.unwrap().cells,
     outlineId: (() => {
       const at = layout.unwrap().footprint.outline
       return at === undefined ? undefined : loaded.part.operations[at]?.id

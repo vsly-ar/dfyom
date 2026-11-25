@@ -3,7 +3,7 @@
 // blanks and the preview's rectangles. Pure. Doc: docs/conventions/ui.md#split-part-split-parts-4a,
 // docs/modes/split-parts.md#ui-summary-design
 import { holds } from '../../../../core/design/split/blanks'
-import type { PartDTO, SplitDTO } from '../../../../core/design/part.dto'
+import { isShapeLine, type PartDTO, type SplitDTO } from '../../../../core/design/part.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 
 const mm = (q: { exact: { num: string; den: string } }): number =>
@@ -41,9 +41,13 @@ export interface DowelArgs {
   readonly holes?: readonly DowelHoleArgs[]
 }
 
+/** A split line's args: straight at a value, or along an open named shape (4e). */
+export type SplitLineArgs =
+  { readonly axis: 'x' | 'y'; readonly at: string } | { readonly shape: string }
+
 /** `design.split.set`'s `split` arg as sources. */
 export interface SplitArgs {
-  readonly lines: readonly { readonly axis: 'x' | 'y'; readonly at: string }[]
+  readonly lines: readonly SplitLineArgs[]
   readonly levels: readonly string[]
   readonly margin: string
   /** The lines' joint (4b-2 keys, 4d fingers and half laps); absent = butt lines. */
@@ -61,7 +65,9 @@ export function splitArgs(split: SplitDTO): SplitArgs {
   const kind = split.joint.kind
   const c = split.joint.clearance
   return {
-    lines: split.lines.map((l) => ({ axis: l.axis, at: l.at.source })),
+    lines: split.lines.map((l) =>
+      isShapeLine(l) ? { shape: l.shape } : { axis: l.axis, at: l.at.source },
+    ),
     levels: split.levels.map((q) => q.source),
     margin: split.margin.source,
     ...(kind === 'butt'
@@ -192,6 +198,8 @@ export interface SplitCut {
   readonly index: number
   readonly axis: 'x' | 'y' | 'z'
   readonly at: number
+  /** A shape line's shape (4e): its findings by the line's index. */
+  readonly shape?: string
 }
 
 /** A cut moved by a viewport drag in progress. */
@@ -206,12 +214,12 @@ export function splitCuts(split: SplitDTO, draft?: CutDraft | null): SplitCut[] 
   const moved = (kind: 'line' | 'level', index: number, at: number) =>
     draft != null && draft.kind === kind && draft.index === index ? draft.at : at
   return [
-    ...split.lines.map((l, i) => ({
-      kind: 'line' as const,
-      index: i,
-      axis: l.axis,
-      at: moved('line', i, mm(l.at)),
-    })),
+    // a shape line (4e) has no plane to drag
+    ...split.lines.flatMap((l, i) =>
+      isShapeLine(l)
+        ? []
+        : [{ kind: 'line' as const, index: i, axis: l.axis, at: moved('line', i, mm(l.at)) }],
+    ),
     ...split.levels.map((q, i) => ({
       kind: 'level' as const,
       index: i,
@@ -336,10 +344,46 @@ export function cutFindings<W extends { code: string; params?: Record<string, un
     if (w.code !== 'design.split' || w.params === undefined) return false
     const p = w.params
     if (cut.kind === 'level') return near(p['level']) || has(p['nearZ'])
+    // a shape line (4e) by its index; with one, straight lines' keys say their index too
+    if (cut.shape !== undefined || typeof p['line'] === 'number')
+      return (
+        p['line'] === cut.index ||
+        (Array.isArray(p['nearLines']) && p['nearLines'].includes(cut.index))
+      )
     return (
       (p['axis'] === cut.axis && near(p['at'])) || has(cut.axis === 'x' ? p['nearX'] : p['nearY'])
     )
   })
+}
+
+/**
+ * A first curved line (4e "Add curved line"): an open path across the stock along Y through its
+ * middle, with a bump of four tangent arcs (no sharp corner, so no inside corner on either piece).
+ */
+export function curvedLineSeed(L: number, W: number, units: 'mm' | 'inch') {
+  const r = Math.max(1, Math.round(Math.min(L, W) / 20))
+  const c = L / 2
+  const m = W / 2
+  const P = (x: number, y: number) => [cutSource(x, units), cutSource(y, units)]
+  const arc = (x: number, y: number, cw: boolean) => ({
+    kind: 'arc' as const,
+    to: P(x, y),
+    radius: cutSource(r, units),
+    cw,
+  })
+  return {
+    kind: 'path' as const,
+    start: P(c, 0),
+    segments: [
+      { kind: 'line' as const, to: P(c, m - 2 * r) },
+      arc(c - r, m - r, false),
+      arc(c - 2 * r, m, true),
+      arc(c - r, m + r, true),
+      arc(c, m + 2 * r, false),
+      { kind: 'line' as const, to: P(c, W) },
+    ],
+    closed: false,
+  }
 }
 
 /**

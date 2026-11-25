@@ -187,3 +187,71 @@ export function longPanelCommands(partId: string): [string, object][] {
     ],
   ] as [string, object][]
 }
+
+// ── the 4e exit part: a round table top split by a curved line ──────────────────────────────
+
+/**
+ * A round table top Ø 1200 mm of 25 mm oak (split parts 4e exit, docs/modes/split-parts.md#slices):
+ * a 1210 × 1210 board, larger than the 800 mm travel of the test machine, a circular outline, a
+ * through hole and a pocket crossing the curved line. Split by the curved line (TABLE_CURVE: two
+ * straight runs along Y and a bump of four tangent arcs) and the straight line y = 605, joined by keys: four pieces
+ * that fit the machine.
+ */
+export const TABLE_STOCK = {
+  name: 'Oak 1210 × 1210 × 25',
+  shape: 'block' as const,
+  length: '1210',
+  width: '1210',
+  thickness: '25',
+  material: { name: 'Oak', class: 'hardwood' as const },
+}
+
+/** The curved split line, an open path from the front edge to the back edge (part X, Y). */
+export const TABLE_CURVE = {
+  kind: 'path' as const,
+  start: ['605', '0'],
+  segments: [
+    { kind: 'line' as const, to: ['605', '300'] },
+    // a bump to X 485 and back, tangent throughout (no sharp inside corner on either piece)
+    { kind: 'arc' as const, to: ['545', '360'], radius: '60', cw: false },
+    { kind: 'arc' as const, to: ['485', '420'], radius: '60', cw: true },
+    { kind: 'arc' as const, to: ['545', '480'], radius: '60', cw: true },
+    { kind: 'arc' as const, to: ['605', '540'], radius: '60', cw: false },
+    { kind: 'line' as const, to: ['605', '1210'] },
+  ],
+  closed: false,
+}
+
+/** The straight line across the curved one. */
+export const TABLE_LINE = { axis: 'y' as const, at: '605' }
+
+/** The table's design commands; the curve is its first named shape, `shape1`. */
+export function tableCommands(partId: string): [string, object][] {
+  return [
+    ['design.drilling.add', { partId, center: ['300', '300'], diameter: '8', bottom: 'through' }],
+    [
+      'design.pocket.add',
+      {
+        partId,
+        shape: {
+          kind: 'rectangle',
+          center: ['590', '350'],
+          length: '60',
+          width: '40',
+          cornerRadius: '5',
+        },
+        depth: '5',
+      },
+    ],
+    [
+      'design.profile.add',
+      {
+        partId,
+        shape: { kind: 'circle', center: ['605', '605'], diameter: '1200' },
+        slotWidth: '6',
+        tabs: { count: '8', width: '6', thickness: '2' },
+      },
+    ],
+    ['design.shape.add', { partId, name: 'Split curve', items: [TABLE_CURVE] }],
+  ] as [string, object][]
+}

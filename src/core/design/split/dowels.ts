@@ -15,7 +15,7 @@ import { DOWEL_DEFAULT, DOWEL_SIZES, DOWEL_WALL_MIN, dowelDepthDefault, dowelHol
 import type { OperationDTO, SplitDTO } from '../part.dto'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
-import { EPS, regionBounds, splitLayout, splitNumbers, type Cell, type Layout } from './layout'
+import { EPS, regionBounds, splitLayout, splitNumbersOf, type Cell, type Layout } from './layout'
 import { removals, type Removal } from './removals'
 
 const mmOf = (q: { exact: { num: string; den: string } }) =>
@@ -414,7 +414,9 @@ export function splitGeometry(
     width: loaded.stock.width.canonical,
     thickness: loaded.stock.thickness.canonical,
   }
-  const layout = splitLayout(port, splitNumbers(split), stock, loaded.part.operations, geometry)
+  const numbers = splitNumbersOf(port, split, loaded.dto.shapes, stock)
+  if (numbers.isErr()) return Err(numbers.unwrapErr().withContext('splitGeometry'))
+  const layout = splitLayout(port, numbers.unwrap(), stock, loaded.part.operations, geometry)
   if (layout.isErr()) return Err(layout.unwrapErr().withContext('splitGeometry'))
   return Ok({
     layout: layout.unwrap(),
