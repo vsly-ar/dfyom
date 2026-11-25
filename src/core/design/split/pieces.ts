@@ -9,7 +9,7 @@
 import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import type { Region2dPort } from '../../geometry/2d/port'
 import { chainBounds, type Bounds2 } from '../../geometry/2d/model'
-import type { DfmWarning, OperationGeometry } from '../../geometry/model'
+import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
 import { fieldContext, type Operation } from '../operation'
@@ -261,12 +261,18 @@ interface Ctx {
   readonly outlineId: string | undefined
 }
 
-function zRange(c: Ctx, op: Operation, g: OperationGeometry): ZRange | undefined {
+/**
+ * The operation's extent in part-frame z. `bevel`: a loop chamfer's real bevel, from the
+ * material top at its edge (`onZ`, below a faced stock face, edge-chamfers.md E2) instead of its
+ * `on` face: what the split's findings check (E3); the mapping keeps the `on` face's range.
+ */
+function zRange(c: Ctx, op: Operation, g: OperationGeometry, bevel = false): ZRange | undefined {
   const dir = g.direction ?? '+z'
   if (dir !== '+z' && dir !== '-z') return undefined
   const entry = c.table.get(op.on)
   if (entry.isNone()) return undefined
-  const faceZ = entry.unwrap().faceZ.toNumber()
+  const faceZ =
+    bevel && g.kind === 'chamfer' && isLoopChamfer(g) ? g.onZ : entry.unwrap().faceZ.toNumber()
   const zOn = dir === '+z' ? faceZ : -c.T - faceZ
   let depth = 0
   let through = false
@@ -769,7 +775,13 @@ function mapOperation(
         edge !== undefined &&
         (edge.on ?? STOCK_FACE[dir]) === STOCK_FACE[dir]
       if (!atFace && (z.fromFace || !b.sameOn.has(edgeOf))) return Ok(undefined)
-      if (z.capped || (r.dir === '+z' ? r.zlo < cell.band.zb - EPS : r.zhi > cell.band.zt + EPS))
+      // a loop chamfer's bevel lies on the faced top (E3: its real range, not its `on` face's)
+      const rb = g.kind === 'chamfer' && isLoopChamfer(g) ? (zRange(c, op, g, true) ?? r) : r
+      if (
+        z.capped ||
+        (r.dir === '+z' ? rb.zlo < cell.band.zb - EPS : rb.zhi > cell.band.zt + EPS) ||
+        (rb !== r && (rb.zhi > cell.band.zt + EPS || rb.zlo < cell.band.zb - EPS))
+      )
         c.finding(op, `cone:${op.id}`, `${op.name} is cut by a split level`)
       const ch: OperationDTO & { kind: 'chamfer' } = {
         ...base,

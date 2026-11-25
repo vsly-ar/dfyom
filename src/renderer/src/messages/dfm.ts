@@ -182,6 +182,11 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
         p['width'] !== undefined
         ? `The library has no ${num(p['angle'])}° chamfer mill with a cutting edge for a ${L(p['width'])} bevel.`
         : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
+  // edge chamfers E3 (edge-chamfers.md § DFM findings)
+  'dfm.chamferMeets': (p, L) =>
+    `The bevels meet on a ${L(p['wall'])} wall: its top becomes a ridge. Use a width of at most ${L(num(p['wall']) / 2)}.`,
+  'dfm.chamferIncomplete': (p, L, name) =>
+    `The ${L(p['tipDiameter'])} tip of the ${String(p['tool'])} does not fit where the air beside ${name.item(String(p['edgeOf']))} is narrower: ${L(p['length'])} of its edge is not chamfered fully.`,
 }
 
 /** Why a split cuts a feature (`params.reason` of `design.split` rule `cutsFeature`). */
@@ -192,6 +197,8 @@ const CUTS: Readonly<Record<string, string>> = {
   fillet: 'A split level cuts its floor fillet, which neither piece can make.',
   cone: 'A split level cuts its cone, which neither piece can make.',
   sideFace: 'It is on a side face: pieces do not take side-face operations yet.',
+  chamferKey:
+    'Its bevel runs past the split line along the outline and nicks a key: use a narrower chamfer or move the key.',
 }
 
 /**

@@ -268,4 +268,18 @@ describe('edge chamfers in a plan (E2, outside edges)', () => {
     const alongLine = cuts.filter((p) => p[0] > 125 + dx - 5 && p[1] > 30 + dy && p[1] < 170 + dy)
     expect(alongLine).toEqual([])
   })
+
+  it('E3: a split level is checked against the bevel on the faced top, not the stock top', async () => {
+    const { s } = await enclosurePlan()
+    const cone = async (level: string) => {
+      const r = (await s.run('design.split.set', {
+        partId: s.partId,
+        split: { levels: [level] },
+      })) as { findings: { message: string; params: Record<string, unknown> }[] }
+      return r.findings.filter((f) => f.params['reason'] === 'cone')
+    }
+    // the bevel runs −9.738 … −11.238: a level at −1 misses it (the `on` face's range said cut)
+    expect(await cone('-1')).toEqual([])
+    expect((await cone('-10.5')).map((f) => f.params['operationId'])).toEqual(['chamfer1'])
+  })
 })

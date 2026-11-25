@@ -32,6 +32,18 @@ export const chamferMessages = {
     edgeBottom: string
   }) =>
     `Section: chamfer ${p.width} wide at ${p.angle} (Ø ${p.diameter}), ${p.depth} deep, on ${p.edgeName} Ø ${p.edgeDiameter} ${p.edgeBottom}.`,
+  /** A general edge's section (edge chamfers E3): one wall with its bevel, no diameter. */
+  wallSectionLabel: (p: {
+    width: string
+    angle: string
+    depth: string
+    edgeName: string
+    side: 'inside' | 'outside'
+    edgeBottom: string
+  }) =>
+    `Section: chamfer ${p.width} wide at ${p.angle}, ${p.depth} deep, along ${p.side === 'outside' ? 'the outline of' : 'the wall of'} ${p.edgeName}, ${p.edgeBottom}.`,
+  /** An Edge option for a general edge (E3): "Profile 1 · outline", "Pocket 2 · rim". */
+  edgeLoopOption: (name: string, role: 'rim' | 'opening' | 'outline') => `${name} · ${role}`,
   edgeThrough: 'through',
   edgeDeep: (depth: string) => `${depth} deep`,
 } as const

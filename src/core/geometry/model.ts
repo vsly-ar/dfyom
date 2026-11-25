@@ -399,6 +399,9 @@ export const DFM_WARNING_CODES = [
   // chamfer operation (v0.4): docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
   'dfm.chamferTooDeep',
   'dfm.chamferNoTool',
+  // edge chamfers (E3): docs/modes/edge-chamfers.md#dfm-findings
+  'dfm.chamferMeets',
+  'dfm.chamferIncomplete',
   // Clones features (v0.4 F5; `operation` = the feature id): docs/modes/features.md#checks-and-dfm
   'dfm.cloneOutsideStock',
   'dfm.cloneDuplicate',

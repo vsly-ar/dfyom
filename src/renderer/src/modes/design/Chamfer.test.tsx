@@ -240,10 +240,22 @@ describe('chamfer UI (U4)', () => {
     await waitFor(() => expect(chamfer()).toBeDefined())
     expect(chamfer().edgeOf).toBe(part().operations[0]!.id)
     const edge = within(inspector()).getByRole('combobox', { name: 'Edge' })
-    expect(edge).toHaveTextContent(/^Pocket 1$/)
+    // E3: the edge by name and role
+    expect(edge).toHaveTextContent(/^Pocket 1 · rim$/)
     expect(input('Width').value).toMatch(/^0\.5/)
     expect(input('Depth').value).toMatch(/^0\.5/)
     expect(within(inspector()).queryByLabelText('Diameter', { selector: 'input' })).toBeNull()
+    // E3: the wall section, no diameter in it
+    const section = within(inspector()).getByRole('img', { name: /^Section: chamfer/ })
+    expect(section).toHaveAccessibleName(
+      'Section: chamfer 0.5 mm wide at 90°, 0.5 mm deep, along the wall of Pocket 1, 4 mm deep.',
+    )
+    expect(document.querySelector('[data-part="diameter"]')).toBeNull()
+    await user.click(input('Angle'))
+    await waitFor(() =>
+      expect(document.querySelector('[data-part="angle"]')).toHaveAttribute('data-state', 'active'),
+    )
+    await expectNoAxeViolations()
   })
 
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {

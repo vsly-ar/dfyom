@@ -31,6 +31,7 @@ import {
   isLoopChamfer,
   loopChamferDepth,
   type CircleChamferGeometry,
+  type LoopChamferGeometry,
   CHORD_TOLERANCE,
   EPSILON,
   type DfmSuggestion,
@@ -52,6 +53,7 @@ import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
+import { chamferIncomplete, chamferMeets } from './chamfer-findings'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -200,7 +202,7 @@ export function parameterChecks(
         ]
       case 'chamfer':
         return [
-          ...chamfer(op, input.operations, stock, input.stock, lib),
+          ...chamfer(op, input.operations, stock, input.stock, lib, options.region2d, own),
           ...reach(op, stock, lib, own, options.unitSystem),
           ...tool,
         ]
@@ -624,6 +626,8 @@ function chamfer(
   stock: StockGeometry,
   partStock: StockGeometry,
   lib: Library,
+  port?: Region2dPort,
+  own?: OperationTool,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   const edge = all.find((o) => o.id === op.edgeOf)
@@ -685,6 +689,7 @@ function chamfer(
         { suggestion: atMost(limit.width) },
       ),
     )
+  if (loop && port !== undefined) out.push(...loopChamferFindings(op, port, own))
   if (!lib.empty && candidates(op, lib).length === 0 && loop)
     out.push(
       warning(
@@ -710,6 +715,52 @@ function chamfer(
           edgeDiameter: op.edgeDiameter,
           // F7: a stepped chamfer needs a flat end mill smaller than the edge
           ...(op.stepdown !== undefined && { stepped: 1 }),
+        },
+      ),
+    )
+  return out
+}
+
+/**
+ * Edge chamfer findings (edge-chamfers.md § DFM findings, E3): `dfm.chamferMeets` (parameter
+ * `width`, suggests the widest bevel that keeps the wall's top) and `dfm.chamferIncomplete` for the
+ * operation's own chamfer mill with a tip (parameter `tool`), markers at `at` / `points`.
+ */
+function loopChamferFindings(
+  op: LoopChamferGeometry,
+  port: Region2dPort,
+  own: OperationTool | undefined,
+): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const meet = chamferMeets(op, port)
+  if (meet !== undefined)
+    out.push(
+      warning(
+        'dfm.chamferMeets',
+        op,
+        'width',
+        `the bevels meet at the ${mm(meet.wall)} wall near ${point(meet.at)}: its top becomes a ridge`,
+        { at: meet.at, points: meet.points, wall: meet.wall, width: op.width },
+        { suggestion: atMost(meet.wall / 2) },
+      ),
+    )
+  const tip = own?.tool.type === 'chamferMill' ? (own.tool.tipDiameter ?? 0) : 0
+  const miss = own === undefined ? undefined : chamferIncomplete(op, port, tip)
+  if (miss !== undefined && own !== undefined)
+    out.push(
+      warning(
+        'dfm.chamferIncomplete',
+        op,
+        'tool',
+        `the ${mm(tip)} tip of the ${own.label} does not reach ${mm(miss.length)} of ${op.edgeOf}'s ` +
+          `edge near ${point(miss.at)} (the air there is narrower than the tip)`,
+        {
+          at: miss.at,
+          points: miss.points,
+          length: miss.length,
+          tipDiameter: tip,
+          tool: own.label,
+          edgeOf: op.edgeOf,
         },
       ),
     )
