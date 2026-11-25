@@ -1437,7 +1437,7 @@ const operationList = defineQuery({
           .number()
           .nullable()
           .describe(
-            'mm; a through profile: the material it cuts through below the stock face (less what an earlier setup cleared under its slot from the opposite face). Cut depth = throughDepth + strategy.breakthrough; to cut to depth D set breakthrough = D − throughDepth. Null otherwise',
+            'mm; a through profile or pocket: the material it cuts through below the stock face (less what an earlier setup cleared under it from the opposite face). Cut depth = throughDepth + strategy.breakthrough; to cut to depth D set breakthrough = D − throughDepth. Null otherwise',
           ),
       }),
     ),

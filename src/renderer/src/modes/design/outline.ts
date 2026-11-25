@@ -195,6 +195,43 @@ export function patternAreaLoops(
   return area.pieces.flatMap((p) => [p.outer, ...p.holes]).map((l) => chainPoints(l.elements, at))
 }
 
+/** The thin-web marker's radius (mm): a small ring round the narrowest web (patterns P5). */
+export const PATTERN_WEB_MARKER = 1.5
+
+/**
+ * Everything a selected pattern draws dashed on its face (patterns P2, P5): the area, the ghosts
+ * (cells left out at the border, whole) and a ring round the thinnest web (`dfm.patternThinWeb`'s
+ * marker), all in the part frame.
+ */
+export function patternGuideLoops(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  facts: {
+    readonly area: Region
+    readonly ghosts?: Region | undefined
+    readonly web?: { readonly at: readonly [number, number] } | undefined
+  },
+): OutlineLoop[] {
+  const face = operationFace(op, stock, table)
+  const at = (u: number, v: number): Vec3 => toPartFrame(face.frame, [u, v, face.w])
+  const ghosts = (facts.ghosts?.pieces ?? []).map((p) => chainPoints(p.outer.elements, at))
+  const web = facts.web?.at
+  const ring =
+    web === undefined
+      ? []
+      : [
+          Array.from({ length: 24 }, (_, i) => {
+            const t = (i / 24) * 2 * Math.PI
+            return at(
+              web[0] + PATTERN_WEB_MARKER * Math.cos(t),
+              web[1] + PATTERN_WEB_MARKER * Math.sin(t),
+            )
+          }),
+        ]
+  return [...patternAreaLoops(op, stock, table, facts.area), ...ghosts, ...ring]
+}
+
 const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>
   loops.map((l) => {
     const out = l.map((p) => toPartFrame(face.frame, p))

@@ -9,6 +9,7 @@
  */
 import { toGeometryInput } from '../design/geometry-input'
 import type { Operation } from '../design/operation'
+import { SurfaceTable } from '../design/surfaces'
 import type { Region2dPort } from '../geometry/2d/port'
 import { materialBands, throughDepths, type MaterialCover } from '../geometry/through-depth'
 import type { LoadedPlan } from './plan'
@@ -83,8 +84,9 @@ export function planMaterialBands(
 }
 
 /**
- * The material a through profile cuts below its stock face (mm; DF23, DF50): its through depth in
- * this plan, else the stock thickness. Null for a blind groove or another kind.
+ * The material a through profile or (patterns P4) a through pocket cuts below its stock face (mm;
+ * DF23, DF50): its through depth in this plan, else the stock thickness (a through pocket: its
+ * floor below the stock face, the material below its `on`). Null for a blind cut or another kind.
  */
 export function planThroughDepth(
   plan: LoadedPlan,
@@ -92,7 +94,14 @@ export function planThroughDepth(
   port?: Region2dPort,
 ): number | null {
   const op = ops[0]
-  if (op === undefined || !ops.every((o) => o.kind === 'profile' && o.depth.isNone())) return null
-  // a profile plan operation machines one profile; the stock thickness as the checks count it
-  return planThroughDepths(plan, port).get(op.id) ?? plan.stock.thickness.canonical
+  if (op === undefined) return null
+  const profiles = ops.every((o) => o.kind === 'profile' && o.depth.isNone())
+  const pockets = ops.every((o) => o.kind === 'pocket' && o.through === true)
+  if (!profiles && !pockets) return null
+  // a plan operation machines one profile or pocket; the depth as the checks count it
+  const known = planThroughDepths(plan, port).get(op.id)
+  if (known !== undefined) return known
+  if (op.kind !== 'pocket') return plan.stock.thickness.canonical
+  const floor = SurfaceTable.of(plan.part.operations, plan.stock).get(`${op.id}.floor`)
+  return floor.mapOr(plan.stock.thickness.canonical, (e) => -e.faceZ.toNumber() + 0)
 }

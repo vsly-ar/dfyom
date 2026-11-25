@@ -26,7 +26,7 @@ import {
   markerPoint,
   operationFace,
   operationOutline,
-  patternAreaLoops,
+  patternGuideLoops,
   surfaceAxes,
 } from './outline'
 import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
@@ -168,7 +168,8 @@ export function useDesignScene(): SceneProps {
   }, [part])
 
   const ops = part?.loaded?.part.operations
-  // a selected pattern shows its pocket's outline (the cells) and its area dashed (patterns P2)
+  // a selected pattern shows its pocket's outline (the cells) and its area dashed (patterns P2),
+  // with the cells left out at the border as dashed ghosts and a ring at the thinnest web (P5)
   const pattern = part?.dto.features?.find((f) => f.id === selected && f.kind === 'pattern')
   const selectedOp = ops?.find(
     (o) => o.id === selected || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
@@ -204,7 +205,8 @@ export function useDesignScene(): SceneProps {
     let guide: readonly OutlineLoop[] | null = null
     if (pattern !== undefined && port !== undefined) {
       const facts = patternFacts(pattern.id, part.dto.shapes ?? [], port)
-      if (facts !== undefined) guide = patternAreaLoops(selectedOp, s, table, facts.area)
+      // the area, the ghosts left out at the border and the thinnest web's ring (P2, P5)
+      if (facts !== undefined) guide = patternGuideLoops(selectedOp, s, table, facts)
     } else if (rotationGuide === selectedOp.id && outline.length > 0) {
       const top = outline[0]!.map((p) => unapplyPlacement(face.frame, p))
       const us = top.map((p) => p[0])

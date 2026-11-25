@@ -229,11 +229,15 @@ export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | 
 /**
  * The stock face a bottom chamfer (edge-chamfers.md E4b) sits on: the face opposite a **through**
  * `outside` / `inside` profile's own (non-circular: a `loop` edge) stock face; undefined for any
- * other edge (circles, pockets, blind profiles, drillings keep the top edge only).
+ * other edge (circles, blind pockets, blind profiles, drillings keep the top edge only). Patterns
+ * P5: a **through pocket** (a pattern's through cells) on a stock face has one too.
  */
 export function bottomEdgeFace(edge: Operation | undefined): string | undefined {
-  if (edge?.kind !== 'profile' || edge.depth.isSome() || chamferEdgeKind(edge) !== 'loop')
-    return undefined
+  const through =
+    edge?.kind === 'pocket'
+      ? edge.through === true
+      : edge?.kind === 'profile' && edge.depth.isNone() && chamferEdgeKind(edge) === 'loop'
+  if (edge === undefined || !through) return undefined
   const d = stockFaceDirection(edge.on)
   return d === undefined ? undefined : STOCK_FACE[oppositeDirection(d)]
 }

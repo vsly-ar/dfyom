@@ -59,10 +59,16 @@ const OPPOSITE: Readonly<Record<string, string>> = {
 
 /**
  * The face a bottom chamfer of `op` sits on (E4b, the core's `bottomEdgeFace`): the stock face
- * opposite a through, non-round outside/inside profile's; undefined for any other edge.
+ * opposite a through, non-round outside/inside profile's or (patterns P5) a through pocket's;
+ * undefined for any other edge.
  */
 export function bottomEdgeFaceDto(op: OperationDTO | undefined): string | undefined {
-  if (op?.kind !== 'profile' || op.depth !== undefined || !isLoopEdge(op)) return undefined
+  // patterns P5: a through pocket (a pattern's through cells) has one too
+  const through =
+    op?.kind === 'pocket'
+      ? op.through === true
+      : op?.kind === 'profile' && op.depth === undefined && isLoopEdge(op)
+  if (op === undefined || !through) return undefined
   return OPPOSITE[op.on ?? 'stock.top']
 }
 
