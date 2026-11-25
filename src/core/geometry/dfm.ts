@@ -765,7 +765,8 @@ function loopChamferFindings(
   own: OperationTool | undefined,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
-  const meet = chamferMeets(op, port)
+  // patterns P3: between a pattern's cells it is the pattern's finding (patternWeb)
+  const meet = op.edge.pattern === true ? undefined : chamferMeets(op, port)
   if (meet !== undefined)
     out.push(
       warning(

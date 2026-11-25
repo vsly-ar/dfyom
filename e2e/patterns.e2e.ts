@@ -1,8 +1,9 @@
 // Patterns P1 in the built app: Add → Features → Pattern adds a pattern feature with the defaults
 // on the stock top, the minimal inspector shows the cell read-out, and its Lattice and Cell
 // fields update the pattern (one `design.pattern.update` each). P2: a preset, the Polar lattice,
-// Clip and Invert. Windows stay hidden (app.fixture.ts).
-// Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, docs/conventions/ui.md
+// Clip and Invert. P3: the Chamfer switch and its width. Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, #implementation-p3,
+// docs/conventions/ui.md
 import type { Locator } from '@playwright/test'
 import { expect, test } from './app.fixture'
 
@@ -79,4 +80,17 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await invert.click()
   await expect(invert).toBeChecked()
   await expect(readout).toHaveText(/^\d+ cells/)
+
+  // ── P3: the chamfer round every island, then narrower ──────────────────────────────────────
+  const chamfer = inspector.getByRole('switch', { name: 'Chamfer every cell' })
+  await expect(chamfer).not.toBeChecked()
+  await chamfer.click()
+  await expect(chamfer).toBeChecked()
+  const width = inspector
+    .getByLabel('Chamfer width', { exact: true })
+    .and(inspector.locator('input'))
+  await expect(width).toHaveValue(/0\.5/)
+  await setField(inspector, 'Chamfer width', '0.3')
+  await expect(width).toHaveValue(/0\.3/)
+  await expect(inspector.locator('[data-feature-field="chamfer.tool"]')).toBeVisible()
 })

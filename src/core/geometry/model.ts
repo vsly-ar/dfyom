@@ -295,6 +295,13 @@ export interface LoopChamferEdge {
    * Doc: docs/modes/edge-chamfers.md#implementation-e4b
    */
   readonly tabs?: readonly LoopChamferTab[]
+  /**
+   * Patterns P3: the edge is a pattern's cells (its owned pocket). The bevels meeting between two
+   * cells are the pattern's finding (`patternWeb` at twice the width, exact for the lattice), not
+   * the region-wide `chamferMeets`, which is slow on hundreds of cells.
+   * Doc: docs/modes/patterns.md#implementation-p3
+   */
+  readonly pattern?: true
 }
 
 /** A tab a bottom chamfer stops short of (E4b): its centre on the edge and width along it. */

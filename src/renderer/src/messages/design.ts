@@ -42,7 +42,7 @@ export const designMessages = {
     /** Patterns P1 (patterns.md § UI). */
     addPattern: 'Pattern',
     pattern: {
-      groups: { cell: 'Cell', layout: 'Layout', area: 'Area', cut: 'Cut' },
+      groups: { cell: 'Cell', layout: 'Layout', area: 'Area', cut: 'Cut', chamfer: 'Chamfer' },
       cell: 'Cell',
       cells: {
         circle: 'Circle',
@@ -102,6 +102,12 @@ export const designMessages = {
       } as Record<string, string>,
       depth: 'Depth',
       tool: 'Tool',
+      chamfer: 'Chamfer every cell',
+      chamferWidth: 'Chamfer width',
+      chamferAngle: 'Chamfer angle',
+      chamferTool: 'V-bit',
+      chamferNote:
+        'An edge chamfer round every cell (inverted: every island), cut after the pocket.',
       readout: (cells: number) => (cells === 1 ? '1 cell' : `${cells} cells`),
       /** "84 cells · web 1.2 mm · 6 slivers dropped" (the inspector's read-out, P2). */
       readoutFull: (cells: number, web: string | undefined, dropped: number) =>

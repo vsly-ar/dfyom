@@ -2,7 +2,8 @@
 // and Presets, then the groups Cell (kind with thumbnails, its sizes, rotation), Layout (lattice
 // incl. Polar, gap or pitch, angle, origin: empty = the area's centre), Area (On, the boundary:
 // Whole face or a closed shape with its centre and rotation, margin, Whole/Clip, Invert), Cut
-// (depth, the pocket's tool). Every edit is one `design.pattern.update` (one undo step); errors
+// (depth, the pocket's tool), Chamfer (P3: a switch, then width, angle and the chamfer's tool).
+// Every edit is one `design.pattern.update` (one undo step); errors
 // and findings show at their field, the rest under Findings.
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1
 import { useMemo, useState } from 'react'
@@ -163,6 +164,7 @@ export function PatternInspector({
     'fit',
     'invert',
     'depth',
+    'chamfer',
     'tool',
   ])
   const unplaced = findings.filter((w) => {
@@ -233,6 +235,9 @@ export function PatternInspector({
     k === 'sides' ? p.sides : k === 'cornerRadius' ? p.cornerRadius : (p[k as 'length'] ?? k)
 
   const gap = spacing.gap !== undefined
+  const chamfer = feature['chamfer'] as { width: QuantityDTO; angle: QuantityDTO } | undefined
+  const pocketOp = owned.find((o) => o.id === `${feature.id}_pocket`)
+  const chamferOp = owned.find((o) => o.id === `${feature.id}_chamfer`)
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -486,16 +491,50 @@ export function PatternInspector({
 
         <Group title={p.groups.cut}>
           {quantityField('depth', p.depth, 'length', feature['depth'], (depth) => ({ depth }))}
-          {owned.map((op) => (
-            <div key={op.id} data-feature-field="tool">
+          {pocketOp === undefined ? null : (
+            <div data-feature-field="tool">
               <ToolField
                 part={part}
-                op={op}
-                warnings={warnings.warnings.filter((w) => w.operation === op.id)}
+                op={pocketOp}
+                warnings={warnings.warnings.filter((w) => w.operation === pocketOp.id)}
                 label={p.tool}
               />
             </div>
-          ))}
+          )}
+        </Group>
+
+        <Group title={p.groups.chamfer}>
+          <div data-feature-field="chamfer">
+            <Field label={p.chamfer} kind="toggle" messages={messagesAt('chamfer')}>
+              <Switch
+                label={p.chamfer}
+                hideLabel
+                checked={chamfer !== undefined}
+                onCheckedChange={(on) => void update({ chamfer: on ? {} : null }, 'chamfer')}
+              />
+            </Field>
+            <p className={styles['muted']}>{p.chamferNote}</p>
+          </div>
+          {chamfer === undefined
+            ? null
+            : [
+                quantityField('chamfer.width', p.chamferWidth, 'length', chamfer.width, (w) => ({
+                  chamfer: { width: w },
+                })),
+                quantityField('chamfer.angle', p.chamferAngle, 'angle', chamfer.angle, (a) => ({
+                  chamfer: { angle: a },
+                })),
+              ]}
+          {chamferOp === undefined ? null : (
+            <div data-feature-field="chamfer.tool">
+              <ToolField
+                part={part}
+                op={chamferOp}
+                warnings={warnings.warnings.filter((w) => w.operation === chamferOp.id)}
+                label={p.chamferTool}
+              />
+            </div>
+          )}
         </Group>
 
         {unplaced.length > 0 ? (

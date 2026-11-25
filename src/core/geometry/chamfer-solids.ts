@@ -42,7 +42,9 @@ import {
   type LiftCorner,
 } from './outline'
 import { flattenLoop, type Triangulate } from './prism'
+import { translateRegion } from './2d/place'
 import {
+  chainBounds,
   regionArea,
   regionLoops,
   reverseLoop,
@@ -156,7 +158,10 @@ export function loopChamferSolids(
   })
 }
 
-/** The sweep of every loop: one offset-loft, else the swept chords. */
+/**
+ * The sweep of every loop: one offset-loft, else the swept chords. An inside edge of several
+ * pieces (a pattern's cells, patterns P3) is lofted and checked piece by piece (`pieceMeshes`).
+ */
 function sweepMeshes(
   sweep: ChamferSweep,
   levels: readonly LoftLevel[],
@@ -164,8 +169,329 @@ function sweepMeshes(
   ctx: ChamferSolidsContext,
   band: boolean,
 ): AppResult<LabelledMesh[]> {
+  if (!band && sweep.path.pieces.length > 1) return pieceMeshes(sweep, levels, label, ctx)
   const loft = loopLoft(sweep.path, levels, label, ctx, band)
   return loft.isOk() ? Ok([loft.unwrap()]) : sweptChords(sweep, label)
+}
+
+// ── piece by piece (patterns P3) ─────────────────────────────────────────────────────────────
+
+/** One piece's loft in its own frame (its box corner at the origin): rings per level and caps. */
+interface PieceLoft {
+  /** Per level, the piece's rings (outer, then its holes). */
+  readonly rings: readonly (readonly Vec2[])[][]
+  readonly capB: Uint32Array
+  readonly capT: Uint32Array
+}
+
+/** What `pieceMeshes` did (tests, perf): pieces lofted, pieces swept, meshes, distinct pieces. */
+export interface PieceStats {
+  readonly lofted: number
+  readonly fallback: number
+  readonly meshes: number
+  readonly groups: number
+}
+
+/**
+ * A path of several pieces (patterns.md § Chamfer, spike S8): the loft is built and checked
+ * against the 2D port **per piece**, never per region or per group of pieces (one cell whose
+ * offset changes structure would send every cell to the fallback). Pieces that are translated
+ * copies of one another (a pattern's cells) share one loft, check and cap triangulation. Pieces
+ * whose bevels meet (their paths nearer than twice the face radius) must not share a mesh (it
+ * would self-intersect), so the pieces are coloured greedily over that graph: every piece that
+ * meets none goes into the first mesh, and each mesh holds pieces that are pairwise apart. The
+ * meshes are unioned in the kernel by the evaluation. A piece whose own offset changes structure
+ * is swept chord by chord, alone.
+ */
+function pieceMeshes(
+  sweep: ChamferSweep,
+  levels: readonly LoftLevel[],
+  label: number,
+  ctx: ChamferSolidsContext,
+  stats?: { value?: PieceStats },
+): AppResult<LabelledMesh[]> {
+  const pieces = sweep.path.pieces
+  // 1. group the pieces by their geometry less their box corner
+  const keys = new Map<string, number>()
+  const reps: Region[] = []
+  const groupOf: number[] = []
+  const origins: Vec2[] = []
+  const boxes: { min: Vec2; max: Vec2 }[] = []
+  for (const p of pieces) {
+    const b = chainBounds(p.outer.elements)!
+    const o = b.min
+    const local: Region = translateRegion({ pieces: [p] }, [-o[0], -o[1]])
+    const key = regionKey(local)
+    let g = keys.get(key)
+    if (g === undefined) {
+      keys.set(key, (g = reps.length))
+      reps.push(local)
+    }
+    groupOf.push(g)
+    origins.push(o)
+    boxes.push(b)
+  }
+  // 2. one loft (or none: the fallback) per group
+  const lofts: (PieceLoft | undefined)[] = []
+  for (const r of reps) {
+    const l = pieceLoft(r, levels, ctx)
+    lofts.push(l.isOk() ? l.unwrap() : undefined)
+  }
+  // 3. which pieces' bevels meet: grown boxes on a bucket grid, then the paths' distance
+  const reach = sweep.faceRho + 2 * CHORD_TOLERANCE + 1e-6
+  const flat = reps.map((r) => regionLoops(r).map((l) => flattenLoop(l, 'shrink').points))
+  const meets = new Map<string, boolean>()
+  const near = (i: number, j: number): boolean => {
+    const d: Vec2 = [origins[j]![0] - origins[i]![0], origins[j]![1] - origins[i]![1]]
+    const k = `${groupOf[i]},${groupOf[j]},${Math.round(d[0] * 1e6)},${Math.round(d[1] * 1e6)}`
+    let m = meets.get(k)
+    if (m === undefined) {
+      m = ringsWithin(flat[groupOf[i]!]!, flat[groupOf[j]!]!, d, 2 * reach)
+      meets.set(k, m)
+    }
+    return m
+  }
+  const neighbours = boxNeighbours(boxes, reach, near)
+  // 4. greedy colouring: one mesh per colour
+  const colour = new Int32Array(pieces.length).fill(-1)
+  const members: number[][] = []
+  const swept: number[] = []
+  for (let i = 0; i < pieces.length; i++) {
+    if (lofts[groupOf[i]!] === undefined) {
+      swept.push(i)
+      continue
+    }
+    const used = new Set<number>()
+    for (const j of neighbours[i]!) if (colour[j]! >= 0) used.add(colour[j]!)
+    let c = 0
+    while (used.has(c)) c++
+    colour[i] = c
+    ;(members[c] ??= []).push(i)
+  }
+  const out: LabelledMesh[] = []
+  for (const m of members)
+    out.push(
+      piecesMesh(
+        m.map((i) => ({ loft: lofts[groupOf[i]!]!, at: origins[i]! })),
+        levels,
+        label,
+      ),
+    )
+  for (const i of swept) {
+    const s = sweptChords({ ...sweep, path: { pieces: [pieces[i]!] } }, label)
+    if (s.isErr()) return s
+    out.push(...s.unwrap())
+  }
+  if (stats !== undefined)
+    stats.value = {
+      lofted: pieces.length - swept.length,
+      fallback: swept.length,
+      meshes: out.length,
+      groups: reps.length,
+    }
+  return Ok(out)
+}
+
+/** A key of a region's geometry (to 10⁻⁶ mm): equal keys are the same piece. */
+function regionKey(r: Region): string {
+  const n = (x: number) => Math.round(x * 1e6)
+  const p = (v: Vec2) => `${n(v[0])},${n(v[1])}`
+  return regionLoops(r)
+    .map((l) =>
+      l.elements
+        .map((e) =>
+          e.kind === 'line'
+            ? `l${p(e.a)},${p(e.b)}`
+            : `a${p(e.a)},${p(e.b)},${p(e.centre)},${e.ccw ? 1 : 0}`,
+        )
+        .join(';'),
+    )
+    .join('|')
+}
+
+/** One piece's loft rings and caps, checked per level against the 2D port, or why not. */
+function pieceLoft(
+  piece: Region,
+  levels: readonly LoftLevel[],
+  ctx: ChamferSolidsContext,
+): AppResult<PieceLoft> {
+  const loops = regionLoops(piece)
+  const rhoMax = Math.max(...levels.map((l) => l.rho))
+  const plans = loops.map((l) => planFor(l, -rhoMax, CHORD_TOLERANCE))
+  const rings: Vec2[][][] = []
+  let checked = -1
+  for (const lv of levels) {
+    const rs: Vec2[][] = []
+    for (const [k, l] of loops.entries()) {
+      const r = offsetRing(l, -lv.rho, plans[k]!)
+      if (typeof r === 'string') return loftInvalid(r, { offset: -lv.rho })
+      rs.push(r)
+    }
+    if (lv.rho !== checked) {
+      const ok = sameAsPort(piece, rs, -lv.rho, ctx.region2d)
+      if (ok !== undefined) return loftInvalid(ok, { offset: -lv.rho })
+    }
+    checked = lv.rho
+    rings.push(rs)
+  }
+  const capB = ctx.triangulate(rings[0]!)
+  if (capB.isErr()) return capB
+  const capT = ctx.triangulate(rings.at(-1)!)
+  if (capT.isErr()) return capT
+  return Ok({ rings, capB: capB.unwrap(), capT: capT.unwrap() })
+}
+
+/**
+ * For every piece, the pieces whose boxes grown by `reach` overlap its own and for which `near`
+ * holds (a bucket grid of the boxes: linear for a pattern's cells).
+ */
+function boxNeighbours(
+  boxes: readonly { min: Vec2; max: Vec2 }[],
+  reach: number,
+  near: (i: number, j: number) => boolean,
+): number[][] {
+  const out: number[][] = boxes.map(() => [])
+  if (boxes.length === 0) return out
+  let size = 0
+  for (const b of boxes) size = Math.max(size, b.max[0] - b.min[0], b.max[1] - b.min[1])
+  size += 2 * reach
+  const cellOf = (x: number) => Math.floor(x / size)
+  const grid = new Map<string, number[]>()
+  boxes.forEach((b, i) => {
+    const k = `${cellOf(b.min[0])},${cellOf(b.min[1])}`
+    const l = grid.get(k)
+    if (l === undefined) grid.set(k, [i])
+    else l.push(i)
+  })
+  boxes.forEach((b, i) => {
+    const cx = cellOf(b.min[0])
+    const cy = cellOf(b.min[1])
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (const j of grid.get(`${cx + dx},${cy + dy}`) ?? []) {
+          if (j <= i) continue
+          const c = boxes[j]!
+          if (
+            b.min[0] - reach > c.max[0] + reach ||
+            c.min[0] - reach > b.max[0] + reach ||
+            b.min[1] - reach > c.max[1] + reach ||
+            c.min[1] - reach > b.max[1] + reach
+          )
+            continue
+          if (!near(i, j)) continue
+          out[i]!.push(j)
+          out[j]!.push(i)
+        }
+  })
+  return out
+}
+
+/** Whether rings `a` and rings `b` moved by `d` come nearer than `limit` (closed polylines). */
+function ringsWithin(
+  a: readonly (readonly Vec2[])[],
+  b: readonly (readonly Vec2[])[],
+  d: Vec2,
+  limit: number,
+): boolean {
+  const moved = b.map((r) => r.map((p): Vec2 => [p[0] + d[0], p[1] + d[1]]))
+  for (const ra of a)
+    for (let i = 0; i < ra.length; i++) {
+      const p = ra[i]!
+      const q = ra[(i + 1) % ra.length]!
+      for (const rb of moved)
+        for (let j = 0; j < rb.length; j++)
+          if (segmentDistance(p, q, rb[j]!, rb[(j + 1) % rb.length]!) < limit) return true
+    }
+  return false
+}
+
+function segmentDistance(p: Vec2, q: Vec2, r: Vec2, s: Vec2): number {
+  const d1 = sub(q, p)
+  const d2 = sub(s, r)
+  // crossing segments
+  const den = cross(d1, d2)
+  if (Math.abs(den) > 1e-15) {
+    const t = cross(sub(r, p), d2) / den
+    const u = cross(sub(r, p), d1) / den
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return 0
+  }
+  return Math.min(
+    pointSegment(p, r, s),
+    pointSegment(q, r, s),
+    pointSegment(r, p, q),
+    pointSegment(s, p, q),
+  )
+}
+
+function pointSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const ab = sub(b, a)
+  const l2 = dot(ab, ab)
+  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2))
+  return dist(p, add(a, mul(ab, t)))
+}
+
+/** One mesh of pieces that are pairwise apart: each piece's loft moved to its box corner. */
+function piecesMesh(
+  parts: readonly { loft: PieceLoft; at: Vec2 }[],
+  levels: readonly LoftLevel[],
+  label: number,
+): LabelledMesh {
+  let vertices = 0
+  let triangles = 0
+  let bandTris = 0
+  for (const { loft } of parts) {
+    const perLevel = loft.rings[0]!.reduce((s, r) => s + r.length, 0)
+    vertices += perLevel * levels.length
+    bandTris += 2 * perLevel * (levels.length - 1)
+    triangles += loft.capB.length / 3 + loft.capT.length / 3
+  }
+  triangles += bandTris
+  const positions = new Float64Array(vertices * 3)
+  const tris = new Uint32Array(triangles * 3)
+  const faces = new Uint32Array(triangles)
+  let v = 0
+  let t = 0
+  let base = 0
+  // band triangles first (labelled), then the caps (air), as `loftMesh`
+  const caps: number[] = []
+  for (const { loft, at } of parts) {
+    const counts = loft.rings[0]!.map((r) => r.length)
+    const perLevel = counts.reduce((a, b) => a + b, 0)
+    for (const [k, rs] of loft.rings.entries())
+      for (const r of rs)
+        for (const p of r) {
+          positions[v++] = p[0] + at[0]
+          positions[v++] = p[1] + at[1]
+          positions[v++] = levels[k]!.z
+        }
+    let start = 0
+    for (const n of counts) {
+      for (let k = 0; k + 1 < levels.length; k++) {
+        const b0 = base + k * perLevel + start
+        const b1 = base + (k + 1) * perLevel + start
+        for (let i = 0; i < n; i++) {
+          const i1 = (i + 1) % n
+          faces[t / 3] = label
+          tris[t++] = b0 + i
+          tris[t++] = b0 + i1
+          tris[t++] = b1 + i1
+          faces[t / 3] = label
+          tris[t++] = b0 + i
+          tris[t++] = b1 + i1
+          tris[t++] = b1 + i
+        }
+      }
+      start += n
+    }
+    for (let k = 0; k < loft.capB.length; k += 3)
+      caps.push(base + loft.capB[k]!, base + loft.capB[k + 2]!, base + loft.capB[k + 1]!)
+    const top = base + (levels.length - 1) * perLevel
+    for (let k = 0; k < loft.capT.length; k += 3)
+      caps.push(top + loft.capT[k]!, top + loft.capT[k + 1]!, top + loft.capT[k + 2]!)
+    base += perLevel * levels.length
+  }
+  tris.set(caps, t)
+  return { positions, triangles: tris, faces }
 }
 
 /**
@@ -348,7 +674,25 @@ export function loopChamferConstruction(
   if (sweep.isErr() || sweep.unwrap() === undefined) return 'empty'
   const s = sweep.unwrap()!
   const outside = op.edge.side === 'outside'
+  if (!outside && s.path.pieces.length > 1)
+    return loopChamferPieces(op, ctx)?.fallback === 0 ? 'loft' : 'fallback'
   return loopLoft(s.path, loftLevels(s), 0, ctx, outside).isOk() ? 'loft' : 'fallback'
+}
+
+/**
+ * What the piece-by-piece construction does for an inside edge of several pieces (patterns P3;
+ * tests, perf): pieces lofted and swept, meshes, distinct pieces. Undefined otherwise.
+ */
+export function loopChamferPieces(
+  op: LoopChamferGeometry,
+  ctx: ChamferSolidsContext,
+): PieceStats | undefined {
+  const sweep = sweepOf(op, ctx.region2d)
+  if (sweep.isErr() || sweep.unwrap() === undefined) return undefined
+  const s = sweep.unwrap()!
+  if (op.edge.side === 'outside' || s.path.pieces.length < 2) return undefined
+  const stats: { value?: PieceStats } = {}
+  return pieceMeshes(s, loftLevels(s), 0, ctx, stats).isOk() ? stats.value : undefined
 }
 
 interface LoftLevel {
