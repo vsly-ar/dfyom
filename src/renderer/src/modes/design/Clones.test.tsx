@@ -225,6 +225,52 @@ describe('Clones UI (U3)', () => {
     )
   })
 
+  it('Add to source… joins a hole feature to the group; its remove button takes it out (DF40)', async () => {
+    const { user, part } = await renderDesign(async (d) => {
+      await addPocket(d)
+      await d.dispatch(
+        'design.hole.add',
+        { partId: partId(d), center: ['50', '30'], fastener: 'M3' },
+        ui,
+      )
+      await d.dispatch(
+        'design.clones.add',
+        {
+          partId: partId(d),
+          source: { operationIds: ['pocket1'] },
+          rows: [{ kind: 'offset', count: 1, du: '0', dv: '20' }],
+        },
+        ui,
+      )
+    })
+    await user.click(await within(navigator()).findByRole('button', { name: /^Clones 1, ×/ }))
+    await user.click(await within(inspector()).findByRole('button', { name: 'Add to source…' }))
+    const hole = part().features!.find((f) => f.kind === 'hole')!
+    await user.click(await screen.findByRole('menuitem', { name: hole.name }))
+    await waitFor(() =>
+      expect(part().features?.find((f) => f.id === 'clones1')?.['source']).toEqual({
+        featureIds: ['hole1'],
+        operationIds: ['pocket1'],
+      }),
+    )
+    const items = within(inspector()).getByRole('list', { name: 'Source items' })
+    await waitFor(() =>
+      expect(
+        within(items)
+          .getAllByRole('listitem')
+          .map((li) => li.textContent),
+      ).toEqual(['Pocket 1', hole.name]),
+    )
+    await user.click(
+      within(items).getByRole('button', { name: `Remove ${hole.name} from the source` }),
+    )
+    await waitFor(() =>
+      expect(part().features?.find((f) => f.id === 'clones1')?.['source']).toEqual({
+        operationIds: ['pocket1'],
+      }),
+    )
+  })
+
   it('over 100 instances: the read-out says by how many and Make clones is refused', async () => {
     const { user, part } = await openDraft()
     await user.click(within(inspector()).getByRole('button', { name: 'Add row' }))

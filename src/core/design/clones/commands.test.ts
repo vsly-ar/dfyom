@@ -199,16 +199,28 @@ describe('design.clones.add', () => {
       { partId: s.partId, featureId: 'probe1' },
       'design.featureOwned',
     )
-    // Clones of Clones are refused
+    // Clones of Clones (v2, G2): the Clones brings its source; stored as a group
+    const outer = (await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { featureId: 'clones1' },
+      rows: [offsetRow(1, '60')],
+    })) as { featureId: string; operationIds: string[] }
+    expect(s.part().features?.find((f) => f.id === outer.featureId)).toMatchObject({
+      source: { featureIds: ['clones1', 'probe1'] },
+    })
+    expect(outer.operationIds).toContain('clones2_2_clones1_4_probe1_drill')
+    expect(s.op('clones2_2_clones1_4_probe1_drill')).toMatchObject({
+      on: 'clones2_2_clones1_4_probe1_pocket.floor',
+    })
+    // a third level is refused, with the next step (X2 F4)
     const e = await s.fail(
       'design.clones.add',
-      { partId: s.partId, source: { featureId: 'clones1' }, rows: [offsetRow(1, '5')] },
+      { partId: s.partId, source: { featureIds: ['clones2'] }, rows: [offsetRow(1, '5')] },
       'model.invariant',
     )
-    expect(e.issues.map((i) => i.rule)).toContain('clonesNested')
-    // with the next step: a row on that Clones, or its source in a new one (X2 F4)
-    expect(e.issues.find((i) => i.rule === 'clonesNested')?.message).toMatch(
-      /add a row to clones1, or clone its source \((featureId|operationIds) [^)]+\) in a new Clones/,
+    expect(e.issues.map((i) => i.rule)).toContain('clonesNestedDepth')
+    expect(e.issues.find((i) => i.rule === 'clonesNestedDepth')?.message).toMatch(
+      /two levels at most; clone its source instead/,
     )
   })
 

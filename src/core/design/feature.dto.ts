@@ -16,9 +16,11 @@ export const FeatureIdSchema = z.string().regex(FEATURE_ID_PATTERN).describe('e.
 /**
  * Role of an owned operation (A3): `<step>` or `<instance>_<step>` for repeated cuts (Clones:
  * `3_pocket2`, `3_hole1_drill`). The step names the cut, so the instances of one step are found
- * by role (cut order tool by tool, D34; feature.ts `stepOf`).
+ * by role (cut order tool by tool, D34; feature.ts `stepOf`). A step that is an inner Clones'
+ * instance keeps its id (Clones v2, G3: `2_clones2_3_hole2_drill`).
  */
-export const FEATURE_ROLE_PATTERN = /^([1-9]\d{0,3}_)?[a-z][A-Za-z0-9]*(_[a-z][A-Za-z0-9]*){0,2}$/
+export const FEATURE_ROLE_PATTERN =
+  /^([1-9]\d{0,3}_)?([a-z][a-zA-Z]*[1-9]\d*_[1-9]\d{0,3}_)?[a-z][A-Za-z0-9]*(_[a-z][A-Za-z0-9]*){0,2}$/
 
 export const FeatureRoleSchema = z.string().regex(FEATURE_ROLE_PATTERN)
 

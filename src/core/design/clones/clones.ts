@@ -4,8 +4,9 @@
  * step-major (source operation A on every position, then B: tool by tool, D34).
  * Doc: docs/modes/features.md#clones, docs/modes/design-v0.4.md#implementation-f5
  *
- * - **Source** (`source`): `{ operationIds }` (plain operations) or `{ featureId }` (a whole
- *   feature, not Clones). It stays where it is in the design order as instance 1, contiguous and
+ * - **Source** (`source`): `{ operationIds }` (plain operations), `{ featureId }` (a whole
+ *   feature, not Clones) or a group `{ featureIds, operationIds? }` (Clones v2, DF40: features,
+ *   a Clones among them with its own source members, and plain operations). It stays where it is in the design order as instance 1, contiguous and
  *   right before the instances (the feature's span, feature.ts `nested`); its operations keep
  *   their ids and commands.
  * - **Instances** 2…N: role `<n>_<source operation id>` (id `clones1_3_pocket2`), the source
@@ -143,7 +144,75 @@ export function mapRow<A, B>(
 }
 
 export type ClonesSource =
-  { readonly operationIds: readonly string[] } | { readonly featureId: string }
+  | { readonly operationIds: readonly string[] }
+  | { readonly featureId: string }
+  | {
+      readonly featureIds: readonly string[]
+      readonly operationIds?: readonly string[] | undefined
+    }
+
+/** Most features of a group source (Clones v2, G1). */
+export const CLONES_GROUP_FEATURES = 20
+/** Most owned operations of a Clones whose group holds a Clones (G2). */
+export const CLONES_NESTED_OPERATIONS = 1000
+
+/** The members of a source, any form: feature ids and plain operation ids (G1). */
+export function sourceMembers(source: ClonesSource): {
+  readonly featureIds: readonly string[]
+  readonly operationIds: readonly string[]
+} {
+  if ('featureId' in source) return { featureIds: [source.featureId], operationIds: [] }
+  if ('featureIds' in source)
+    return { featureIds: source.featureIds, operationIds: source.operationIds ?? [] }
+  return { featureIds: [], operationIds: source.operationIds }
+}
+
+/** A source in its stored form: one feature `{ featureId }`, operations only, else a group. */
+export function sourceOf(
+  featureIds: readonly string[],
+  operationIds: readonly string[],
+): ClonesSource {
+  if (featureIds.length === 0) return { operationIds: [...operationIds] }
+  if (featureIds.length === 1 && operationIds.length === 0 && !CLONES_ID.test(featureIds[0]!))
+    return { featureId: featureIds[0]! }
+  return operationIds.length === 0
+    ? { featureIds: [...featureIds] }
+    : { featureIds: [...featureIds], operationIds: [...operationIds] }
+}
+
+/**
+ * The source as stored (G2): each member Clones' own source members joined to the group (after
+ * it, in its order), operations owned by a member feature left out (they come with it), then the
+ * stored form (`sourceOf`). Unknown ids stay for `sourceIssues` to name.
+ */
+export function normalizeSource(
+  source: ClonesSource,
+  features: readonly { readonly feature: FeatureBase }[],
+  ops: readonly Operation[],
+): ClonesSource {
+  const m = sourceMembers(source)
+  const fids: string[] = []
+  const add = (id: string) => {
+    if (!fids.includes(id)) fids.push(id)
+  }
+  const oids: string[] = []
+  for (const id of m.featureIds) {
+    add(id)
+    const f = features.find((l) => l.feature.id === id)?.feature
+    if (f?.kind !== 'clones') continue
+    const inner = sourceMembers((f as Clones).source)
+    inner.featureIds.forEach(add)
+    for (const o of inner.operationIds) if (!oids.includes(o)) oids.push(o)
+  }
+  for (const o of m.operationIds) {
+    const owner = ops.find((x) => x.id === o)
+    const by = owner === undefined ? undefined : ownerOf(owner)
+    if ((by === undefined || !fids.includes(by)) && !oids.includes(o)) oids.push(o)
+  }
+  // the group's own operations first (as given), then those its Clones members brought
+  const own = m.operationIds.filter((o) => oids.includes(o))
+  return sourceOf(fids, [...own, ...oids.filter((o) => !own.includes(o))])
+}
 
 export interface Clones extends FeatureBase {
   readonly kind: 'clones'
@@ -173,9 +242,17 @@ function rowSchemas<Q extends z.ZodType>(q: Q) {
   }) as unknown as [z.ZodObject, z.ZodObject, ...z.ZodObject[]]
 }
 
+const OperationIdsSchema = z.array(z.string().min(1).max(128)).min(1).max(50)
+
 export const ClonesSourceSchema = z.union([
-  z.object({ operationIds: z.array(z.string().min(1).max(128)).min(1).max(50) }).strict(),
+  z.object({ operationIds: OperationIdsSchema }).strict(),
   z.object({ featureId: z.string().min(1).max(64) }).strict(),
+  z
+    .object({
+      featureIds: z.array(z.string().min(1).max(64)).min(1).max(CLONES_GROUP_FEATURES),
+      operationIds: OperationIdsSchema.optional(),
+    })
+    .strict(),
 ])
 
 const ClonesDtoSchema = z.looseObject({
@@ -245,8 +322,10 @@ function rowFromDTO(dto: Record<string, unknown>, i: number): AppResult<CloneRow
 /** The source operations in `ops`, in design order (missing ids are left out). */
 export function sourceOperations(source: ClonesSource, ops: readonly Operation[]): Operation[] {
   if ('featureId' in source) return ops.filter((o) => ownerOf(o) === source.featureId)
-  const ids = new Set(source.operationIds)
-  return ops.filter((o) => ids.has(o.id))
+  const m = sourceMembers(source)
+  const ids = new Set(m.operationIds)
+  const features = new Set(m.featureIds)
+  return ops.filter((o) => ids.has(o.id) || features.has(ownerOf(o) ?? ''))
 }
 
 /** The surface owner of a face target: `pocket2.floor` → `pocket2`. */
@@ -275,9 +354,13 @@ export function referencePoint(src: readonly Operation[]): UV {
 const CLONES_ID = /^clones[1-9]\d*$/
 
 /**
- * The source's rules (design-v0.4.md § Clones in v0.4) as `model.invariant` issues at `source`:
- * it exists and is not empty; plain operations or one feature that is not Clones; not nested in
- * another feature; pockets, drillings and `inside` / `on` profiles only; one face.
+ * The source's rules (design-v0.4.md § Clones in v0.4, features.md § Clones v2) as
+ * `model.invariant` issues at `source`: it exists and is not empty; its feature members exist and
+ * are not this Clones; a member Clones has no Clones member (two levels, `clonesNestedDepth`) and
+ * all its own source members are in the group (`clonesNestedSource`); a plain operation owned by
+ * a feature outside the group is refused (`clonesSourceOwned`); not nested in another feature
+ * (other than an outer Clones holding this one); pockets, drillings and `inside` / `on` profiles
+ * only; one face.
  */
 export function sourceIssues(
   feature: Clones,
@@ -288,45 +371,89 @@ export function sourceIssues(
   const at = (path: (string | number)[], rule: string, message: string) =>
     issues.push({ path: ['source', ...path], rule, message })
   const s = feature.source
+  const m = sourceMembers(s)
+  const featurePath = (k: number) => ('featureId' in s ? ['featureId'] : ['featureIds', k])
+  const clonesOf = (id: string) => {
+    const f = features.find((l) => l.feature.id === id)?.feature
+    return f?.kind === 'clones' ? (f as Clones) : undefined
+  }
+  // an outer Clones holding this one also nests this one's source (G2)
+  const holds = (outer: FeatureBase, id: string) =>
+    outer.kind === 'clones' && sourceMembers((outer as Clones).source).featureIds.includes(id)
   const nestedElsewhere = (id: string) =>
     features.find(
-      (l) => l.feature.id !== feature.id && l.spec.nested?.(l.feature, ops).includes(id) === true,
+      (l) =>
+        l.feature.id !== feature.id &&
+        !m.featureIds.includes(l.feature.id) &&
+        !holds(l.feature, feature.id) &&
+        l.spec.nested?.(l.feature, ops).includes(id) === true,
     )
-  if ('featureId' in s) {
-    if (CLONES_ID.test(s.featureId)) {
-      // the next step (llm-api.md, DF41 F4): a row on that Clones, or its source in a new one
-      const nested = features.find((l) => l.feature.id === s.featureId)?.feature
-      const inner = nested?.kind === 'clones' ? (nested as Clones).source : undefined
-      const source =
-        inner === undefined
-          ? ''
-          : 'featureId' in inner
-            ? ` (featureId ${inner.featureId})`
-            : ` (operationIds ${inner.operationIds.join(', ')})`
+  if (new Set(m.featureIds).size !== m.featureIds.length)
+    at(['featureIds'], 'unique', 'a feature is listed twice')
+  m.featureIds.forEach((id, k) => {
+    if (id === feature.id) {
+      at(featurePath(k), 'clonesNestedSelf', 'a Clones cannot be in its own source')
+      return
+    }
+    if (!features.some((l) => l.feature.id === id)) {
+      at(featurePath(k), 'unknownFeature', 'no such feature')
+      return
+    }
+    const inner = clonesOf(id)
+    if (inner === undefined) return
+    const im = sourceMembers(inner.source)
+    if (im.featureIds.some((x) => clonesOf(x) !== undefined))
       at(
-        ['featureId'],
-        'clonesNested',
-        `Clones of Clones are not allowed: add a row to ${s.featureId}, or clone its source${source} in a new Clones`,
+        featurePath(k),
+        'clonesNestedDepth',
+        `${id} holds a Clones itself: Clones nest two levels at most; clone its source instead`,
       )
-    } else if (!features.some((l) => l.feature.id === s.featureId))
-      at(['featureId'], 'unknownFeature', 'no such feature')
-  } else {
-    if (new Set(s.operationIds).size !== s.operationIds.length)
-      at(['operationIds'], 'unique', 'an operation is listed twice')
-    s.operationIds.forEach((id, k) => {
-      const op = ops.find((o) => o.id === id)
-      if (op === undefined) at(['operationIds', k], 'unknownOperation', 'no such operation')
-      else if (op.owner.isSome() && ownerOf(op) !== feature.id)
-        at(
-          ['operationIds', k],
-          'clonesSourceOwned',
-          `belongs to ${ownerOf(op)}: use it as featureId`,
-        )
-    })
+    const missing = [
+      ...im.featureIds.filter((x) => !m.featureIds.includes(x)),
+      ...im.operationIds.filter((x) => !m.operationIds.includes(x)),
+    ]
+    if (missing.length > 0)
+      at(
+        featurePath(k),
+        'clonesNestedSource',
+        `${id}'s source (${missing.join(', ')}) must be in the group with it`,
+      )
+  })
+  // a Clones that is a member of another keeps its source while it is one (G5)
+  const outer = features.find((l) => l.feature.id !== feature.id && holds(l.feature, feature.id))
+  if (outer !== undefined) {
+    const om = sourceMembers((outer.feature as Clones).source)
+    const out = [
+      ...m.featureIds.filter((x) => !om.featureIds.includes(x)),
+      ...m.operationIds.filter((x) => !om.operationIds.includes(x)),
+    ]
+    if (out.length > 0)
+      at(
+        'featureId' in s ? ['featureId'] : ['operationIds'],
+        'clonesNestedSource',
+        `${feature.id} is in ${outer.feature.name} (${outer.feature.id}): change its source there first`,
+      )
   }
+  if (new Set(m.operationIds).size !== m.operationIds.length)
+    at(['operationIds'], 'unique', 'an operation is listed twice')
+  m.operationIds.forEach((id, k) => {
+    const op = ops.find((o) => o.id === id)
+    if (op === undefined) at(['operationIds', k], 'unknownOperation', 'no such operation')
+    else if (
+      op.owner.isSome() &&
+      ownerOf(op) !== feature.id &&
+      !m.featureIds.includes(ownerOf(op)!)
+    )
+      at(
+        ['operationIds', k],
+        'clonesSourceOwned',
+        `belongs to ${ownerOf(op)}: add ${ownerOf(op)} to featureIds instead`,
+      )
+  })
   if (issues.length > 0) return issues
   const src = sourceOperations(s, ops)
-  const path = 'featureId' in s ? ['featureId'] : ['operationIds']
+  const path =
+    'featureId' in s ? ['featureId'] : 'featureIds' in s ? ['featureIds'] : ['operationIds']
   if (src.length === 0) {
     at(path, 'clonesSourceEmpty', 'the source has no operations')
     return issues
@@ -431,20 +558,38 @@ export function featurePath(
   )
 }
 
-/** `model.invariant` (`clonesLimit`, at `rows`) when the path makes more than `CLONES_MAX` instances. */
-export function limitIssues(path: ClonePath): Issue[] {
+/**
+ * `model.invariant` (`clonesLimit`, at `rows`) when the path makes more than `CLONES_MAX`
+ * instances, or, with `nested` (a group holding a Clones, G2) of `sourceOps` operations, more than
+ * `CLONES_NESTED_OPERATIONS` owned operations.
+ */
+export function limitIssues(path: ClonePath, nested = false, sourceOps = 0): Issue[] {
   const n = path.instances.length
-  return n <= CLONES_MAX
-    ? []
-    : [
+  if (n > CLONES_MAX)
+    return [
+      {
+        path: ['rows'],
+        rule: 'clonesLimit',
+        message: `${n} instances; at most ${CLONES_MAX} per Clones feature`,
+        params: { max: CLONES_MAX, actual: n },
+      },
+    ]
+  const owned = sourceOps * (n - 1)
+  return nested && owned > CLONES_NESTED_OPERATIONS
+    ? [
         {
           path: ['rows'],
           rule: 'clonesLimit',
-          message: `${n} instances; at most ${CLONES_MAX} per Clones feature`,
-          params: { max: CLONES_MAX, actual: n },
+          message: `${owned} cloned operations; at most ${CLONES_NESTED_OPERATIONS} when the source holds a Clones`,
+          params: { max: CLONES_NESTED_OPERATIONS, actual: owned, operations: true },
         },
       ]
+    : []
 }
+
+/** The source holds a Clones feature (G2): its operations include a Clones' owned ones. */
+const holdsClones = (src: readonly Operation[]): boolean =>
+  src.some((o) => CLONES_ID.test(ownerOf(o) ?? ''))
 
 /**
  * The instances, step-major: each source operation (design order) on every clone position in
@@ -467,7 +612,7 @@ export function expandClones(
       data: { featureId: feature.id },
     })
   const path = clonePath(referencePoint(src), pathRows(feature.rows, ctx.shapes))
-  const limit = limitIssues(path)
+  const limit = limitIssues(path, holdsClones(src), src.length)
   if (limit.length > 0)
     return fail('model.invariant', limit[0]!.message, {
       issues: limit,
@@ -500,16 +645,23 @@ export function clonesFromDTO(dto: FeatureDTO): AppResult<Clones> {
   }))
 }
 
+/** A source as a plain record (the v1 forms unchanged; a group with `operationIds` only when any). */
+function sourceDTO(s: ClonesSource): ClonesSource {
+  if ('featureId' in s) return { featureId: s.featureId }
+  if ('featureIds' in s)
+    return s.operationIds === undefined
+      ? { featureIds: [...s.featureIds] }
+      : { featureIds: [...s.featureIds], operationIds: [...s.operationIds] }
+  return { operationIds: [...s.operationIds] }
+}
+
 export function clonesToDTO(c: Clones): FeatureDTO {
   return {
     id: c.id,
     kind: 'clones',
     name: c.name,
     on: c.on,
-    source:
-      'featureId' in c.source
-        ? { featureId: c.source.featureId }
-        : { operationIds: [...c.source.operationIds] },
+    source: sourceDTO(c.source),
     rows: c.rows.map(rowToDTO),
   }
 }
@@ -732,9 +884,13 @@ export function clonesSourceIds(
   if (dto.kind !== 'clones') return undefined
   const s = ClonesSourceSchema.safeParse((dto as Record<string, unknown>)['source'])
   if (!s.success) return undefined
-  if ('operationIds' in s.data) return new Set(s.data.operationIds)
-  const id = s.data.featureId
-  return new Set([id, ...ops.filter((o) => o.featureId === id).map((o) => o.id)])
+  const m = sourceMembers(s.data)
+  const features = new Set(m.featureIds)
+  return new Set([
+    ...m.operationIds,
+    ...m.featureIds,
+    ...ops.filter((o) => o.featureId !== undefined && features.has(o.featureId)).map((o) => o.id),
+  ])
 }
 
 // ── kind ───────────────────────────────────────────────────────────────────────────────────
@@ -784,7 +940,7 @@ function arrangeClones(
   const start = next.findIndex((o) => nested.has(o.id)) + nested.size // right after the source (an empty block is still there)
   const owned = next.filter((o) => ownerOf(o) === feature.id).length
   const path = featurePath(feature, next, shapes)
-  const limit = limitIssues(path)
+  const limit = limitIssues(path, holdsClones(sourceOperations(feature.source, next)), nested.size)
   if (limit.length > 0)
     return fail('model.invariant', issueSummary(limit), { issues: limit, where })
   return Ok({ ops: next, start, end: start + owned })
@@ -833,8 +989,7 @@ export const clonesKindSpec: FeatureKindSpec<Clones> = {
   nested: (c, ops) => {
     const src = sourceOperations(c.source, ops).map((o) => o.id)
     // ids not in the part come last, so the consistency check names them
-    if ('operationIds' in c.source)
-      for (const id of c.source.operationIds) if (!src.includes(id)) src.push(id)
+    for (const id of sourceMembers(c.source).operationIds) if (!src.includes(id)) src.push(id)
     return src
   },
   arrange: arrangeClones,

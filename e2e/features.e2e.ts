@@ -337,6 +337,19 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   }
   await render(page, 'long-names', 'df25')
 
+  // ── DF40 (Clones v2): Make Clones… on the Clones row clones it with its source ─────────────
+  await navigator.getByRole('button', { name: /^Clones 1, ×3/ }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Make Clones…' }).click()
+  await expect(inspector.getByText('New Clones')).toBeVisible()
+  await expect(readout).toHaveText('1 + 1 clone = 2 instances · 0 skipped')
+  await inspector.getByRole('button', { name: 'Make clones' }).click()
+  const outer = navigator.getByRole('button', { name: /^Clones 2, ×2/ })
+  await expect(outer).toHaveAttribute('aria-pressed', 'true')
+  await outer.press('ArrowRight')
+  await expect(navigator.getByRole('list', { name: 'Source of Clones 2' })).toContainText(
+    'Clones 1',
+  )
+
   expect(dfyom.rendererErrors).toEqual([])
 })
 

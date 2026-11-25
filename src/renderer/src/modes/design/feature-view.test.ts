@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Dispatcher } from '../../../../core/commands/dispatcher'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designDispatcher } from '../../test/bridge'
+import { addableFeatures, sourceWith, sourceWithout } from './clones-view'
 import {
   clonesSource,
   cloneInstances,
@@ -151,10 +152,61 @@ describe('feature view', () => {
 
     expect(clonesSource(p, null)).toMatchObject({ ok: false })
     expect(clonesSource(p, 'facing1')).toEqual({ ok: false, reason: 'A facing can’t be cloned.' })
-    expect(clonesSource(p, 'clones1')).toMatchObject({ ok: false })
+    // Clones v2 (DF40, G2/G9): a Clones is a source too; its width spans its instances
+    expect(clonesSource(p, 'clones1')).toEqual({
+      ok: true,
+      source: { featureId: 'clones1' },
+      width: 55,
+    })
     expect(clonesSource(p, 'pocket1')).toEqual({
       ok: false,
       reason: 'Pocket 1 is already cloned by Clones 1.',
     })
+  })
+
+  it('a group holding a Clones nests it with its own source (Clones v2, DF40)', async () => {
+    const p = await part(async (d, partId) => {
+      await ok(d, 'design.pocket.add', {
+        partId,
+        shape: { kind: 'circle', center: ['20', '30'], diameter: '12' },
+        depth: '2',
+      })
+      await ok(d, 'design.drilling.add', { partId, center: ['30', '30'], diameter: '3' })
+      await ok(d, 'design.clones.add', {
+        partId,
+        source: { operationIds: ['drill1'] },
+        rows: [{ kind: 'arc', radius: '10', angle: '180', arc: '360', step: '120' }],
+      })
+      await ok(d, 'design.pocket.add', {
+        partId,
+        shape: { kind: 'circle', center: ['80', '45'], diameter: '6' },
+        depth: '1',
+      })
+      await ok(d, 'design.clones.add', {
+        partId,
+        source: { featureIds: ['clones1'], operationIds: ['pocket1'] },
+        rows: [{ kind: 'offset', count: 1, du: '45', dv: '0' }],
+      })
+    })
+    const units = operationUnits(p)
+    expect(units.map((u) => u.id)).toEqual(['clones2', 'pocket2'])
+    const outer = units[0] as FeatureUnit
+    expect(outer.nested.map((n) => n.id)).toEqual(['pocket1', 'clones1'])
+    const inner = outer.nested[1] as FeatureUnit
+    expect(inner.nested.map((n) => n.id)).toEqual(['drill1'])
+    expect(inner.ops.map((o) => o.id)).toEqual(['clones1_2_drill1', 'clones1_3_drill1'])
+    expect(clonesSource(p, 'clones1')).toEqual({
+      ok: false,
+      reason: 'Clones 1 is already cloned by Clones 2.',
+    })
+    // removing the inner Clones takes its source; the last member stays
+    const source = { featureIds: ['clones1'], operationIds: ['pocket1', 'drill1'] }
+    expect(sourceWithout(source, inner)).toEqual({ operationIds: ['pocket1'] })
+    expect(sourceWithout({ operationIds: ['pocket1'] }, outer.nested[0]!)).toBeUndefined()
+    expect(sourceWith({ operationIds: ['pocket1'] }, 'hole1', true)).toEqual({
+      featureIds: ['hole1'],
+      operationIds: ['pocket1'],
+    })
+    expect(addableFeatures(p, outer.feature)).toEqual([])
   })
 })

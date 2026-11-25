@@ -40,9 +40,11 @@ import {
   expandClones,
   featurePath,
   mapRow,
+  normalizeSource,
   rowIssues,
   sourceFace,
   sourceIssues,
+  sourceMembers,
   sourceOperations,
   type CloneRow,
   type Clones,
@@ -77,7 +79,9 @@ const RowsArg = z
   )
 
 const params = {
-  source: ClonesSourceSchema.describe('Existing operations, or one feature'),
+  source: ClonesSourceSchema.describe(
+    'Existing operations, one feature, or a group: featureIds (a Clones brings its source) + operationIds',
+  ),
   rows: RowsArg,
 }
 
@@ -104,8 +108,10 @@ export const clonesSpec: FeatureCommandSpec<typeof params, Clones> = {
   updateParams: AS_ADD,
   onArg: false,
   addSummary: 'Clone operations or a feature along a path; instances go right after the source.',
-  build: (a, prev, { f, id, name, before, on }) => {
-    const source = a.source ?? prev!.source
+  build: (a, prev, { f, id, name, before, on, features }) => {
+    // a member Clones brings its own source members into the group (G2)
+    const source =
+      a.source === undefined ? prev!.source : normalizeSource(a.source, features, before)
     const rows = a.rows !== undefined ? a.rows.map((r, i) => parseRow(f, r, i)) : prev!.rows
     return {
       kind: 'clones',
@@ -137,7 +143,7 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
   for (const partId of Object.keys(draft.parts)) {
     const features = draft.parts[partId]!.features
     if (features === undefined || !features.some((f) => f.kind === 'clones')) continue
-    const loaded = loadPart(draft as ProjectDoc, partId, where)
+    const loaded = loadPart(draft as ProjectDoc, partId, where, true)
     if (loaded.isErr()) {
       // an edit a Clones cannot follow (a shape an `along` row reads, F6) is the expansion's own
       // refusal, not a corrupt part
@@ -152,8 +158,13 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
     // the records the part was loaded from: unchanged ones are frozen (P5, frozen-memo.ts)
     const records = baseOf(draft.parts[partId]!)
     const stockRecord = baseOf(draft.snapshots[records.stock])
-    for (const [k, lf] of l.features.entries()) {
-      if (lf.spec !== (clonesSpec as unknown as FeatureKindSpec)) continue
+    // in design order of their spans: a member Clones (G2) lies inside its outer one's source and
+    // is followed first, so the outer copies its new instances
+    const order = [...l.features.entries()]
+      .filter(([, lf]) => lf.spec === (clonesSpec as unknown as FeatureKindSpec))
+      .map(([k, lf]) => ({ k, lf, at: featureSpan(ops, lf).ownedStart }))
+      .sort((a, b) => a.at - b.at)
+    for (const { k, lf } of order) {
       const c = lf.feature as Clones
       const issues = sourceIssues(c, ops, l.features)
       if (issues.length > 0)
@@ -233,13 +244,27 @@ const followed = new WeakMap<object, readonly unknown[]>()
 const sameKey = (a: readonly unknown[] | undefined, b: readonly unknown[]) =>
   a !== undefined && a.length === b.length && a.every((x, i) => x === b[i])
 
+/** Some part has a Clones whose group holds a Clones (Clones v2, G2). */
+function holdsNestedClones(draft: Draft<ProjectDoc>): boolean {
+  return Object.values(draft.parts).some((p) =>
+    (p.features ?? []).some((f) => {
+      if (f.kind !== 'clones') return false
+      const s = ClonesSourceSchema.safeParse((f as Record<string, unknown>)['source'])
+      return s.success && sourceMembers(s.data).featureIds.some((id) => id.startsWith('clones'))
+    }),
+  )
+}
+
 /** After every document command (commands.md#document-hooks). */
 export const clonesFollowHook: DocumentHook = {
   name: 'design.clonesFollow',
   after: (draft, command, ctx) =>
     // every part with Clones is loaded, from cached models of its unchanged records, and a Clones
-    // whose inputs are all unchanged is skipped (P5); `design.clones.*` already wrote the expansion
-    command.name.startsWith('design.clones.') ? Ok(undefined) : followClones(draft, ctx),
+    // whose inputs are all unchanged is skipped (P5); `design.clones.*` already wrote the expansion,
+    // unless a Clones holds another one (G4: the outer follows the edited inner)
+    command.name.startsWith('design.clones.') && !holdsNestedClones(draft)
+      ? Ok(undefined)
+      : followClones(draft, ctx),
 }
 
 /** After the tool choice on Apply: instances take their source's new tool (C3). */
@@ -301,7 +326,10 @@ const clonesPreview = defineQuery({
         where,
       })
     const draftArgs = args
-    const source = draftArgs.source ?? prev?.source
+    const source =
+      draftArgs.source === undefined
+        ? prev?.source
+        : normalizeSource(draftArgs.source, l.features, ops)
     if (source === undefined || (draftArgs.rows === undefined && prev === undefined))
       return fail('input.malformed', 'a draft needs source and rows', {
         issues: [

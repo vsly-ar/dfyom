@@ -276,13 +276,22 @@ export function featureSpan(
   return { start: first, ownedStart, end: block.start === block.end ? ownedStart : block.end }
 }
 
-/** The feature nesting operation `id` (Clones whose source it is), if any. */
+/**
+ * The feature nesting operation `id` (Clones whose source it is), if any; the innermost one when
+ * Clones nest (Clones v2: an outer Clones nests its member Clones' source too).
+ */
 export function nestingFeature(
   ops: readonly Operation[],
   features: readonly LoadedFeature[],
   id: string,
 ): LoadedFeature | undefined {
-  return features.find((lf) => lf.spec.nested?.(lf.feature, ops).includes(id) === true)
+  let best: { lf: LoadedFeature; size: number } | undefined
+  for (const lf of features) {
+    const nested = lf.spec.nested?.(lf.feature, ops)
+    if (nested?.includes(id) !== true) continue
+    if (best === undefined || nested.length < best.size) best = { lf, size: nested.length }
+  }
+  return best?.lf
 }
 
 /**
@@ -294,11 +303,12 @@ export function spanUnits(
   features: readonly LoadedFeature[],
 ): (string | undefined)[] {
   const out: (string | undefined)[] = ops.map(ownerOf)
-  for (const lf of features) {
-    if (lf.spec.nested === undefined) continue
-    const { start, end } = featureSpan(ops, lf)
-    for (let i = start; i < end; i++) out[i] = lf.feature.id
-  }
+  // inner spans first, so an outer span (Clones v2) overwrites them
+  const spans = features
+    .filter((lf) => lf.spec.nested !== undefined)
+    .map((lf) => ({ id: lf.feature.id, ...featureSpan(ops, lf) }))
+    .sort((a, b) => a.end - a.start - (b.end - b.start))
+  for (const { id, start, end } of spans) for (let i = start; i < end; i++) out[i] = id
   return out
 }
 
@@ -518,6 +528,8 @@ export function checkFeatures(
   stock: Stock,
   units: UnitSystem,
   records?: FrozenRecords,
+  /** Skip the role comparison of nesting kinds (Clones) that are about to follow (`loadPart`). */
+  following = false,
 ): AppResult<LoadedFeature[]> {
   const loaded = loadFeatures(dto)
   if (loaded.isErr()) return loaded
@@ -564,6 +576,19 @@ export function checkFeatures(
         featureId: feature.id,
       })
   const nestedBy = new Map<string, string>()
+  // spans as id sets: an operation nested by two features is fine when one span lies wholly in
+  // the other's nested operations (Clones v2: an outer Clones holds an inner one with its source)
+  const spanIds = new Map<string, { nested: Set<string>; span: string[] }>()
+  for (const lf of loaded.unwrap()) {
+    const nested = lf.spec.nested?.(lf.feature, ops) ?? []
+    const span = [...nested, ...ops.filter((o) => ownerOf(o) === lf.feature.id).map((o) => o.id)]
+    spanIds.set(lf.feature.id, { nested: new Set(nested), span })
+  }
+  const inside = (inner: string, outer: string) => {
+    const a = spanIds.get(inner)
+    const b = spanIds.get(outer)
+    return a !== undefined && b !== undefined && a.span.every((id) => b.nested.has(id))
+  }
   for (const [i, { spec, feature }] of loaded.unwrap().entries()) {
     const { start, end } = featureBlock(ops, feature.id)
     const data = { featureId: feature.id }
@@ -589,7 +614,8 @@ export function checkFeatures(
     for (const [k, id] of nested.entries()) {
       const other = nestedBy.get(id)
       nestedBy.set(id, feature.id)
-      if (first < 0 || ops[first + k]?.id !== id || other !== undefined || first + k >= blockAt)
+      const laminar = other === undefined || inside(other, feature.id) || inside(feature.id, other)
+      if (first < 0 || ops[first + k]?.id !== id || !laminar || first + k >= blockAt)
         return malformed(
           `the nested operations of ${feature.id} are not right before its block`,
           ['features'],
@@ -605,6 +631,7 @@ export function checkFeatures(
         data,
       )
     const at = start === end ? blockAt : start
+    if (following && spec.nested !== undefined) continue
     const expanded = expansionOf(
       spec,
       feature,

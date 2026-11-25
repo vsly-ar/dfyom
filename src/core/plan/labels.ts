@@ -34,12 +34,15 @@ function operationOf(part: PartDTO, id: string): OpDTO | undefined {
 /** A Clones feature's source as stored (`clones.ts` `ClonesSource`). */
 function sourceOf(f: NonNullable<PartDTO['features']>[number]): {
   operationIds?: readonly string[]
-  featureId?: string
+  featureIds: readonly string[]
 } {
   const s = (f as { source?: unknown }).source
-  return typeof s === 'object' && s !== null
-    ? (s as { operationIds?: string[]; featureId?: string })
-    : {}
+  if (typeof s !== 'object' || s === null) return { featureIds: [] }
+  const r = s as { operationIds?: string[]; featureId?: string; featureIds?: string[] }
+  return {
+    ...(r.operationIds === undefined ? {} : { operationIds: r.operationIds }),
+    featureIds: r.featureIds ?? (r.featureId === undefined ? [] : [r.featureId]),
+  }
 }
 
 /** The Clones position an operation cuts: an instance's number, 1 for the source; else none. */
@@ -53,14 +56,18 @@ export function clonesPosition(
   const owner = features.find((f) => f.id === op.featureId)
   if (owner?.kind === 'clones' && op.featureRole !== undefined)
     return { featureId: owner.id, name: owner.name, n: instanceOf(op.featureRole) }
-  const source = features.find((f) => {
+  const sources = features.filter((f) => {
     if (f.kind !== 'clones') return false
     const s = sourceOf(f)
     return (
       s.operationIds?.includes(op.id) === true ||
-      (op.featureId !== undefined && s.featureId === op.featureId)
+      (op.featureId !== undefined && s.featureIds.includes(op.featureId))
     )
   })
+  // the innermost position (Clones v2): an outer Clones holds the inner one as a member
+  const source = sources.find(
+    (f) => !sources.some((g) => g !== f && sourceOf(f).featureIds.includes(g.id)),
+  )
   return source === undefined ? undefined : { featureId: source.id, name: source.name, n: 1 }
 }
 

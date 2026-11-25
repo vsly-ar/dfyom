@@ -31,8 +31,18 @@ export function unknownPart(partId: string, where: string): AppResult<never> {
   })
 }
 
-/** The part with its operations and stock as models; a broken record is `input.malformed`. */
-export function loadPart(doc: ProjectDoc, partId: string, where: string): AppResult<LoadedPart> {
+/**
+ * The part with its operations and stock as models; a broken record is `input.malformed`.
+ * `following`: only for `design.clonesFollow`, which re-expands every Clones right after: a
+ * Clones block whose roles no longer match its source (a hole changed type, an inner Clones
+ * skipped a position, DF40) is not corruption yet (`checkFeatures`).
+ */
+export function loadPart(
+  doc: ProjectDoc,
+  partId: string,
+  where: string,
+  following = false,
+): AppResult<LoadedPart> {
   const dto = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
   if (dto === undefined) return unknownPart(partId, where)
   // read the records, not the draft's proxies; unmodified ones are a committed document's frozen
@@ -71,6 +81,7 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
     stock.unwrap(),
     doc.unitSystem,
     frozenRecords(records, snap),
+    following,
   )
   if (features.isErr())
     return Err(features.unwrapErr().prefixIssues('parts', partId).withContext(where, { partId }))
