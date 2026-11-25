@@ -119,12 +119,20 @@ export async function closeApp(app: ElectronApplication): Promise<number> {
   const discard = async () => {
     for (const w of app.windows()) {
       const prompt = w.getByRole('dialog', { name: /^Save changes to / })
-      if (await prompt.isVisible().catch(() => false))
-        await prompt
-          .getByRole('button', { name: 'Discard' })
-          .click({ timeout: 1000 })
-          .then(() => answered++)
-          .catch(() => undefined)
+      if (!(await prompt.isVisible().catch(() => false))) continue
+      await prompt
+        .getByRole('button', { name: 'Discard' })
+        .click({ timeout: 1000 })
+        .catch(() => undefined)
+      // P8: count a prompt once it is gone, not by the click's result. A click that landed can
+      // still reject (Discard lets the quit close the window while Playwright finishes the click),
+      // and a prompt still closing must not be clicked and counted again. A click that didn't
+      // land leaves the prompt open: the next round tries again.
+      const gone = await prompt.waitFor({ state: 'hidden', timeout: 15_000 }).then(
+        () => true,
+        () => w.isClosed(),
+      )
+      if (gone) answered++
     }
   }
   while (!done) {

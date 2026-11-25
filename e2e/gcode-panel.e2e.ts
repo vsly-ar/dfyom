@@ -113,6 +113,13 @@ async function executingLine(list: Locator): Promise<number> {
   return Number(await row.locator('span').first().textContent())
 }
 
+/** The executing line as the panel's header counts it ("Line 1,234 / 5,678"; 0 without one). */
+async function headerLine(panel: Locator): Promise<number> {
+  const count = panel.getByText(/^Line [\d,]+ \/ [\d,]+$/)
+  if ((await count.count()) === 0) return 0
+  return Number(((await count.textContent()) ?? '').split(' ')[1]!.replace(/,/g, ''))
+}
+
 test('run: the gCode panel follows the executing line and stops following on a scroll (DF84)', async ({
   dfyom,
 }) => {
@@ -199,12 +206,27 @@ test('run: the gCode panel follows the executing line and stops following on a s
   expect(rowBox.y + rowBox.height).toBeLessThanOrEqual(listBox.y + listBox.height + 1)
   await render(page, 'df84-gcode-panel')
 
-  // the user's wheel turns Follow off: the list no longer moves with the run
+  // the user's wheel turns Follow off: the list no longer moves with the run. The wheel's scroll
+  // can land a frame after its event turned Follow off (`mouse.wheel` doesn't wait for it, P8):
+  // wait until the list moved up (Follow only moves it down), then for the run to go on (by the
+  // header's count: the executing row soon leaves the rendered rows).
   await list.hover()
+  const before = await scrolled()
   await page.mouse.wheel(0, -400)
   await expect(follow).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(scrolled).toBeLessThan(before)
   const held = await scrolled()
-  await expect.poll(() => executingLine(list).catch(() => 0)).not.toBe(first)
+  const heldLine = await headerLine(panel)
+  await expect
+    .poll(
+      async () => {
+        if (await waits().isVisible())
+          await waits().getByRole('button', { name: 'Continue' }).click()
+        return headerLine(panel).catch(() => 0)
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(heldLine + 2)
   expect(await scrolled()).toBe(held)
   await follow.click()
   await expect(follow).toHaveAttribute('aria-pressed', 'true')
