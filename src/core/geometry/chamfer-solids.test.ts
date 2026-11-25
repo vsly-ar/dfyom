@@ -153,6 +153,32 @@ describe('loop chamfer solids (E1, inside edges)', () => {
     )
   })
 
+  it('E4a corner lift: the mitre, (a+b)wh + 4w²h/3 with the cones filled', () => {
+    const outer = roundedRectLoop(20, 15, 100, 65, 0)
+    const pocket = regionPocket('pocket1', numberRegion({ pieces: [{ outer, holes: [] }] }), 5)
+    const c: LoopChamferGeometry = { ...chamferOf(pocket, 2), cornerLift: true }
+    const mitred = (80 + 50) * 2 * 2 + (4 * 4 * 2) / 3
+    expect(Math.abs(removed(pocket, c) - mitred)).toBeLessThan(band(loopChamferRegion(c), 2) / 2)
+  })
+
+  it('E4a chosen loops: the rim only leaves the island sharp, the island only the rim', () => {
+    const outer = roundedRectLoop(20, 15, 100, 65, 3)
+    const island = circleLoop([60, 40], 10, false)
+    const region = numberRegion({ pieces: [{ outer, holes: [island] }] })
+    const pocket = regionPocket('pocket1', region, 5)
+    const all = chamferOf(pocket, 1)
+    const rim = port.length(outer) * 0.5 + Math.PI / 3
+    const isle = Math.PI * (10 * 1 - 1 / 3)
+    const tol = band(region, 1) / 2
+    const only = (loops: number[]): LoopChamferGeometry => ({
+      ...all,
+      edge: { ...all.edge, loops },
+    })
+    expect(Math.abs(removed(pocket, only([0])) - rim)).toBeLessThan(tol)
+    expect(Math.abs(removed(pocket, only([1])) - isle)).toBeLessThan(tol)
+    expect(Math.abs(removed(pocket, only([0, 1])) - (rim + isle))).toBeLessThan(tol)
+  })
+
   it('a pocket with an island: the rim and the island, one piece', () => {
     const outer = roundedRectLoop(20, 15, 100, 65, 3)
     const island = circleLoop([60, 40], 10, false)

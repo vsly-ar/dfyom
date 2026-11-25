@@ -229,9 +229,12 @@ function operationGeometry(
             ...(source === undefined
               ? {}
               : { within: { min: vec2(source.within.min), max: vec2(source.within.max) } }),
+            // E4a: chosen loops; absent = every loop
+            ...(op.loops.isSome() ? { loops: op.loops.unwrap() } : {}),
           },
           width: op.width.canonical,
           angle: op.angle.canonical,
+          ...(op.cornerLift ? { cornerLift: true as const } : {}),
         }))
       }
       const edge = chamferEdge(ops.slice(0, index), op.edgeOf)

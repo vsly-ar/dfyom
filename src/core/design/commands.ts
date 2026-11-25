@@ -198,6 +198,12 @@ const chamferParams = {
   width: Src.describe('At the face (1.5 × 45°: 1.5); default 0.5 mm'),
   depth: Src.describe('Instead of width'),
   angle: Src.describe('Default 90°'),
+  loops: z
+    .array(z.number().int().nonnegative())
+    .min(1)
+    .nullable()
+    .describe('General edge: loop indices to chamfer (0 = the outline, then islands); null = all'),
+  cornerLift: z.boolean().describe('General edge: lift the V-bit into sharp inside corners'),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
@@ -822,6 +828,14 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       // stepped only through the hole feature in v0.4 (F7): no arg, kept as it is
       stepdown: prev?.stepdown ?? None,
       sourceEdge: prev?.sourceEdge ?? None,
+      // E4a: null = every loop again
+      loops:
+        a.loops === undefined
+          ? (prev?.loops ?? None)
+          : a.loops === null
+            ? None
+            : Some([...new Set(a.loops)].sort((x, y) => x - y)),
+      cornerLift: a.cornerLift ?? prev?.cornerLift ?? false,
     }
   },
 }

@@ -151,9 +151,11 @@ export const LoopChamferGeometrySchema = z.object({
     side: z.enum(['inside', 'outside']),
     depth: z.number().exactOptional(),
     within: z.object({ min: Vec2Schema, max: Vec2Schema }).exactOptional(),
+    loops: z.array(z.number().int().nonnegative()).readonly().exactOptional(),
   }),
   width: z.number(),
   angle: z.number(),
+  cornerLift: z.literal(true).exactOptional(),
 })
 
 // two chamfer shapes share `kind`: the circular one first (it needs `center`), then the loop one

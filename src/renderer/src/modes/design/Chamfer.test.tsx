@@ -16,6 +16,9 @@ import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { chamferEdgeChoice } from './chamfer-view'
+import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
+import type { Region2dPort } from '../../../../core/geometry/2d/port'
+import { Ok } from '../../../../shared/result'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -30,9 +33,13 @@ vi.mock('../../viewport/Scene', () => ({
 const ui = { kind: 'ui', id: 'test' } as const
 const partId = (d: Dispatcher) => Object.keys(d.doc.parts)[0]!
 
-async function renderDesign(setup?: (d: Dispatcher) => Promise<void>) {
+async function renderDesign(setup?: (d: Dispatcher) => Promise<void>, port?: Region2dPort) {
   const bridge: FakeBridge = createFakeBridge()
-  const d = await designDispatcher()
+  const d = await designDispatcher(
+    undefined,
+    undefined,
+    port === undefined ? {} : { region2d: port },
+  )
   const stock = await d.dispatch(
     'library.stock.add',
     {
@@ -55,7 +62,9 @@ async function renderDesign(setup?: (d: Dispatcher) => Promise<void>) {
   await setup?.(d)
   bridge.bind(d, 'p1', { file: '/p/bracket.dfyom' })
   const r = renderUi(
-    <ShellProvider shell={createShell(bridge)}>
+    <ShellProvider
+      shell={createShell(bridge, port === undefined ? {} : { region2d: Promise.resolve(Ok(port)) })}
+    >
       <App />
     </ShellProvider>,
   )
@@ -255,6 +264,58 @@ describe('chamfer UI (U4)', () => {
     await waitFor(() =>
       expect(document.querySelector('[data-part="angle"]')).toHaveAttribute('data-state', 'active'),
     )
+    await expectNoAxeViolations()
+  })
+
+  it('E4a: Corner lift on a general edge; Loops for a pocket with an island', async () => {
+    const fs = (
+      globalThis as unknown as {
+        process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: string): Uint8Array } }
+      }
+    ).process.getBuiltinModule('node:fs')
+    const port = loadRegion2dSync(
+      fs.readFileSync('vendor/cavalier-contours/cavalier_contours.wasm'),
+    ).expect('the vendored 2D module loads')
+    const { user, chamfer } = await renderDesign(async (d) => {
+      for (const [name, args] of [
+        [
+          'design.shape.add',
+          {
+            partId: partId(d),
+            items: [
+              { kind: 'rectangle', center: ['0', '0'], length: '40', width: '24' },
+              { kind: 'circle', center: ['0', '0'], diameter: '8', op: 'subtract' },
+            ],
+          },
+        ],
+        [
+          'design.pocket.add',
+          {
+            partId: partId(d),
+            shape: { kind: 'named', shapeId: 'shape1', center: ['50', '30'] },
+            depth: '4',
+          },
+        ],
+        ['design.chamfer.add', { partId: partId(d), edgeOf: 'pocket1' }],
+      ] as const)
+        (await d.dispatch(name, args, ui)).unwrap()
+    }, port)
+    const row = await within(navigator()).findByRole('button', { name: /^Chamfer 1/ })
+    await user.click(row)
+    const lift = await within(inspector()).findByRole('switch', { name: 'Corner lift' })
+    expect(lift).not.toBeChecked()
+    await user.click(lift)
+    await waitFor(() => expect(chamfer().cornerLift).toBe(true))
+    const loops = await within(inspector()).findByRole('list', { name: 'Loops' })
+    const rim = within(loops).getByRole('checkbox', { name: 'Rim' })
+    const island = within(loops).getByRole('checkbox', { name: 'Island 1' })
+    expect(rim).toBeChecked()
+    await user.click(island)
+    await waitFor(() => expect(chamfer().loops).toEqual([0]))
+    // the last checked loop cannot be unchecked
+    await waitFor(() => expect(within(loops).getByRole('checkbox', { name: 'Rim' })).toBeDisabled())
+    await user.click(within(loops).getByRole('checkbox', { name: 'Island 1' }))
+    await waitFor(() => expect(chamfer().loops).toBeUndefined())
     await expectNoAxeViolations()
   })
 

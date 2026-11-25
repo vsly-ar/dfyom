@@ -30,9 +30,24 @@ import {
   type LoopChamferGeometry,
   type Vec2,
 } from './model'
-import { loopChamferAxis } from './outline'
+import {
+  choosesEveryLoop,
+  loopChamferAxis,
+  loopChamferEdgeLoops,
+  loopChamferLiftCorners,
+  nearChosenLoop,
+  type LiftCorner,
+} from './outline'
 import { flattenLoop, type Triangulate } from './prism'
-import { regionArea, regionLoops, type Element, type Loop, type Region } from './2d/model'
+import {
+  regionArea,
+  regionLoops,
+  reverseLoop,
+  signedArea,
+  type Element,
+  type Loop,
+  type Region,
+} from './2d/model'
 import type { Region2dPort } from './2d/port'
 
 /**
@@ -115,9 +130,16 @@ export function loopChamferSolids(
       })
     const levels = loftLevels(sweep)
     const outside = op.edge.side === 'outside'
-    const loft = loopLoft(sweep.path, levels, bevel, ctx, outside)
-    const meshes = loft.isOk() ? Ok([loft.unwrap()]) : sweptChords(sweep, bevel)
+    const meshes = choosesEveryLoop(op)
+      ? sweepMeshes(sweep, levels, bevel, ctx, outside)
+      : chosenBands(op, sweep, levels, bevel, ctx)
     if (meshes.isErr()) return Err(meshes.unwrapErr())
+    if (op.cornerLift === true)
+      for (const c of loopChamferLiftCorners(op, true)) {
+        const kite = liftKite(c, levels, bevel, ctx.triangulate)
+        if (kite.isErr()) return Err(kite.unwrapErr())
+        meshes.unwrap().push(kite.unwrap())
+      }
     const mask = withinMask(op, sweep, levels, bevel, ctx.triangulate)
     if (mask.isErr()) return Err(mask.unwrapErr())
     return Ok(
@@ -127,6 +149,81 @@ export function loopChamferSolids(
       }),
     )
   })
+}
+
+/** The sweep of every loop: one offset-loft, else the swept chords. */
+function sweepMeshes(
+  sweep: ChamferSweep,
+  levels: readonly LoftLevel[],
+  label: number,
+  ctx: ChamferSolidsContext,
+  band: boolean,
+): AppResult<LabelledMesh[]> {
+  const loft = loopLoft(sweep.path, levels, label, ctx, band)
+  return loft.isOk() ? Ok([loft.unwrap()]) : sweptChords(sweep, label)
+}
+
+/**
+ * Chosen loops (E4a): per chosen loop of the sweep's path, the V-groove band round that loop
+ * alone (the outside edge's construction), so the other loops keep their sharp edge.
+ */
+function chosenBands(
+  op: LoopChamferGeometry,
+  sweep: ChamferSweep,
+  levels: readonly LoftLevel[],
+  label: number,
+  ctx: ChamferSolidsContext,
+): AppResult<LabelledMesh[]> {
+  const edges = loopChamferEdgeLoops(op, true)
+  const out: LabelledMesh[] = []
+  for (const l of regionLoops(sweep.path)) {
+    const first = l.elements[0]
+    if (first === undefined || !nearChosenLoop(edges, first.a)) continue
+    const outer = signedArea(l) < 0 ? reverseLoop(l) : l
+    const one: ChamferSweep = { ...sweep, path: { pieces: [{ outer, holes: [] }] } }
+    const m = sweepMeshes(one, levels, label, ctx, true)
+    if (m.isErr()) return m
+    out.push(...m.unwrap())
+  }
+  return Ok(out)
+}
+
+/**
+ * The mitre a corner lift adds at a sharp corner (E4a): at each level the kite between the
+ * path's vertex (the edge's corner moved `run` into the air), the two bevels' offsets by ρ and
+ * their mitre point ρ / sin(θ/2) along the bisector, lofted as the sweep's levels; its own
+ * removal mesh, unioned with the loft in the kernel.
+ */
+function liftKite(
+  c: LiftCorner,
+  levels: readonly LoftLevel[],
+  label: number,
+  triangulate: Triangulate,
+): AppResult<LabelledMesh> {
+  const vp = add(c.v, mul(c.bisector, -LOOP_CHAMFER_RUN / c.sinHalf))
+  const cos = c.sinHalf
+  const sin = Math.sqrt(Math.max(0, 1 - cos * cos))
+  const turn = (s: number): Vec2 => [
+    c.bisector[0] * cos - s * c.bisector[1] * sin,
+    c.bisector[0] * s * sin + c.bisector[1] * cos,
+  ]
+  const n1 = turn(1)
+  const n2 = turn(-1)
+  const ring = (rho: number): Vec2[] => {
+    const r: Vec2[] = [
+      vp,
+      add(vp, mul(n2, rho)),
+      add(vp, mul(c.bisector, rho / c.sinHalf)),
+      add(vp, mul(n1, rho)),
+    ]
+    return ringArea(r) < 0 ? r.reverse() : r
+  }
+  return loftMesh(
+    levels.map((lv) => [ring(lv.rho)]),
+    levels,
+    label,
+    triangulate,
+  )
 }
 
 interface Box {

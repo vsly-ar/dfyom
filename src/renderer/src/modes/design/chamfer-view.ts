@@ -7,6 +7,8 @@
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #chamfer-inspector;
 // docs/modes/design-v0.4.md#implementation-c2
 import { derivedLength } from '../../../../core/design/hole'
+import { placeShape } from '../../../../core/design/placement'
+import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { Quantity } from '../../../../core/quantity/quantity'
@@ -207,4 +209,38 @@ export function wallSectionValues(
     side: edge.kind === 'profile' && edge.side === 'outside' ? 'outside' : 'inside',
     ...(invalid !== undefined ? { invalid } : {}),
   }
+}
+
+/**
+ * The loops of a general edge as the Loops checkboxes name them (edge chamfers E4a), in the
+ * order of the chamfer's `loops` indices: per piece its outer loop ("Rim", "Rim 2"; "Opening",
+ * "Outline"), then its islands ("Island 1" …). One loop for a v0.1 shape and an outline; a named
+ * shape needs the 2D port (none without it: no Loops group).
+ */
+export function edgeLoopLabels(
+  part: DesignPart,
+  chamfer: ChamferDTO,
+  port: Region2dPort | undefined,
+): string[] {
+  const edge = part.dto.operations.find((o) => o.id === chamfer.edgeOf)
+  if (
+    edge === undefined ||
+    !isLoopEdge(edge) ||
+    (edge.kind !== 'pocket' && edge.kind !== 'profile')
+  )
+    return []
+  const role = chamferMessages.loopRole(loopEdgeRole(edge))
+  if (edge.kind === 'profile' && edge.side === 'outside') return [role(1)]
+  if (edge.shape.kind !== 'named') return [role(1)]
+  const op = part.loaded?.part.operations.find((o) => o.id === edge.id)
+  if (port === undefined || op === undefined || !('shape' in op)) return []
+  const placed = placeShape(port, op.shape, part.loaded!.part.shapes)
+  if (placed.isErr()) return []
+  const outline = placed.unwrap().outline
+  if (outline.kind !== 'region') return []
+  let island = 0
+  return outline.region.pieces.flatMap((p, i) => [
+    role(i + 1),
+    ...p.holes.map(() => chamferMessages.island(++island)),
+  ])
 }

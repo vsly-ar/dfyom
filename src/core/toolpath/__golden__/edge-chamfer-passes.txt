@@ -1,0 +1,107 @@
+toolpath op-chamfer1 tool cm4 S16000
+stats cut 770.9291 rapid 105 s 68.1067
+pass rough
+  rapid 30 8 10
+  rapid 30 8 2
+  line 30 8 -1 F200
+  line 50 8 -1 F800
+  line 50 32 -1 F800
+  line 10 32 -1 F800
+  line 10 8 -1 F800
+  line 30 8 -1 F800
+  rapid 30 8 10
+pass finish
+  rapid 30 6 10
+  rapid 30 6 2
+  line 30 6 -1 F200
+  line 50 6 -1 F800
+  arc 51.4142 6.5858 -1 c 50 8 ccw F800
+  line 52 6 -1 F800
+  line 53 5 0 F800
+  line 52 6 -1 F800
+  line 51.4142 6.5858 -1 F800
+  arc 52 8 -1 c 50 8 ccw F800
+  line 52 32 -1 F800
+  arc 51.4142 33.4142 -1 c 50 32 ccw F800
+  line 52 34 -1 F800
+  line 53 35 0 F800
+  line 52 34 -1 F800
+  line 51.4142 33.4142 -1 F800
+  arc 50 34 -1 c 50 32 ccw F800
+  line 10 34 -1 F800
+  arc 8.5858 33.4142 -1 c 10 32 ccw F800
+  line 8 34 -1 F800
+  line 7 35 0 F800
+  line 8 34 -1 F800
+  line 8.5858 33.4142 -1 F800
+  arc 8 32 -1 c 10 32 ccw F800
+  line 8 8 -1 F800
+  arc 8.5858 6.5858 -1 c 10 8 ccw F800
+  line 8 6 -1 F800
+  line 7 5 0 F800
+  line 8 6 -1 F800
+  line 8.5858 6.5858 -1 F800
+  arc 10 6 -1 c 10 8 ccw F800
+  line 30 6 -1 F800
+  rapid 30 6 10
+pass rough
+  rapid 30 8 10
+  rapid 30 8 2
+  line 30 8 -2 F200
+  line 50 8 -2 F800
+  line 50 32 -2 F800
+  line 10 32 -2 F800
+  line 10 8 -2 F800
+  line 30 8 -2 F800
+  rapid 30 8 10
+pass finish
+  rapid 30 7 10
+  rapid 30 7 2
+  line 30 7 -2 F200
+  line 50 7 -2 F800
+  arc 50.7071 7.2929 -2 c 50 8 ccw F800
+  line 51 7 -2 F800
+  line 53 5 0 F800
+  line 51 7 -2 F800
+  line 50.7071 7.2929 -2 F800
+  arc 51 8 -2 c 50 8 ccw F800
+  line 51 32 -2 F800
+  arc 50.7071 32.7071 -2 c 50 32 ccw F800
+  line 51 33 -2 F800
+  line 53 35 0 F800
+  line 51 33 -2 F800
+  line 50.7071 32.7071 -2 F800
+  arc 50 33 -2 c 50 32 ccw F800
+  line 10 33 -2 F800
+  arc 9.2929 32.7071 -2 c 10 32 ccw F800
+  line 9 33 -2 F800
+  line 7 35 0 F800
+  line 9 33 -2 F800
+  line 9.2929 32.7071 -2 F800
+  arc 9 32 -2 c 10 32 ccw F800
+  line 9 8 -2 F800
+  arc 9.2929 7.2929 -2 c 10 8 ccw F800
+  line 9 7 -2 F800
+  line 7 5 0 F800
+  line 9 7 -2 F800
+  line 9.2929 7.2929 -2 F800
+  arc 10 7 -2 c 10 8 ccw F800
+  line 30 7 -2 F800
+  rapid 30 7 10
+  rapid 30 8 10
+  rapid 30 8 2
+  line 30 8 -3 F200
+  line 50 8 -3 F800
+  line 53 5 0 F800
+  line 50 8 -3 F800
+  line 50 32 -3 F800
+  line 53 35 0 F800
+  line 50 32 -3 F800
+  line 10 32 -3 F800
+  line 7 35 0 F800
+  line 10 32 -3 F800
+  line 10 8 -3 F800
+  line 7 5 0 F800
+  line 10 8 -3 F800
+  line 30 8 -3 F800
+  rapid 30 8 10

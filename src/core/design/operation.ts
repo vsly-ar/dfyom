@@ -175,6 +175,13 @@ export interface Chamfer extends Common {
    * the piece's face frame; the bevel follows that shape within the cell. Written by the split.
    */
   readonly sourceEdge: Option<ChamferSourceEdge>
+  /**
+   * E4a: the chosen loops of a general edge, indices into its loops (per piece the outer loop,
+   * then its islands); None = every loop. Doc: docs/modes/edge-chamfers.md#implementation-e4a
+   */
+  readonly loops: Option<readonly number[]>
+  /** E4a: lift the V-bit into the sharp inside corners of a general edge (a mitre). */
+  readonly cornerLift: boolean
 }
 export interface ChamferSourceEdge {
   readonly shape: Shape
@@ -613,6 +620,8 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         angle: a as Quantity,
         stepdown: s === undefined ? None : Some(s as Quantity),
         sourceEdge: e as Option<ChamferSourceEdge>,
+        loops: dto.loops === undefined ? None : Some([...dto.loops]),
+        cornerLift: dto.cornerLift === true,
       }))
     }
   }
@@ -736,6 +745,8 @@ export function operationToDTO(op: Operation): OperationDTO {
               },
             }
           : {}),
+        ...(op.loops.isSome() ? { loops: [...op.loops.unwrap()] } : {}),
+        ...(op.cornerLift ? { cornerLift: true } : {}),
       } as OperationDTO
   }
 }

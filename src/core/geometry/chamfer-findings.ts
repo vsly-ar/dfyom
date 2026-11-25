@@ -19,7 +19,7 @@ import { regionLoops, type Loop, type Region } from './2d/model'
 import type { Region2dPort } from './2d/port'
 import { cornerZones, findRestMaterial, type RestPiece } from './2d/rest-material'
 import type { LoopChamferGeometry, Vec2 } from './model'
-import { loopChamferRegion } from './outline'
+import { choosesEveryLoop, loopChamferEdgeLoops, loopChamferRegion } from './outline'
 
 /** Widths and tips are checked this much below their size (`FIT_SLACK`): equal is no finding. */
 const SLACK = 0.005
@@ -109,10 +109,12 @@ export function chamferMeets(op: Op, port: Region2dPort): ChamferMeet | undefine
   return cached(port, key, () => {
     const band = materialAround(op, port, 2 * w + 1)
     if (band.isErr()) return undefined
+    // E4a: only beside a chosen loop (a wall to an unchosen loop still counts, a known gap)
+    const near = nearChosen(op, 2 * w + 1)
     const rest = (r: number): RestPiece[] =>
       findRestMaterial(port, band.unwrap(), r)
         .unwrapOr([])
-        .filter((p) => inCell(op, p.at))
+        .filter((p) => inCell(op, p.at) && near(p.at))
     const pieces = rest(w - SLACK)
     if (pieces.length === 0) return undefined
     // the widest disc that still fits everywhere: half the narrowest wall
@@ -177,8 +179,18 @@ export function chamferIncomplete(
   })
 }
 
-/** The chamfered loops (an outside edge: the part's outline only). */
-const edgeLoops = (op: Op): Loop[] => regionLoops(loopChamferRegion(op))
+/** The chamfered loops (an outside edge: the part's outline only; E4a: the chosen ones). */
+const edgeLoops = (op: Op): Loop[] =>
+  choosesEveryLoop(op)
+    ? regionLoops(loopChamferRegion(op))
+    : loopChamferEdgeLoops(op).flatMap((l) => (l.chosen ? [l.loop] : []))
+
+/** Whether a point lies within `t` of a chosen loop (always, when every loop is chosen). */
+function nearChosen(op: Op, t: number): (p: Vec2) => boolean {
+  if (choosesEveryLoop(op)) return () => true
+  const loops = edgeLoops(op)
+  return (p) => (closestOnChains(loops, p)?.distance ?? Infinity) <= t
+}
 
 /** The stretches of a closed loop whose samples are not reached: length and middle. */
 function missing(

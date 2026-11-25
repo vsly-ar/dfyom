@@ -148,6 +148,54 @@ describe('design.chamfer.add / update', () => {
     expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
   })
 
+  it('E4a: loops and cornerLift on a general edge; null = every loop; refused on a circle', async () => {
+    const s = await designSetup()
+    await drill(s)
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'rectangle', center: ['70', '30'], length: '10', width: '10' },
+      depth: '2',
+    })
+    await chamfer(s, { edgeOf: 'pocket1', loops: [0, 0], cornerLift: true })
+    // duplicates dropped; stored only when set
+    expect(s.op('chamfer1')).toMatchObject({ loops: [0], cornerLift: true })
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      loops: null,
+      cornerLift: false,
+    })
+    expect(s.op('chamfer1')).not.toHaveProperty('loops')
+    expect(s.op('chamfer1')).not.toHaveProperty('cornerLift')
+    const rule = (e: AppError) => e.issues.map((i) => i.rule)
+    expect(
+      rule(
+        await s.fail(
+          'design.chamfer.update',
+          { partId: s.partId, operationId: 'chamfer1', loops: [1] },
+          'model.invariant',
+        ),
+      ),
+    ).toContain('chamferLoops')
+    const onCircle = await s.fail(
+      'design.chamfer.add',
+      { partId: s.partId, edgeOf: 'drill1', loops: [0], cornerLift: true },
+      'model.invariant',
+    )
+    expect(rule(onCircle)).toEqual(expect.arrayContaining(['chamferLoops', 'chamferLift']))
+    // the geometry input carries both
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      loops: [0],
+      cornerLift: true,
+    })
+    const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+    expect(loaded.part.operations.find((o) => o.id === 'chamfer1')).toMatchObject({
+      cornerLift: true,
+    })
+  })
+
   it('refuses a missing edge, a width of 0 and an angle out of range', async () => {
     const s = await designSetup()
     await drill(s)
@@ -469,6 +517,8 @@ const sinkSpec: FeatureCommandSpec<typeof sinkParams, Sink> = {
           angle: Quantity.parse('90°', fieldContext('angle', ctx.units)).unwrap(),
           stepdown: None,
           sourceEdge: None,
+          loops: None,
+          cornerLift: false,
         },
       },
     ]),

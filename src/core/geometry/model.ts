@@ -258,6 +258,12 @@ interface LoopChamferFields {
   readonly width: number
   /** Included angle, degrees. */
   readonly angle: number
+  /**
+   * E4a: lift the V-bit into the sharp line-line corners of the chosen loops (the V-carving
+   * corner move), so the bevels meet in a mitre; absent = off (E1: the cone stays).
+   * Doc: docs/modes/edge-chamfers.md#implementation-e4a
+   */
+  readonly cornerLift?: true
 }
 
 /** The general edge a loop chamfer follows, in the edge operation's face frame. */
@@ -277,6 +283,11 @@ export interface LoopChamferEdge {
    * chamfered only where it is the source's real edge, never along the split line.
    */
   readonly within?: { readonly min: Vec2; readonly max: Vec2 }
+  /**
+   * E4a: the chosen loops, indices into `regionLoops(loopChamferRegion(…))` (per piece its outer
+   * loop, then its islands); absent = every loop.
+   */
+  readonly loops?: readonly number[]
 }
 
 export type ChamferGeometry = Extract<OperationGeometry, { kind: 'chamfer' }>

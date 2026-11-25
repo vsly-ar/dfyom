@@ -12,15 +12,18 @@ import {
   arc,
   elementLength,
   line,
+  regionLoops,
+  reverseLoop,
   type Element,
   type Loop,
   type Path,
   type Region,
 } from './2d/model'
+import { closestOnChains } from './2d/measure'
 import { translatePath, translateRegion } from './2d/place'
-import type { AppResult } from '../../shared/result'
+import { Ok, type AppResult } from '../../shared/result'
 import type { Region2dPort } from './2d/port'
-import type { LoopChamferGeometry, OperationGeometry, Shape } from './model'
+import type { LoopChamferGeometry, OperationGeometry, Shape, Vec2 } from './model'
 
 /** A shape placed in its face frame: a region (closed) or one open path, in mm. */
 export type Outline =
@@ -139,4 +142,99 @@ export function loopChamferAxis(
 ): AppResult<Region> {
   const r = loopChamferRegion(op, local)
   return port.offset(r, op.edge.side === 'inside' ? d : -d)
+}
+
+/**
+ * A loop chamfer's edge loops with the air on their left (an outside edge's part loop reversed),
+ * in region order, each marked chosen (E4a `edge.loops`; absent = every loop).
+ * Doc: docs/modes/edge-chamfers.md#implementation-e4a
+ */
+export function loopChamferEdgeLoops(
+  op: Pick<LoopChamferGeometry, 'edge'>,
+  local = false,
+): { readonly loop: Loop; readonly chosen: boolean }[] {
+  const chosen = op.edge.loops
+  return regionLoops(loopChamferRegion(op, local)).map((l, i) => ({
+    loop: op.edge.side === 'outside' ? reverseLoop(l) : l,
+    chosen: chosen === undefined || chosen.includes(i),
+  }))
+}
+
+/** True when the chamfer bevels every loop of its edge (E4a: no `loops`, or all of them). */
+export function choosesEveryLoop(op: Pick<LoopChamferGeometry, 'edge'>): boolean {
+  if (op.edge.loops === undefined) return true
+  return loopChamferEdgeLoops(op).every((l) => l.chosen)
+}
+
+/** Whether the edge loop nearest `p` is chosen (E4a); true without loops. */
+export function nearChosenLoop(
+  edges: readonly { readonly loop: Loop; readonly chosen: boolean }[],
+  p: Vec2,
+): boolean {
+  const c = closestOnChains(
+    edges.map((e) => e.loop),
+    p,
+  )
+  return c === undefined || edges[c.chain]!.chosen
+}
+
+/**
+ * A sharp corner a corner lift (E4a) climbs: the edge vertex `v` between two lines of a chosen
+ * loop where the air is convex (a concave material corner), `bisector` the unit direction into
+ * the material and `sinHalf` = sin(θ/2), θ the air's angle at the corner; the mitre runs
+ * width / sinHalf along the bisector.
+ */
+export interface LiftCorner {
+  readonly v: Vec2
+  readonly bisector: Vec2
+  readonly sinHalf: number
+}
+
+/** Largest turn a corner lift takes (rad): a 10° corner, mitre 11.5 × the width. */
+export const LIFT_MAX_TURN = (170 * Math.PI) / 180
+/** Smaller turns are straight: nothing to lift (rad). */
+const LIFT_MIN_TURN = 1e-3
+
+/** The corners a loop chamfer with `cornerLift` lifts into (E4a), face frame (or `local`). */
+export function loopChamferLiftCorners(
+  op: Pick<LoopChamferGeometry, 'edge'>,
+  local = false,
+): LiftCorner[] {
+  const out: LiftCorner[] = []
+  for (const { loop, chosen } of loopChamferEdgeLoops(op, local)) {
+    const els = loop.elements
+    if (!chosen || els.length < 3) continue
+    els.forEach((e, i) => {
+      const f = els[(i + 1) % els.length]!
+      if (e.kind !== 'line' || f.kind !== 'line') return
+      const u = unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]])
+      const w = unit2([f.b[0] - f.a[0], f.b[1] - f.a[1]])
+      const turn = Math.atan2(u[0] * w[1] - u[1] * w[0], u[0] * w[0] + u[1] * w[1])
+      // a left turn with the air on the left: the air is convex there
+      if (!(turn > LIFT_MIN_TURN && turn <= LIFT_MAX_TURN + 1e-9)) return
+      // into the material: the mean of the two right normals
+      const b = unit2([u[1] + w[1], -u[0] - w[0]])
+      out.push({ v: e.b, bisector: b, sinHalf: Math.cos(turn / 2) })
+    })
+  }
+  return out
+}
+
+function unit2(a: Vec2): Vec2 {
+  const l = Math.hypot(a[0], a[1])
+  return [a[0] / l, a[1] / l]
+}
+
+/** The points within `t` of the chosen loops of a loop chamfer (E4a), face frame. */
+export function chosenLoopsBand(
+  op: Pick<LoopChamferGeometry, 'edge'>,
+  port: Region2dPort,
+  t: number,
+): AppResult<Region> {
+  let out: AppResult<Region> = Ok({ pieces: [] })
+  for (const { loop, chosen } of loopChamferEdgeLoops(op)) {
+    if (!chosen) continue
+    out = out.andThen((acc) => port.offsetPath(loop, t).andThen((b) => port.union(acc, b)))
+  }
+  return out
 }
