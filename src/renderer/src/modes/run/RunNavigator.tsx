@@ -133,6 +133,11 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const setupChosen = setups.some((x) => x.id === setupId) ? setupId : setups[0]?.id
 
   const connected = isConnected(status)
+  // the serial port is the default choice (DF101): list the ports once, as choosing it does
+  const closed = status.connection.state === 'closed'
+  useEffect(() => {
+    if (closed && connectTo === 'serial' && ports === undefined) void store.getState().scanPorts()
+  }, [closed, connectTo, ports, store])
   const gates = runGates(status, { planChosen: chosen !== undefined && !manual })
   const liveScale = connected ? status.connection.timeScale : timeScale
   // the open connection's target decides, else the choice

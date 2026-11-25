@@ -452,6 +452,11 @@ function ToolpathSection({
   const allReady = ready === ops.length
   const exportNote =
     exportWhy ?? (allReady || busy ? null : m.export.generatesFirst(ops.length - ready))
+  const exportLabel = exporting
+    ? m.export.busy
+    : several
+      ? m.export.actionSetup(setup.name)
+      : m.export.action
 
   return (
     <Section title={m.toolpaths.title} icon="toolpath">
@@ -489,6 +494,7 @@ function ToolpathSection({
         <Button
           variant={allReady ? 'primary' : 'default'}
           icon={<Icon name="export-gcode" />}
+          className={styles['fitButton']}
           disabled={exporting || busy || exportWhy !== null}
           {...(exportNote === null ? {} : { 'aria-describedby': ids.export })}
           onClick={() =>
@@ -504,7 +510,11 @@ function ToolpathSection({
             )
           }
         >
-          {exporting ? m.export.busy : several ? m.export.actionSetup(setup.name) : m.export.action}
+          {/* DF103: a long setup name ends in "…"; the label's title (not the button's, which
+              would become its description) has the whole label */}
+          <span className={styles['fitLabel']} title={exportLabel}>
+            {exportLabel}
+          </span>
         </Button>
         {exportNote !== null ? (
           <p id={ids.export} className={styles['why']}>

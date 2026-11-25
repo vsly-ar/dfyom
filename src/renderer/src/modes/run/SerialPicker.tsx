@@ -1,5 +1,6 @@
-// The Run navigator's connect choice (virtual machine or serial port) with the port and baud
-// selects, and the settings-check warning of an open serial connection.
+// The Run navigator's connect choice (serial port first and chosen by default, DF101; or the
+// virtual machine) with the port and baud selects, and the settings-check warning of an open
+// serial connection.
 // Doc: docs/modes/run-machine.md#ports-and-the-port-picker, #settings-check
 import type { SettingsCheck } from '../../../../core/run/settings-check'
 import { BAUD_RATES, type SerialPortInfo } from '../../../../core/run/serial'
@@ -46,8 +47,8 @@ export function SerialPicker({
         size="sm"
         disabled={disabled}
         options={[
-          { value: 'virtual', label: m.virtual },
           { value: 'serial', label: m.serialPort },
+          { value: 'virtual', label: m.virtual },
         ]}
         value={connectTo}
         onValueChange={onConnectTo}

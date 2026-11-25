@@ -124,7 +124,10 @@ export interface RunState {
   readonly alignFocus: number
   /** Time scale chosen before connecting; while connected the status has the live one. */
   readonly timeScale: TimeScale
-  /** The connect choice (per window). */
+  /**
+   * The connect choice (per window, not remembered across launches): a serial port by default
+   * (DF101: the real machine is what Run is for), the virtual machine one click away.
+   */
   readonly connectTo: ConnectTo
   /** Serial port path chosen in the picker; `undefined` = none yet. */
   readonly portPath: string | undefined
@@ -352,7 +355,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setupChangeOpen: false,
       alignFocus: 0,
       timeScale: 1,
-      connectTo: 'virtual',
+      connectTo: 'serial',
       portPath: undefined,
       baud: DEFAULT_BAUD,
       ports: undefined,
@@ -419,7 +422,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       setConnectTo: (connectTo) => {
         set({ connectTo })
-        if (connectTo === 'serial' && get().ports === undefined) void get().scanPorts()
+        // choosing the serial port lists the ports again (one plugged in meanwhile shows)
+        if (connectTo === 'serial') void get().scanPorts()
       },
       setPort: (portPath) => set({ portPath }),
       setBaud: (baud) => set({ baud }),

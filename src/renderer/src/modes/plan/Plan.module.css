@@ -97,6 +97,8 @@
 .navigator,
 .inspector {
   display: grid;
+  /* one column as wide as the panel, never its widest control's (DF103) */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   min-height: 0;
 }
@@ -267,12 +269,15 @@
 .fields {
   container-type: inline-size;
   display: grid;
+  /* one column as wide as the panel, never its widest control's (DF103) */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-3);
 }
 
 .group {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 
@@ -391,6 +396,8 @@
 .section {
   container-type: inline-size;
   display: grid;
+  /* one column as wide as the panel, never its widest control's (DF103) */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   padding: var(--space-3);
   border-bottom: 1px solid var(--border);
@@ -494,7 +501,21 @@
 
 .actions {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
+}
+
+/* DF103: a button whose label can be long (Export <setup> gCode…) ends it in "…"; its title has
+   the whole label */
+.fitButton {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fitLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .reasons {

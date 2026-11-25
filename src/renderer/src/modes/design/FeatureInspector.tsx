@@ -30,7 +30,7 @@ import {
 } from './feature-view'
 import { NameField } from './NameField'
 import { OperationFields, warningPath, type OperationFieldsContext } from './OperationFields'
-import { partOperationIcon } from './operation-icon'
+import { partOperationIconProps } from './operation-icon'
 import { ToolField } from './ToolField'
 import type { DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -298,7 +298,7 @@ export function FeatureInspector({
                     className={styles['inlineLink']}
                     onClick={() => select(o.id)}
                   >
-                    <Icon name={partOperationIcon(part.dto, o)} size="sm" />
+                    <Icon {...partOperationIconProps(part.dto, o)} size="sm" />
                     {roleLabel(feature.name, o.name)}
                   </button>
                 </li>

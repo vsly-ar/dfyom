@@ -97,6 +97,8 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   )
   await navigator.getByRole('combobox', { name: 'Machine' }).click()
   await page.getByRole('option', { name: 'Top right' }).click()
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
   // DF46: one line (44 px); the toolbar keeps its height when the machine group appears

@@ -136,9 +136,13 @@
   user-select: none;
 }
 
+/* an option with a picture: the picture and the text start at the list's start edge, each in one
+   column, never centred in a wide list (DF100: the tool list centred its narrower rows, because
+   [data-described] centres its column vertically and the row turned that across) */
 .item[data-icon] {
   flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
 }
 

@@ -119,6 +119,15 @@ describe('own icon set (B22)', () => {
     expect(container.querySelector('svg')).toHaveAttribute('data-size', 'lg')
   })
 
+  it('turns the drawing about its centre when asked (DF99), never by default', () => {
+    const turned = render(<Icon name="facing" rotate={90} />).container.querySelector('svg')!
+    expect(turned).toHaveAttribute('data-rotate', '90')
+    expect(turned.querySelector('g')).toHaveAttribute('transform', 'rotate(90 8 8)')
+    const plain = render(<Icon name="facing" />).container.querySelector('svg')!
+    expect(plain).not.toHaveAttribute('data-rotate')
+    expect(plain.querySelector('g')).toBeNull()
+  })
+
   it('is the icon sheet of the design-system page (design/icons/b22/sync-page.mjs)', () => {
     const page = readFileSync(`${process.cwd()}/docs/conventions/ui-design-system.html`, 'utf8')
     const block = page.slice(page.indexOf('/* icons:begin'), page.indexOf('/* icons:end */'))

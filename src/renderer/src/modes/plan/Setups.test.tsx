@@ -20,6 +20,7 @@ import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
+import { cssRule } from '../../test/css'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 import type { PlanOperationDTO } from '../../../../core/plan/plan.dto'
@@ -128,6 +129,11 @@ describe('Setup panel', () => {
     // the bottom facing under Bottom, the top operations under Top
     const bottomOps = within(t.opsOf('Bottom')).getAllByRole('button', { name: /^Facing/ })
     expect(bottomOps).toHaveLength(1)
+    // DF99: the bottom facing's icon is turned over, as in the design navigator
+    expect(bottomOps[0]!.querySelector('svg[data-icon="facing"]')).toHaveAttribute(
+      'data-rotate',
+      '180',
+    )
     expect(within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })).toHaveLength(1)
     // the first setup is the one shown and exported
     expect(bottom).toHaveTextContent('Shown in the viewport and exported')
@@ -937,5 +943,34 @@ describe('Aid parameters (DF83)', () => {
     act(() => probe.scene!.aids!.onSelect(h.id))
     await within(t.inspector()).findByRole('region', { name: 'Alignment aid' })
     expect(first.id).toBeDefined()
+  })
+})
+
+describe('Long names in the sidebar (DF103)', () => {
+  it('ends a long setup name in the export button with "…", the whole label as its title', async () => {
+    const long = 'Bottom of the enclosure lid with the long gCode file name'
+    const t = await renderSetups(async (s, planId) => {
+      const bottom = s.plan(planId).setups[0]!
+      await s.run('plan.setup.update', { planId, setupId: bottom.id, name: long })
+    })
+    const button = within(t.nav()).getByRole('button', { name: `Export ${long} gCode…` })
+    // the label is its own box, so it can end in an ellipsis inside the button; its title (not
+    // the button's description) has the whole label
+    const label = button.querySelector('span[title]')!
+    expect(label).toHaveTextContent(`Export ${long} gCode…`)
+    expect(label).toHaveAttribute('title', `Export ${long} gCode…`)
+    expect(button).not.toHaveAttribute('title')
+    const css = 'src/renderer/src/modes/plan/Plan.module.css'
+    expect(cssRule(css, `.${label.className}`)).toMatchObject({
+      overflow: 'hidden',
+      'text-overflow': 'ellipsis',
+      'min-width': '0',
+    })
+    // one column as wide as the panel: the navigator, its sections and the toolpath actions
+    for (const rule of ['.navigator, .inspector', '.section', '.actions'])
+      expect(cssRule(css, rule)).toMatchObject({ 'grid-template-columns': 'minmax(0, 1fr)' })
+    expect(
+      cssRule('src/renderer/src/modes/run/Run.module.css', '.section')['grid-template-columns'],
+    ).toBe('minmax(0, 1fr)')
   })
 })
