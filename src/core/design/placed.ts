@@ -115,7 +115,8 @@ function depthRange(g: OperationGeometry, stock: StockGeometry): readonly [numbe
     case 'facing':
       return [-g.depth, 0]
     case 'pocket':
-      return [g.onZ - g.depth, g.onZ]
+      // a through pocket (patterns P4) too ends on the material an earlier setup left (DF50)
+      return [g.throughDepth === undefined ? g.onZ - g.depth : -g.throughDepth, g.onZ]
     case 'drilling':
       // a through hole ends on the material an earlier setup left (DF61), else the far face
       return [

@@ -182,6 +182,53 @@ describe('throughDepths of through drillings (DF61)', () => {
   })
 })
 
+/** A top (+z) through pocket (patterns P4) of a 100 × 40 rectangle on `onZ`. */
+const throughPocket = (onZ = 0): Extract<OperationGeometry, { kind: 'pocket' }> => ({
+  kind: 'pocket',
+  id: 'pattern1_pocket',
+  onZ,
+  shape: {
+    center: [125, 50],
+    contour: { kind: 'rectangle', length: 100, width: 40, cornerRadius: 2 },
+  },
+  depth: 40 + onZ,
+  floorRadius: 0,
+  through: true,
+})
+
+describe('throughDepths of through pockets (patterns P4 follow-up)', () => {
+  it('a through pocket over the bottom relief cuts the material left; partly covered: the full extent', () => {
+    const relief = bottomPocket('pocket1', 158, 108)
+    expect(depths([relief, throughPocket()])).toEqual(new Map([['pattern1_pocket', 33]]))
+    // a relief narrower than the pocket leaves material under part of it
+    expect(depths([bottomPocket('pocket1', 90, 108), throughPocket()])).toEqual(new Map())
+    // a blind pocket is not a through cut
+    const { through: _, ...blind } = throughPocket()
+    expect(depths([relief, { ...blind, depth: 5 }])).toEqual(new Map())
+  })
+
+  it('a stacked through pocket (on a floor 3 below the face) keeps its depth below the face', () => {
+    expect(depths([bottomPocket('pocket1', 158, 108), throughPocket(-3)])).toEqual(
+      new Map([['pattern1_pocket', 33]]),
+    )
+    // the relief reaching above its `on` level leaves nothing to cut: the full extent
+    expect(depths([bottomPocket('pocket1', 158, 108, { depth: 38 }), throughPocket(-3)])).toEqual(
+      new Map(),
+    )
+  })
+
+  it('tool reach and the geometry read it; no bottom band of its own', () => {
+    const ops = [bottomPocket('pocket1', 158, 108), throughPocket()]
+    const pocket = withThroughDepths(ops, depths(ops))[1]!
+    expect(pocket).toMatchObject({ throughDepth: 33, depth: 40 })
+    expect(reachDepth(pocket as Exclude<OperationGeometry, { kind: 'facing' }>, STOCK)).toEqual([
+      33,
+      'depth',
+    ])
+    expect(materialBands(ops, STOCK, port, () => true).get('pattern1_pocket')).toBeUndefined()
+  })
+})
+
 describe('throughDepths with blind profiles as removals (DF61)', () => {
   it('a bottom step whose slot covers the outline slot clears its depth', () => {
     // the step along the same loop, a wider slot: from the bottom face 9.5 deep

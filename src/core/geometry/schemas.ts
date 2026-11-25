@@ -88,6 +88,7 @@ export const PocketGeometrySchema = z.object({
   depth: z.number(),
   floorRadius: z.number(),
   through: z.literal(true).exactOptional(),
+  throughDepth: z.number().exactOptional(),
 })
 export const DrillingGeometrySchema = z.object({
   kind: z.literal('drilling'),

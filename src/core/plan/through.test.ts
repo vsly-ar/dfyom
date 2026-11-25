@@ -296,3 +296,115 @@ describe('partial coverage and holes on cleared material (DF61 follow-ups)', () 
     expect(Math.min(...rapids)).toBeLessThan(0)
   })
 })
+
+/**
+ * Patterns P4 follow-up: a through grille (Ø 6 hex circles, margin 10) over the same 5 mm bottom
+ * relief: the grille's through pocket cuts the 15 mm left, in the plan's setup order.
+ */
+async function grilleOverRelief(): Promise<{ s: PlanSetup; planId: string }> {
+  const s = await planSetup({ part: false, services: { region2d } })
+  const partId = s.partId
+  await s.run('design.pocket.add', {
+    partId,
+    on: 'stock.bottom',
+    shape: {
+      kind: 'rectangle',
+      center: ['50', '30'],
+      length: '100',
+      width: '60',
+      cornerRadius: '4',
+    },
+    depth: '5',
+    floorRadius: '0',
+  })
+  await s.run('design.pattern.add', {
+    partId,
+    lattice: 'hex',
+    cell: { kind: 'circle', diameter: '6' },
+    spacing: { gap: '2' },
+    margin: '10',
+    through: true,
+  })
+  await s.run('project.apply', {})
+  const planId = await s.create({ machineLibraryItemId: s.machineId })
+  return { s, planId }
+}
+
+describe('through pockets after an earlier setup (patterns P4 follow-up)', () => {
+  const grilleOp = (s: PlanSetup, planId: string) =>
+    s
+      .plan(planId)
+      .setups.flatMap((x) => x.operations)
+      .find((o) => o.designOperationIds[0] === 'pattern1_pocket')!
+  const grilleZ = (s: PlanSetup, planId: string) => {
+    const [input] = expectOk(
+      planOperationInputs(s.d.doc, planId, [grilleOp(s, planId).id], region2d),
+    )
+    const request = expectOk(toGeneratorInputs(input!, region2d))
+    const tp = expectOk(generateRequest(request, noSteps, () => Ok(region2d)))
+    return { input: input!, z: Math.min(...zs(tp)) }
+  }
+  const grilleReach = (s: PlanSetup, planId: string) =>
+    (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }).warnings.filter(
+      (w) => w.rule === 'reach' && w.planOperationId === grilleOp(s, planId).id,
+    )
+
+  it('cuts the material the bottom setup left + the breakthrough; the checks measure it', async () => {
+    const { s, planId } = await grilleOverRelief()
+    expect(s.plan(planId).setups.map((x) => x.name)).toEqual(['Bottom', 'Top'])
+    const { input, z } = grilleZ(s, planId)
+    expect(input.throughDepths?.get('pattern1_pocket')).toBe(15)
+    expect(z).toBeCloseTo(-15.5, 9)
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: grilleOp(s, planId).id,
+      stickout: '18',
+    })
+    expect(grilleReach(s, planId)).toEqual([])
+  })
+
+  it('breakthrough: taken by the through pocket, refused on a blind pocket (not ignored)', async () => {
+    const { s, planId } = await grilleOverRelief()
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: grilleOp(s, planId).id,
+      strategy: { breakthrough: '1' },
+    })
+    expect(grilleZ(s, planId).z).toBeCloseTo(-16, 9)
+    const relief = s
+      .plan(planId)
+      .setups.flatMap((x) => x.operations)
+      .find((o) => o.designOperationIds[0] === 'pocket1')!
+    const before = s.d.doc
+    const e = await s.failWith(
+      'plan.operation.update',
+      { planId, planOperationId: relief.id, strategy: { breakthrough: '1' } },
+      'model.invariant',
+    )
+    expect(e.issues).toEqual([
+      expect.objectContaining({ path: ['strategy', 'breakthrough'], rule: 'throughOnly' }),
+    ])
+    expect(s.d.doc).toBe(before)
+    // clearing it stays allowed
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: relief.id,
+      strategy: { breakthrough: null },
+    })
+  })
+
+  it('in the plan’s setup order: the top first cuts the whole stock', async () => {
+    const { s, planId } = await grilleOverRelief()
+    const top = s.plan(planId).setups.find((x) => x.name === 'Top')!.id
+    await s.run('plan.setup.move', { planId, setupId: top, toIndex: 0 })
+    expect(grilleZ(s, planId).z).toBeCloseTo(-20.5, 9)
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: grilleOp(s, planId).id,
+      stickout: '18',
+    })
+    expect(grilleReach(s, planId)).toEqual([
+      expect.objectContaining({ params: expect.objectContaining({ depth: 20.5 }) }),
+    ])
+  })
+})

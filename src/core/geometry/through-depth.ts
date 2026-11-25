@@ -28,6 +28,7 @@ import { pocketRegion, profileChain } from './outline'
 
 type Profile = Extract<OperationGeometry, { kind: 'profile' }>
 type Drilling = Extract<OperationGeometry, { kind: 'drilling' }>
+type Pocket = Extract<OperationGeometry, { kind: 'pocket' }>
 /** Whether `earlier` is machined in a setup before the one of `later` (its own setup: false). */
 export type RunsBefore = (earlier: OperationGeometry, later: OperationGeometry) => boolean
 
@@ -57,9 +58,18 @@ export const OPPOSITE: Readonly<Record<Direction, Direction>> = {
 export const isThroughGeometry = (op: OperationGeometry): op is Profile =>
   op.kind === 'profile' && op.depth === undefined
 
-/** A through profile or a through drilling: what `throughDepths` measures (DF50, DF61). */
-const isThroughCut = (op: OperationGeometry): op is Profile | Drilling =>
-  isThroughGeometry(op) || (op.kind === 'drilling' && op.bottom.kind === 'through')
+/** A pattern's through pocket (patterns P4). */
+const isThroughPocket = (op: OperationGeometry): op is Pocket =>
+  op.kind === 'pocket' && op.through === true
+
+/**
+ * A through profile, a through drilling or a through pocket: what `throughDepths` measures
+ * (DF50, DF61, patterns P4 follow-up).
+ */
+const isThroughCut = (op: OperationGeometry): op is Profile | Drilling | Pocket =>
+  isThroughGeometry(op) ||
+  (op.kind === 'drilling' && op.bottom.kind === 'through') ||
+  isThroughPocket(op)
 
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
@@ -296,9 +306,9 @@ function clearedDepth(
 }
 
 /**
- * The through depth of every through profile or through drilling whose slot or hole an earlier
- * setup partly cleared from the opposite face: the stock extent along its normal less that
- * cleared depth. Cuts without such material removal are left out (they cut the full extent), as
+ * The through depth of every through profile, through drilling or through pocket (patterns P4)
+ * whose slot, hole or region an earlier setup partly cleared from the opposite face: the stock
+ * extent along its normal less that cleared depth. Cuts without such material removal are left out (they cut the full extent), as
  * are cuts that would keep less than `MIN_THROUGH` (the opposite cuts go through already: the
  * cut keeps the full extent).
  */
@@ -319,16 +329,31 @@ export function throughDepths(
         ? undefined
         : op.kind === 'profile'
           ? slotRegion(op, stock, port)
-          : holeRegion(op, stock, port),
+          : op.kind === 'pocket'
+            ? pocketFaceRegion(op, stock, port)
+            : holeRegion(op, stock, port),
     )
     const cleared = clearedDepth(clears, slot, port)
     if (cleared <= EPSILON) continue
     const extent = localStock(direction, stock).thickness
     const depth = extent - cleared
-    if (depth < MIN_THROUGH) continue
+    // a through pocket cuts from its `on` level (a stacked one below the face)
+    if (depth - (op.kind === 'pocket' ? -op.onZ : 0) < MIN_THROUGH) continue
     out.set(op.id, depth)
   }
   return out
+}
+
+/** A pocket's region in its face frame, within the stock face rectangle. */
+function pocketFaceRegion(
+  op: Pocket,
+  stock: StockGeometry,
+  port: Region2dPort,
+): Region | undefined {
+  const local = localStock(op.direction ?? '+z', stock)
+  return port
+    .intersect(pocketRegion(op).region, rectangle(local.length, local.width))
+    .mapOr(undefined, (r) => r)
 }
 
 /** A value computed on first use. */
@@ -484,7 +509,7 @@ export function materialBands(
       if (port === undefined) return undefined
       if (op.kind === 'profile') return slotRegion(op, stock, port)
       if (op.kind === 'drilling') return holeRegion(op, stock, port)
-      return port.intersect(pocketRegion(op).region, face).mapOr(undefined, (r) => r)
+      return pocketFaceRegion(op, stock, port)
     })
     // depths below the face where the cut starts and where its floor is (none: through, a hole)
     const start = op.kind === 'pocket' || op.kind === 'drilling' ? -op.onZ : 0
@@ -501,7 +526,8 @@ export function materialBands(
         partial = partialCover(port, same, t, Math.max(start, cleared), cleared, floor)
     }
     let bottom: number | undefined
-    if (floor !== undefined) {
+    // a through pocket has its `throughDepth` for that, as a through profile
+    if (floor !== undefined && !isThroughPocket(op)) {
       const opposite = OPPOSITE[direction]
       const below = clearsOf(ops, opposite, direction, op, stock, port, before)
       if (below.length > 0) {
@@ -520,13 +546,16 @@ export function materialBands(
   return out
 }
 
-/** Profiles and drillings with their `throughDepth` set from `depths` (others: without one). */
+/**
+ * Profiles, drillings and pockets with their `throughDepth` set from `depths` (others: without
+ * one).
+ */
 export function withThroughDepths(
   ops: readonly OperationGeometry[],
   depths: ReadonlyMap<string, number>,
 ): OperationGeometry[] {
   return ops.map((o) => {
-    if (o.kind !== 'profile' && o.kind !== 'drilling') return o
+    if (o.kind !== 'profile' && o.kind !== 'drilling' && o.kind !== 'pocket') return o
     const d = depths.get(o.id)
     if (d === undefined) {
       if (o.throughDepth === undefined) return o

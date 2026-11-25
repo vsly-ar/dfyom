@@ -173,6 +173,13 @@ export type OperationGeometry = FacePlacement &
         readonly floorRadius: number
         /** Patterns P4: cleared through the opposite face (no floor); absent = blind. */
         readonly through?: true
+        /**
+         * A through pocket's depth below the stock face when an earlier setup already cleared
+         * material under its whole region from the opposite face (DF50 for through pockets,
+         * `throughDepths`); absent = the stock extent along the normal. The toolpath cuts
+         * `throughDepth + onZ` below `on`; the removal solid still runs through.
+         */
+        readonly throughDepth?: number
       }
     | {
         readonly kind: 'drilling'

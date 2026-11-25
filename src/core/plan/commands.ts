@@ -1067,6 +1067,18 @@ const operationUpdate = defineCommand({
       issues.push(
         ...strategyIssues(kind, op.strategy, resolveStrategy(kind, op.strategy, sctx), sctx),
       )
+      // a blind pocket has no breakthrough (only a pattern's through pocket breaks through, P4):
+      // refused rather than stored and ignored (DF83's rule); clearing it (null) stays allowed
+      if (
+        kind === 'pocket' &&
+        typeof args.strategy.breakthrough === 'string' &&
+        !e.ops.some((o) => o.kind === 'pocket' && o.through === true)
+      )
+        issues.push({
+          path: ['strategy', 'breakthrough'],
+          rule: 'throughOnly',
+          message: 'a blind pocket has no breakthrough: only a through pocket breaks through',
+        })
     }
     if (args.zRef === null) delete op.zRef
     else if (args.zRef !== undefined) {
