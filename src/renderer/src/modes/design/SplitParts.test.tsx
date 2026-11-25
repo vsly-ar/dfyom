@@ -89,11 +89,11 @@ describe('split part (split parts 4a)', () => {
       expect.stringMatching(/^2 · .* × 10 mm · own blank$/),
     ])
     expect(within(section).getByLabelText('Level at Z', { selector: 'input' })).toBeVisible()
-    // the level's findings under its field (4a polish), at most three and a count
+    // the level's findings under its field (4a polish): one, its glue face (U9 Q131), and a count
     expect(
       within(section).getByText(/^The glue face at the level at Z -10 mm is 4 mm wide/),
     ).toBeVisible()
-    expect(within(section).getByText('2 more in Warnings')).toBeVisible()
+    expect(within(section).getByText('4 more in Warnings')).toBeVisible()
     // the warning list names the split, not an "Unknown operation" (design review U9)
     const list = screen.getByRole('region', { name: 'Warnings' })
     await waitFor(() => expect(within(list).getAllByText('Split').length).toBeGreaterThan(0))
@@ -269,6 +269,28 @@ describe('split part (split parts 4a)', () => {
     await t.user.click(within(joint()).getByRole('radio', { name: 'Butt' }))
     await waitFor(() => expect(t.s.part().split?.joint.dowels).toBeUndefined())
     expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.dowels')
+    await expectNoAxeViolations()
+  })
+
+  it('a set joint’s settings are collapsed with a one-line summary; a click opens them (U9 Q131)', async () => {
+    const t = await renderSplit(async (s) => {
+      await s.run('design.split.set', {
+        partId: s.partId,
+        split: { lines: [], levels: ['-10 mm'], margin: '5 mm', dowels: {} },
+      })
+    })
+    const section = t.split()
+    const settings = within(section).getByText('Dowel settings')
+    expect(within(section).getByText(/^Ø.* mm · .* mm deep · \d+ holes?$/)).toBeVisible()
+    expect(within(section).getByLabelText('Dowel Ø', { selector: 'input' })).not.toBeVisible()
+    await t.user.click(settings)
+    await waitFor(() =>
+      expect(within(section).getByLabelText('Dowel Ø', { selector: 'input' })).toBeVisible(),
+    )
+    // the library stocks come after the cuts
+    const level = within(section).getByLabelText('Level at Z', { selector: 'input' })
+    const stocks = within(section).getByRole('switch', { name: 'Use library stocks' })
+    expect(level.compareDocumentPosition(stocks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await expectNoAxeViolations()
   })
 

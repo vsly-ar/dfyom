@@ -253,19 +253,6 @@ export function SplitSection({
           </li>
         ))}
       </ul>
-      <Field
-        label={t.useStocks}
-        kind="toggle"
-        messages={[{ id: 'note', severity: 'note', text: t.useStocksHint }]}
-      >
-        <Switch
-          label={t.useStocks}
-          hideLabel
-          checked={split.useStocks === true}
-          onCheckedChange={(on) => void send({ ...args, useStocks: on })}
-        />
-      </Field>
-      <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
       <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
         {split.lines.length === 0 && split.levels.length === 0 ? (
           <p className={styles['muted']}>{t.noCuts}</p>
@@ -365,6 +352,20 @@ export function SplitSection({
       {split.levels.length > 0 ? (
         <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
       ) : null}
+      {/* the blanks after the cuts (U9 Q131): how the pieces are cut first, then from what */}
+      <Field
+        label={t.useStocks}
+        kind="toggle"
+        messages={[{ id: 'note', severity: 'note', text: t.useStocksHint }]}
+      >
+        <Switch
+          label={t.useStocks}
+          hideLabel
+          checked={split.useStocks === true}
+          onCheckedChange={(on) => void send({ ...args, useStocks: on })}
+        />
+      </Field>
+      <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
       <div className={styles['addRow']}>
         <Button
           size="sm"
@@ -401,6 +402,10 @@ function KeyFields({
   const unit = defaultUnit('length', part.units)
   const placed = keys?.keys.keys ?? []
   const fmt = (v: number) => `${+v.toFixed(2)}`
+  // U9 Q131: the settings open when the joint is chosen here, collapsed once set
+  const [chosen, setChosen] = useState(false)
+  const clearance =
+    split.joint.clearance?.source ?? lengthDTO(keyClearance(split), part.units).source
   return (
     <div className={styles['splitGroup']} role="group" aria-label={t.lineJoint}>
       <Field label={t.lineJoint} kind="toggle">
@@ -414,12 +419,17 @@ function KeyFields({
           value={kind}
           onValueChange={(v) => {
             const { joint: _, clearance: _c, ...rest } = args
+            setChosen(true)
             send(v === 'puzzle' || v === 'dovetail' ? { ...rest, joint: v } : rest)
           }}
         />
       </Field>
       {kind === 'butt' ? null : (
-        <>
+        <JointSettings
+          title={t.keySettings}
+          summary={t.keySettingsSummary(clearance, keys === undefined ? undefined : placed.length)}
+          open={chosen}
+        >
           <QuantityInput
             label={t.clearance}
             kind="length"
@@ -442,9 +452,49 @@ function KeyFields({
             </p>
           )}
           <TestFit part={part} />
-        </>
+        </JointSettings>
       )}
     </div>
+  )
+}
+
+/**
+ * A joint's settings (U9 Q131): a disclosure under the joint control, its summary a one-line
+ * read-out ("Key settings · clearance 0.15 mm · 2 keys"); open when the joint was chosen in
+ * this inspector, collapsed otherwise (the joint is set), so a set split stays short. Opens and
+ * closes over `--motion-base` (the height, cut under reduced motion).
+ */
+function JointSettings({
+  title,
+  summary,
+  open: opened,
+  children,
+}: {
+  title: string
+  summary: string
+  /** Open it (the joint was just chosen); the user's own toggles win after that. */
+  open: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  const [open, setOpen] = useState(opened)
+  const [was, setWas] = useState(opened)
+  if (opened !== was) {
+    setWas(opened)
+    if (opened) setOpen(true)
+  }
+  return (
+    <details
+      className={styles['splitSettings']}
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary>
+        <Icon name="chevron-down" />
+        <span className={styles['splitSettingsTitle']}>{title}</span>
+        <span className={styles['splitSettingsSummary']}>{summary}</span>
+      </summary>
+      <div className={styles['splitGroup']}>{children}</div>
+    </details>
   )
 }
 
@@ -635,6 +685,8 @@ function DowelFields({
     ...args,
     dowels: { ...d, holes: next ?? [] },
   })
+  // U9 Q131: the settings open when Dowels is chosen here, collapsed once set
+  const [chosen, setChosen] = useState(false)
   return (
     <div className={styles['splitGroup']} role="group" aria-label={t.levelJoint}>
       <Field label={t.levelJoint} kind="toggle">
@@ -647,12 +699,21 @@ function DowelFields({
           value={dowels === undefined ? 'butt' : 'dowels'}
           onValueChange={(v) => {
             const { dowels: _, ...rest } = args
+            setChosen(true)
             send(v === 'dowels' ? { ...rest, dowels: {} } : rest)
           }}
         />
       </Field>
       {dowels === undefined || d === undefined ? null : (
-        <>
+        <JointSettings
+          title={t.dowelSettings}
+          summary={t.dowelSettingsSummary(
+            dowels.diameter.source,
+            dowels.depth.source,
+            holes.length,
+          )}
+          open={chosen}
+        >
           <QuantityInput
             label={t.dowelDiameter}
             kind="length"
@@ -719,7 +780,7 @@ function DowelFields({
               {t.placeAgain}
             </Button>
           </div>
-        </>
+        </JointSettings>
       )}
     </div>
   )
@@ -779,8 +840,11 @@ function CutRow({
   )
 }
 
-/** Findings listed under a cut's field at most; the rest are in the warning list. */
-const CUT_FINDINGS_MAX = 3
+/**
+ * Findings listed under a cut's field at most (U9 Q131: one, its glue face first, was three);
+ * the rest are in the warning list ("n more in Warnings").
+ */
+const CUT_FINDINGS_MAX = 1
 
 /**
  * Top (X–Y) and Front (X–Z) of the pieces' blanks, pulled apart from the part's centre once shown
