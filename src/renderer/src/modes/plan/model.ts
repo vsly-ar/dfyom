@@ -601,7 +601,8 @@ export function strategyQuantity(
 /**
  * The strategy parameters the inspector shows for a kind, in table order, given the resolved
  * values (docs/conventions/ui.md#plan-mode-task-37: only parameters that apply). `through`: a
- * drilling through the stock or a through profile, not a blind groove (breakthrough applies).
+ * drilling through the stock, a through profile (not a blind groove) or a pattern's through
+ * pocket (patterns P4): breakthrough applies.
  */
 export function shownStrategyKeys(
   kind: OperationKind,
@@ -616,6 +617,7 @@ export function shownStrategyKeys(
         if (key === 'helixDiameter') return entry === 'helix'
         if (key === 'rampAngle') return entry !== 'plunge'
         if (key === 'finishStepdown') return Number(resolved['finishAllowance'] ?? 0) > 0
+        if (key === 'breakthrough') return through
         return true
       case 'profile':
         if (key === 'breakthrough') return through

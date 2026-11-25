@@ -283,3 +283,130 @@ describe('patterns P3 exit', () => {
     )
   })
 })
+
+/** The lowest Z of a plan operation's toolpath for `designId`. */
+function lowestZ(s: Awaited<ReturnType<typeof planSetup>>, planId: string, designId: string) {
+  const op = opsOf(s.plan(planId)).find((o) => o.designOperationIds.includes(designId))!
+  const tp = (
+    s.query('plan.toolpath.get', { planId, planOperationId: op.id }) as {
+      toolpath: Toolpath
+    }
+  ).toolpath
+  return {
+    tp,
+    z: Math.min(
+      ...tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2]))),
+    ),
+  }
+}
+
+describe('patterns P4 exit', () => {
+  it("cnc-code's lace on a grid: a pattern stacked on another's floor, volume, plan, golden, machine", async () => {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const s = await planSetup({ part: false, services: svc, stock: LID })
+    const grid = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Grid',
+      lattice: 'square',
+      cell: { kind: 'rectangle', length: '30', width: '30', cornerRadius: '4' },
+      spacing: { gap: '6' },
+      origin: ['22', '25'],
+      margin: '4',
+      depth: '3',
+    })) as { cells: number }
+    expect(grid.cells).toBe(2)
+    const lace = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Lace',
+      on: 'pattern1_pocket.floor',
+      lattice: 'hex',
+      cell: { kind: 'circle', diameter: '5' },
+      spacing: { gap: '1.5' },
+      margin: '1.5',
+      depth: '1.5',
+    })) as { cells: number; warnings: { code: string; severity: string }[] }
+    expect(lace.cells).toBe(18)
+    expect(lace.warnings.filter((w) => w.severity !== 'info')).toEqual([])
+    await s.run('project.apply', {})
+
+    // removed volume = the grid's cells × 3 + the lace's cells × 1.5
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const area = (id: string) => {
+      const op = input.operations.find((o) => o.id === id)!
+      if (op.kind !== 'pocket' || op.shape.contour.kind !== 'region') throw new Error('no region')
+      return op.shape.contour.region
+    }
+    const below = area('pattern1_pocket')
+    const cells = area('pattern2_pocket')
+    expect(cells.pieces).toHaveLength(lace.cells)
+    // the lace lies within the grid's cells less its margin
+    const out = expectOk(region2d.difference(cells, expectOk(region2d.offset(below, 1.5))))
+    expect(regionArea(out)).toBeLessThan(1e-6)
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    const want = regionArea(below) * 3 + regionArea(cells) * 1.5
+    expect(Math.abs(80 * 50 * 12 - solid.volume - want) / want).toBeLessThan(0.002)
+
+    // the lace after the grid, from the grid's floor down 1.5 mm
+    const { lines, planId } = await planExportRun(s, svc)
+    expect(opsOf(s.plan(planId)).map((o) => o.designOperationIds.join('+'))).toEqual([
+      'pattern1_pocket',
+      'pattern2_pocket',
+    ])
+    expect(lowestZ(s, planId, 'pattern1_pocket').z).toBeCloseTo(-3, 9)
+    expect(lowestZ(s, planId, 'pattern2_pocket').z).toBeCloseTo(-4.5, 9)
+    await expect(lines.join('\n') + '\n').toMatchFileSnapshot('__golden__/pattern-lace-stack.nc')
+  })
+
+  it('a through grille in a 6 mm panel: no slug, cut through + breakthrough, golden, machine', async () => {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const panel = {
+      ...LID,
+      name: 'Panel',
+      thickness: '6',
+      material: { name: 'Birch plywood', class: 'sheetGood' as const },
+    }
+    const s = await planSetup({ part: false, services: svc, stock: panel })
+    const out = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Grille',
+      lattice: 'hex',
+      cell: { kind: 'circle', diameter: '6' },
+      spacing: { gap: '2' },
+      margin: '5',
+      through: true,
+    })) as { cells: number; warnings: { code: string; severity: string }[] }
+    expect(out.cells).toBeGreaterThan(20)
+    expect(out.warnings.filter((w) => w.severity !== 'info')).toEqual([])
+    await s.run('project.apply', {})
+
+    // every cell cleared through the 6 mm, no floor and so no slug: cells' area × 6 removed
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const pocket = input.operations[0]!
+    if (pocket.kind !== 'pocket' || pocket.shape.contour.kind !== 'region')
+      throw new Error('no region')
+    expect(pocket).toMatchObject({ depth: 6, through: true })
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    const want = regionArea(pocket.shape.contour.region) * 6
+    expect(Math.abs(80 * 50 * 6 - solid.volume - want) / want).toBeLessThan(0.006)
+
+    // cut to the thickness + the 0.5 mm breakthrough
+    const { lines, planId, toolpath } = await planExportRun(s, svc)
+    const zs = toolpath.passes.flatMap((p) =>
+      p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])),
+    )
+    expect(Math.min(...zs)).toBeCloseTo(-6.5, 9)
+    const op = opsOf(s.plan(planId))[0]!
+    expect(op.strategy).not.toHaveProperty('breakthrough')
+    await expect(lines.join('\n') + '\n').toMatchFileSnapshot(
+      '__golden__/pattern-through-grille.nc',
+    )
+  })
+})

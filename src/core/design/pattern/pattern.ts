@@ -104,8 +104,13 @@ export interface Pattern extends FeatureBase {
   readonly fit: PatternFit
   /** The pocket clears the boundary less the margin minus the cells (islands). */
   readonly invert: boolean
-  /** The pocket's depth below `on`. */
+  /** The pocket's depth below `on` (kept, unused, while `through`). */
   readonly depth: Quantity
+  /**
+   * P4 (Q126): every cell cut through the stock by a through pocket (each cell cleared wholly,
+   * no slug); refused with `invert` (`patternThroughInvert`).
+   */
+  readonly through: boolean
   /** P3: Some = the owned chamfer `<id>_chamfer` on the pocket's edge (off by default). */
   readonly chamfer: Option<PatternChamfer>
 }
@@ -161,6 +166,7 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   fit: z.enum(['whole', 'clip']).optional(),
   invert: z.boolean().optional(),
   depth: length(),
+  through: z.boolean().optional(),
   chamfer: z.object({ width: length(), angle: angle() }).optional(),
 })
 
@@ -260,6 +266,7 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       fit: d.fit ?? 'whole',
       invert: d.invert ?? false,
       depth: depth!,
+      through: d.through ?? false,
       chamfer: chq.length === 0 ? None : Some({ width: chq[0]!, angle: chq[1]! }),
     }
   })
@@ -328,6 +335,7 @@ function patternToDTO(p: Pattern): FeatureDTO {
     ...(p.fit === 'clip' ? { fit: 'clip' } : {}),
     ...(p.invert ? { invert: true } : {}),
     depth: p.depth.toDTO(),
+    ...(p.through ? { through: true } : {}),
     ...(p.chamfer.isSome()
       ? {
           chamfer: {
@@ -355,6 +363,12 @@ function patternInvariants(p: Pattern): Issue[] {
   const positive = (q: Quantity, ...path: (string | number)[]) =>
     check(q.exact.compare(ZERO) > 0, path, 'positive', 'must be greater than 0')
   positive(p.depth, 'depth')
+  check(
+    !(p.through && p.invert),
+    ['invert'],
+    'patternThroughInvert',
+    'an inverted pattern cut through would leave every island loose: turn off Through or Invert',
+  )
   // the angle's range is the owned chamfer's rule (validate.ts), reported at chamfer.angle
   if (p.chamfer.isSome()) positive(p.chamfer.unwrap().width, 'chamfer', 'width')
   check(p.margin.exact.compare(ZERO) >= 0, ['margin'], 'nonNegative', 'must be 0 or more')
@@ -377,7 +391,7 @@ function patternInvariants(p: Pattern): Issue[] {
       'shapeCycle',
       "a pattern's cell is a named shape of the part, not an owned shape",
     )
-  // a pattern's cells as the boundary (stacking, Q127) waits for P4
+  // stacking (P4, Q127) is by `on` (a pattern's floor), never an owned shape as the boundary
   if (p.boundary.isSome())
     check(
       /^shape[1-9]\d*$/.test(p.boundary.unwrap().shapeId),
@@ -399,6 +413,9 @@ const MIN_ANCHOR: Anchor = Object.freeze({ u: 'min', v: 'min' })
  * round every loop (EC-B).
  */
 function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly ExpandedOperation[]> {
+  // P4: a through pocket's depth is the material below `on` (readers that matter re-read it)
+  const depth = p.through ? derivedLength(materialBelow(p.on, ctx), ctx.units) : Ok(p.depth)
+  if (depth.isErr()) return depth
   return derivedLength(ZERO, ctx.units).map((zero): ExpandedOperation[] => [
     {
       role: 'pocket',
@@ -413,8 +430,9 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
           rotation: None,
           mirror: false,
         },
-        depth: p.depth,
+        depth: depth.unwrap(),
         floorRadius: zero,
+        ...(p.through ? { through: true } : {}),
       },
     },
     ...(p.chamfer.isNone()
@@ -436,6 +454,29 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
           },
         ]),
   ])
+}
+
+/** The material below the surface `on` along its normal (mm exact; the stock thickness on top). */
+function materialBelow(on: string, ctx: ExpansionContext): Rational {
+  const table = SurfaceTable.of(ctx.before, ctx.stock)
+  return table
+    .get(on)
+    .mapOr(ctx.stock.thickness.exact, (e) => e.faceZ.add(table.extent(e.direction)))
+}
+
+/**
+ * P4 (Q127): the owned shape of the pattern whose pocket floor `on` is (`pattern1_pocket.floor`
+ * → `pattern1_cells`), so the pattern is stacked on it; undefined for any other face.
+ */
+export function stackedOn(on: string, before: readonly Operation[]): string | undefined {
+  const m = /^(.+)\.floor$/.exec(on)
+  if (m === null) return undefined
+  const op = before.find((o) => o.id === m[1])
+  if (op?.kind !== 'pocket' || op.through === true || op.shape.kind !== 'named') return undefined
+  const owner = op.owner.isSome() ? op.owner.unwrap().featureId : undefined
+  return owner !== undefined && op.shape.shapeId === ownedShapeId(owner)
+    ? op.shape.shapeId
+    : undefined
 }
 
 /** The face rectangle of `on` in its face frame: `[0, 0]`–`[length, width]` of its direction. */
@@ -499,6 +540,7 @@ export function patternRecord(
   before: readonly Operation[],
   stock: Stock,
 ): PatternRecord {
+  const floor = stackedOn(p.on, before)
   return {
     cell: cellRecord(p.cell),
     cellRotation: p.cell.rotation.canonical,
@@ -527,6 +569,8 @@ export function patternRecord(
     margin: p.margin.canonical,
     ...(p.fit === 'clip' ? { fit: 'clip' as const } : {}),
     ...(p.invert ? { invert: true as const } : {}),
+    ...(p.through ? { through: true as const } : {}),
+    ...(floor === undefined ? {} : { floor }),
   }
 }
 
@@ -706,10 +750,18 @@ export function patternFacts(
   const id = ownedShapeId(featureId)
   const own = shapes.find((s) => s.id === id)
   if (own?.pattern === undefined) return undefined
-  const cell = own.pattern.cell
-  const refs = new Set([id])
-  if ('shapeId' in cell) refs.add(cell.shapeId)
-  if (own.pattern.area !== undefined) refs.add(own.pattern.area.shapeId)
+  // the cell, the boundary and (P4) the stack below, with theirs
+  const refs = new Set<string>()
+  const add = (sid: string) => {
+    if (refs.has(sid)) return
+    refs.add(sid)
+    const rec = shapes.find((s) => s.id === sid)?.pattern
+    if (rec === undefined) return
+    if ('shapeId' in rec.cell) add(rec.cell.shapeId)
+    if (rec.area !== undefined) add(rec.area.shapeId)
+    if (rec.floor !== undefined) add(rec.floor)
+  }
+  add(id)
   const loaded = new Map<string, NamedShape>()
   for (const s of shapes)
     if (refs.has(s.id)) {

@@ -3,9 +3,10 @@
  * margin), the cell placed at every node whose cell lies wholly inside (`whole`) or cut to the
  * area (`clip`, slivers dropped), emitted as region pieces with no boolean (cells are disjoint:
  * the overlap check below), so 2 000 cells resolve in milliseconds (S8 finding 2). `invert` makes
- * the cells holes of the area; a split piece's `clip` rectangle cuts the result last.
+ * the cells holes of the area; a split piece's `clip` rectangle cuts the result last. P4: a
+ * stacked pattern's area is the region of the pattern below it, less the margin.
  * Doc: docs/modes/patterns.md#owned-shape-and-operations, docs/modes/patterns.md#implementation-p1,
- * docs/modes/patterns.md#implementation-p2
+ * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p4
  *
  * Pure numbers (mm, degrees) and the 2D port; the cell's and the boundary's own resolution is
  * passed in (shape.ts resolves named shapes and primitives), so this module has no shape-layer
@@ -56,9 +57,11 @@ const SLACK = 1e-9
 const AREA_SHARE = 1e-9
 
 type ItemsDef = readonly ShapeItem<number>[]
+/** What the resolver callback takes: items, or (P4) the pattern a stacked one stands on. */
+type Def = ItemsDef | readonly [PatternDefinition]
 
 /** A pattern as the resolver reads it: the record with the cell's (and boundary's) items. */
-export interface PatternDefinition extends Omit<PatternRecord, 'cell' | 'area'> {
+export interface PatternDefinition extends Omit<PatternRecord, 'cell' | 'area' | 'floor'> {
   readonly kind: 'pattern'
   readonly op: 'add'
   /** The cell's shape definition (a primitive item centred on the origin, or a named shape's). */
@@ -66,6 +69,8 @@ export interface PatternDefinition extends Omit<PatternRecord, 'cell' | 'area'> 
   /** A named boundary shape's items, placed (P2); absent = the face rectangle. */
   readonly area?:
     { readonly items: ItemsDef; readonly center: Vec2; readonly rotation: number } | undefined
+  /** P4: the definition of the pattern this one is stacked on (its region bounds the area). */
+  readonly floor?: readonly [PatternDefinition] | undefined
 }
 
 /** What the layout found besides the region (the read-out, DFM and the viewport). */
@@ -161,13 +166,22 @@ export function circumRadius(r: Region): number {
 export function resolvePattern(
   port: Region2dPort,
   p: PatternDefinition,
-  resolveCell: (def: ItemsDef) => CellResult,
+  resolveCell: (def: Def) => CellResult,
 ): AppResult<PatternCells> {
   const resolved = resolveCell(p.cell)
   if (resolved.isErr()) return Err(resolved.unwrapErr().prefixIssues('cell'))
   const r = resolved.unwrap()
   if (r.kind !== 'region')
     return invalid([issue(['cell'], 'patternCellOpen', 'the cell must be a closed shape')])
+  // P4: a through cell with a hole of its own would leave that island loose
+  if (p.through === true && r.region.pieces.some((x) => x.holes.length > 0))
+    return invalid([
+      issue(
+        ['cell'],
+        'patternThroughIslands',
+        'a cell with a hole cut through would leave its island loose: use a cell without holes or turn off Through',
+      ),
+    ])
   // the cell turned by its own rotation, its box centred on the origin (the node)
   const turned = orientRegion(r.region, { rotation: p.cellRotation, mirror: false })
   const tb = boundsOf(turned)!
@@ -371,9 +385,10 @@ function opening(port: Region2dPort, r: Region): AppResult<Region> {
 function areaOf(
   port: Region2dPort,
   p: PatternDefinition,
-  resolveCell: (def: ItemsDef) => CellResult,
+  resolveCell: (def: Def) => CellResult,
 ): AppResult<{ region: Region; rect: boolean }> {
   const m = p.margin
+  if (p.floor !== undefined) return stackedArea(port, p, p.floor, resolveCell)
   if (p.area === undefined) {
     const lo: Vec2 = [p.boundary.min[0] + m, p.boundary.min[1] + m]
     const hi: Vec2 = [p.boundary.max[0] - m, p.boundary.max[1] - m]
@@ -395,6 +410,32 @@ function areaOf(
   ])
   if (!(m > 0)) return Ok({ region: placed, rect: false })
   return port.offset(placed, m).map((region) => ({ region, rect: false }))
+}
+
+/**
+ * P4 (stacking, Q127): the area of a pattern on another one's floor: the lower pattern's region
+ * (its cells, or inverted the web between its islands; same face frame) shrunk by the margin,
+ * intersected with the boundary shape when one is given.
+ */
+function stackedArea(
+  port: Region2dPort,
+  p: PatternDefinition,
+  floor: readonly [PatternDefinition],
+  resolveCell: (def: Def) => CellResult,
+): AppResult<{ region: Region; rect: boolean }> {
+  const below = resolveCell(floor)
+  if (below.isErr()) return Err(below.unwrapErr().prefixIssues('on'))
+  const b = below.unwrap()
+  if (b.kind !== 'region' || b.region.pieces.length === 0)
+    return Ok({ region: { pieces: [] }, rect: false })
+  const shrunk = p.margin > 0 ? port.offset(b.region, p.margin) : Ok(b.region)
+  if (shrunk.isErr() || p.area === undefined)
+    return shrunk.map((region) => ({ region, rect: false }))
+  const own = areaOf(port, { ...p, floor: undefined }, resolveCell)
+  if (own.isErr()) return own
+  return port
+    .intersect(own.unwrap().region, shrunk.unwrap())
+    .map((region) => ({ region, rect: false }))
 }
 
 /** Row lattices (square, staggered, hex): nodes over the area's box, one pitch beyond. */

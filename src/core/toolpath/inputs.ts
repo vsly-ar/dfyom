@@ -429,7 +429,12 @@ export function toGeneratorInputs(
             finishStepdown: s.finishStepdown,
             direction: s.direction,
           }
-          const placed = pocketRegion(op)
+          // a through pocket (patterns P4) goes `breakthrough` below the opposite face
+          const outline = pocketRegion(op)
+          const placed =
+            op.through === true && s.kind === 'pocket'
+              ? { ...outline, depth: outline.depth + (s.breakthrough ?? 0) }
+              : outline
           const R = tool.diameter / 2
           const reach = openReach(R, s.finishAllowance)
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
@@ -499,7 +504,7 @@ export function toGeneratorInputs(
           // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2
           // output); general shapes go to the region generator in the face frame (T1 wiring)
           return Ok(
-            isAnalyticOperation(op)
+            isAnalyticOperation(op) && op.through !== true
               ? {
                   kind: 'pocket',
                   ...turned,

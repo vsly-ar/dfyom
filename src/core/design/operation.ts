@@ -124,6 +124,14 @@ export interface Pocket extends Common {
   readonly shape: Shape
   readonly depth: Quantity
   readonly floorRadius: Quantity
+  /**
+   * A through pocket (patterns P4, set only by a pattern's `through`): it clears its region down
+   * through the opposite stock face (the plan adds `breakthrough`), so no slug is left; `depth`
+   * is the material below `on` when the feature expanded (readers that matter read it fresh,
+   * `throughPocketDepth`), and its floor is no face target. Absent = blind.
+   * Doc: docs/modes/patterns.md#implementation-p4
+   */
+  readonly through?: boolean | undefined
 }
 export interface Drilling extends Common {
   readonly kind: 'drilling'
@@ -568,6 +576,7 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         shape: shape.unwrap(),
         depth: depth.unwrap(),
         floorRadius: floorRadius.unwrap(),
+        ...(dto.through === true ? { through: true } : {}),
       }))
     }
     case 'drilling': {
@@ -717,6 +726,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         shape: shapeToDTO(op.shape),
         depth: op.depth.toDTO(),
         floorRadius: op.floorRadius.toDTO(),
+        ...(op.through === true ? { through: true } : {}),
       } as OperationDTO
     case 'drilling':
       return {
@@ -832,20 +842,23 @@ function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShap
  * `out`; a cell that does not exist is `input.malformed` (`unknownShape`).
  */
 function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>): AppResult<void> {
-  for (const s of [...out.values()]) {
+  // a worklist: a stacked pattern's lower pattern (P4) brings its own cell and boundary
+  const queue = [...out.values()]
+  for (let s = queue.shift(); s !== undefined; s = queue.shift()) {
     const p = s.pattern
     if (p === undefined) continue
-    // the cell and (patterns P2) the boundary shape
+    // the cell, (patterns P2) the boundary shape and (P4) the pattern below
     const refs: [string, string][] = []
     if ('shapeId' in p.cell) refs.push(['cell', p.cell.shapeId])
     if (p.area !== undefined) refs.push(['area', p.area.shapeId])
+    if (p.floor !== undefined) refs.push(['floor', p.floor])
     for (const [field, id] of refs) {
       if (out.has(id)) continue
       const k = dto.shapes?.findIndex((x) => x.id === id) ?? -1
       if (k < 0)
         return fail(
           'input.malformed',
-          `${s.id} takes shape ${id} as its ${field === 'cell' ? 'cell' : 'boundary'}, which the part does not have`,
+          `${s.id} takes shape ${id} as its ${field === 'area' ? 'boundary' : field}, which the part does not have`,
           {
             issues: [
               {
@@ -860,6 +873,7 @@ function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>
       const c = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
       if (c.isErr()) return c
       out.set(id, c.unwrap())
+      queue.push(c.unwrap())
     }
   }
   return Ok(undefined)

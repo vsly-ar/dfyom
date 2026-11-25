@@ -38,7 +38,15 @@ export type StrategyKey = keyof StrategyDTO
 /** Strategy parameters each operation kind accepts. */
 export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[]>> = {
   facing: ['direction', 'pattern', 'axis', 'overshoot'],
-  pocket: ['direction', 'entry', 'helixDiameter', 'rampAngle', 'finishAllowance', 'finishStepdown'],
+  pocket: [
+    'direction',
+    'entry',
+    'helixDiameter',
+    'rampAngle',
+    'finishAllowance',
+    'finishStepdown',
+    'breakthrough',
+  ],
   drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'rampAngle', 'breakthrough'],
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance', 'finishStepdown'],
   // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
@@ -86,7 +94,7 @@ export const StrategyArgSchema = z
     peckDepth: clear(Src).describe('Drilling: default DC'),
     chipBreakBack: clear(Src).describe('Drilling: default 0.5 mm / 0.02"'),
     helixPitch: clear(Src).describe('Drilling (helix): default preset stepdown, else 0.25 DC'),
-    breakthrough: clear(Src).describe('Drilling (through)/profile: default 0.5 mm / 0.02"'),
+    breakthrough: clear(Src).describe('Through drilling/profile/pocket: default 0.5 mm / 0.02"'),
   })
   .describe('Pass strategy parameters; omitted keys stay, null resets to the default')
 export type StrategyArgs = z.output<typeof StrategyArgSchema>
@@ -176,6 +184,8 @@ export type ResolvedStrategy =
       readonly rampAngle: number
       readonly finishAllowance: number
       readonly finishStepdown: number
+      /** A through pocket's (patterns P4) only; absent on a blind pocket. */
+      readonly breakthrough?: number
     }
   | {
       readonly kind: 'drilling'
@@ -275,7 +285,14 @@ export function resolveStrategy(
       }
     case 'pocket': {
       const op = c.ops[0]
-      const depth = op?.kind === 'pocket' ? op.depth.canonical : 0
+      // a through pocket (patterns P4): the material below `on` + breakthrough
+      const through = op?.kind === 'pocket' && op.through === true
+      const depth =
+        op?.kind !== 'pocket'
+          ? 0
+          : through
+            ? materialBelow(op.on, c.allOps, c.stock) + breakthrough
+            : op.depth.canonical
       return {
         kind,
         direction,
@@ -284,6 +301,7 @@ export function resolveStrategy(
         rampAngle,
         finishAllowance,
         finishStepdown: mm(s.finishStepdown).unwrapOr(finishStepdownDefault(depth, c.tool, wood)),
+        ...(through ? { breakthrough } : {}),
       }
     }
     case 'drilling': {
@@ -488,7 +506,8 @@ export function strategyIssues(
     bad('rampAngle', 'range', 'must be 0.5° to 30°', { min: 0.5, max: 30 })
   if ('finishAllowance' in r && r.finishAllowance < 0)
     bad('finishAllowance', 'nonNegative', 'must be ≥ 0')
-  if ('breakthrough' in r && r.breakthrough < 0) bad('breakthrough', 'nonNegative', 'must be ≥ 0')
+  if ('breakthrough' in r && (r.breakthrough ?? 0) < 0)
+    bad('breakthrough', 'nonNegative', 'must be ≥ 0')
   if (r.kind === 'facing' && r.overshoot < 0) bad('overshoot', 'nonNegative', 'must be ≥ 0')
   if (r.kind === 'pocket' || r.kind === 'profile') {
     if (set('finishStepdown') && r.finishStepdown <= 0)

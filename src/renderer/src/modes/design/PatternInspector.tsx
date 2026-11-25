@@ -2,10 +2,12 @@
 // and Presets, then the groups Cell (kind with thumbnails, its sizes, rotation), Layout (lattice
 // incl. Polar, gap or pitch, angle, origin: empty = the area's centre), Area (On, the boundary:
 // Whole face or a closed shape with its centre and rotation, margin, Whole/Clip, Invert), Cut
-// (depth, the pocket's tool), Chamfer (P3: a switch, then width, angle and the chamfer's tool).
+// (P4: Through, else depth; the pocket's tool), Chamfer (P3: a switch, then width, angle and the
+// chamfer's tool). P4: on another pattern's floor the Boundary's face option names its cells.
 // Every edit is one `design.pattern.update` (one undo step); errors
 // and findings show at their field, the rest under Findings.
-// Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1
+// Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1,
+// docs/modes/patterns.md#implementation-p4
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
@@ -164,6 +166,7 @@ export function PatternInspector({
     'fit',
     'invert',
     'depth',
+    'through',
     'chamfer',
     'tool',
   ])
@@ -235,6 +238,13 @@ export function PatternInspector({
     k === 'sides' ? p.sides : k === 'cornerRadius' ? p.cornerRadius : (p[k as 'length'] ?? k)
 
   const gap = spacing.gap !== undefined
+  const through = feature['through'] === true
+  // P4: on another pattern's floor the face is that pattern's cells (stacked)
+  const stackedOn = ((): string | undefined => {
+    const id = /^(.+)_pocket\.floor$/.exec(feature.on)?.[1]
+    const below = part.dto.features?.find((f) => f.id === id && f.kind === 'pattern')
+    return below?.name
+  })()
   const chamfer = feature['chamfer'] as { width: QuantityDTO; angle: QuantityDTO } | undefined
   const pocketOp = owned.find((o) => o.id === `${feature.id}_pocket`)
   const chamferOp = owned.find((o) => o.id === `${feature.id}_chamfer`)
@@ -414,7 +424,13 @@ export function PatternInspector({
           <div data-feature-field="boundary">
             <Field label={p.boundary} messages={messagesAt('boundary')}>
               <Select
-                options={[{ value: FACE, label: p.boundaryFace }, ...shapeOptions]}
+                options={[
+                  {
+                    value: FACE,
+                    label: stackedOn === undefined ? p.boundaryFace : p.boundaryFloor(stackedOn),
+                  },
+                  ...shapeOptions,
+                ]}
                 value={boundary?.shapeId ?? FACE}
                 onValueChange={(shapeId) => {
                   if (shapeId === (boundary?.shapeId ?? FACE)) return
@@ -429,6 +445,11 @@ export function PatternInspector({
                 }}
               />
             </Field>
+            {stackedOn === undefined ? null : (
+              <p className={styles['muted']} data-pattern-stacked>
+                {p.stackedNote(stackedOn)}
+              </p>
+            )}
           </div>
           {boundary === undefined
             ? null
@@ -490,7 +511,20 @@ export function PatternInspector({
         </Group>
 
         <Group title={p.groups.cut}>
-          {quantityField('depth', p.depth, 'length', feature['depth'], (depth) => ({ depth }))}
+          <div data-feature-field="through">
+            <Field label={p.through} kind="toggle" messages={messagesAt('through')}>
+              <Switch
+                label={p.through}
+                hideLabel
+                checked={through}
+                onCheckedChange={(on) => void update({ through: on }, 'through')}
+              />
+            </Field>
+            {through ? <p className={styles['muted']}>{p.throughNote}</p> : null}
+          </div>
+          {through
+            ? null
+            : quantityField('depth', p.depth, 'length', feature['depth'], (depth) => ({ depth }))}
           {pocketOp === undefined ? null : (
             <div data-feature-field="tool">
               <ToolField
