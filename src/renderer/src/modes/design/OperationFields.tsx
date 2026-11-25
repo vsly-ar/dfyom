@@ -465,15 +465,19 @@ function ShapeGroup({
       ) : null}
       {shape.kind !== 'circle' ? <RotationField ctx={ctx} /> : null}
       {shape.kind === 'named' ? (
-        <Switch
-          label={t.picker.mirror}
-          checked={shape.mirror === true}
-          disabled={ctx.readOnly}
-          onCheckedChange={(mirror) => {
-            const { mirror: _was, ...rest } = shapeArgs(shape)
-            ctx.send({ shape: mirror ? { ...rest, mirror: true } : rest }, 'shape.mirror')
-          }}
-        />
+        // a toggle Field as every inspector switch: label and switch on one row (U9 Q130)
+        <Field label={t.picker.mirror} kind="toggle" readOnly={ctx.readOnly}>
+          <Switch
+            label={t.picker.mirror}
+            hideLabel
+            checked={shape.mirror === true}
+            disabled={ctx.readOnly}
+            onCheckedChange={(mirror) => {
+              const { mirror: _was, ...rest } = shapeArgs(shape)
+              ctx.send({ shape: mirror ? { ...rest, mirror: true } : rest }, 'shape.mirror')
+            }}
+          />
+        </Field>
       ) : null}
     </Group>
   )
