@@ -384,6 +384,48 @@ describe('chamfer UI (U4)', () => {
     ).toMatch(/^90/)
   })
 
+  it('shows a chamfer’s dfm.reach at the tool field; the section stays neutral (U9 P1)', async () => {
+    const { user } = await renderDesign(async (d) => {
+      for (const [name, args] of [
+        ['design.facing.add', { partId: partId(d), depth: '15' }],
+        [
+          'design.pocket.add',
+          {
+            partId: partId(d),
+            on: 'facing1.floor',
+            shape: { kind: 'rectangle', center: ['50', '30'], length: '30', width: '20' },
+            depth: '2',
+          },
+        ],
+        ['design.chamfer.add', { partId: partId(d), edgeOf: 'pocket1' }],
+        [
+          'library.tool.add',
+          {
+            values: {
+              name: 'V-bit short',
+              type: 'chamferMill',
+              angle: '90',
+              diameter: '6',
+              fluteLength: '4',
+              overallLength: '40',
+              fluteCount: '2',
+            },
+            units: 'mm',
+          },
+        ],
+      ] as const)
+        (await d.dispatch(name, args, ui)).unwrap()
+    })
+    await user.click(await within(navigator()).findByRole('button', { name: /^Chamfer 1/ }))
+    const tool = await within(inspector()).findByRole('region', { name: 'Tool' })
+    expect(await within(tool).findByText(/No tool in the library reaches/)).toBeVisible()
+    expect(within(inspector()).getAllByText(/No tool in the library reaches/)).toHaveLength(1)
+    expect(within(tool).getByRole('button', { name: 'New tool…' })).toBeVisible()
+    // a finding is not an invalid value: no part of the section is drawn red
+    const section = within(inspector()).getByRole('img', { name: /^Section: chamfer/ })
+    expect(section.querySelector('[data-state="invalid"]')).toBeNull()
+  })
+
   it('shows a countersink’s chamfer read-only, edited through its hole', async () => {
     const { user } = await renderDesign(async (d) => {
       ;(

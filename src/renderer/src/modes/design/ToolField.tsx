@@ -32,6 +32,7 @@ import type { ToolType } from '../../../../core/library/tool.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
 import { Field, FieldIcon, Icon, Select, type FieldMessage, type SelectOption } from '../../ui'
 import { chamferDiameter } from './chamfer-view'
+import { warningPath } from './OperationFields'
 import styles from './Design.module.css'
 import { dfmNames, pendingApply, quantityAt, type DesignPart } from './model'
 import { useCommand } from './useDesign'
@@ -487,8 +488,9 @@ export function ToolField({
       ? []
       : [{ id: 'error', severity: 'error' as const, text: sentenceCase(error.message) }]),
     ...warnings
-      // v0.4 U4: no library tool fits the chamfer – shown here, its fix is "New tool…"
-      .filter((w) => w.parameter === 'tool' || w.code === 'dfm.chamferNoTool')
+      // v0.4 U4: no library tool fits the chamfer – shown here, its fix is "New tool…"; U9 P1: so
+      // does a chamfer's reach
+      .filter((w) => warningPath(w, op) === 'tool')
       .map((w): FieldMessage => {
         const text = dfmMessages.text(w, part.units, dfmNames(part.dto))
         return pendingApply(w)
@@ -509,7 +511,9 @@ export function ToolField({
                     return { fix: wider, ...(fix !== undefined ? { alternative: fix } : {}) }
                   })()
                 : {}),
-              ...(w.code === 'dfm.chamferNoTool' || w.code === 'dfm.noFittingTool'
+              ...(w.code === 'dfm.chamferNoTool' ||
+              w.code === 'dfm.noFittingTool' ||
+              (w.code === 'dfm.reach' && op.kind === 'chamfer')
                 ? {
                     fix: {
                       label: t.newTool,

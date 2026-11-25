@@ -116,6 +116,8 @@ export function placeErrors(
 export function warningPath(w: DfmWarning, op: OperationDTO): string | undefined {
   // v0.4 U4: "no library tool fits the chamfer" shows at the tool field, with "New tool…"
   if (w.code === 'dfm.chamferNoTool') return 'tool'
+  // U9 P1: a chamfer's reach is about the tools, not its width: at the tool field too
+  if (w.code === 'dfm.reach' && op.kind === 'chamfer') return 'tool'
   const p = w.parameter
   if (p === undefined) return undefined
   if (p === 'center') return 'center.0'

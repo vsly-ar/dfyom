@@ -6,7 +6,8 @@
 // illustration of the edge with its cone (a general edge: one wall with its bevel, E3) above Width (the stored size, "1.5 × 45°"), Depth (the
 // alternative: a commit sends `depth` and the core turns it into the width through the angle),
 // Angle (60°–120°) and the derived Diameter at the face (read-only, "from the edge and the
-// width"), then the tool field (where `dfm.chamferNoTool` shows with "New tool…", ToolField).
+// width"), then the tool field (where `dfm.chamferNoTool` and a chamfer's `dfm.reach` show with
+// "New tool…", ToolField). The section draws a part red only for an invalid value (U9 P1).
 // The focused field's measured part is amber in the section; hovering a part of the section
 // highlights its field's label and clicking it focuses the field. Each commit is one
 // `design.chamfer.update` (one undo step); a new edge keeps the width.
@@ -58,15 +59,14 @@ const t = chamferMessages
 
 type ChamferDTO = Extract<OperationDTO, { kind: 'chamfer' }>
 
-/** The parts a hard finding or an error draws in `--danger` (at their field's path). */
+/**
+ * The parts the section draws in `--danger`: only an invalid value (an error at its field's
+ * path). A finding is not an invalid value: it shows at its field, the drawing stays neutral (U9 P1).
+ */
 function invalidParts(ctx: OperationFieldsContext): Set<string> {
   const parts = new Set<string>()
   for (const e of ctx.errors)
     if (['width', 'depth', 'angle', 'edgeOf'].includes(e.path)) parts.add(e.path)
-  for (const w of ctx.warnings) {
-    const at = warningPath(w, ctx.op)
-    if (at === 'width' && dfmMessages.tier(w) !== 'soft') parts.add('width')
-  }
   return parts
 }
 
