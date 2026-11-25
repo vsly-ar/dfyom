@@ -9,7 +9,7 @@
 import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import type { Region2dPort } from '../../geometry/2d/port'
 import { chainBounds, type Bounds2 } from '../../geometry/2d/model'
-import type { DfmWarning, OperationGeometry } from '../../geometry/model'
+import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
 import { fieldContext, type Operation } from '../operation'
@@ -257,14 +257,22 @@ interface Ctx {
   readonly footprintBounds: Bounds2
   readonly toolDiameter: (op: Operation) => number
   readonly finding: (op: Operation, key: string, message: string) => void
+  /** The source's outline operation id (replaced by `<split>_outline` in each piece). */
+  readonly outlineId: string | undefined
 }
 
-function zRange(c: Ctx, op: Operation, g: OperationGeometry): ZRange | undefined {
+/**
+ * The operation's extent in part-frame z. `bevel`: a loop chamfer's real bevel, from the
+ * material top at its edge (`onZ`, below a faced stock face, edge-chamfers.md E2) instead of its
+ * `on` face: what the split's findings check (E3); the mapping keeps the `on` face's range.
+ */
+function zRange(c: Ctx, op: Operation, g: OperationGeometry, bevel = false): ZRange | undefined {
   const dir = g.direction ?? '+z'
   if (dir !== '+z' && dir !== '-z') return undefined
   const entry = c.table.get(op.on)
   if (entry.isNone()) return undefined
-  const faceZ = entry.unwrap().faceZ.toNumber()
+  const faceZ =
+    bevel && g.kind === 'chamfer' && isLoopChamfer(g) ? g.onZ : entry.unwrap().faceZ.toNumber()
   const zOn = dir === '+z' ? faceZ : -c.T - faceZ
   let depth = 0
   let through = false
@@ -323,6 +331,12 @@ interface PieceBuild {
   readonly floors: Map<string, boolean>
   /** Mapped operation ids whose `on` is their source `on` (not moved to the stock face). */
   readonly sameOn: Set<string>
+  /**
+   * Piece operation ids whose shape the split clipped (a crossing pocket or profile, the
+   * generated outline from the source's) → the source's shape shifted into the piece: a loop
+   * chamfer on them follows that within the cell (edge-chamfers.md E2, `sourceEdge`).
+   */
+  readonly clipped: Map<string, OperationShapeDTO>
   nextShape: number
 }
 
@@ -572,6 +586,7 @@ function outlineOperation(
           where: 'planPieces',
         })
       shape = clipped.unwrap()!
+      b.clipped.set(id, shiftedShape(literal(outlineDto.shape, c.units), delta, c.units))
     }
   }
   const slot = outlineDto?.slotWidth ?? lengthDTO(c.units === 'inch' ? 6.35 : 6, c.units)
@@ -695,6 +710,7 @@ function mapOperation(
         if (clipped.isErr()) return clipped
         if (clipped.unwrap() === undefined) return Ok(undefined)
         shape = clipped.unwrap()!
+        b.clipped.set(op.id, shiftedShape(base.shape, delta, c.units))
       }
       if (base.kind === 'pocket' && z.capped) {
         // a pocket through the piece: a pocket must end above the stock bottom, so it becomes a
@@ -748,11 +764,46 @@ function mapOperation(
       break
     }
     case 'chamfer': {
-      // with its edge, on the same face; a cone cut by a level stays whole in the upper piece
-      if (z.fromFace || !b.sameOn.has(base.edgeOf)) return Ok(undefined)
-      if (z.capped || (r.dir === '+z' ? r.zlo < cell.band.zb - EPS : r.zhi > cell.band.zt + EPS))
+      // with its edge, on the same face; a cone cut by a level stays whole in the upper piece.
+      // The source's outline is the piece's generated one (edge-chamfers.md E2)
+      const edgeOf = base.edgeOf === c.outlineId ? `${c.split.id}_outline` : base.edgeOf
+      const edge = b.ops.find((o) => o.id === edgeOf)
+      // at the piece's own stock face (its top piece): kept with its edge there (E2)
+      const atFace =
+        z.fromFace &&
+        (r.dir === '+z' ? r.zhi <= cell.band.zt + EPS : r.zlo >= cell.band.zb - EPS) &&
+        edge !== undefined &&
+        (edge.on ?? STOCK_FACE[dir]) === STOCK_FACE[dir]
+      if (!atFace && (z.fromFace || !b.sameOn.has(edgeOf))) return Ok(undefined)
+      // a loop chamfer's bevel lies on the faced top (E3: its real range, not its `on` face's)
+      const rb = g.kind === 'chamfer' && isLoopChamfer(g) ? (zRange(c, op, g, true) ?? r) : r
+      if (
+        z.capped ||
+        (r.dir === '+z' ? rb.zlo < cell.band.zb - EPS : rb.zhi > cell.band.zt + EPS) ||
+        (rb !== r && (rb.zhi > cell.band.zt + EPS || rb.zlo < cell.band.zb - EPS))
+      )
         c.finding(op, `cone:${op.id}`, `${op.name} is cut by a split level`)
-      out = { ...base, on: on! }
+      const ch: OperationDTO & { kind: 'chamfer' } = {
+        ...base,
+        edgeOf,
+        on: atFace ? STOCK_FACE[dir] : on!,
+      }
+      // a loop chamfer on a clipped edge bevels the source's edge within the cell only, never
+      // the split line or a key (E2)
+      const source = b.clipped.get(edgeOf)
+      if (source !== undefined) {
+        const { x0, x1, y0, y1 } = cell.rect
+        const v0 = dir === '+z' ? y0 : c.W - y1
+        const v1 = dir === '+z' ? y1 : c.W - y0
+        ch.sourceEdge = {
+          shape: source,
+          within: {
+            min: [L(x0 + delta[0]), L(v0 + delta[1])],
+            max: [L(x1 + delta[0]), L(v1 + delta[1])],
+          },
+        }
+      }
+      out = ch
       break
     }
   }
@@ -916,6 +967,10 @@ export function planPieces(
     split: numbers,
     units: loaded.units,
     footprintBounds: fb,
+    outlineId: (() => {
+      const at = layout.unwrap().footprint.outline
+      return at === undefined ? undefined : loaded.part.operations[at]?.id
+    })(),
     toolDiameter: (op) =>
       tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
     finding: (op, key, message) => {
@@ -973,6 +1028,7 @@ export function planPieces(
       shapes: literal(loaded.dto.shapes ?? [], loaded.units),
       floors: new Map(),
       sameOn: new Set(),
+      clipped: new Map(),
       nextShape: shapeMax + 1,
     }
     for (let i = 0; i < loaded.part.operations.length; i++) {

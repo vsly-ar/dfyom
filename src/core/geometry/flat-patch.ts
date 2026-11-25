@@ -19,7 +19,7 @@ import {
   type Region,
 } from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
-import { pocketRegion } from './outline'
+import { loopChamferRegion, pocketRegion } from './outline'
 import {
   frameMap,
   holeRegion,
@@ -30,7 +30,7 @@ import {
   rectangle,
   slotRegion,
 } from './through-depth'
-import { chamferDepth } from './model'
+import { chamferDepth, isLoopChamfer, loopChamferDepth } from './model'
 
 /** A patch smaller than this (mm²) is gone (boolean slivers). */
 const PATCH_AREA = 1e-2
@@ -78,6 +78,18 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
         },
       ]
     case 'chamfer': {
+      if (isLoopChamfer(op)) {
+        // a general edge: inside (E1) the air grown by the bevel's width; outside (E2) the band
+        // the bevel's width on both sides of the part's loop
+        const r = loopChamferRegion(op)
+        const grown = port.offset(r, -op.width)
+        const band =
+          op.edge.side === 'inside'
+            ? grown
+            : grown.andThen((g) => port.offset(r, op.width).andThen((s) => port.difference(g, s)))
+        const region = band.mapOr(undefined, (x) => x)
+        return [{ direction, lowest: op.onZ - loopChamferDepth(op), region: clip(region) }]
+      }
       const r = op.diameter / 2
       const a: Vec2 = [op.center[0] + r, op.center[1]]
       const disc: Region = {

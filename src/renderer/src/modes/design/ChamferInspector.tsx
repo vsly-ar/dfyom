@@ -1,8 +1,9 @@
 // The chamfer inspector (v0.4 task U4, D45): the `chamfer` kind's groups inside OperationFields, so
 // the Design inspector, a countersink's read-only owned chamfer and the plan copy share it. Edge (a
-// Select of the earlier drillings, circle pockets and inside circle profiles, "Drilling 2 · Ø 3.4
-// mm", with pick mode tinting their surfaces in the viewport; `edgeOf`), then the section
-// illustration of the edge with its cone above Width (the stored size, "1.5 × 45°"), Depth (the
+// Select of the earlier drillings, pockets and outside/inside profiles, "Drilling 2 · Ø 3.4 mm" or
+// a general edge's name and role, "Profile 1 · outline" (edge-chamfers.md E1, E3; no Diameter for
+// it), with pick mode tinting their surfaces in the viewport; `edgeOf`), then the section
+// illustration of the edge with its cone (a general edge: one wall with its bevel, E3) above Width (the stored size, "1.5 × 45°"), Depth (the
 // alternative: a commit sends `depth` and the core turns it into the width through the angle),
 // Angle (60°–120°) and the derived Diameter at the face (read-only, "from the edge and the
 // width"), then the tool field (where `dfm.chamferNoTool` shows with "New tool…", ToolField).
@@ -28,9 +29,20 @@ import {
   Select,
   type FieldMessage,
 } from '../../ui'
-import { chamferSection, coneDepth, type ChamferPart } from '../../viewport/chamfer-section'
+import {
+  chamferSection,
+  wallChamferSection,
+  type ChamferPart,
+} from '../../viewport/chamfer-section'
 import { SketchView } from '../../viewport/SketchView'
-import { chamferDiameter, chamferSectionValues, edgeOptions } from './chamfer-view'
+import {
+  chamferDepthValue,
+  chamferDiameter,
+  chamferSectionValues,
+  edgeOptions,
+  isLoopEdge,
+  wallSectionValues,
+} from './chamfer-view'
 import { defaultUnit, dfmNames } from './model'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
@@ -67,8 +79,16 @@ export function ChamferInspector({
   const [hovered, setHovered] = useState<string | null>(null)
   const fields = useRef(new Map<string, HTMLDivElement>())
   if (op.kind !== 'chamfer') return null
-  const values = chamferSectionValues(ctx.part, op, invalidParts(ctx))
-  const sketch = values === undefined ? undefined : chamferSection(values, ctx.units)
+  const invalid = invalidParts(ctx)
+  const values = chamferSectionValues(ctx.part, op, invalid)
+  // a general edge (E3): the wall section, the same bevel at every point of its loops
+  const wall = values === undefined ? wallSectionValues(ctx.part, op, invalid) : undefined
+  const sketch =
+    values !== undefined
+      ? chamferSection(values, ctx.units)
+      : wall !== undefined
+        ? wallChamferSection(wall, ctx.units)
+        : undefined
 
   /** One field of the section: reports focus (its part is amber) and takes hover and clicks. */
   const target = (part: ChamferPart, children: React.ReactNode) => (
@@ -129,8 +149,7 @@ export function ChamferInspector({
 function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'chamfer') return null
-  const v = chamferSectionValues(ctx.part, op)
-  const depth = v === undefined ? undefined : coneDepth(v)
+  const depth = chamferDepthValue(op)
   const parsed =
     depth === undefined || !Number.isFinite(depth)
       ? undefined
@@ -157,10 +176,12 @@ function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
   )
 }
 
-/** The diameter at the face: read-only, the edge's Ø + 2 × width. */
+/** The diameter at the face: read-only, the edge's Ø + 2 × width; none on a general edge (E1). */
 function DiameterField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'chamfer') return null
+  const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
+  if (edge !== undefined && isLoopEdge(edge)) return null
   const d = chamferDiameter(ctx.part.dto, op, ctx.units)
   return (
     <Field

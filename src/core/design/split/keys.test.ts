@@ -15,6 +15,7 @@ import { loadPart } from '../load'
 import { keyItem, keySize, KEY_CLEARANCE_DEFAULT, type Key, type KeyKind } from './keys'
 import type { Cell } from './layout'
 import { planPieces } from './pieces'
+import { bevelNicksKey } from './findings'
 import {
   ENCLOSURE_LEVEL,
   ENCLOSURE_STOCK,
@@ -246,5 +247,42 @@ describe('keys: findings and args (4b-2)', () => {
     expect(b.issues.map((i) => [i.path.join('.'), i.rule])).toEqual([
       ['split.clearance', 'keysOnly'],
     ])
+  })
+})
+
+describe('a chamfered outline near a key (edge-chamfers.md E3)', () => {
+  const square = (n: number): Region => ({
+    pieces: [
+      {
+        outer: {
+          elements: [
+            { kind: 'line', a: [0, 0], b: [n, 0] },
+            { kind: 'line', a: [n, 0], b: [n, n] },
+            { kind: 'line', a: [n, n], b: [0, n] },
+            { kind: 'line', a: [0, n], b: [0, 0] },
+          ],
+        },
+        holes: [],
+      },
+    ],
+  })
+
+  it('bevelNicksKey: a knob nearer the outline than the width is nicked; one in the middle is not', () => {
+    const key = testKey('puzzle', 6, 0.15)
+    const fp = square(200)
+    expect(bevelNicksKey(fp, key, 1, 0.2)).toBe(false)
+    // the knob's side 2 mm from the outline at y = 0
+    const near: Key = { ...key, u: key.size.half + 2 }
+    expect(bevelNicksKey(fp, near, 3, 0)).toBe(true)
+    expect(bevelNicksKey(fp, near, 1.5, 0)).toBe(false)
+  })
+
+  it('the panel: a 1 mm outline chamfer, keys in the middle of the line: no finding', async () => {
+    const s = await panel()
+    const outline = s.part().operations.find((o) => o.kind === 'profile')!
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: outline.id, width: '1' })
+    const r = await split(s, { lines: [PANEL_LINE], joint: 'puzzle' })
+    expect(r.pieces).toHaveLength(2)
+    expect(byRule(r, 'cutsFeature').filter((f) => f.params['reason'] === 'chamferKey')).toEqual([])
   })
 })

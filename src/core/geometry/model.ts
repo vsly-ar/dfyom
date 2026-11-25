@@ -210,29 +210,86 @@ export type OperationGeometry = FacePlacement &
           readonly positions?: readonly number[]
         }
       }
-    /**
-     * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling, circle pocket or inside circle profile on the
-     * same face), coaxial with it: `center` is the edge's axis, `onZ` its face
-     * (docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges).
-     */
-    | {
-        readonly kind: 'chamfer'
-        readonly id: string
-        readonly onZ: number
-        readonly center: Vec2
-        readonly edgeOf: string
-        readonly edgeDiameter: number
-        /** In the face plane, > `edgeDiameter`. */
-        readonly diameter: number
-        /** Included angle, degrees. */
-        readonly angle: number
-        /**
-         * Stepped (F7): terraces of at most this height by a flat end mill; absent = a chamfer
-         * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid is then the terraces.
-         */
-        readonly stepdown?: number
-      }
+    | CircleChamferFields
+    | LoopChamferFields
   )
+
+/**
+ * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling, circle pocket or inside
+ * circle profile on the same face), coaxial with it: `center` is the edge's axis, `onZ` its face
+ * (docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges).
+ */
+interface CircleChamferFields {
+  readonly kind: 'chamfer'
+  readonly id: string
+  readonly onZ: number
+  readonly center: Vec2
+  readonly edgeOf: string
+  readonly edgeDiameter: number
+  /** In the face plane, > `edgeDiameter`. */
+  readonly diameter: number
+  /** Included angle, degrees. */
+  readonly angle: number
+  /**
+   * Stepped (F7): terraces of at most this height by a flat end mill; absent = a chamfer
+   * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid is then the terraces.
+   */
+  readonly stepdown?: number
+  readonly edge?: never
+}
+
+/**
+ * Edge chamfer (E1, E2): a bevel along every loop of a general edge, the top edge of an earlier
+ * pocket of any other shape or `inside` profile (E1), or `outside` profile (E2), on the same face
+ * (`edge.shape`). `onZ` is the material's top at the edge: the edge's face, or the deepest earlier
+ * facing's floor of that face when the edge starts on a faced stock face (E2). A present `edge`
+ * tells it from the circular chamfer, whose input stays byte-identical.
+ * Doc: docs/modes/edge-chamfers.md#implementation-e1, docs/modes/edge-chamfers.md#implementation-e2
+ */
+interface LoopChamferFields {
+  readonly kind: 'chamfer'
+  readonly id: string
+  readonly onZ: number
+  readonly edgeOf: string
+  readonly edge: LoopChamferEdge
+  /** Stepped chamfers stay circular (rule `chamferStepped`). */
+  readonly stepdown?: never
+  /** The bevel's width at the face (mm, > 0), from the edge into the material. */
+  readonly width: number
+  /** Included angle, degrees. */
+  readonly angle: number
+}
+
+/** The general edge a loop chamfer follows, in the edge operation's face frame. */
+export interface LoopChamferEdge {
+  /**
+   * The edge operation's shape. `inside`: its region is the air side of every chamfered loop.
+   * `outside`: its (first) loop's region is the part, the air is around it (E2).
+   */
+  readonly shape: Shape
+  /** Which side of the loops is air: `inside` (a pocket or an inside profile; E1), `outside` (E2). */
+  readonly side: 'inside' | 'outside'
+  /** The edge operation's depth below `onZ` (a pocket, a step); absent = through. */
+  readonly depth?: number
+  /**
+   * On a split piece only (E2): the piece's cell in the face frame. The bevel stays within it
+   * (grown by the tool's reach at the face), so `shape` (then the source's edge, unclipped) is
+   * chamfered only where it is the source's real edge, never along the split line.
+   */
+  readonly within?: { readonly min: Vec2; readonly max: Vec2 }
+}
+
+export type ChamferGeometry = Extract<OperationGeometry, { kind: 'chamfer' }>
+export type CircleChamferGeometry = FacePlacement & CircleChamferFields
+export type LoopChamferGeometry = FacePlacement & LoopChamferFields
+
+/** A chamfer along a general edge (edge-chamfers.md E1), not a circular mouth (v0.4). */
+export const isLoopChamfer = (op: ChamferGeometry): op is LoopChamferGeometry =>
+  op.edge !== undefined
+
+/** Depth of a loop chamfer's bevel below its face: width / tan(α / 2) (mm). */
+export const loopChamferDepth = (c: { readonly width: number; readonly angle: number }): number =>
+  c.width / Math.tan(((c.angle / 2) * Math.PI) / 180)
 
 /** Chamfer mill angles match within this (degrees), design-v0.4.md § Chamfer operation. */
 export const CHAMFER_ANGLE_TOLERANCE = 0.5
@@ -243,7 +300,7 @@ export const coneSlant = (inner: number, outer: number, angle: number): number =
 
 /** Depth of a chamfer's cone below its face: (D − d) / 2 / tan(α / 2) (mm). */
 export function chamferDepth(
-  c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,
+  c: Pick<CircleChamferFields, 'edgeDiameter' | 'diameter' | 'angle'>,
 ): number {
   return (c.diameter - c.edgeDiameter) / 2 / Math.tan(((c.angle / 2) * Math.PI) / 180)
 }
@@ -255,7 +312,7 @@ export function chamferDepth(
  * Undefined when the sizes give no cone or the stepdown is not positive.
  */
 export function chamferTerraces(
-  c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,
+  c: Pick<CircleChamferFields, 'edgeDiameter' | 'diameter' | 'angle'>,
   stepdown: number,
 ): { readonly count: number; readonly height: number; readonly radii: number[] } | undefined {
   const h = chamferDepth(c)
@@ -342,6 +399,9 @@ export const DFM_WARNING_CODES = [
   // chamfer operation (v0.4): docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
   'dfm.chamferTooDeep',
   'dfm.chamferNoTool',
+  // edge chamfers (E3): docs/modes/edge-chamfers.md#dfm-findings
+  'dfm.chamferMeets',
+  'dfm.chamferIncomplete',
   // Clones features (v0.4 F5; `operation` = the feature id): docs/modes/features.md#checks-and-dfm
   'dfm.cloneOutsideStock',
   'dfm.cloneDuplicate',

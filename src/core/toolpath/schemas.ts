@@ -7,6 +7,7 @@
 import { z } from 'zod'
 import {
   ChamferGeometrySchema,
+  LoopChamferGeometrySchema,
   DrillingGeometrySchema,
   FacingGeometrySchema,
   AnalyticPocketGeometrySchema,
@@ -27,6 +28,7 @@ import type {
   Toolpath,
   ToolpathTool,
 } from './model'
+import type { EdgeChamferInput } from './edge-chamfer'
 import type { MarkInput } from './mark'
 import type { RegionPocketInput } from './region-pocket'
 import type { RegionProfileInput } from './region-profile'
@@ -248,6 +250,14 @@ export const ChamferInputSchema: z.ZodType<ChamferInput> = z.object({
     rampAngle: z.number(),
     direction: Direction,
   }),
+})
+
+/** An edge chamfer along a general edge (E1), placed in the face frame. */
+export const EdgeChamferInputSchema: z.ZodType<EdgeChamferInput> = z.object({
+  ...base,
+  cutting: DrillCuttingSchema,
+  operation: LoopChamferGeometrySchema.omit({ direction: true }),
+  strategy: z.object({ direction: Direction }),
 })
 
 /** A witness mark (alignment aid, S14): a spot (`from` = `to`) or a line at `depth`, face frame. */

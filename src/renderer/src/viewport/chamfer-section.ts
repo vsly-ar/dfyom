@@ -240,3 +240,176 @@ export function chamferSection(v: ChamferSectionValues, units: UnitSystem): Sket
     }),
   }
 }
+
+/** The values of a chamfer along a general edge's wall (edge chamfers E3): no diameter. */
+export interface WallChamferSectionValues {
+  /** The bevel's width at the face, mm. */
+  readonly width: number
+  /** Included angle, degrees. */
+  readonly angle: number
+  /** The wall's depth below the face, mm (a through cut: to the far stock face); NaN unknown. */
+  readonly edgeDepth: number
+  readonly through: boolean
+  readonly edgeName: string
+  /** `inside`: a pocket's or an opening's wall; `outside`: a part's outline (the label says). */
+  readonly side: 'inside' | 'outside'
+  readonly invalid?: ReadonlySet<string>
+}
+
+/**
+ * The section of a chamfer along a general edge (edge chamfers E3): one straight wall with its
+ * bevel, the same at every point of the loop, at true proportions, air on the left and the
+ * material on the right. As `chamferSection`: a bevel that reaches the floor is cut there, a deep
+ * wall fades out below about three bevel depths, a blind one shows its floor with the stock fading
+ * out below. Parts: `width` (the face from the edge to the bevel's top), `depth`, `angle` (the
+ * bevel), `edgeOf` (the wall); no `diameter`.
+ */
+export function wallChamferSection(v: WallChamferSectionValues, units: UnitSystem): Sketch {
+  const L = (mm: number) => lengthSource(mm, units)
+  const w = Math.max(v.width, 1e-6)
+  const tanHalf = Math.tan(((v.angle / 2) * Math.PI) / 180)
+  const c = Math.max(w / tanHalf, 0)
+  const h = Number.isFinite(v.edgeDepth) && v.edgeDepth > 0 ? v.edgeDepth : Infinity
+  // material to the right of the bevel, a strip of air to the left of the wall
+  const S = w + Math.max(1.5 * w, 1.5)
+  const A = Math.max(0.8 * w, 1)
+  const cap = Math.max(3 * c, 2 * w)
+  const cut = c > h // the bevel reaches the floor (or the far face)
+  const rc = cut ? Math.max(w - h * tanHalf, 0) : 0
+  const yc = cut ? h : c
+  const shape: 'through' | 'floor' | 'cutShort' =
+    v.through && h <= 1.5 * cap ? 'through' : !v.through && h <= cap ? 'floor' : 'cutShort'
+  const wallEnd = shape === 'cutShort' ? cap : h
+  const bottom = shape === 'floor' ? h + Math.max(0.35 * S, c, 0.5) : wallEnd
+
+  const contour: SketchPoint[] = [[w, 0], [rc, yc], ...(cut ? [] : [[0, wallEnd] as const])]
+  const primitives: SketchPrimitive[] = [
+    { kind: 'material', points: [[S, 0], ...contour, [S, cut ? yc : wallEnd]] },
+    ...(shape === 'floor'
+      ? [
+          {
+            kind: 'material' as const,
+            points: [
+              [-A, h],
+              [S, h],
+              [S, bottom],
+              [-A, bottom],
+            ] as const,
+          },
+        ]
+      : []),
+    {
+      kind: 'line',
+      style: 'edge',
+      points: [
+        [w, 0],
+        [S, 0],
+      ],
+    },
+    { kind: 'line', style: 'edge', points: contour },
+  ]
+  if (shape === 'floor')
+    primitives.push({
+      kind: 'line',
+      style: 'edge',
+      points: [
+        [-A, h],
+        [rc, h],
+      ],
+    })
+  else if (shape === 'through')
+    primitives.push({
+      kind: 'line',
+      style: 'edge',
+      points: [
+        [rc, h],
+        [S, h],
+      ],
+    })
+  const maxY = bottom + 0.1 * S
+  if (shape !== 'through')
+    primitives.push({
+      kind: 'fade',
+      x0: -A,
+      x1: S,
+      from: shape === 'floor' ? h + 0.15 * (bottom - h) : yc + 0.35 * (bottom - yc),
+      to: bottom,
+    })
+
+  const bad = (part: ChamferPart) => (v.invalid?.has(part) === true ? { invalid: true } : {})
+  primitives.push(
+    {
+      kind: 'measure',
+      part: 'width',
+      paths: [
+        [
+          [0, 0],
+          [w, 0],
+        ],
+      ],
+      value: L(v.width),
+      chip: [w / 2, 0],
+      side: 'above',
+      ...bad('width'),
+    },
+    {
+      kind: 'measure',
+      part: 'angle',
+      paths: [contour.slice(0, 2)],
+      value: `${Number(v.angle.toFixed(2))}°`,
+      chip: [(w + rc) / 2, yc / 2],
+      side: 'right',
+      ...bad('angle'),
+    },
+    {
+      kind: 'measure',
+      part: 'depth',
+      paths: [
+        [
+          [rc, 0],
+          [rc, yc],
+        ],
+      ],
+      value: L(c),
+      chip: [rc, yc / 2],
+      side: 'left',
+      ...bad('depth'),
+    },
+    {
+      kind: 'measure',
+      part: 'edgeOf',
+      paths: cut
+        ? [
+            [
+              [-A, h],
+              [rc, h],
+            ],
+          ]
+        : [
+            [
+              [0, yc],
+              [0, wallEnd],
+            ],
+          ],
+      value: v.edgeName,
+      chip: cut ? [rc / 2, h] : [0, (yc + wallEnd) / 2],
+      side: cut ? 'below' : 'left',
+      ...bad('edgeOf'),
+    },
+  )
+
+  return {
+    bounds: { minX: -A, minY: -0.2 * S, maxX: S, maxY },
+    primitives,
+    label: chamferMessages.wallSectionLabel({
+      width: L(v.width),
+      angle: `${Number(v.angle.toFixed(2))}°`,
+      depth: L(c),
+      edgeName: v.edgeName,
+      side: v.side,
+      edgeBottom: v.through
+        ? chamferMessages.edgeThrough
+        : chamferMessages.edgeDeep(Number.isFinite(h) ? L(h) : '–'),
+    }),
+  }
+}

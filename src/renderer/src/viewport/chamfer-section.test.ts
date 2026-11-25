@@ -1,10 +1,11 @@
 // The chamfer section's primitives (v0.4 task U4, D45): true proportions, the cone from the chamfer
 // Ø at the face to the edge Ø at the cone depth, how the bore ends (through, floor, cut short: the
 // stock fades out instead of a break line), a cone cut at a shallow floor, one measured part per
-// field (width, depth, angle, diameter, edge), invalid parts and the label.
+// field (width, depth, angle, diameter, edge), invalid parts and the label. E3: the wall section of
+// a general edge (one wall and its bevel, no diameter).
 // Doc: docs/conventions/ui.md#section-illustration
 import { describe, expect, it } from 'vitest'
-import { chamferSection, coneDepth } from './chamfer-section'
+import { chamferSection, coneDepth, wallChamferSection } from './chamfer-section'
 import type { SketchPrimitive } from './sketch'
 
 const base = {
@@ -112,5 +113,62 @@ describe('chamferSection', () => {
 
   it('is one uniform scale: a wider angle gives a shallower cone', () => {
     expect(coneDepth({ ...base, angle: 120 })).toBeLessThan(coneDepth({ ...base, angle: 60 }))
+  })
+})
+
+describe('wallChamferSection (edge chamfers E3)', () => {
+  const wall = {
+    width: 1.5,
+    angle: 90,
+    edgeDepth: 40,
+    through: true,
+    edgeName: 'Profile 1',
+    side: 'outside' as const,
+  }
+
+  it('draws one wall with its bevel: width, depth, angle, edge; no diameter', () => {
+    const s = wallChamferSection(wall, 'mm')
+    expect(measure(s.primitives, 'width').paths).toEqual([
+      [
+        [0, 0],
+        [1.5, 0],
+      ],
+    ])
+    expect(measure(s.primitives, 'angle').paths[0]).toEqual([
+      [1.5, 0],
+      [0, expect.closeTo(1.5)],
+    ])
+    expect(measure(s.primitives, 'depth').value).toBe('1.5 mm')
+    expect(measure(s.primitives, 'edgeOf').value).toBe('Profile 1')
+    expect(s.primitives.some((p) => p.kind === 'measure' && p.part === 'diameter')).toBe(false)
+    // a 40 mm wall is cut short and fades out below the bevel
+    expect(fades(s.primitives)).toHaveLength(1)
+    expect(s.bounds.maxY).toBeLessThan(10)
+    expect(s.label).toBe(
+      'Section: chamfer 1.5 mm wide at 90°, 1.5 mm deep, along the outline of Profile 1, through.',
+    )
+  })
+
+  it('a bevel deeper than a blind pocket is cut at its floor; invalid parts', () => {
+    const s = wallChamferSection(
+      {
+        ...wall,
+        width: 2,
+        edgeDepth: 1,
+        through: false,
+        side: 'inside',
+        edgeName: 'Pocket 1',
+        invalid: new Set(['width']),
+      },
+      'mm',
+    )
+    expect(measure(s.primitives, 'angle').paths[0]).toEqual([
+      [2, 0],
+      [expect.closeTo(1), 1],
+    ])
+    expect(measure(s.primitives, 'edgeOf').paths[0]![1]).toEqual([expect.closeTo(1), 1])
+    expect(measure(s.primitives, 'width').invalid).toBe(true)
+    expect(s.primitives.filter((p) => p.kind === 'material')).toHaveLength(2)
+    expect(s.label).toContain('along the wall of Pocket 1, 1 mm deep.')
   })
 })

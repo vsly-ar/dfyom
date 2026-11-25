@@ -1,5 +1,6 @@
 // Pure helpers of the chamfer UI (v0.4 task U4): which operations can be a chamfer's edge (a
-// drilling, a circle pocket or an inside circle profile), the edge the Add menu's Chamfer uses (the selected one, else the
+// drilling, a pocket of any shape or an outside/inside profile; edge chamfers E1/E2 widened the
+// circular edges of v0.4 to general loops), the edge the Add menu's Chamfer uses (the selected one, else the
 // last in design order, else disabled with the reason), the Edge field's options ("Drilling 2 ·
 // Ø 3.4 mm", earlier operations only), the derived diameter and depth (D45: a chamfer stores its
 // width) and the section illustration's values from the part.
@@ -11,7 +12,7 @@ import type { UnitSystem } from '../../../../core/project/document'
 import type { Quantity } from '../../../../core/quantity/quantity'
 import { chamferMessages } from '../../messages/chamfer'
 import { lengthSource } from '../../messages/dfm'
-import type { ChamferSectionValues } from '../../viewport/chamfer-section'
+import type { ChamferSectionValues, WallChamferSectionValues } from '../../viewport/chamfer-section'
 import { itemName, quantityOf, type DesignPart } from './model'
 import { operationFace } from './outline'
 
@@ -29,8 +30,27 @@ function edgeDiameterDto(op: OperationDTO) {
   return undefined
 }
 
-/** Whether a chamfer can break this operation's edge (design-v0.4.md rule `chamferEdge`). */
-export const isChamferEdge = (op: OperationDTO): boolean => edgeDiameterDto(op) !== undefined
+/**
+ * Whether a chamfer can break this operation's edge (design-v0.4.md rule `chamferEdge`, widened
+ * by edge-chamfers.md E1/E2): a drilling, any pocket, any outside or inside profile.
+ */
+export const isChamferEdge = (op: OperationDTO): boolean =>
+  edgeDiameterDto(op) !== undefined || isLoopEdge(op)
+
+/**
+ * A general edge (edge-chamfers.md E1/E2): a pocket or inside profile that is not round, or any
+ * outside profile.
+ */
+export const isLoopEdge = (op: OperationDTO): boolean =>
+  edgeDiameterDto(op) === undefined &&
+  (op.kind === 'pocket' || (op.kind === 'profile' && op.side !== 'on'))
+
+/**
+ * Which edge a general edge is, for its Edge option (E3): a pocket's rim, an inside profile's
+ * opening, an outside profile's outline.
+ */
+export const loopEdgeRole = (op: OperationDTO): 'rim' | 'opening' | 'outline' =>
+  op.kind === 'profile' ? (op.side === 'outside' ? 'outline' : 'opening') : 'rim'
 
 /** The edge's diameter in mm (NaN when not round or not loadable). */
 export function edgeDiameter(op: OperationDTO): number {
@@ -92,7 +112,9 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
   const before = index < 0 ? part.operations : part.operations.slice(0, index)
   const options = before.filter(isChamferEdge).map((o) => ({
     value: o.id,
-    label: chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
+    label: isLoopEdge(o)
+      ? chamferMessages.edgeLoopOption(o.name, loopEdgeRole(o))
+      : chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
   }))
   if (!options.some((o) => o.value === chamfer.edgeOf))
     options.push({
@@ -100,6 +122,13 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
       label: chamferMessages.edgeMissing(itemName(part, chamfer.edgeOf)),
     })
   return options
+}
+
+/** The chamfer's depth below the face (mm) from its stored width and angle; undefined while either doesn't load. */
+export function chamferDepthValue(chamfer: ChamferDTO): number | undefined {
+  const width = quantityOf(chamfer.width)?.canonical
+  const angle = quantityOf(chamfer.angle)?.canonical
+  return width === undefined || angle === undefined ? undefined : chamferDepthOf(width, angle)
 }
 
 /**
@@ -116,22 +145,11 @@ export function chamferSectionValues(
   const width = quantityOf(chamfer.width)?.canonical
   const angle = quantityOf(chamfer.angle)?.canonical
   if (edge === undefined || width === undefined || angle === undefined) return undefined
+  // a general edge draws the wall section instead (`wallSectionValues`, E3)
   const edgeD = edgeDiameter(edge)
   if (!Number.isFinite(edgeD)) return undefined
   const diameter = edgeD + 2 * width
-  let depth = Number.NaN
-  let through = false
-  if (edge.kind === 'pocket') depth = quantityOf(edge.depth)?.canonical ?? Number.NaN
-  else if (edge.kind === 'drilling' && edge.bottom !== 'through' && edge.depth !== undefined)
-    depth = quantityOf(edge.depth)?.canonical ?? Number.NaN
-  else if (edge.kind === 'drilling') {
-    through = true
-    const loaded = part.loaded?.part.operations.find((o) => o.id === edge.id)
-    if (loaded !== undefined && part.loaded !== undefined && part.table !== undefined) {
-      const face = operationFace(loaded, part.loaded.stock, part.table)
-      depth = face.w + face.local.thickness
-    }
-  }
+  const { depth, through } = edgeDepth(part, edge)
   return {
     width,
     diameter,
@@ -140,6 +158,53 @@ export function chamferSectionValues(
     edgeDepth: depth,
     through,
     edgeName: edge.name,
+    ...(invalid !== undefined ? { invalid } : {}),
+  }
+}
+
+/**
+ * The edge's depth below its face (mm): a pocket's, a blind drilling's or a blind profile's
+ * depth; a through drilling or profile: the stock below its face (NaN while it does not load).
+ */
+function edgeDepth(part: DesignPart, edge: OperationDTO): { depth: number; through: boolean } {
+  const q = (d: Parameters<typeof quantityOf>[0]) => quantityOf(d)?.canonical ?? Number.NaN
+  if (edge.kind === 'pocket') return { depth: q(edge.depth), through: false }
+  if (edge.kind === 'drilling' && edge.bottom !== 'through' && edge.depth !== undefined)
+    return { depth: q(edge.depth), through: false }
+  if (edge.kind === 'profile' && edge.depth !== undefined)
+    return { depth: q(edge.depth), through: false }
+  if (edge.kind !== 'drilling' && edge.kind !== 'profile')
+    return { depth: Number.NaN, through: false }
+  const loaded = part.loaded?.part.operations.find((o) => o.id === edge.id)
+  if (loaded === undefined || part.loaded === undefined || part.table === undefined)
+    return { depth: Number.NaN, through: true }
+  const face = operationFace(loaded, part.loaded.stock, part.table)
+  return { depth: face.w + face.local.thickness, through: true }
+}
+
+/**
+ * The wall section's values of a chamfer along a general edge (edge chamfers E3): width, angle,
+ * the wall's depth and side, no diameter. Undefined for a round edge (`chamferSectionValues`) or
+ * while the part or the edge does not load.
+ */
+export function wallSectionValues(
+  part: DesignPart,
+  chamfer: ChamferDTO,
+  invalid?: ReadonlySet<string>,
+): WallChamferSectionValues | undefined {
+  const edge = part.dto.operations.find((o) => o.id === chamfer.edgeOf)
+  const width = quantityOf(chamfer.width)?.canonical
+  const angle = quantityOf(chamfer.angle)?.canonical
+  if (edge === undefined || width === undefined || angle === undefined || !isLoopEdge(edge))
+    return undefined
+  const { depth, through } = edgeDepth(part, edge)
+  return {
+    width,
+    angle,
+    edgeDepth: depth,
+    through,
+    edgeName: edge.name,
+    side: edge.kind === 'profile' && edge.side === 'outside' ? 'outside' : 'inside',
     ...(invalid !== undefined ? { invalid } : {}),
   }
 }

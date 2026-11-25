@@ -8,7 +8,7 @@
  */
 import type { Region2dPort } from '../../geometry/2d/port'
 import { regionArea } from '../../geometry/2d/model'
-import type { DfmWarning } from '../../geometry/model'
+import { isLoopChamfer, type DfmWarning } from '../../geometry/model'
 import type { Library } from '../../library/library'
 import { Machine } from '../../library/machine'
 import { Stock } from '../../library/stock'
@@ -22,6 +22,7 @@ import { baseOf, isFrozenRecord } from '../frozen-memo'
 import { EPS, regionBounds, splitNumbers } from './layout'
 import { materialAt, removals } from './removals'
 import { dowelFindings, dowelNumbers } from './dowels'
+import type { Key } from './keys'
 import { DOWEL_WALL_MIN } from '../dowel'
 import { planPieces, splitFinding, type PiecesResult } from './pieces'
 
@@ -249,7 +250,9 @@ function geometricDfm(
         )
       return
     }
+    // a loop chamfer (E1) follows its edge operation, which has its own finding
     if (g.kind !== 'drilling' && g.kind !== 'chamfer') return
+    if (g.kind === 'chamfer' && isLoopChamfer(g)) return
     const r = g.diameter / 2
     const c: [number, number] =
       dir === '+z' ? [g.center[0], g.center[1]] : [g.center[0], W - g.center[1]]
@@ -420,6 +423,35 @@ function geometricDfm(
     )
   // ── keys (4b-2) ──────────────────────────────────────────────────────────────────────────
   out.push(...keyFindings(planned, (n) => pieces.find((p) => p.n === n)?.name ?? `piece ${n}`, id))
+  // ── a chamfered outline nicks a key (edge-chamfers.md E3) ────────────────────────────────
+  if (outline !== undefined) {
+    const outlineId = loaded.part.operations[outline]?.id
+    loaded.part.operations.forEach((op, i) => {
+      const g = geometry[i]
+      if (g?.kind !== 'chamfer' || !isLoopChamfer(g) || g.edgeOf !== outlineId) return
+      const tip = tools[op.id]?.tool.tipDiameter ?? 0
+      const nicked = planned.keys.keys.filter((k) =>
+        bevelNicksKey(layout.footprint.region, k, g.width, tip),
+      )
+      if (nicked.length > 0)
+        out.push(
+          splitFinding(
+            id,
+            'cutsFeature',
+            'warning',
+            `${op.name} runs past the split line along the outline and bevels ${nicked.length === 1 ? 'a key' : `${nicked.length} keys`} within ${fmt(g.width)} mm of the outline`,
+            {
+              operationId: op.id,
+              reason: 'chamferKey',
+              keys: nicked.flatMap((k) => [
+                k.axis === 'x' ? k.at : k.u,
+                k.axis === 'x' ? k.u : k.at,
+              ]),
+            },
+          ),
+        )
+    })
+  }
   // ── sliver ───────────────────────────────────────────────────────────────────────────────
   const partHeight = top - bottom
   const partVolume = regionArea(layout.footprint.region) * partHeight
@@ -441,6 +473,36 @@ function geometricDfm(
       )
   }
   return { findings: out, fb, partHeight }
+}
+
+/**
+ * Whether a loop chamfer on the outline of `width` bevels a key's knob (edge-chamfers.md E3): the
+ * male piece's chamfer runs on past the split line by its reach (tip/2 + width), and the bevel
+ * cuts `width` into the material from the outline, so a knob whose stretch within that reach of
+ * the line comes nearer than `width` to the outline is nicked. Sampled on the box's rim (0.5 mm).
+ */
+export function bevelNicksKey(
+  footprint: Parameters<typeof materialAt>[0],
+  k: Key,
+  width: number,
+  tip: number,
+): boolean {
+  const reach = tip / 2 + width
+  const u0 = k.u - k.size.half - width
+  const u1 = k.u + k.size.half + width
+  const w0 = 0
+  const w1 = Math.min(k.size.depth, reach) + width
+  const at = (u: number, w: number): [number, number] =>
+    k.axis === 'x' ? [k.at + w, u] : [u, k.at + w]
+  const steps = (lo: number, hi: number) => {
+    const n = Math.max(1, Math.ceil((hi - lo) / 0.5))
+    return Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n)
+  }
+  const rim = [
+    ...steps(u0, u1).flatMap((u) => [at(u, w0), at(u, w1)]),
+    ...steps(w0, w1).flatMap((w) => [at(u0, w), at(u1, w)]),
+  ]
+  return rim.some((p) => !materialAt(footprint, [], 0, p[0], p[1], 0))
 }
 
 /**

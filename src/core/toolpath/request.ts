@@ -14,6 +14,7 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
 import { generateChamfer } from './chamfer'
+import { generateEdgeChamfer, type EdgeChamferInput } from './edge-chamfer'
 import { generateMark, type MarkInput } from './mark'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
@@ -34,6 +35,7 @@ import { generateRegionProfile, type RegionProfileInput } from './region-profile
 import {
   ChamferInputSchema,
   DrillingInputSchema,
+  EdgeChamferInputSchema,
   FacingInputSchema,
   MarkInputSchema,
   PocketInputSchema,
@@ -54,6 +56,7 @@ export type GeneratorRequest = (
   | { readonly kind: 'regionPocket'; readonly inputs: readonly RegionPocketInput[] }
   | { readonly kind: 'regionProfile'; readonly inputs: readonly RegionProfileInput[] }
   | { readonly kind: 'chamfer'; readonly inputs: readonly ChamferInput[] }
+  | { readonly kind: 'edgeChamfer'; readonly inputs: readonly EdgeChamferInput[] }
   | { readonly kind: 'mark'; readonly inputs: readonly MarkInput[] }
 ) & {
   /**
@@ -99,6 +102,7 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
     inputs: z.array(ChamferInputSchema).min(1).readonly(),
     wcs,
   }),
+  z.object({ kind: z.literal('edgeChamfer'), inputs: one(EdgeChamferInputSchema), wcs }),
   z.object({ kind: z.literal('mark'), inputs: one(MarkInputSchema), wcs }),
 ])
 
@@ -142,6 +146,10 @@ function generateLocal(
       return joined(request.inputs, generateChamfer, 'chamfer', steps)
     case 'mark':
       return generateMark(request.inputs[0]!, steps)
+    case 'edgeChamfer': {
+      const input = request.inputs[0]!
+      return region2d().andThen((port) => generateEdgeChamfer(input, port, steps))
+    }
     case 'regionPocket':
       return region2d().andThen((port) => {
         // a partly cleared pocket (DF61 follow-up): the uncovered part above the cleared level,

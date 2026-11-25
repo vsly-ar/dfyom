@@ -17,6 +17,7 @@ import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
   chamferDiameter,
+  chamferEdgeKind,
   circularEdgeDiameter,
   isGeneralShape,
   type Operation,
@@ -203,6 +204,36 @@ function operationGeometry(
         },
       }))
     case 'chamfer': {
+      const edgeOp = ops.slice(0, index).find((o) => o.id === op.edgeOf)
+      // a general edge (edge-chamfers.md E1, E2): the bevel follows every loop of its shape; on a
+      // split piece the source's edge within the piece's cell (`sourceEdge`)
+      if (
+        chamferEdgeKind(edgeOp) === 'loop' &&
+        (edgeOp?.kind === 'pocket' || edgeOp?.kind === 'profile')
+      ) {
+        const source = op.sourceEdge.isSome() ? op.sourceEdge.unwrap() : undefined
+        return shapeGeometry(source?.shape ?? edgeOp.shape, shapes, port).map((shape) => ({
+          kind: 'chamfer',
+          id: op.id,
+          ...direction,
+          onZ: materialTopZ(op.on, on, ops.slice(0, index), table),
+          edgeOf: op.edgeOf,
+          edge: {
+            shape,
+            side: edgeOp.kind === 'profile' && edgeOp.side === 'outside' ? 'outside' : 'inside',
+            ...(edgeOp.kind === 'pocket'
+              ? { depth: edgeOp.depth.canonical }
+              : edgeOp.depth.isSome()
+                ? { depth: edgeOp.depth.unwrap().canonical }
+                : {}),
+            ...(source === undefined
+              ? {}
+              : { within: { min: vec2(source.within.min), max: vec2(source.within.max) } }),
+          },
+          width: op.width.canonical,
+          angle: op.angle.canonical,
+        }))
+      }
       const edge = chamferEdge(ops.slice(0, index), op.edgeOf)
       if (edge === undefined) return bug(op, `edge ${op.edgeOf} is not an earlier round operation`)
       return Ok({
@@ -224,6 +255,28 @@ function operationGeometry(
       })
     }
   }
+}
+
+/**
+ * Where a loop chamfer's bevel sits (edge-chamfers.md E2): the face of `on`, or, when `on` is a
+ * stock face that earlier facings of its direction cut down, the deepest such floor: the top of
+ * the material along the edge (a part's outline profiled from `stock.top` after a top facing).
+ */
+function materialTopZ(
+  onId: string,
+  on: { readonly faceZ: { toNumber(): number }; readonly direction: Direction },
+  before: readonly Operation[],
+  table: SurfaceTable,
+): number {
+  let z = on.faceZ.toNumber()
+  if (!onId.startsWith('stock.')) return z
+  for (const f of before) {
+    if (f.kind !== 'facing') continue
+    const floor = table.get(`${f.id}.floor`)
+    if (floor.isNone() || floor.unwrap().direction !== on.direction) continue
+    z = Math.min(z, floor.unwrap().faceZ.toNumber())
+  }
+  return z
 }
 
 /**

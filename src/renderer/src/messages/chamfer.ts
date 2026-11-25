@@ -11,7 +11,7 @@ export const chamferMessages = {
    * The edge operation is gone or not round any more (the command refuses such an edge): its name,
    * never its id (DF43; "Unknown operation" when gone).
    */
-  edgeMissing: (name: string) => `${name} (not a drilling, circular pocket or circular opening)`,
+  edgeMissing: (name: string) => `${name} (not a drilling, pocket or outside/inside profile)`,
   /** D45: the chamfer's size is its width at the face ("1.5 × 45°"); depth is the alternative. */
   width: 'Width',
   angle: 'Angle',
@@ -19,9 +19,8 @@ export const chamferMessages = {
   depthNote: 'Or enter the depth: the width follows through the angle.',
   diameter: 'Diameter',
   diameterNote: 'From the edge and the width.',
-  /** Add menu: no drilling, circular pocket or circular opening in the part (ui.md § Feature rows and Add). */
-  noEdge:
-    'Add a drilling, a circular pocket or a circular opening first: a chamfer breaks its edge.',
+  /** Add menu: no drilling, pocket or outside/inside profile in the part (ui.md § Feature rows and Add). */
+  noEdge: 'Add a drilling, a pocket or a profile first: a chamfer breaks its edge.',
   /** The section illustration's accessible name, built from the values. */
   sectionLabel: (p: {
     width: string
@@ -33,6 +32,18 @@ export const chamferMessages = {
     edgeBottom: string
   }) =>
     `Section: chamfer ${p.width} wide at ${p.angle} (Ø ${p.diameter}), ${p.depth} deep, on ${p.edgeName} Ø ${p.edgeDiameter} ${p.edgeBottom}.`,
+  /** A general edge's section (edge chamfers E3): one wall with its bevel, no diameter. */
+  wallSectionLabel: (p: {
+    width: string
+    angle: string
+    depth: string
+    edgeName: string
+    side: 'inside' | 'outside'
+    edgeBottom: string
+  }) =>
+    `Section: chamfer ${p.width} wide at ${p.angle}, ${p.depth} deep, along ${p.side === 'outside' ? 'the outline of' : 'the wall of'} ${p.edgeName}, ${p.edgeBottom}.`,
+  /** An Edge option for a general edge (E3): "Profile 1 · outline", "Pocket 2 · rim". */
+  edgeLoopOption: (name: string, role: 'rim' | 'opening' | 'outline') => `${name} · ${role}`,
   edgeThrough: 'through',
   edgeDeep: (depth: string) => `${depth} deep`,
 } as const

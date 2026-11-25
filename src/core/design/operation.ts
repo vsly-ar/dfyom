@@ -170,6 +170,15 @@ export interface Chamfer extends Common {
    * end mill; None = a chamfer mill. Doc: docs/modes/design-v0.4.md#stepped-countersink-f7-d41
    */
   readonly stepdown: Option<Quantity>
+  /**
+   * On a split piece only (edge-chamfers.md E2): the source's edge shape and the piece's cell, in
+   * the piece's face frame; the bevel follows that shape within the cell. Written by the split.
+   */
+  readonly sourceEdge: Option<ChamferSourceEdge>
+}
+export interface ChamferSourceEdge {
+  readonly shape: Shape
+  readonly within: { readonly min: Point; readonly max: Point }
 }
 export type Operation = Facing | Pocket | Drilling | Profile | Chamfer
 
@@ -187,6 +196,23 @@ export function circularEdgeDiameter(op: Operation | undefined): Quantity | unde
     return op.shape.diameter
   return undefined
 }
+
+/**
+ * The edge a chamfer can bevel (design-v0.4.md rule `chamferEdge`, widened by edge-chamfers.md
+ * E1/E2): `circle` for the circular mouths of v0.4 (exact cone, `circularEdgeDiameter`), `loop` for
+ * the top edge of a pocket of any other shape, or an `inside` or `outside` profile of any other
+ * shape (every loop, islands included); undefined for any other operation (facings, `on`
+ * profiles, chamfers).
+ */
+export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | undefined {
+  if (circularEdgeDiameter(op) !== undefined) return 'circle'
+  if (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side !== 'on')) return 'loop'
+  return undefined
+}
+
+/** A chamfer along a general edge (edge-chamfers.md E1): its `edgeOf` among `ops` is a `loop` edge. */
+export const isLoopChamferOp = (op: Chamfer, ops: readonly Operation[]): boolean =>
+  chamferEdgeKind(ops.find((o) => o.id === op.edgeOf)) === 'loop'
 
 /**
  * A chamfer's diameter in the face plane, mm exact: the edge's Ø + 2 × `width` (D45,
@@ -567,14 +593,26 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
       const width = q(dto.width, 'width')
       const angle = q(dto.angle, 'angle')
       const stepdown = dto.stepdown === undefined ? Ok(undefined) : q(dto.stepdown, 'stepdown')
-      return collect<Quantity | undefined>([width, angle, stepdown]).map(([w, a, s]) => ({
+      const se = dto.sourceEdge
+      const sourceEdge: AppResult<Option<ChamferSourceEdge>> =
+        se === undefined
+          ? Ok(None)
+          : collect<unknown>([
+              shapeFromDTO(se.shape),
+              pointFromDTO(se.within.min, 'sourceEdge', 'within', 'min'),
+              pointFromDTO(se.within.max, 'sourceEdge', 'within', 'max'),
+            ]).map(([shape, min, max]) =>
+              Some({ shape: shape as Shape, within: { min: min as Point, max: max as Point } }),
+            )
+      return collect<unknown>([width, angle, stepdown, sourceEdge]).map(([w, a, s, e]) => ({
         ...base,
         kind: 'chamfer',
         on: dto.on,
         edgeOf: dto.edgeOf,
-        width: w!,
-        angle: a!,
-        stepdown: s === undefined ? None : Some(s),
+        width: w as Quantity,
+        angle: a as Quantity,
+        stepdown: s === undefined ? None : Some(s as Quantity),
+        sourceEdge: e as Option<ChamferSourceEdge>,
       }))
     }
   }
@@ -687,6 +725,17 @@ export function operationToDTO(op: Operation): OperationDTO {
         width: op.width.toDTO(),
         angle: op.angle.toDTO(),
         ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().toDTO() } : {}),
+        ...(op.sourceEdge.isSome()
+          ? {
+              sourceEdge: {
+                shape: shapeToDTO(op.sourceEdge.unwrap().shape),
+                within: {
+                  min: op.sourceEdge.unwrap().within.min.map((x) => x.toDTO()),
+                  max: op.sourceEdge.unwrap().within.max.map((x) => x.toDTO()),
+                },
+              },
+            }
+          : {}),
       } as OperationDTO
   }
 }

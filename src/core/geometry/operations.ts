@@ -28,6 +28,8 @@ import {
   chamferDepth,
   chamferTerraces,
   isAnalyticOperation,
+  isLoopChamfer,
+  type CircleChamferGeometry,
   type AnalyticContour as Contour,
   type AnalyticOperation,
   type AnalyticShape,
@@ -40,6 +42,7 @@ import {
 } from './model'
 import { tiledBox, type Triangulate } from './prism'
 import { shapePocket, shapeProfile } from './shape-solids'
+import { loopChamferSolids } from './chamfer-solids'
 import { analyticTabCentres } from './tab-hold'
 import type { Region2dPort } from './2d/port'
 
@@ -115,7 +118,9 @@ export function slotCoversOpening(op: Extract<OperationGeometry, { kind: 'profil
 /** True if some operation needs the general builders, and so the 2D port. */
 export function needsRegion2d(input: PartGeometryInput): boolean {
   return input.operations.some(
-    (op) => (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op),
+    (op) =>
+      ((op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op)) ||
+      (op.kind === 'chamfer' && isLoopChamfer(op)),
   )
 }
 
@@ -209,6 +214,7 @@ function build(
     case 'drilling':
       return drilling(op, stock)
     case 'chamfer':
+      if (isLoopChamfer(op)) return general(op, context).andThen((c) => loopChamferSolids(op, c))
       return chamfer(op)
     case 'profile':
       if (isAnalyticOperation(op)) return profile(op, stock)
@@ -350,7 +356,7 @@ export const CHAMFER_RUN_IN = 4 * CHORD_TOLERANCE
  * mouth's column is the edge's own removal); the bottom cap lies inside the edge's removal (air).
  * Doc: docs/modes/design-v0.4.md#implementation-c2
  */
-function chamfer(op: Extract<OperationGeometry, { kind: 'chamfer' }>): AppResult<LocalSolids> {
+function chamfer(op: CircleChamferGeometry): AppResult<LocalSolids> {
   const table = new Table()
   const cone = table.add('cone')
   const R = op.diameter / 2

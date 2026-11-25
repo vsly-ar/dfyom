@@ -8,7 +8,13 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
-import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
+import {
+  isAnalyticOperation,
+  isLoopChamfer,
+  type OperationGeometry,
+  type StockGeometry,
+} from '../geometry/model'
+import type { EdgeChamferOperation } from './edge-chamfer'
 import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
 import type { MaterialBand } from '../geometry/through-depth'
 import { pocketRegion, profileChain } from '../geometry/outline'
@@ -39,6 +45,18 @@ const WHERE = 'toGeneratorInputs'
 
 /** Ramp angle of a facing cleared around workholding (degrees, as the pocket default). */
 const FACING_RAMP_ANGLE = 3
+
+/** The loop chamfer a plan operation machines alone (edge-chamfers.md E1). */
+function loopChamferOf(
+  op: OperationGeometry,
+  planOperationId: string,
+): AppResult<EdgeChamferOperation> {
+  if (op.kind === 'chamfer' && isLoopChamfer(op)) return Ok(op)
+  return fail('internal.unexpected', 'a loop chamfer is planned alone', {
+    where: WHERE,
+    data: { planOperationId },
+  })
+}
 
 /**
  * Whether cutting a partly cleared pocket in two (`rest` down to `level`, then `region` from
@@ -570,7 +588,34 @@ export function toGeneratorInputs(
       }))
     }
     case 'chamfer': {
-      const chamfers = ops.filter((o): o is ChamferOperation => o.kind === 'chamfer')
+      // a general edge (edge-chamfers.md E1): never grouped, its own generator in the face frame
+      if (ops.some((o) => o.kind === 'chamfer' && isLoopChamfer(o)))
+        return single('chamfer').andThen((op) =>
+          loopChamferOf(op, id).andThen((operation: EdgeChamferOperation) =>
+            cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map(
+              (c): GeneratorRequest => ({
+                kind: 'edgeChamfer',
+                ...turned,
+                inputs: [
+                  {
+                    ...base,
+                    cutting: {
+                      spindleSpeed: c.spindleSpeed,
+                      feedRate: c.feedRate,
+                      plungeRate: c.plungeRate,
+                    },
+                    operation,
+                    // climb, as the circular chamfer's ring (plan-v0.4.md § Chamfer toolpath)
+                    strategy: { direction: 'climb' },
+                  },
+                ],
+              }),
+            ),
+          ),
+        )
+      const chamfers = ops.filter(
+        (o): o is ChamferOperation => o.kind === 'chamfer' && !isLoopChamfer(o),
+      )
       const visits = nearestNeighbourOrder(
         chamfers.map((operation) => ({
           operation,

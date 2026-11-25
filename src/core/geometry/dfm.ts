@@ -28,6 +28,10 @@ import {
 } from './face'
 import {
   chamferDepth,
+  isLoopChamfer,
+  loopChamferDepth,
+  type CircleChamferGeometry,
+  type LoopChamferGeometry,
   CHORD_TOLERANCE,
   EPSILON,
   type DfmSuggestion,
@@ -49,6 +53,7 @@ import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
+import { chamferIncomplete, chamferMeets } from './chamfer-findings'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -197,7 +202,7 @@ export function parameterChecks(
         ]
       case 'chamfer':
         return [
-          ...chamfer(op, input.operations, stock, input.stock, lib),
+          ...chamfer(op, input.operations, stock, input.stock, lib, options.region2d, own),
           ...reach(op, stock, lib, own, options.unitSystem),
           ...tool,
         ]
@@ -621,6 +626,8 @@ function chamfer(
   stock: StockGeometry,
   partStock: StockGeometry,
   lib: Library,
+  port?: Region2dPort,
+  own?: OperationTool,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   const edge = all.find((o) => o.id === op.edgeOf)
@@ -637,14 +644,16 @@ function chamfer(
         : edge?.kind === 'profile'
           ? (edge.depth ?? op.onZ + stock.thickness)
           : undefined
-  const depth = chamferDepth(op)
+  const loop = isLoopChamfer(op)
+  const depth = loop ? loopChamferDepth(op) : chamferDepth(op)
   const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
   // the widest chamfer that stays above each limit (D45: sized by width); the smallest wins
   const limits: { width: number; edgeDepth: number; edgeOf: string; floor: boolean }[] = []
   if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON)
     limits.push({ width: edgeDepth * tan, edgeDepth, edgeOf: op.edgeOf, floor: false })
   // B4: a through edge can still end in a thin floor left by a cut from the opposite face
-  if (through)
+  // (circular edges; a general edge's floors below are not checked yet, edge-chamfers.md E1)
+  if (through && !loop)
     for (const f of floorsUnder(op, all, partStock)) {
       const outside = Math.max(0, f.radius - op.edgeDiameter / 2)
       if (
@@ -680,7 +689,18 @@ function chamfer(
         { suggestion: atMost(limit.width) },
       ),
     )
-  if (!lib.empty && candidates(op, lib).length === 0)
+  if (loop && port !== undefined) out.push(...loopChamferFindings(op, port, own))
+  if (!lib.empty && candidates(op, lib).length === 0 && loop)
+    out.push(
+      warning(
+        'dfm.chamferNoTool',
+        op,
+        'angle',
+        `no chamfer mill of ${op.angle}° in the library has a cutting edge for a ${mm(op.width)} bevel`,
+        { angle: op.angle, width: op.width },
+      ),
+    )
+  else if (!lib.empty && !loop && candidates(op, lib).length === 0)
     out.push(
       warning(
         'dfm.chamferNoTool',
@@ -702,6 +722,52 @@ function chamfer(
 }
 
 /**
+ * Edge chamfer findings (edge-chamfers.md § DFM findings, E3): `dfm.chamferMeets` (parameter
+ * `width`, suggests the widest bevel that keeps the wall's top) and `dfm.chamferIncomplete` for the
+ * operation's own chamfer mill with a tip (parameter `tool`), markers at `at` / `points`.
+ */
+function loopChamferFindings(
+  op: LoopChamferGeometry,
+  port: Region2dPort,
+  own: OperationTool | undefined,
+): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const meet = chamferMeets(op, port)
+  if (meet !== undefined)
+    out.push(
+      warning(
+        'dfm.chamferMeets',
+        op,
+        'width',
+        `the bevels meet at the ${mm(meet.wall)} wall near ${point(meet.at)}: its top becomes a ridge`,
+        { at: meet.at, points: meet.points, wall: meet.wall, width: op.width },
+        { suggestion: atMost(meet.wall / 2) },
+      ),
+    )
+  const tip = own?.tool.type === 'chamferMill' ? (own.tool.tipDiameter ?? 0) : 0
+  const miss = own === undefined ? undefined : chamferIncomplete(op, port, tip)
+  if (miss !== undefined && own !== undefined)
+    out.push(
+      warning(
+        'dfm.chamferIncomplete',
+        op,
+        'tool',
+        `the ${mm(tip)} tip of the ${own.label} does not reach ${mm(miss.length)} of ${op.edgeOf}'s ` +
+          `edge near ${point(miss.at)} (the air there is narrower than the tip)`,
+        {
+          at: miss.at,
+          points: miss.points,
+          length: miss.length,
+          tipDiameter: tip,
+          tool: own.label,
+          edgeOf: op.edgeOf,
+        },
+      ),
+    )
+  return out
+}
+
+/**
  * The floors under a chamfer (hardening B4, design-v0.4.md § Implementation C2, DFM): pockets and
  * blind drillings cut from the face opposite the chamfer's, with the material left between the
  * chamfer's face and the cut's bottom (`thickness`, ≤ 0 when the cut reaches the face) and the
@@ -709,7 +775,7 @@ function chamfer(
  * farther than the chamfer's outer radius are left out.
  */
 function floorsUnder(
-  op: Op<'chamfer'>,
+  op: CircleChamferGeometry,
   all: readonly OperationGeometry[],
   stock: StockGeometry,
 ): { id: string; thickness: number; radius: number }[] {

@@ -12,6 +12,8 @@ import type { DfmTool } from './dfm'
 import {
   CHAMFER_ANGLE_TOLERANCE,
   chamferDepth,
+  isLoopChamfer,
+  loopChamferDepth,
   coneSlant,
   EPSILON,
   type OperationGeometry,
@@ -117,7 +119,10 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
     return op.depth === undefined ? [op.throughDepth ?? stock.thickness, 'on'] : [op.depth, 'depth']
   if (op.kind === 'pocket') return [op.depth - op.onZ, 'depth']
   // the cone's bottom (the tool tip when contoured; a plunged tip goes deeper, `toolFit`)
-  if (op.kind === 'chamfer') return [chamferDepth(op) - op.onZ, 'diameter']
+  if (op.kind === 'chamfer')
+    return isLoopChamfer(op)
+      ? [loopChamferDepth(op) - op.onZ, 'width']
+      : [chamferDepth(op) - op.onZ, 'diameter']
   return op.bottom.kind === 'through'
     ? [op.throughDepth ?? stock.thickness, 'on']
     : [op.bottom.depth - op.onZ, 'depth']
@@ -273,7 +278,7 @@ export function toolFit(
       // plunged (DC covers the chamfer): the tip ends where the tool cone has the chamfer's Ø
       const tip = tool.tipDiameter ?? 0
       const depth =
-        tool.diameter + TOL >= op.diameter
+        !isLoopChamfer(op) && tool.diameter + TOL >= op.diameter
           ? chamferDepth({ ...op, edgeDiameter: tip }) - op.onZ
           : reachDepth(op, stock)[0]
       return tool.reach + EPSILON >= depth
@@ -311,15 +316,26 @@ export function wallDepth(
   return through ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
 }
 
-/** A circular chamfer as the fit rule sees it (mm, degrees): its edge Ø, chamfer Ø and angle. */
-export interface ChamferFitInput {
-  readonly edgeDiameter: number
-  readonly diameter: number
-  /** Included angle, degrees. */
-  readonly angle: number
-  /** Stepped (F7): cut in terraces by a flat end mill. */
-  readonly stepdown?: number
-}
+/**
+ * A chamfer as the fit rule sees it (mm, degrees): a circular one by its edge Ø, chamfer Ø and
+ * angle; one along a general edge (edge-chamfers.md E1) by its width and angle.
+ */
+export type ChamferFitInput =
+  | {
+      readonly edgeDiameter: number
+      readonly diameter: number
+      /** Included angle, degrees. */
+      readonly angle: number
+      /** Stepped (F7): cut in terraces by a flat end mill. */
+      readonly stepdown?: number
+      readonly width?: never
+    }
+  | {
+      readonly width: number
+      readonly angle: number
+      readonly edgeDiameter?: never
+      readonly stepdown?: never
+    }
 
 export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
 
@@ -332,7 +348,7 @@ export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
  * § Implementation (task C2)). Reach is checked by `toolFit`, which knows the depth below the face.
  */
 export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
-  if (c.stepdown !== undefined) return steppedFit(tool, c)
+  if (c.edgeDiameter !== undefined && c.stepdown !== undefined) return steppedFit(tool, c)
   if (tool.type !== 'chamferMill' || tool.angle === undefined)
     return {
       rule: 'type',
@@ -346,6 +362,19 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
       values: { toolAngle: tool.angle, angle: c.angle },
     }
   const tip = tool.tipDiameter ?? 0
+  if (c.edgeDiameter === undefined) {
+    // a general edge (edge-chamfers.md § Tool): one ring, the cutting edge covers the bevel,
+    // (DC − dt) / 2 ≥ width; no tip rule (the air beside the edge is the finding's business)
+    const edge = coneSlant(tip, tool.diameter, tool.angle)
+    const slant = coneSlant(0, 2 * c.width, c.angle)
+    return edge + TOL >= slant
+      ? undefined
+      : {
+          rule: 'slant',
+          detail: `cutting edge ${mm(edge)} is shorter than the chamfer's slant ${mm(slant)}`,
+          values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, width: c.width },
+        }
+  }
   if (tip >= c.edgeDiameter - TOL)
     return {
       rule: 'tip',
@@ -370,7 +399,7 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
  * edge Ø, which goes down inside it (the upper bound of helical boring, so the hole's end mill
  * fits). First failed rule, or undefined; reach as for a contoured chamfer (`toolFit`).
  */
-function steppedFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
+function steppedFit(tool: DfmTool, c: { readonly edgeDiameter: number }): ToolUnfit | undefined {
   if (tool.type !== 'flatEndMill')
     return {
       rule: 'type',
