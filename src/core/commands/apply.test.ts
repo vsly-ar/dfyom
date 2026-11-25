@@ -459,6 +459,7 @@ describe('implicit apply (applyFirst)', () => {
     expect(APP_HOOKS.map((h) => h.name)).toEqual([
       'design.clonesFollow',
       'design.patternFollow',
+      'design.disabledFollow',
       'design.splitFollow',
     ])
   })

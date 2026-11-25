@@ -7,6 +7,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { PartGeometryInput } from '../geometry/model'
 import { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
+import { enabledPart } from './disabled'
 import { checkFeatures, type FrozenRecords, type LoadedFeature } from './feature'
 import { baseOf, snapshotFromRecord } from './frozen-memo'
 import { toGeometryInput } from './geometry-input'
@@ -109,13 +110,28 @@ function frozenRecords(records: PartDTO, stock: object): FrozenRecords | undefin
   }
 }
 
-/** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */
+/**
+ * The part as evaluation, DFM and split pieces see it: without its disabled items (hardening
+ * DF106, design/disabled.ts). The same as `loadPart` when nothing is disabled.
+ */
+export function loadEnabledPart(
+  doc: ProjectDoc,
+  partId: string,
+  where: string,
+): AppResult<LoadedPart> {
+  const dto = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
+  if (dto?.disabled === undefined) return loadPart(doc, partId, where)
+  const enabled = enabledPart(baseOf(dto))
+  return loadPart({ ...doc, parts: { ...doc.parts, [partId]: enabled } }, partId, where)
+}
+
+/** The geometry input of a part of the document (for evaluation, task 2.8/2.9); DF106: enabled items only. */
 export function partGeometryInput(
   doc: ProjectDoc,
   partId: string,
   region2d?: Region2dPort,
 ): AppResult<PartGeometryInput> {
-  return loadPart(doc, partId, 'partGeometryInput').andThen((l) =>
+  return loadEnabledPart(doc, partId, 'partGeometryInput').andThen((l) =>
     toGeometryInput(l.part, l.stock, region2d),
   )
 }

@@ -7,6 +7,7 @@
  */
 import { Err, fail, type AppResult } from '../../shared/result'
 import type { Region2dPort } from '../geometry/2d/port'
+import { enabledPart } from '../design/disabled'
 import { partFromDTO, type Part } from '../design/operation'
 import { shapeFacts } from '../design/placement'
 import type { PartDTO } from '../design/part.dto'
@@ -124,10 +125,12 @@ export function rebuildBlocker(
   doc: ProjectDoc,
   port?: Region2dPort,
 ): Blocker | undefined {
-  const part = Object.hasOwn(doc.parts, plan.design.partId)
+  const record = Object.hasOwn(doc.parts, plan.design.partId)
     ? doc.parts[plan.design.partId]
     : undefined
-  if (part === undefined) return undefined
+  if (record === undefined) return undefined
+  // DF106: the rebuild takes the enabled part (items disabled in the design or plan left out)
+  const part = enabledPart(enabledPart(record), plan.disabled ?? [])
   const stock = stockCopyFor(plan, part, doc)
   if (stock === undefined)
     return { reason: 'rebuild blocked: the stock copy is missing', fields: ['stock'] }

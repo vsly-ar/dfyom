@@ -26,6 +26,7 @@ import { HOLE_COMMANDS } from '../design/hole-commands'
 import { PATTERN_COMMANDS } from '../design/pattern/commands'
 import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
 import { patternFollowHook } from '../design/pattern/follow'
+import { disabledFollowHook } from '../design/disabled-follow'
 import { TEST_FIT_COMMANDS } from '../design/split/test-fit'
 import { SPLIT_QUERIES } from '../design/split/suggest'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
@@ -137,13 +138,14 @@ export const MACHINE_SCOPE_QUERIES: readonly AnyQueryDef[] = [jobGet, jobList, .
 /**
  * Document hooks of the app (docs/architecture/commands.md#document-hooks): Clones instances
  * follow an edited source in the same command (`design.clonesFollow`, v0.4 F5), patterns their
- * stock and the operations below them (`design.patternFollow`, patterns P4 follow-up), split
- * pieces their source (`design.splitFollow`, after the patterns: pieces copy their records). The draft
+ * stock and the operations below them (`design.patternFollow`, patterns P4 follow-up), a part's
+ * disabled list its items (`design.disabledFollow`, DF106), split pieces their source (`design.splitFollow`, after the patterns: pieces copy their records). The draft
  * auto-rebuild moved behind Apply in v0.2 P2 (`plan.draftFollow`).
  */
 export const APP_HOOKS: readonly DocumentHook[] = [
   clonesFollowHook,
   patternFollowHook,
+  disabledFollowHook,
   splitFollowHook,
 ]
 

@@ -36,7 +36,7 @@ import type { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import { loadPart, unknownPart, type LoadedPart } from './load'
+import { loadEnabledPart, loadPart, unknownPart, type LoadedPart } from './load'
 import {
   CENTRE_ANCHOR,
   DEFAULTS,
@@ -58,6 +58,7 @@ import {
   type Part,
   type Shape,
 } from './operation'
+import { checkDisabledList, disabledState, dropDisabledWarnings } from './disabled'
 import { baseOf } from './frozen-memo'
 import {
   AnchorDtoSchema,
@@ -451,21 +452,27 @@ export function withWarnings<R extends object>(
 ) {
   const library = ctx.services.library
   const tools = library === undefined ? [] : libraryTools(library)
-  return shapesOf(operations, loaded.dto)
-    .andThen((shapes) =>
-      partWarnings(
-        { ...loaded.part, operations, ...(shapes.size === 0 ? {} : { shapes }) },
-        loaded.stock,
-        loaded.units,
-        tools,
-        loaded.snapshots,
-        ctx.services.region2d,
-        features,
-        loaded.dto.shapes,
-      ),
-    )
-    .map((warnings) => ({ ...value, warnings }))
-    .mapErr((e) => e.withContext(where))
+  return (
+    shapesOf(operations, loaded.dto)
+      .andThen((shapes) =>
+        partWarnings(
+          { ...loaded.part, operations, ...(shapes.size === 0 ? {} : { shapes }) },
+          loaded.stock,
+          loaded.units,
+          tools,
+          loaded.snapshots,
+          ctx.services.region2d,
+          features,
+          loaded.dto.shapes,
+        ),
+      )
+      // DF106: a disabled item has no warnings (the dto is the draft's, after the command)
+      .map((warnings) => ({
+        ...value,
+        warnings: dropDisabledWarnings(warnings, baseOf(loaded.dto)),
+      }))
+      .mapErr((e) => e.withContext(where))
+  )
 }
 
 /**
@@ -1224,6 +1231,10 @@ const partUpdate = defineCommand({
       .optional()
       .describe('Split piece: auto, own block or a library stock'),
     detach: z.literal(true).optional().describe('Split piece: make it a plain part'),
+    disabled: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Ids switched off (replaces the list)'),
   }),
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
@@ -1236,6 +1247,15 @@ const partUpdate = defineCommand({
     const parsed = f.done()
     if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
     const target = draft.parts[args.partId]!
+    if (args.disabled !== undefined) {
+      // DF106 (design.md#disabling-operations-and-features-df106): one gesture, one undo step
+      const { list, issues } = checkDisabledList(baseOf(target), args.disabled, 'disabled')
+      const unknown = issues.filter((i) => i.rule === 'unknownItem')
+      if (unknown.length > 0) return malformed(unknown, where)
+      if (issues.length > 0) return invalid(issues, where)
+      if (list.length === 0) delete target.disabled
+      else if (!deepEqual(target.disabled, list)) target.disabled = list
+    }
     if (args.name !== undefined) target.name = args.name
     if (args.blank !== undefined) {
       const set = pieceBlankChoice(target, args.blank, ctx, where)
@@ -1554,11 +1574,19 @@ const operationList = defineQuery({
   name: 'design.operation.list',
   summary: 'List the operations of a part in design order.',
   args: z.object(PartArg),
-  result: z.object({ operations: z.array(OperationDtoSchema) }),
+  result: z.object({
+    operations: z.array(OperationDtoSchema),
+    disabled: z
+      .array(z.string())
+      .optional()
+      .describe('Off: switched off or depending on a switched-off item (DF106); absent = none'),
+  }),
   run(doc, args) {
     const part = Object.hasOwn(doc.parts, args.partId) ? doc.parts[args.partId] : undefined
     if (part === undefined) return unknownPart(args.partId, 'design.operation.list')
-    return Ok({ operations: part.operations })
+    const state = disabledState(part)
+    const off = [...state.features, ...state.operations]
+    return Ok({ operations: part.operations, ...(off.length === 0 ? {} : { disabled: off }) })
   },
 })
 
@@ -1617,7 +1645,7 @@ const warningList = defineQuery({
     const library = ctx.services.library
     if (library === undefined)
       return fail('internal.unexpected', 'no library service configured', { where })
-    const loaded = loadPart(doc, args.partId, where)
+    const loaded = loadEnabledPart(doc, args.partId, where)
     if (loaded.isErr()) return loaded
     const { part, stock, units, features, dto } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }

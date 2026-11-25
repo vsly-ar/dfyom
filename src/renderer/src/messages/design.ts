@@ -652,6 +652,13 @@ export const designMessages = {
     },
     /** The row menu's Remove (DF16). */
     removeItem: 'Remove',
+    /** The row menu's switch of a top-level row (DF106, design.md § Disabling operations and features). */
+    disableItem: 'Disable',
+    enableItem: 'Enable',
+    /** The marker of a row that is off (DF106): its own, or following the item it builds on. */
+    off: 'Off',
+    offTitle: 'Disabled: kept here, left out of the 3D view, checks and Plan.',
+    offFollows: 'Off: it builds on a disabled item. Enable that item to bring it back.',
     actions: (name: string) => `Actions for ${name}`,
     /** The description of a row with a row menu (DF70: no action buttons on rows). */
     rowMenuHint: 'Right-click or Shift+F10 for actions.',

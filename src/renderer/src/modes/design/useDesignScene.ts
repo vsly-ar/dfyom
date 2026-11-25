@@ -11,6 +11,7 @@
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
+import { isDisabled } from '../../../../core/design/disabled'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
 import { placedBox } from '../../../../core/design/reference'
 import { faceFrame, toPartFrame } from '../../../../core/geometry/face'
@@ -19,7 +20,7 @@ import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import { referenceMessages } from '../../messages/reference'
 import type { OutlineLoop, ViewportProps } from '../../viewport'
-import { failingOperation, surfaceLabel } from './model'
+import { disabledOf, failingOperation, surfaceLabel } from './model'
 import {
   anchorPoint,
   frameAxes,
@@ -168,11 +169,16 @@ export function useDesignScene(): SceneProps {
   }, [part])
 
   const ops = part?.loaded?.part.operations
+  // DF106: a disabled item is not in the 3D view: no outline, axes, tab markers or clones
+  const shown =
+    selected !== null && part !== undefined && isDisabled(disabledOf(part), selected)
+      ? null
+      : selected
   // a selected pattern shows its pocket's outline (the cells) and its area dashed (patterns P2),
   // with the cells left out at the border as dashed ghosts and a ring at the thinnest web (P5)
-  const pattern = part?.dto.features?.find((f) => f.id === selected && f.kind === 'pattern')
+  const pattern = part?.dto.features?.find((f) => f.id === shown && f.kind === 'pattern')
   const selectedOp = ops?.find(
-    (o) => o.id === selected || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
+    (o) => o.id === shown || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
   )
   // U9 P4: a pattern's cells (its owned pocket and chamfer) are selected by their outlines, not
   // a fill: hundreds of cells filled amber would be a block of accent
@@ -247,9 +253,9 @@ export function useDesignScene(): SceneProps {
       labels: designMessages.inspector.frameAxes,
     }
   }, [faceId, part])
-  const selectedDto = part?.dto.operations.find((o) => o.id === selected)
+  const selectedDto = part?.dto.operations.find((o) => o.id === shown)
   const tabs = useTabMarkers(part, selectedDto)
-  const clones = useClonesScene(part, selected, warnings)
+  const clones = useClonesScene(part, shown, warnings)
   // the exploded split preview while the part inspector (its Split section) shows (4a polish)
   const clonesDraft = useUi((s) => s.clonesDraft)
   const splitScene = useSplitScene(

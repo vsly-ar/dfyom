@@ -409,5 +409,24 @@ test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector'
   await focusWidth()
   await render(page, 'chamfer-inspector', 'u4', focusWidth)
 
+  // ── DF106: Disable the drilling from its row menu: it and its chamfer stay listed, Off ─────
+  const drilling = navigator.getByRole('button', { name: /^Drilling 1/ })
+  await drilling.focus()
+  await page.keyboard.press('Shift+F10')
+  await page
+    .getByRole('menu', { name: 'Actions for Drilling 1' })
+    .getByRole('menuitem', { name: 'Disable' })
+    .click()
+  await expect(drilling).toContainText('Off')
+  await expect(navigator.getByRole('button', { name: /^Chamfer 1/ })).toContainText('Off')
+  // nothing builds on it: Chamfer is gone from its menu; Enable brings both back
+  await drilling.focus()
+  await page.keyboard.press('Shift+F10')
+  const offMenu = page.getByRole('menu', { name: 'Actions for Drilling 1' })
+  await expect(offMenu.getByRole('menuitem', { name: 'Chamfer' })).toHaveCount(0)
+  await offMenu.getByRole('menuitem', { name: 'Enable' }).click()
+  await expect(drilling).not.toContainText('Off')
+  await expect(navigator.getByRole('button', { name: /^Chamfer 1/ })).not.toContainText('Off')
+
   expect(dfyom.rendererErrors).toEqual([])
 })

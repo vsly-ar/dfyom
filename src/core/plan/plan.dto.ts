@@ -263,5 +263,14 @@ export const PlanDtoSchema = z.object({
     .describe("The plan's own library copies: stock, machine, tools"),
   machine: z.string().min(1).optional().describe("Id of the machine copy in the plan's snapshots"),
   setups: z.array(SetupDtoSchema).min(1).describe('Setups in machining order'),
+  /**
+   * Design operations and features switched off in this plan only (hardening DF106,
+   * docs/modes/plan-v0.4.md#disabling-in-a-plan-df106): left out of `design.part` and its plan
+   * operations; Design never sees it. Absent = none.
+   */
+  disabled: z
+    .array(OperationIdSchema)
+    .optional()
+    .describe('Design operation/feature ids switched off in this plan only'),
 })
 export type PlanDTO = z.output<typeof PlanDtoSchema>
