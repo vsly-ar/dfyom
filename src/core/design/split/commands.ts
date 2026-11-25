@@ -22,7 +22,8 @@ import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Fields, invalid, load, PartArg, Src, withWarnings, Warnings } from '../commands'
 import { baseOf, isFrozenRecord } from '../frozen-memo'
 import { loadPart, unknownPart, type LoadedPart } from '../load'
-import { type PartDTO, PartIdSchema, type SplitDTO, SPLIT_JOINTS } from '../part.dto'
+import { isShapeLine, type PartDTO, PartIdSchema, type SplitDTO, SPLIT_JOINTS } from '../part.dto'
+import { ShapeIdSchema } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
 import { requirePort } from '../shape'
 import { dropUnusedToolSnapshot } from '../tool-args'
@@ -255,10 +256,15 @@ export function regeneratePieces(
 
 // ── design.split.set ──────────────────────────────────────────────────────────────────────
 
-const LineArg = z.object({
-  axis: z.enum(['x', 'y']).describe('x: the plane x = at (runs along Y)'),
-  at: Src,
-})
+const LineArg = z.union([
+  z.object({
+    axis: z.enum(['x', 'y']).describe('x: the plane x = at (runs along Y)'),
+    at: Src,
+  }),
+  z
+    .object({ shape: ShapeIdSchema })
+    .describe('Along an open shape (part X, Y), edge to edge; male piece on its left'),
+])
 
 const SplitArg = z
   .object({
@@ -300,7 +306,7 @@ const splitSet = defineCommand({
   kind: 'document',
   name: 'design.split.set',
   summary:
-    'Split a part into pieces by straight lines and levels; pieces are derived parts kept in sync, each with its own blank.',
+    'Split a part into pieces by lines (straight or an open shape) and levels; pieces are derived parts kept in sync, each with its own blank.',
   title: () => 'Split part',
   machine: false,
   args: z.object({
@@ -368,10 +374,12 @@ function parseSplit(
   depth: number | undefined
 }> {
   const f = new Fields(l.units, SurfaceTable.build(l.part.operations, l.stock).resolver(0))
-  const lines = (a.lines ?? []).map((line, i) => ({
-    axis: line.axis,
-    at: f.q(`split.lines.${i}.at`, 'length', line.at),
-  }))
+  // a shape line (4e) is checked with the layout (splitLinePaths): lineShape, lineEnds, lineCrossing
+  const lines = (a.lines ?? []).map((line, i) =>
+    'shape' in line
+      ? { shape: line.shape }
+      : { axis: line.axis, at: f.q(`split.lines.${i}.at`, 'length', line.at) },
+  )
   const levels = (a.levels ?? []).map((s, i) => f.q(`split.levels.${i}`, 'length', s))
   const margin = f.q('split.margin', 'length', a.margin ?? (l.units === 'inch' ? '0.2"' : '5 mm'))
   // keys (4b-2): the clearance given, else the previous one, else the default
@@ -412,6 +420,15 @@ function parseSplit(
   const issues: Issue[] = []
   const seen = new Set<string>()
   lines.forEach((line, i) => {
+    if ('shape' in line) {
+      if (lines.slice(0, i).some((p) => 'shape' in p && p.shape === line.shape))
+        issues.push({
+          path: ['split', 'lines', i, 'shape'],
+          rule: 'duplicate',
+          message: 'the same line twice',
+        })
+      return
+    }
     const max = line.axis === 'x' ? L : W
     const v = line.at.canonical
     if (!(v > 0 && v < max))
@@ -455,11 +472,16 @@ function parseSplit(
       message: 'a clearance needs a keyed, finger or half-lap joint',
     })
   // half laps (4d): where an X and a Y line cross, four laps would claim one corner
-  if (kind === 'halfLap' && new Set(lines.map((x) => x.axis)).size > 1)
+  // (4e: shape lines take no half lap either; laps at crossings and on shape lines are 4f)
+  if (
+    kind === 'halfLap' &&
+    (lines.some((x) => 'shape' in x) ||
+      new Set(lines.map((x) => ('shape' in x ? 'shape' : x.axis))).size > 1)
+  )
     issues.push({
       path: ['split', 'joint'],
       rule: 'lapCrossing',
-      message: 'a half lap needs lines along one axis only (X or Y)',
+      message: 'a half lap needs straight lines along one axis only (X or Y)',
     })
   if (
     clearance !== undefined &&
@@ -499,6 +521,8 @@ function parseSplit(
   })
   if (issues.length > 0) return invalid(issues, 'design.split.set')
   const D = (q: { toDTO(): unknown }) => q.toDTO() as SplitDTO['margin']
+  const lineDto = (x: (typeof lines)[number]): SplitDTO['lines'][number] =>
+    'shape' in x ? { shape: x.shape } : { axis: x.axis, at: D(x.at) }
   const dowels =
     dw === undefined
       ? undefined
@@ -514,7 +538,7 @@ function parseSplit(
   return Ok({
     split: {
       id: SPLIT_ID,
-      lines: lines.map((x) => ({ axis: x.axis, at: D(x.at) })),
+      lines: lines.map(lineDto),
       levels: levels.map(D),
       margin: D(margin),
       joint: {
@@ -524,12 +548,7 @@ function parseSplit(
       },
       ...((a.useStocks ?? prev?.useStocks === true) ? { useStocks: true as const } : {}),
       // detached pieces (4d) are kept by number while the lines and levels stay
-      ...(prev?.detached !== undefined &&
-      sameCuts(
-        prev,
-        lines.map((x) => ({ axis: x.axis, at: D(x.at) })),
-        levels.map(D),
-      )
+      ...(prev?.detached !== undefined && sameCuts(prev, lines.map(lineDto), levels.map(D))
         ? { detached: prev.detached }
         : {}),
     },
@@ -541,12 +560,17 @@ function parseSplit(
 /** The same lines and levels (by value), so piece numbers still mean the same cells. */
 function sameCuts(
   prev: SplitDTO,
-  lines: readonly { axis: 'x' | 'y'; at: SplitDTO['margin'] }[],
+  lines: readonly SplitDTO['lines'][number][],
   levels: readonly SplitDTO['margin'][],
 ): boolean {
   return (
     prev.lines.length === lines.length &&
-    prev.lines.every((l, i) => l.axis === lines[i]!.axis && mmOf(l.at) === mmOf(lines[i]!.at)) &&
+    prev.lines.every((l, i) => {
+      const n = lines[i]!
+      if (isShapeLine(l) || isShapeLine(n))
+        return isShapeLine(l) && isShapeLine(n) && l.shape === n.shape
+      return l.axis === n.axis && mmOf(l.at) === mmOf(n.at)
+    }) &&
     prev.levels.length === levels.length &&
     prev.levels.every((z, i) => mmOf(z) === mmOf(levels[i]!))
   )

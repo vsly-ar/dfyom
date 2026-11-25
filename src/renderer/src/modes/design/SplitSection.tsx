@@ -6,9 +6,11 @@
 // the read-only note for its operations. Since 4b the joints: dowels on levels, keys on lines
 // (Puzzle / Dovetail with the clearance; the keys drawn in Top) and, 4b-3, "Test fit…" (coupon
 // parts of the key at one or three clearances; the first is shown). Since 4c each piece chip names
-// its blank and opens a menu to change it, "Use library stocks" and "Split to fit…".
+// its blank and opens a menu to change it, "Use library stocks" and "Split to fit…". Since 4e a
+// line can run along an open named shape: "Add curved line" (a new shape and the line, one undo
+// step), "Line along shape", the row's shape picker and "Edit shape"; Top draws the pieces' shapes.
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design,
-// docs/modes/split-parts.md#implementation-4c
+// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4e
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -23,6 +25,7 @@ import {
   Icon,
   IconButton,
   Menu,
+  newGestureId,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -38,6 +41,7 @@ import { NameField } from './NameField'
 import { defaultUnit, quantityOf, type DesignPart, dfmNames } from './model'
 import {
   blankText,
+  curvedLineSeed,
   cutFindings,
   cutSource,
   dowelHoles,
@@ -55,6 +59,9 @@ import {
   type PieceView,
   type SplitArgs,
 } from './split-view'
+import { isShapeLine } from '../../../../core/design/part.dto'
+import { shapeLinePath } from '../../../../core/design/split/layout'
+import { useOpenShape } from './useOpenShape'
 import { DOWEL_SIZES } from '../../../../core/design/dowel'
 import {
   isKeyKind,
@@ -173,6 +180,9 @@ export function SplitSection({
 }): React.JSX.Element {
   const { send, error, confirm, setConfirm } = useSplitSet(part)
   const setFocus = useUi((st) => st.setSplitFocus)
+  const call = useCommand()
+  const openShape = useOpenShape()
+  const shapeName = (id: string) => part.dto.shapes?.find((x) => x.id === id)?.name ?? id
   const split = part.dto.split
   const stock = part.loaded?.stock
   // keys on the lines (4b-2): placed by the core from the source, for the preview and read-outs
@@ -231,9 +241,31 @@ export function SplitSection({
   const withLines = (lines: SplitArgs['lines']) => ({ ...args, lines })
   const withLevels = (levels: SplitArgs['levels']) => ({ ...args, levels })
   const addLine = (axis: 'x' | 'y') => {
-    const at = split.lines.filter((l) => l.axis === axis).map((l) => mmOf(l.at))
+    const at = split.lines.flatMap((l) => (!isShapeLine(l) && l.axis === axis ? [mmOf(l.at)] : []))
     const v = nextCut(at, 0, axis === 'x' ? L : W)
     void send(withLines([...args.lines, { axis, at: cutSource(v, units) }]))
+  }
+  // shape lines (4e): the part's named shapes that are one open path, and those not yet lines
+  const openShapes = (part.dto.shapes ?? []).filter(
+    (x) => port !== undefined && shapeLinePath(port, x.id, part.dto.shapes) !== undefined,
+  )
+  const used = new Set(split.lines.flatMap((l) => (isShapeLine(l) ? [l.shape] : [])))
+  const freeShape = openShapes.find((x) => !used.has(x.id))
+  const addCurvedLine = async () => {
+    // a new open shape and the line along it: one gesture, one undo step
+    const gesture = newGestureId()
+    const r = await call(
+      'design.shape.add',
+      {
+        partId: part.dto.id,
+        name: t.curveName(openShapes.length + 1),
+        items: [curvedLineSeed(L, W, units)],
+      },
+      { gesture },
+    )
+    if (!r.ok) return
+    const { shapeId } = r.value as { shapeId: string }
+    await send(withLines([...args.lines, { shape: shapeId }]), false, gesture)
   }
   const addLevel = () => {
     const v = nextCut(split.levels.map(mmOf), -T, 0)
@@ -245,15 +277,29 @@ export function SplitSection({
   // the keys' and fingers' outlines, and each half lap's overlap (4d) as a closed outline
   const laps = split.joint.kind === 'halfLap' ? (info?.laps ?? []) : []
   const knobs = [...(keys?.keys.keys ?? []).map((k) => keyPreviewPoints(k)), ...laps.map(lapPoints)]
-  const keysOn = (axis: 'x' | 'y', at: number) =>
-    (keys?.keys.keys ?? []).filter((k) => k.axis === axis && Math.abs(k.at - at) < 1e-6).length
+  // with a shape line every key names its line (4e); else by the straight line's axis and value
+  const keysOn = (i: number) => {
+    const l = split.lines[i]!
+    return (keys?.keys.keys ?? []).filter((k) =>
+      k.line !== undefined
+        ? k.line === i
+        : !isShapeLine(l) && k.axis === l.axis && Math.abs(k.at - mmOf(l.at)) < 1e-6,
+    ).length
+  }
   return (
     <section aria-label={t.title} className={styles['splitSection']}>
       <h3 className={styles['groupTitle']}>
         {t.title} · {t.pieces(pieces.length)}
       </h3>
       <p className={styles['muted']}>{t.intro}</p>
-      <SplitPreview part={part} pieces={pieces} holes={holes} knobs={knobs} />
+      <SplitPreview
+        part={part}
+        pieces={pieces}
+        holes={holes}
+        knobs={knobs}
+        outlines={info?.outlines}
+        paths={info?.paths}
+      />
       {/* U9 Q132 (provisional): pieces with the same blank in one row, a small numbered chip per
           piece (each opens its blank menu, named by the whole chip text) and the blank once */}
       <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
@@ -291,40 +337,84 @@ export function SplitSection({
         {split.lines.length === 0 && split.levels.length === 0 ? (
           <p className={styles['muted']}>{t.noCuts}</p>
         ) : null}
-        {split.lines.map((line, i) => (
-          <CutRow
-            key={`line-${i}`}
-            onFocus={() => setFocus({ kind: 'line', index: i })}
-            onBlur={() => setFocus(null)}
-            {...(keys === undefined ? {} : { note: t.keyCount(keysOn(line.axis, mmOf(line.at))) })}
-            text={findingText}
-            findings={cutFindings(warnings, {
-              kind: 'line',
-              index: i,
-              axis: line.axis,
-              at: mmOf(line.at),
-            })}
-          >
-            <QuantityInput
-              label={t.lineAt(line.axis)}
-              kind="length"
-              defaultUnit={unit}
-              value={quantityOf(line.at)}
-              onCommit={(q, gesture) =>
-                void send(
-                  withLines(args.lines.map((l, k) => (k === i ? { ...l, at: q.source } : l))),
-                  false,
-                  gesture,
-                )
-              }
-            />
-            <IconButton
-              label={t.removeLine(line.axis, line.at.source)}
-              icon={<Icon name="delete" />}
-              onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
-            />
-          </CutRow>
-        ))}
+        {split.lines.map((line, i) =>
+          isShapeLine(line) ? (
+            <CutRow
+              key={`line-${i}`}
+              onFocus={() => setFocus(null)}
+              onBlur={() => setFocus(null)}
+              {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
+              text={findingText}
+              findings={cutFindings(warnings, {
+                kind: 'line',
+                index: i,
+                axis: 'x',
+                at: Number.NaN,
+                shape: line.shape,
+              })}
+            >
+              <Select
+                aria-label={t.lineAlong}
+                value={line.shape}
+                options={openShapes.map((x) => ({
+                  value: x.id,
+                  label: x.name,
+                  disabled: x.id !== line.shape && used.has(x.id),
+                }))}
+                onValueChange={(v) =>
+                  void send(withLines(args.lines.map((l, k) => (k === i ? { shape: v } : l))))
+                }
+              />
+              <IconButton
+                label={t.editLineShape}
+                icon={<Icon name="edit" />}
+                onClick={() => openShape(part.dto.id, line.shape)}
+              />
+              <IconButton
+                label={t.removeShapeLine(shapeName(line.shape))}
+                icon={<Icon name="delete" />}
+                onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
+              />
+            </CutRow>
+          ) : (
+            <CutRow
+              key={`line-${i}`}
+              onFocus={() => setFocus({ kind: 'line', index: i })}
+              onBlur={() => setFocus(null)}
+              {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
+              text={findingText}
+              findings={cutFindings(warnings, {
+                kind: 'line',
+                index: i,
+                axis: line.axis,
+                at: mmOf(line.at),
+              })}
+            >
+              <QuantityInput
+                label={t.lineAt(line.axis)}
+                kind="length"
+                defaultUnit={unit}
+                value={quantityOf(line.at)}
+                onCommit={(q, gesture) =>
+                  void send(
+                    withLines(
+                      args.lines.map((l, k) =>
+                        k === i && !('shape' in l) ? { ...l, at: q.source } : l,
+                      ),
+                    ),
+                    false,
+                    gesture,
+                  )
+                }
+              />
+              <IconButton
+                label={t.removeLine(line.axis, line.at.source)}
+                icon={<Icon name="delete" />}
+                onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
+              />
+            </CutRow>
+          ),
+        )}
         {split.levels.map((level, i) => (
           <CutRow
             key={`level-${i}`}
@@ -371,6 +461,28 @@ export function SplitSection({
           <Button size="sm" icon={<Icon name="add" />} onClick={addLevel}>
             {t.addLevel}
           </Button>
+        </div>
+        {/* split lines as shapes (4e) */}
+        <div className={styles['addRow']}>
+          <Button
+            size="sm"
+            icon={<Icon name="add" />}
+            title={t.addCurvedLineDescription}
+            disabled={port === undefined}
+            onClick={() => void addCurvedLine()}
+          >
+            {t.addCurvedLine}
+          </Button>
+          {freeShape === undefined ? null : (
+            <Button
+              size="sm"
+              icon={<Icon name="add" />}
+              title={t.lineAlongDescription}
+              onClick={() => void send(withLines([...args.lines, { shape: freeShape.id }]))}
+            >
+              {t.addLineAlong}
+            </Button>
+          )}
         </div>
       </div>
       <QuantityInput
@@ -938,6 +1050,8 @@ function SplitPreview({
   pieces,
   holes,
   knobs,
+  outlines,
+  paths,
 }: {
   part: DesignPart
   pieces: readonly PieceView[]
@@ -945,6 +1059,10 @@ function SplitPreview({
   holes: readonly { readonly x: number; readonly y: number }[]
   /** Each key's knob outline (4b-2, part frame), drawn in Top on its line. */
   knobs: readonly (readonly (readonly [number, number])[])[]
+  /** With a shape line (4e): each piece's footprint by number, drawn in Top instead of its box. */
+  outlines?: ReadonlyMap<number, readonly (readonly [number, number])[]> | undefined
+  /** With a shape line (4e): the lines' paths, drawn in Top. */
+  paths?: ReadonlyMap<number, readonly (readonly [number, number])[]> | undefined
 }) {
   const [apart, setApart] = useState(false)
   useEffect(() => {
@@ -969,7 +1087,10 @@ function SplitPreview({
         kind === 'top'
           ? { x: b.x0, y: W - b.y1, w: b.x1 - b.x0, h: b.y1 - b.y0 }
           : { x: b.x0, y: -b.z1, w: b.x1 - b.x0, h: b.z1 - b.z0 }
-      const key = `${r.x}:${r.y}:${r.w}:${r.h}`
+      // a piece's own footprint in Top on a split with a shape line (4e)
+      const pts = kind === 'top' ? outlines?.get(p.n) : undefined
+      const poly = pts?.map((q) => `${q[0]},${W - q[1]}`).join(' ')
+      const key = poly ?? `${r.x}:${r.y}:${r.w}:${r.h}`
       if (seen.has(key)) return []
       seen.add(key)
       const cx = r.x + r.w / 2 - L / 2
@@ -977,7 +1098,7 @@ function SplitPreview({
       const d = Math.hypot(cx, cy) || 1
       const dx = apart ? (cx / d) * gap : 0
       const dy = apart ? (cy / d) * gap : 0
-      return [{ key, n: p.n, r, dx, dy }]
+      return [{ key, n: p.n, r, dx, dy, poly }]
     })
     return (
       <PreviewView
@@ -1010,13 +1131,26 @@ function SplitPreview({
                   />
                 ))
               : null}
-            {rects.map(({ key, n, r, dx, dy }) => (
+            {kind === 'top'
+              ? [...(paths ?? [])].map(([i, pts]) => (
+                  <polyline
+                    key={`path-${i}`}
+                    className={styles['splitKey']}
+                    points={pts.map((p) => `${p[0]},${W - p[1]}`).join(' ')}
+                  />
+                ))
+              : null}
+            {rects.map(({ key, n, r, dx, dy, poly }) => (
               <g
                 key={key}
                 className={styles['splitPiece']}
                 style={{ transform: `translate(${dx}px, ${dy}px)` }}
               >
-                <rect x={r.x} y={r.y} width={r.w} height={r.h} />
+                {poly === undefined ? (
+                  <rect x={r.x} y={r.y} width={r.w} height={r.h} />
+                ) : (
+                  <polygon points={poly} />
+                )}
                 <text x={r.x + r.w / 2} y={r.y + r.h / 2} fontSize={fontSize}>
                   {n}
                 </text>

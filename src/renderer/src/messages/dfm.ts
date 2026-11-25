@@ -225,7 +225,11 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
   const size = (v: unknown) =>
     Array.isArray(v) ? (v as number[]).map((x) => L(x)).join(' × ') : '?'
   const piece = `Piece ${num(p['piece'])}`
-  const line = `the line at ${String(p['axis']).toUpperCase()} ${L(p['at'])}`
+  // a shape line (4e) by its number
+  const line =
+    typeof p['line'] === 'number'
+      ? `split line ${num(p['line']) + 1}`
+      : `the line at ${String(p['axis']).toUpperCase()} ${L(p['at'])}`
   switch (p['rule']) {
     case 'noOutline':
       return 'The part has no through outline profile, so the pieces are cut along the stock edges. Add the outline first.'
@@ -236,6 +240,7 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
         ...((p['nearX'] as number[] | undefined) ?? []).map((x) => `the line at X ${L(x)}`),
         ...((p['nearY'] as number[] | undefined) ?? []).map((y) => `the line at Y ${L(y)}`),
         ...((p['nearZ'] as number[] | undefined) ?? []).map((z) => `the level at Z ${L(z)}`),
+        ...((p['nearLines'] as number[] | undefined) ?? []).map((i) => `split line ${num(i) + 1}`),
       ]
       return `${op} lies within ${L(p['limit'])} of ${at.length > 0 ? list(at) : 'a split'}: a thin wall at the joint. Move the split.`
     }
@@ -254,7 +259,13 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
       const ab = Array.isArray(p['pieces']) ? (p['pieces'] as number[]).map(num) : []
       const pair = `pieces ${ab[0] ?? '?'} and ${ab[1] ?? '?'}`
       const r = Array.isArray(p['run']) ? (p['run'] as number[]).map(num) : [Number.NaN, Number.NaN]
-      const run = `${p['axis'] === 'x' ? 'Y' : 'X'} ${L(r[0])}–${L(r[1])}`
+      const run =
+        typeof p['line'] === 'number'
+          ? `${L(r[0])}–${L(r[1])} along it`
+          : `${p['axis'] === 'x' ? 'Y' : 'X'} ${L(r[0])}–${L(r[1])}`
+      // split lines as shapes (4e): joints go on straight segments only
+      if (p['reason'] === 'curved')
+        return `No ${p['joint'] === 'finger' ? 'fingers' : 'key'} on ${line} between ${pair}: they meet along arcs only, and joints go on straight segments. A butt joint there; give the line a straight stretch.`
       // fingers and half laps (split parts 4d)
       if (p['joint'] === 'halfLap')
         return `No half lap on ${line} between ${pair}: a feature or the part edge lies within the ${L(p['lap'])} lap or one tool Ø (${L(p['tool'])}) of it. A butt joint there; move the split or the feature.`

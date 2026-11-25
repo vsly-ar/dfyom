@@ -411,7 +411,7 @@ const itemUpdate = defineCommand({
 const shapeRemove = defineCommand({
   kind: 'document',
   name: 'design.shape.remove',
-  summary: 'Remove a shape; fails with design.referenced while an operation uses it.',
+  summary: 'Remove a shape; fails with design.referenced while an operation or split line uses it.',
   title: () => 'Remove shape',
   machine: false,
   args: z.object(ShapeArg),
@@ -427,10 +427,14 @@ const shapeRemove = defineCommand({
     const users = operationsUsingShape(l.dto, args.shapeId)
     // Clones whose `along` row follows the shape (F6)
     const features = featuresUsingShape(l.dto, args.shapeId)
-    if (users.length + features.length > 0)
+    // split lines along the shape (split parts 4e)
+    const lines = (l.dto.split?.lines ?? []).flatMap((x, i) =>
+      'shape' in x && x.shape === args.shapeId ? [i] : [],
+    )
+    if (users.length + features.length + lines.length > 0)
       return fail(
         'design.referenced',
-        `${args.shapeId} is used by ${[...users, ...features].join(', ')}`,
+        `${args.shapeId} is used by ${[...users, ...features, ...lines.map((i) => `split line ${i + 1}`)].join(', ')}`,
         {
           issues: [
             ...users.map((id) => ({
@@ -444,6 +448,12 @@ const shapeRemove = defineCommand({
               rule: 'referenced',
               message: `follows ${args.shapeId} (Clones along, pattern cell)`,
               params: { featureId: id, shapeId: args.shapeId },
+            })),
+            ...lines.map((i) => ({
+              path: ['split', 'lines', i],
+              rule: 'referenced',
+              message: `split line ${i + 1} runs along ${args.shapeId}`,
+              params: { line: i, shapeId: args.shapeId },
             })),
           ],
           where,

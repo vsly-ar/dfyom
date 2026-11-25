@@ -1,16 +1,21 @@
 // The exploded split preview's view model (split parts 4a polish): grid cells pulled along the cut
 // normals, the handles in the gaps, snapping and the findings of a cut; the editor's args with
-// dowels (4b: a removed level drops its holes, the later ones renumbered); the Test fit clearances.
-// Spec: docs/conventions/ui.md#split-part-split-parts-4a
+// dowels (4b: a removed level drops its holes, the later ones renumbered); the Test fit clearances;
+// shape lines (4e: args, no drag handle, findings by index, the curved line's seed).
+// Spec: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#implementation-4e
 import { describe, expect, it } from 'vitest'
 import { easeEmphasized } from '../../viewport/SplitLayer'
+import type { SplitDTO } from '../../../../core/design/part.dto'
 import {
+  curvedLineSeed,
   cutFindings,
   cutShift,
   explodeGap,
   explodedCells,
   libraryStockViews,
   snapCut,
+  splitArgs,
+  splitCuts,
   stocksHolding,
   stocksOfClass,
   testFitClearances,
@@ -139,6 +144,47 @@ describe('split editor args with dowels (4b)', () => {
     // without dowels only the level goes
     const { dowels: _, ...butt } = args
     expect(withoutLevel(butt, 0)).toEqual({ ...butt, levels: ['-40 mm', '-20 mm'] })
+  })
+})
+
+describe('split lines as shapes (4e)', () => {
+  const q = (v: number) => ({
+    kind: 'length' as const,
+    source: `${v} mm`,
+    defaultUnit: 'mm' as const,
+    exact: { num: String(v), den: '1' },
+  })
+  const split = {
+    id: 'split1',
+    lines: [{ axis: 'y', at: q(605) }, { shape: 'shape1' }],
+    levels: [],
+    margin: q(5),
+    joint: { kind: 'puzzle' },
+  } as unknown as SplitDTO
+
+  it('args keep a shape line by its shape; it has no drag handle', () => {
+    expect(splitArgs(split).lines).toEqual([{ axis: 'y', at: '605 mm' }, { shape: 'shape1' }])
+    expect(splitCuts(split)).toEqual([{ kind: 'line', index: 0, axis: 'y', at: 605 }])
+  })
+
+  it("a shape line's findings by its index", () => {
+    const w = (params: Record<string, unknown>) => ({ code: 'design.split', params })
+    const ws = [
+      w({ rule: 'keyFit', reason: 'curved', line: 1, shapeId: 'shape1' }),
+      w({ rule: 'featureNear', nearX: [], nearY: [], nearZ: [], nearLines: [1] }),
+      w({ rule: 'keyFit', reason: 'near', axis: 'y', at: 605, line: 0 }),
+    ]
+    const cut = { kind: 'line', index: 1, axis: 'x', at: Number.NaN, shape: 'shape1' } as const
+    expect(cutFindings(ws, cut)).toEqual([ws[0], ws[1]])
+    expect(cutFindings(ws, line('y', 605))).toEqual([ws[2]])
+  })
+
+  it('the curved line seed runs edge to edge along Y with tangent arcs', () => {
+    const seed = curvedLineSeed(1210, 1210, 'mm')
+    expect(seed.start).toEqual(['605 mm', '0 mm'])
+    expect(seed.segments.at(-1)).toEqual({ kind: 'line', to: ['605 mm', '1210 mm'] })
+    expect(seed.segments.filter((x) => x.kind === 'arc')).toHaveLength(4)
+    expect(seed.closed).toBe(false)
   })
 })
 

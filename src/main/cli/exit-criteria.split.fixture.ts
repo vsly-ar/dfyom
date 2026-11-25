@@ -4,11 +4,12 @@
 // proposal's 600 × 400 panel split by one line with a puzzle key (4b-2) and its Test fit coupon
 // (4b-3), and the enclosure split to fit a library board by the suggestion (4c), and a shelf longer
 // than the machine's travel split by one line with a finger joint (4d, its pieces' fitted outlines
-// reassembling the shelf); every piece is planned, exported and run on the virtual machine, setup
-// by setup. Not app code.
+// reassembling the shelf), and a round table top Ø 1200 split by a curved line (a named shape) and a
+// straight one with puzzle keys (4e, its four pieces reassembling it); every piece is planned,
+// exported and run on the virtual machine, setup by setup. Not app code.
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
 // docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4d,
-// docs/modes/split-parts.md#slices
+// docs/modes/split-parts.md#implementation-4e, docs/modes/split-parts.md#slices
 import { readFileSync } from 'node:fs'
 import { strFromU8, unzipSync } from 'fflate'
 import { expectOk } from '../../shared/testing/result'
@@ -26,6 +27,9 @@ import {
   PANEL_LINE,
   PANEL_STOCK,
   panelCommands,
+  TABLE_LINE,
+  TABLE_STOCK,
+  tableCommands,
 } from '../../core/design/split/split.fixture'
 import { regionArea, type Region } from '../../core/geometry/2d/model'
 import { nodeRegion2d } from '../../core/geometry/2d/testing/node-wasm'
@@ -97,14 +101,18 @@ function outlineOf(
 }
 
 /**
- * The 4d exit's reassembly: the pieces' fitted outlines (their outline profiles moved back by
- * their offsets) cover the source outline once, with no overlap, up to the joint's clearance band
- * and T-bones (under 0.5 % of the area), sampled every 2 mm off the boundaries.
+ * The 4d and 4e exits' reassembly: the pieces' fitted outlines (their outline profiles moved back
+ * by their offsets) cover the source outline once, with no overlap, up to the joint's clearance
+ * band and T-bones (under 0.5 % of the area), sampled every `step` mm over the stock (`size`), off
+ * the boundaries.
  */
 function fittedOutlinesReassemble(
   archive: string,
   sourceId: string,
   pieceIds: readonly string[],
+  size: readonly [number, number],
+  step: number,
+  gapSeen = false,
 ): void {
   const port = nodeRegion2d()
   const files = unzipSync(readFileSync(archive))
@@ -113,8 +121,8 @@ function fittedOutlinesReassemble(
   let inSource = 0
   let missed = 0
   // off the line, the finger edges and the outline: no sample on a boundary
-  for (let x = 0.7; x < 1010; x += 2)
-    for (let y = 0.7; y < 310; y += 2) {
+  for (let x = 0.7; x < size[0]; x += step)
+    for (let y = 0.7; y < size[1]; y += step) {
       const hits = pieces.filter((p) =>
         port.contains(p.region, [x + p.offset[0]!, y + p.offset[1]!]),
       ).length
@@ -123,9 +131,10 @@ function fittedOutlinesReassemble(
       if (want) inSource++
       if (want && hits === 0) missed++
     }
-  expect(inSource * 4).toBeCloseTo(regionArea(source.region), -3)
+  const area = regionArea(source.region)
+  expect(Math.abs(inSource * step * step - area) / area).toBeLessThan(0.005)
   expect(missed / inSource).toBeLessThan(0.005)
-  expect(missed).toBeGreaterThan(0) // the clearance band and the T-bones are there
+  if (gapSeen) expect(missed).toBeGreaterThan(0) // the clearance band and the T-bones are there
 }
 
 export async function exitCriteriaSplitFlow(
@@ -159,10 +168,20 @@ export async function exitCriteriaSplitFlow(
     await ok<{ partId: string }>('design.part.add', { name: 'Shelf', stock: LONG_PANEL_STOCK })
   ).value.partId
   for (const [name, args] of longPanelCommands(shelfId)) await ok(name, args)
+  // split parts 4e: a round table top Ø 1200, its curved split line a named shape
+  const tableId = (
+    await ok<{ partId: string }>('design.part.add', { name: 'Table', stock: TABLE_STOCK })
+  ).value.partId
+  let curve = ''
+  for (const [name, args] of tableCommands(tableId)) {
+    const r = await ok<{ shapeId?: string }>(name, args)
+    if (name === 'design.shape.add') curve = r.value.shapeId!
+  }
 
   let pieces = 0
   let setups = 0
   let shelfPieces: string[] = []
+  let tablePieces: string[] = []
   const splits: [string, object, string?][] = [
     ['level', { levels: [ENCLOSURE_LEVEL] }],
     [
@@ -186,9 +205,18 @@ export async function exitCriteriaSplitFlow(
     ['fit', {}],
     // split parts 4d: the shelf in two pieces joined by fingers, each within the travel
     ['shelf-finger', { lines: [LONG_PANEL_LINE], joint: 'finger' }, shelfId],
+    // split parts 4e: the table by the curved line and y = 605, joined by puzzle keys
+    ['table-curve', { lines: [{ shape: curve }, TABLE_LINE], joint: 'puzzle' }, tableId],
   ]
   for (const [label, split, splitPart = partId] of splits) {
-    let source = splitPart === panelId ? 'Panel' : splitPart === shelfId ? 'Shelf' : 'Enclosure'
+    let source =
+      splitPart === panelId
+        ? 'Panel'
+        : splitPart === shelfId
+          ? 'Shelf'
+          : splitPart === tableId
+            ? 'Table'
+            : 'Enclosure'
     let r: SplitResult
     if (label === 'panel-coupon') {
       const fit = (
@@ -240,7 +268,19 @@ export async function exitCriteriaSplitFlow(
     } else
       r = (await ok<SplitResult>('design.split.set', { partId: splitPart, split, confirm: true }))
         .value
-    expect(r.pieces).toHaveLength(label === 'level-lines' || label === 'fit' ? 8 : 2)
+    expect(r.pieces).toHaveLength(
+      label === 'level-lines' || label === 'fit' ? 8 : label === 'table-curve' ? 4 : 2,
+    )
+    if (label === 'table-curve') {
+      // keys on the straight runs (none on the arcs: no `curved` pair, each pair has a straight
+      // run; the 65 mm run from the bump to y = 605 takes a small key, a `thinJoint` warning);
+      // every piece within the 800 mm travel, the table not
+      expect(r.findings.filter((f) => ['keyFit', 'outsideTravel'].includes(f.params.rule))).toEqual(
+        [],
+      )
+      expect(r.pieces.every((p) => p.blank[0]! < 800 && p.blank[1]! < 800)).toBe(true)
+      tablePieces = r.pieces.map((p) => p.partId)
+    }
     if (label === 'panel-puzzle') {
       // every run holds its keys; the male piece's blank holds its knobs
       expect(r.findings.filter((f) => f.params.rule === 'keyFit')).toEqual([])
@@ -344,6 +384,22 @@ export async function exitCriteriaSplitFlow(
   await ok('project.save', { target: join(dir, 'enclosure-split.dfyom') })
   // 4d: the shelf's pieces, as saved, reassemble it
   expect(shelfPieces).toHaveLength(2)
-  fittedOutlinesReassemble(join(dir, 'enclosure-split.dfyom'), shelfId, shelfPieces)
+  fittedOutlinesReassemble(
+    join(dir, 'enclosure-split.dfyom'),
+    shelfId,
+    shelfPieces,
+    [1010, 310],
+    2,
+    true,
+  )
+  // 4e: the table's four pieces, as saved, reassemble it
+  expect(tablePieces).toHaveLength(4)
+  fittedOutlinesReassemble(
+    join(dir, 'enclosure-split.dfyom'),
+    tableId,
+    tablePieces,
+    [1210, 1210],
+    4,
+  )
   return { pieces, setups }
 }
