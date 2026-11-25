@@ -247,6 +247,13 @@ const SESSION_TOOL_NAMES = new Set(SESSION_TOOLS.map((t) => t.name))
 /** Job built-ins a bound session sends to the machine scope for its jobs (DF80, `machineScopeJob`). */
 const MACHINE_JOB_BUILTINS = new Set(['job.get', 'job.pause', 'job.resume', 'job.abort'])
 
+/** Machine-scope commands that need a project when given a `planId` (DF80, DF93). */
+const PLAN_ARGS: ReadonlySet<string> = new Set([
+  'run.connection.open',
+  'run.job.start',
+  'run.job.check',
+])
+
 function noProject(
   name: string,
   message = 'no project is bound to this session',
@@ -517,7 +524,7 @@ export class AgentSession {
   /**
    * Without a bound project: a manual-control command or query on the machine-scope dispatcher
    * (DF80, docs/architecture/llm-api.md#machine-scope-df80); undefined when `name` needs a project
-   * (`run.connection.open` with a `planId` too). `expectedRevision` has nothing to check there.
+   * (`run.connection.open`, `run.job.start` and `run.job.check` with a `planId` too). `expectedRevision` has nothing to check there.
    */
   private machineScoped(
     name: string,
@@ -526,7 +533,8 @@ export class AgentSession {
   ): Promise<AppResult<CommandOutcome>> | undefined {
     const scope = this.host.machineScope
     if (scope === undefined) return undefined
-    if (name === 'run.connection.open' && isPlainObject(rawArgs) && rawArgs['planId'] !== undefined)
+    // a plan's connection or run needs its project (a file run, DF93, does not)
+    if (PLAN_ARGS.has(name) && isPlainObject(rawArgs) && rawArgs['planId'] !== undefined)
       return undefined
     const { dispatcher, registry } = scope
     if (registry.query(name).isSome()) return dispatcher.queryAsync(name, rawArgs, this.source)

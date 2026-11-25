@@ -3,3 +3,5 @@
 *.jpg binary
 *.stl binary
 *.step binary
+# DF93: gCode samples keep their line endings (the Estlcam one is CRLF)
+src/core/run/__fixtures__/*.nc -text

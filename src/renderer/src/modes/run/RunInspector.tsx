@@ -4,7 +4,9 @@
 // the run is at, how the last run ended, the overrides (M6) and "Reset (immediate)".
 // Feed hold, resume and Stop live in the main toolbar (MachineToolbar). Without a project (DF80) the
 // run section is the "Open a project to run a plan" empty state; the DRO, overrides and Reset stay.
-// Doc: docs/modes/run.md#run-without-a-project-df80
+// There, "Run gCode file…" and the recent files open an external gCode file, whose card and
+// "Start run" then take the run section (DF93).
+// Doc: docs/modes/run.md#run-without-a-project-df80, #run-an-external-g-code-file-df93
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -16,6 +18,7 @@ import { Dro } from './Dro'
 import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
+import { RunFileSection } from './RunFile'
 import { activeJob, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
 import styles from './Run.module.css'
@@ -43,14 +46,20 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const setupChange = useRun((s) => s.setupChange)
   const setupId = useRun((s) => s.setupId)
   const startedHere = useRun((s) => s.startedHere)
+  const file = useRun((s) => s.file)
   const startWhy = useId()
   const idleId = useId()
   const resetWhy = useId()
   const a = store.getState()
 
   const job = activeJob(status)
+  // DF93: a loaded gCode file is what Start runs
+  const fileReady = file?.state === 'ready' && file.prepared.refusalCount === 0
   const gates = runGates(status, {
-    planChosen: doc !== undefined && planId !== undefined && planId in doc.plans,
+    planChosen:
+      file !== undefined
+        ? fileReady
+        : doc !== undefined && planId !== undefined && planId in doc.plans,
   })
   const wait = waitKey(status)
   const repeatsConnect = gates.start === runMessages.why.notConnected
@@ -58,7 +67,9 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const plan = planId === undefined || doc === undefined ? undefined : doc.plans[planId]
   const units = useRunUnits(doc)
   const overrideMachine = useMachineOverrideLimits(doc)
-  const resumable = setupChange === undefined && canResume(status.lastRun, plan, setupId)
+  const resumable =
+    file === undefined && setupChange === undefined && canResume(status.lastRun, plan, setupId)
+  const startable = job === undefined && (file !== undefined || doc !== undefined)
 
   return (
     <>
@@ -82,6 +93,15 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
               )}
             </p>
           ) : null}
+          {/* the loaded file's card names it already */}
+          {job?.file && job.file.path !== file?.path ? (
+            <p className={styles['runOf']} title={job.file.path}>
+              {runMessages.file.runOf(job.file.name)}
+              {startedHere === job.jobId ? null : (
+                <span className={styles['hint']}> {m.startedElsewhere}</span>
+              )}
+            </p>
+          ) : null}
           {showProgress ? (
             <RunProgressView
               done={progress?.done ?? 0}
@@ -94,7 +114,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             />
           ) : null}
           {job === undefined && ended ? <EndNote ended={ended} /> : null}
-          {job === undefined && doc === undefined ? (
+          {job === undefined && doc === undefined && file === undefined ? (
             <EmptyState
               icon={RunIcon}
               title={m.noProject.title}
@@ -107,7 +127,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
               }}
             />
           ) : null}
-          {job === undefined && !ended && doc !== undefined ? (
+          {doc === undefined ? <RunFileSection idle={job === undefined} /> : null}
+          {job === undefined && !ended && (doc !== undefined || fileReady) ? (
             <p id={idleId} className={styles['hint']}>
               {m.idle}
             </p>
@@ -126,11 +147,15 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             </div>
           ) : null}
 
-          {job === undefined && setupChange !== undefined && planId !== undefined && doc ? (
+          {file === undefined &&
+          job === undefined &&
+          setupChange !== undefined &&
+          planId !== undefined &&
+          doc ? (
             <SetupChangeNote doc={doc} planId={planId} setupId={setupChange} />
           ) : null}
 
-          {job === undefined && doc !== undefined ? (
+          {startable ? (
             <>
               <Button
                 size="lg"
@@ -142,7 +167,9 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
                   : { 'aria-describedby': repeatsConnect && !ended ? idleId : startWhy })}
                 onClick={() =>
                   // between setups, Start goes through the setup-change prompt (task E2)
-                  setupChange === undefined ? a.setPreflightOpen(true) : a.setSetupChangeOpen(true)
+                  setupChange === undefined || file !== undefined
+                    ? a.setPreflightOpen(true)
+                    : a.setSetupChangeOpen(true)
                 }
               >
                 {m.startRun}

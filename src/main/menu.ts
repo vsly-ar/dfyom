@@ -21,6 +21,8 @@ export interface MenuHooks {
   readonly openLibrary: () => void
   /** Help → Open-source licences: the notices window (src/main/licences-window.ts, PK1). */
   readonly openLicences?: () => void
+  /** File → Run gCode file… (DF93): main asks for the file and picks the window. */
+  readonly openRunFile?: () => void
   /**
    * The window that runs `action`: the focused one, except that the Library window passes the
    * items it does not handle to a project window. Default: the focused, else the first window.
@@ -93,6 +95,9 @@ export function menuTemplate(
         { type: 'separator' },
         item('Save', 'project.save', 'CmdOrCtrl+S'),
         item('Save as…', 'project.saveAs', 'CmdOrCtrl+Shift+S'),
+        { type: 'separator' },
+        // DF93: in every window, without a project too (docs/modes/run.md#run-an-external-g-code-file-df93)
+        { label: 'Run gCode file…', click: () => hooks.openRunFile?.() },
         { type: 'separator' },
         ...(mac ? [] : [settings, { type: 'separator' } satisfies MenuItemConstructorOptions]),
         mac ? { role: 'close', label: 'Close window' } : { role: 'quit' },

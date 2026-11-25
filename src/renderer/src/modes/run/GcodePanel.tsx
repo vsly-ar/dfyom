@@ -61,9 +61,28 @@ export function GcodePanel({ insetRight = 0 }: { insetRight?: number }): React.J
   const setGcode = useRun((s) => s.setGcode)
   const jobId = status.job?.jobId ?? status.lastRun?.jobId
   const program = useProgram(bridge.run.program, jobId)
+  // DF93: a loaded gCode file shows its prepared lines while no run streams
+  const file = useRun((s) => s.file)
+  const filePrepared = file?.state === 'ready' ? file.prepared : undefined
+  const fileProgram = useMemo(
+    (): ProgramLoad | undefined =>
+      filePrepared === undefined
+        ? undefined
+        : {
+            state: 'ready',
+            value: {
+              jobId: '',
+              lines: filePrepared.lines,
+              sections: filePrepared.sections,
+              operations: [],
+            },
+          },
+    [filePrepared],
+  )
+  const shown = status.job === undefined && fileProgram !== undefined ? fileProgram : program
   return (
     <GcodePanelView
-      program={program}
+      program={shown}
       run={runIndices(status, program.value?.jobId)}
       state={gcode}
       onChange={setGcode}

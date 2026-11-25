@@ -15,7 +15,7 @@ const WINDOW = {
 describe('app state store', () => {
   it('starts empty without a file', async () => {
     const log = createTestLogger()
-    expect(await loadAppState(tmp.dir, log)).toEqual({ dialogFolders: {} })
+    expect(await loadAppState(tmp.dir, log)).toEqual({ dialogFolders: {}, recentRunFiles: [] })
     expect(log.at('warn')).toEqual([])
   })
 
@@ -34,7 +34,26 @@ describe('app state store', () => {
       window: WINDOW,
       libraryWindow: { ...WINDOW, maximized: false },
       dialogFolders: { project: '/work/parts', 'reference-import': '/work/models' },
+      recentRunFiles: [],
     })
+  })
+
+  it('keeps the recently run gCode files, newest first, at most 8 (DF93)', async () => {
+    const log = createTestLogger()
+    const store = createAppStateStore({ appData: tmp.dir, initial: EMPTY_APP_STATE, log })
+    for (let i = 1; i <= 10; i++) store.rememberRunFile(`/cam/${i}.nc`)
+    store.rememberRunFile('/cam/5.nc')
+    store.forgetRunFile('/cam/9.nc')
+    await store.flush()
+    expect((await loadAppState(tmp.dir, log)).recentRunFiles).toEqual([
+      '/cam/5.nc',
+      '/cam/10.nc',
+      '/cam/8.nc',
+      '/cam/7.nc',
+      '/cam/6.nc',
+      '/cam/4.nc',
+      '/cam/3.nc',
+    ])
   })
 
   it('writes once after changes settle', async () => {
@@ -59,7 +78,10 @@ describe('app state store', () => {
       file,
       JSON.stringify({ window: { bounds: 'x' }, dialogFolders: { project: '/p' } }),
     )
-    expect(await loadAppState(tmp.dir, log)).toEqual({ dialogFolders: { project: '/p' } })
+    expect(await loadAppState(tmp.dir, log)).toEqual({
+      dialogFolders: { project: '/p' },
+      recentRunFiles: [],
+    })
     await writeFile(file, '{ not json')
     expect(await loadAppState(tmp.dir, log)).toEqual(EMPTY_APP_STATE)
     expect(log.at('warn')).toHaveLength(1)

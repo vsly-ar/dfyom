@@ -24,6 +24,7 @@ import {
 } from './host/protocol'
 
 import { AlignmentStepSchema, type AlignmentStep } from './alignment'
+import type { MachineValuesDTO } from '../library/machine.dto'
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
 
@@ -41,6 +42,10 @@ export const RunPlanSchema = z.object({
   setups: z.number().int(),
 })
 export type RunPlan = z.output<typeof RunPlanSchema>
+
+/** DF93: the external gCode file a run job streams: its name and absolute path. */
+export const RunFileSchema = z.object({ name: z.string(), path: z.string() })
+export type RunFile = z.output<typeof RunFileSchema>
 
 /** How the last run job ended (hardening M5, docs/modes/run-machine.md#section-resume-m5). */
 export const LastRunSchema = z.object({
@@ -89,6 +94,11 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
       elapsedSeconds: z.number(),
       /** The run's plan and setup (M7); absent for a job started without them. */
       plan: RunPlanSchema.exactOptional(),
+      /**
+       * DF93: the external gCode file the run streams (docs/modes/run.md#run-an-external-g-code-file-df93);
+       * absent for a plan run.
+       */
+      file: RunFileSchema.exactOptional(),
       /** The operation of the line being acknowledged (M7). */
       planOperationId: z.string().exactOptional(),
       /**
@@ -149,7 +159,7 @@ export interface RunProgram {
   readonly operations: readonly { readonly planOperationId: string; readonly fromLine: number }[]
 }
 
-/** What `run.job.start` tells the machine port about its run (M5, M7). */
+/** What `run.job.start` tells the machine port about a plan run (M5, M7). */
 export interface JobAbout {
   readonly plan: RunPlan
   /** The first line (1-based) of each plan operation in the program streamed. */
@@ -157,6 +167,11 @@ export interface JobAbout {
   /** DF85: `runPlanHash` of the plan and setup exported, and the setup's operations in order. */
   readonly planHash?: string
   readonly order?: readonly string[]
+}
+
+/** DF93: what `run.job.start { file }` tells the machine port about a file run. */
+export interface FileJobAbout {
+  readonly file: RunFile
 }
 
 export interface RunningJob {
@@ -180,12 +195,20 @@ export interface MachineService {
    */
   readonly spindleMinSpeed: number | undefined
   /**
+   * DF93: the machine values the open connection was made for (the plan's copy or the library
+   * machine); a file run checks the controller's `$$` against them on a real connection.
+   */
+  readonly connectedMachine: MachineValuesDTO | undefined
+  /**
    * `target.machineKey` names the machine copy emulated or checked against (decision 6);
    * `profile` what the commands keep from that machine for the connection's lifetime.
    */
   connect(
     target: ConnectTarget,
-    profile?: { readonly spindleMinSpeed?: number | undefined },
+    profile?: {
+      readonly spindleMinSpeed?: number | undefined
+      readonly machine?: MachineValuesDTO | undefined
+    },
   ): AsyncAppResult<ConnectedInfo>
   /** The serial ports the machine host sees (spawns the host if none runs). */
   listPorts(): AsyncAppResult<SerialPortInfo[]>
@@ -207,7 +230,7 @@ export interface MachineService {
     program: SenderProgram,
     listener: JobListener,
     expect: { readonly workZero: readonly [number, number, number]; readonly machineKey: string },
-    about?: JobAbout,
+    about?: JobAbout | FileJobAbout,
   ): AsyncAppResult<RunningJob>
   /** `continue` names the wait it ends (`toolChange` n or `pause` n). */
   controlJob(

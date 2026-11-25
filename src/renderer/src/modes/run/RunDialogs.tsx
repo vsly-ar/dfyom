@@ -21,14 +21,27 @@ import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { TouchOffButton } from './TouchOffButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
+import { FilePreflightDialog } from './RunFile'
 import styles from './Run.module.css'
 
 export function RunDialogs(): React.JSX.Element {
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
+  const store = useRunStore()
+  const file = useRun((s) => s.file)
+  const running = useRun((s) => activeJob(s.status) !== undefined)
+  // DF93: a window with a file that opens a project shows the project; the file is dropped
+  const hasDoc = doc !== undefined
+  useEffect(() => {
+    if (hasDoc && !running && store.getState().file !== undefined) store.getState().closeFile()
+  }, [hasDoc, running, store])
   return (
     <>
-      {doc ? <PreflightDialog doc={doc} /> : null}
+      {file?.state === 'ready' ? (
+        <FilePreflightDialog file={file} />
+      ) : doc ? (
+        <PreflightDialog doc={doc} />
+      ) : null}
       {doc ? <SetupChangeDialog doc={doc} /> : null}
       <WaitDialog doc={doc} />
       <FailureDialog doc={doc} />
@@ -236,7 +249,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 }
 
 /** The pre-flight's soft-limit row: checking, inside the travel, the findings, or the failure. */
-function SoftLimitResult({
+export function SoftLimitResult({
   check,
   units,
 }: {

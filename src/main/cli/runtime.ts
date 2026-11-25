@@ -33,6 +33,7 @@ import {
 } from '../logging/logger'
 import { createMachineClient, workerHostFactory } from '../machine/spawn'
 import { createExportFiles } from '../persistence/export-file'
+import { createGcodeFiles } from '../persistence/gcode-file'
 import { loadHostRegion2d } from '../region2d/node'
 import { createNodeWorkerPool } from '../workers/node'
 
@@ -142,6 +143,7 @@ export async function startHeadless(o: HeadlessOptions): AsyncAppResult<Headless
     workers,
     machine,
     exportFiles: createExportFiles(),
+    gcodeFiles: createGcodeFiles(),
     region2d: region2d.unwrap().port,
   })
   if (host.isErr()) {

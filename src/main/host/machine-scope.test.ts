@@ -2,6 +2,9 @@
 // runs the manual-control run commands on the host's machine-scope dispatcher (in-process machine
 // host, time scale max); plan runs still need a project; a bound session shares the connection.
 // Spec: docs/architecture/llm-api.md#machine-scope-df80, docs/modes/run.md#run-without-a-project-df80
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { libraryInput, machineValues } from '../../core/library/library.fixture'
 import { MachineClient } from '../../core/run/host/client'
@@ -46,9 +49,11 @@ describe('machine scope (DF80)', { timeout: 60_000 }, () => {
       expect(host.registries.project.command(c.name).isSome(), c.name).toBe(true)
     for (const q of MACHINE_SCOPE_QUERIES)
       expect(host.registries.project.query(q.name).isSome(), q.name).toBe(true)
-    // the plan-reading run commands are not in it
-    for (const name of ['run.job.start', 'run.job.check', 'run.align.goto'])
+    // the plan-reading run commands are not in it; run.job.start/check are, for files (DF93)
+    for (const name of ['run.align.goto', 'run.align.tick'])
       expect(host.machineScope.registry.command(name).isNone(), name).toBe(true)
+    for (const name of ['run.job.start', 'run.job.check'])
+      expect(host.machineScope.registry.command(name).isSome(), name).toBe(true)
   })
 
   it('without a project: connect a library machine, home, jog, zero, overrides, disconnect', async () => {
@@ -115,5 +120,100 @@ describe('machine scope (DF80)', { timeout: 60_000 }, () => {
     )
     await value(bound, 'run.connection.close')
     expect((await status()).connection.state).toBe('closed')
+  })
+})
+
+/** Connects the virtual machine to a library machine, homes it and sets the work zero there. */
+async function connectHomed(t: Awaited<ReturnType<typeof setup>>, by: [number, number, number]) {
+  const { ui, value, status } = t
+  const { id } = (await value(ui, 'library.machine.add', {
+    values: libraryInput(machineValues()),
+  })) as { id: string }
+  await value(ui, 'run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' })
+  const { jobId } = (await value(ui, 'run.machine.home')) as { jobId: string }
+  await value(ui, 'job.wait', { jobId, timeoutSeconds: 30 })
+  await value(ui, 'run.machine.jog', { by, feed: 20_000 })
+  const target = [-1 + by[0], -1 + by[1], -1 + by[2]]
+  const until = Date.now() + 20_000
+  while (Date.now() < until) {
+    const s = await status()
+    if (s.state === 'Idle' && s.mpos.every((v, i) => Math.abs(v - (target[i] ?? 0)) < 1e-3)) break
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  await value(ui, 'run.workZero.set', { axes: ['x', 'y', 'z'] })
+}
+
+const fixture = (name: string) =>
+  fileURLToPath(new URL(`../../core/run/__fixtures__/${name}`, import.meta.url))
+
+describe('an external gCode file without a project (DF93)', { timeout: 60_000 }, () => {
+  it('checks and runs a Fusion-style file on the virtual machine, tool changes included', async () => {
+    const t = await setup()
+    const { ui, agent, value, status } = t
+    await connectHomed(t, [-400, -400, -60])
+    const file = fixture('fusion-grbl.nc')
+    expect(await value(ui, 'run.job.check', { file })).toEqual({ findings: [] })
+    const { jobId } = (await value(ui, 'run.job.start', { file })) as { jobId: string }
+    const tools: number[] = []
+    for (;;) {
+      const w = (await value(ui, 'job.wait', { jobId, timeoutSeconds: 30 })) as {
+        state: string
+        outcome?: { ok: boolean; value?: unknown }
+      }
+      if (w.state === 'finished') {
+        expect(w.outcome).toMatchObject({ ok: true, value: { file, toolChanges: 2 } })
+        break
+      }
+      const job = (await status()).job!
+      expect(job.phase).toBe('toolChange')
+      // the status names the file, not a plan
+      expect(job.file).toEqual({ name: 'fusion-grbl.nc', path: file })
+      expect(job.plan).toBeUndefined()
+      tools.push(job.toolChange!.n)
+      expect(job.toolChange!.name).toMatch(/flat end mill$/)
+      await value(ui, 'run.job.continue', { jobId, toolChange: job.toolChange!.n })
+    }
+    expect(tools).toEqual([1, 2])
+    // a file run is not resumed: no lastRun
+    expect((await status()).lastRun).toBeUndefined()
+    // an unbound agent may run a file on the virtual machine (Q50: virtual only)
+    const estlcam = (await value(agent, 'run.job.start', { file: fixture('estlcam.nc') })) as {
+      jobId: string
+    }
+    const first = (await value(agent, 'job.wait', { jobId: estlcam.jobId })) as { state: string }
+    expect(first.state).not.toBe('finished') // waits at M06 T2
+    await value(agent, 'job.abort', { jobId: estlcam.jobId })
+  })
+
+  it('refuses soft-limit findings, refused lines and other files before anything moves', async () => {
+    const t = await setup()
+    const { ui, value } = t
+    await connectHomed(t, [-10, -10, -5])
+    const file = fixture('fusion-grbl.nc')
+    const check = (await value(ui, 'run.job.check', { file })) as {
+      findings: { params: { axis: string } }[]
+    }
+    expect(check.findings.map((f) => f.params.axis)).toEqual(['x', 'y'])
+    const { jobId } = (await value(ui, 'run.job.start', { file })) as { jobId: string }
+    const w = (await value(ui, 'job.wait', { jobId })) as { outcome: { error: { code: string } } }
+    expect(w.outcome.error.code).toBe('run.softLimit')
+
+    const dir = tempDir()
+    cleanups.push(dir.cleanup)
+    const bad = join(dir.dir, 'bad.nc')
+    writeFileSync(bad, 'G21 G90\nG28 G91 Z0\nG0 X1\n')
+    const refused = await ui.call('run.job.check', { file: bad })
+    const e = expectErrCode(refused.result, 'run.program')
+    expect(e.issues.map((i) => [i.rule, i.message])).toEqual([
+      ['storedPosition', expect.stringMatching(/^line 2: G28/)],
+    ])
+    expect(rule(await ui.call('run.job.check', { file: join(dir.dir, 'notes.pdf') }))).toBe(
+      'gcodeFile',
+    )
+    expect(rule(await ui.call('run.job.check', {}))).toBe('oneOf')
+    expectErrCode(
+      (await ui.call('run.job.check', { file: join(dir.dir, 'missing.nc') })).result,
+      'persist.io',
+    )
   })
 })

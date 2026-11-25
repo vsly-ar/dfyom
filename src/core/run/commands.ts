@@ -256,11 +256,13 @@ export const runConnectionOpen = defineCommand({
     const { machine, key } = chosen.unwrap()
     // the spindle override's floor (docs/modes/run-machine.md#overrides-m6); a manual spindle
     // ignores S and has no spindle override
+    // DF93: the machine values too, for a file run's settings check on a real connection
     const profile = {
       spindleMinSpeed:
         machine.spindle.control === 'gcode'
           ? machine.spindle.minSpeed.mapOr(undefined, (q) => q.canonical)
           : undefined,
+      machine: machine.toDTO() as MachineValuesDTO,
     }
     const ctxData =
       args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
@@ -801,7 +803,8 @@ export const RUN_QUERIES: readonly QueryDef[] = [runStatusGet, runSettingsCheck]
  * The run commands that read no document: manual machine control, which needs no project
  * (hardening DF80). The machine-scope dispatcher runs them for sessions without a bound project
  * (docs/architecture/llm-api.md#machine-scope-df80); `run.connection.open` there takes
- * `machineId` only. Plan runs (`run.job.start`, `run.job.check`) and `run.align.*` need a project.
+ * `machineId` only. Plan runs (`run.job.start`, `run.job.check`) and `run.align.*` need a project;
+ * a gCode file run (`file`, DF93) does not.
  */
 export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runConnectionOpen,
@@ -817,4 +820,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runOverrideSet,
   runJobContinue,
   runTimeScaleSet,
+  // DF93: with `file` only (`planId` answers noProject before it gets here)
+  runJobStart,
+  runJobCheck,
 ]

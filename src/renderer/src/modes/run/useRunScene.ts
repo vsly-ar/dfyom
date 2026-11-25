@@ -7,7 +7,9 @@
 // `zeroLevel`) is added back, and a tool-change wait onto such a surface shows the surface and
 // its touch-off spot (docs/modes/z-reference.md#dfyom-run). DF64 L3: the lowered links between
 // operations (`plan.warning.list`) drawn as the program moves, so playback follows the tool.
-// `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene)
+// An external gCode file (DF93) draws its own moves instead (`fileMoves`, work coordinates, no
+// setup frame). `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
+// docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppMode } from '../../../../core/modes'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -15,9 +17,11 @@ import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { useReplica, useShell } from '../../shell/ShellContext'
 import { homedPosition } from '../../../../core/run/grbl/envelope'
+import { fileMoves } from '../../../../core/run/gcode-file'
 import { lengthSource } from '../../messages/dfm'
 import { planMessages } from '../../messages/plan'
 import {
+  SEGMENT,
   advancePlayback,
   toolpathLines,
   type RunEnvelope,
@@ -38,8 +42,12 @@ export function useRunScene(mode: AppMode): RunScene | null {
   const setupId = useRun((s) => s.setupId)
   const jobId = useRun((s) => s.jobId)
   const ended = useRun((s) => s.ended)
+  const file = useRun((s) => s.file)
+  const fileLines = file?.state === 'ready' ? file.prepared.lines : undefined
   const plan =
-    replica.status === 'open' && planId !== undefined ? replica.doc.plans[planId] : undefined
+    fileLines === undefined && replica.status === 'open' && planId !== undefined
+      ? replica.doc.plans[planId]
+      : undefined
   const info = useMemo(() => (plan ? planRunInfo(plan, setupId) : undefined), [plan, setupId])
   const operations = useMemo(() => info?.operations ?? [], [info])
   const runSetupId = info?.setup.id
@@ -98,11 +106,12 @@ export function useRunScene(mode: AppMode): RunScene | null {
   // the moves the program makes: the links applied when every toolpath of the setup is current
   // (they are computed from exactly those)
   const lines = useMemo((): ToolpathLines | null => {
+    if (fileLines !== undefined) return fileToolpathLines(fileLines)
     if (read === null || read.toolpaths.length === 0) return null
     const linked =
       read.current && lowered.length > 0 ? linkedToolpaths(read.toolpaths, lowered) : read.toolpaths
     return toolpathLines(linked)
-  }, [read, lowered])
+  }, [read, lowered, fileLines])
 
   // playback: a cursor that only moves forward during one run
   const cursor = useRef({ jobId: undefined as string | undefined, done: 0 })
@@ -220,4 +229,22 @@ function useWaitZRef(
       onDrag: noDrag,
     }
   }, [run, key, units])
+}
+
+/** DF93: a file's moves as viewport lines (rapids, feeds, plunges: a feed straight down). */
+function fileToolpathLines(lines: readonly string[]): ToolpathLines {
+  const moves = fileMoves(lines)
+  const kind = new Uint8Array(moves.segments)
+  const p = moves.positions
+  for (let i = 0; i < moves.segments; i++) {
+    const o = i * 6
+    const down = p[o + 3] === p[o] && p[o + 4] === p[o + 1] && (p[o + 5] ?? 0) < (p[o + 2] ?? 0)
+    kind[i] = moves.rapid[i] === 1 ? SEGMENT.rapid : down ? SEGMENT.plunge : SEGMENT.feed
+  }
+  return {
+    positions: p.subarray(0, moves.segments * 6),
+    kind,
+    segments: moves.segments,
+    starts: new Uint32Array([0]),
+  }
 }

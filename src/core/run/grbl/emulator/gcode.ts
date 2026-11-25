@@ -28,6 +28,7 @@ export const STATUS = {
   axisCommandConflict: 24,
   wordRepeated: 25,
   noAxisWords: 26,
+  axisWordsExist: 31,
   valueWordMissing: 28,
   g53InvalidMotionMode: 30,
   noAxisWordsInPlane: 32,
@@ -42,8 +43,11 @@ export type StatusCode = (typeof STATUS)[keyof typeof STATUS]
 
 export type SpindleDir = 'off' | 'cw' | 'ccw'
 
-/** Motion modes: G0–G3 and the probe cycles G38.2–G38.5 (docs/architecture/grbl.md#probing). */
-export type MotionMode = 0 | 1 | 2 | 3 | 38.2 | 38.3 | 38.4 | 38.5
+/**
+ * Motion modes: G0–G3, the probe cycles G38.2–G38.5 (docs/architecture/grbl.md#probing) and G80
+ * (motion off: axis words are then an error, DF93).
+ */
+export type MotionMode = 0 | 1 | 2 | 3 | 38.2 | 38.3 | 38.4 | 38.5 | 80
 const PROBE_MODES: ReadonlySet<number> = new Set([38.2, 38.3, 38.4, 38.5])
 
 /** Modal parser state (gc_state) for the emulated subset. Lengths in mm, machine coordinates. */
@@ -120,8 +124,18 @@ const MAX_TOOL_NUMBER = 255
 const AXES = ['X', 'Y', 'Z'] as const
 const VALUE_LETTERS = new Set('FIJKLNPRSTXYZ')
 
-type Group = 'nonModal' | 'motion' | 'plane' | 'distance' | 'feedMode' | 'units' | 'coord'
-type MGroup = 'flow' | 'spindle'
+type Group =
+  | 'nonModal'
+  | 'motion'
+  | 'plane'
+  | 'distance'
+  | 'feedMode'
+  | 'units'
+  | 'coord'
+  | 'cutter'
+  | 'toolLength'
+  | 'pathControl'
+type MGroup = 'flow' | 'spindle' | 'coolant'
 
 const G_GROUPS: ReadonlyMap<number, Group> = new Map([
   [4, 'nonModal'],
@@ -131,7 +145,13 @@ const G_GROUPS: ReadonlyMap<number, Group> = new Map([
   [1, 'motion'],
   [2, 'motion'],
   [3, 'motion'],
+  // DF93: GRBL's modal no-ops that other CAM posts emit (G80 motion off, G40 cutter compensation
+  // off, G49 tool length offset off, G61 exact path)
+  [80, 'motion'],
   [17, 'plane'],
+  [40, 'cutter'],
+  [49, 'toolLength'],
+  [61, 'pathControl'],
   [90, 'distance'],
   [91, 'distance'],
   [94, 'feedMode'],
@@ -142,11 +162,17 @@ const G_GROUPS: ReadonlyMap<number, Group> = new Map([
 
 const M_GROUPS: ReadonlyMap<number, MGroup> = new Map([
   [0, 'flow'],
+  // M1: GRBL 1.1 accepts the optional stop and ignores it (DF93)
+  [1, 'flow'],
   [2, 'flow'],
   [30, 'flow'],
   [3, 'spindle'],
   [4, 'spindle'],
   [5, 'spindle'],
+  // M7/M8/M9: coolant (GRBL switches its pins; nothing to emulate, DF93)
+  [7, 'coolant'],
+  [8, 'coolant'],
+  [9, 'coolant'],
 ])
 
 const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)/
@@ -186,11 +212,16 @@ function readWords(line: string): Result<Words, StatusCode> {
       const group = G_GROUPS.get(int)
       if (group === undefined) return Err(STATUS.unsupportedCommand)
       // GRBL order: the axis-command conflict is checked in the case, the mantissa after it.
-      if (group === 'motion' || int === 10) {
+      if ((group === 'motion' && int !== 80) || int === 10) {
         if (axisCommand !== undefined) return Err(STATUS.axisCommandConflict)
         axisCommand = group === 'motion' ? 'motion' : 'nonModal'
       }
-      if (group === 'distance' && mantissa !== 0) return Err(STATUS.unsupportedCommand) // G90.1/G91.1
+      // G91.1 (incremental arc centres) is GRBL's only arc mode: accepted, nothing to do (DF93);
+      // G90.1 is unsupported
+      if (group === 'distance' && mantissa !== 0) {
+        if (int !== 91 || mantissa !== 10) return Err(STATUS.unsupportedCommand)
+        continue
+      }
       if (mantissa !== 0) return Err(STATUS.commandValueNotInteger)
       if (g.has(group)) return Err(STATUS.modalGroupViolation)
       g.set(group, int)
@@ -300,6 +331,8 @@ export function parseBlock(
   const actions: Action[] = []
   let moves: Move[] = []
   let probe: Extract<Action, { kind: 'probe' }> | undefined
+  // [G80 errors]: axis words while motion is off
+  if (axisCommand === 'motion' && motion === 80) return Err(STATUS.axisWordsExist)
   if (axisCommand === 'motion' && PROBE_MODES.has(motion)) {
     // [G38 errors]: feed undefined, no axis words, target equals the current position
     if (feed === 0) return Err(STATUS.undefinedFeedRate)

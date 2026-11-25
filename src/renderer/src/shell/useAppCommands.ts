@@ -10,6 +10,7 @@ import type { MenuAction } from '../../../shared/preload-api'
 import { isKeyEcho, noteKeyAction } from './key-echo'
 import { modalDialogOpen } from '../ui'
 import { useShell } from './ShellContext'
+import { runStoreOf } from '../modes/run/run-store'
 import { IS_MAC, isEditableTarget } from './shortcuts'
 
 export interface AppCommandHandlers {
@@ -86,6 +87,12 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
     const offOpenFile = bridge.window.onOpenFile((file) => {
       opening = opening.then(() => files.getState().openFile(file))
     })
+    // DF93: a gCode file to run, handed over by main: Run mode shows it
+    // (docs/modes/run.md#run-an-external-g-code-file-df93)
+    const offRunFile = bridge.run.onShowFile((file) => {
+      latest.current.onMode('run')
+      void runStoreOf(bridge).getState().loadFile(file)
+    })
 
     const onKey = (e: KeyboardEvent) => {
       const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -129,6 +136,7 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
     return () => {
       offMenu()
       offOpenFile()
+      offRunFile()
       window.removeEventListener('keydown', onKey)
     }
   }, [bridge, files, ui])

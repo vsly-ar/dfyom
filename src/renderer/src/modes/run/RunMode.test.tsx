@@ -1572,3 +1572,98 @@ describe('Run mode without a project (DF80)', () => {
     await expectNoAxeViolations(t.container)
   })
 })
+
+const FUSION = [
+  '%',
+  '(T1 D=6 CR=0 - flat end mill)',
+  '(T2 D=3 CR=0 - flat end mill)',
+  'G90 G94 G17',
+  'G21',
+  'T1 M6',
+  'S12000 M3',
+  'G0 X5 Y5 Z15',
+  'G1 Z-1 F300',
+  'G1 X40 F800',
+  'G0 Z15',
+  'T2 M6',
+  'S16000 M3',
+  'G1 Z-2 F200',
+  'G0 Z15',
+  'M30',
+  '%',
+].join('\n')
+
+describe('an external gCode file without a project (DF93)', () => {
+  it('main hands the window a file: Run mode, its card and lines, pre-flight, run, status', async () => {
+    const t = await renderNoProject('design')
+    t.bridge.setRunFile('/cam/fusion.nc', FUSION)
+    act(() => t.bridge.emitShowRunFile('/cam/fusion.nc'))
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Run' })).toBeChecked())
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    expect(await inspector.findByText('File fusion.nc')).toBeInTheDocument()
+    expect(inspector.getByText('1: D=6 CR=0 - flat end mill')).toBeInTheDocument()
+    expect(inspector.getByText('2: D=3 CR=0 - flat end mill')).toBeInTheDocument()
+    expect(inspector.getByText('X 5.000 to 40.000 mm')).toBeInTheDocument()
+    expect(inspector.queryByRole('heading', { name: 'Open a project to run a plan' })).toBeNull()
+    // the gCode panel shows the prepared program before the run: M6 became the marker and M0
+    const panel = within(screen.getByRole('region', { name: 'gCode' }))
+    expect(
+      await panel.findByText('(DFYOM TOOL CHANGE 1: D=6 CR=0 - flat end mill)'),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+
+    // connect, home: Start run opens the file's pre-flight
+    const nav = within(t.nav())
+    const connect = await nav.findByRole('button', { name: 'Connect' })
+    await waitFor(() => expect(connect).toBeEnabled())
+    await t.user.click(connect)
+    await screen.findByRole('group', { name: 'Machine' })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    await within(machineGroup()!).findByText('Idle')
+    await t.user.click(inspector.getByRole('button', { name: 'Start run' }))
+    const preflight = within(await screen.findByRole('dialog', { name: 'Start run?' }))
+    expect(preflight.getByText('fusion.nc')).toBeInTheDocument()
+    expect(await preflight.findByText('Inside the travel at this work zero.')).toBeInTheDocument()
+    expect(t.callsOf('run.job.check')).toEqual([{ file: '/cam/fusion.nc' }])
+    await expectNoAxeViolations(t.container)
+    await t.user.click(preflight.getByRole('button', { name: 'Start run' }))
+    expect(t.callsOf('run.job.start')).toEqual([{ file: '/cam/fusion.nc' }])
+    // the status names the file (M7 for files)
+    t.machine.push(
+      t.machine.job('streaming', { file: { name: 'fusion.nc', path: '/cam/fusion.nc' } }),
+    )
+    expect(await inspector.findByText('File fusion.nc')).toBeInTheDocument()
+    expect(inspector.getByRole('progressbar', { name: 'Run progress' })).toBeInTheDocument()
+  })
+
+  it('refused lines keep Start disabled; the open button and the recent files ask main', async () => {
+    const t = await renderNoProject()
+    t.bridge.setRunFile('/cam/g28.nc', 'G21 G90\nG28 G91 Z0\nG0 X1\n')
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    t.bridge.setRunFileChoice('/cam/g28.nc')
+    await t.user.click(await inspector.findByRole('button', { name: 'Run gCode file…' }))
+    expect(t.bridge.runFileOpens).toEqual([undefined])
+    expect(await inspector.findByText('1 line cannot run')).toBeInTheDocument()
+    expect(inspector.getByText(/^Line 2: G28/)).toBeInTheDocument()
+    expect(inspector.getByRole('button', { name: 'Start run' })).toBeDisabled()
+    // close it: the recent files offer it again
+    await t.user.click(inspector.getByRole('button', { name: 'Close file' }))
+    const recent = within(await inspector.findByRole('navigation', { name: 'Recent files' }))
+    await t.user.click(recent.getByRole('button', { name: 'g28.nc' }))
+    expect(t.bridge.runFileOpens).toEqual([undefined, '/cam/g28.nc'])
+    await inspector.findByText('1 line cannot run')
+    await expectNoAxeViolations(t.container)
+  })
+
+  it('a file that cannot be read says so', async () => {
+    const t = await renderNoProject()
+    t.bridge.setRunFile('/cam/gone.nc', null)
+    act(() => t.bridge.emitShowRunFile('/cam/gone.nc'))
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    expect(await inspector.findByText('gone.nc cannot be read.')).toBeInTheDocument()
+    expect(inspector.getByRole('button', { name: 'Close file' })).toBeEnabled()
+  })
+})

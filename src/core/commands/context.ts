@@ -16,6 +16,7 @@ import type { ApplyView } from './apply'
 import type { HostPort } from '../project/lifecycle'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { MachineService } from '../run/service'
+import type { GcodeFiles } from '../run/gcode-file'
 import type { AsyncAppResult, Option } from '../../shared/result'
 
 /**
@@ -73,6 +74,11 @@ export interface Services {
    * absent = run commands fail with `run.notConnected`.
    */
   readonly machine?: MachineService
+  /**
+   * Reads external gCode files for a run (DF93, docs/modes/run.md#run-an-external-g-code-file-df93);
+   * absent = `run.job.start { file }` fails.
+   */
+  readonly gcodeFiles?: GcodeFiles
   /** Writes exported gCode files (docs/architecture/grbl.md#plan-export-command); absent = `plan.export` fails. */
   readonly exportFiles?: ExportFiles
   /**
