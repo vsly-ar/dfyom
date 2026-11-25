@@ -33,7 +33,7 @@ import { derivedPartError } from './derived'
 import { completeDowels } from './dowels'
 import { blankValues, libraryStockOptions, resolveBlank, type ResolvedBlank } from './blanks'
 import { DOWEL_DEPTH_MAX, DOWEL_DIAMETER_MAX, DOWEL_DIAMETER_MIN } from '../dowel'
-import { isKeyKind, KEY_CLEARANCE_DEFAULT, KEY_CLEARANCE_MAX } from './keys'
+import { hasClearance, KEY_CLEARANCE_DEFAULT, KEY_CLEARANCE_MAX } from './keys'
 
 export { derivedPartError }
 
@@ -270,7 +270,7 @@ const SplitArg = z
       .describe('Horizontal cuts: part-frame z, between -thickness and 0; default none'),
     margin: Src.optional().describe('Blank margin per side; default 5 mm'),
     joint: z.enum(SPLIT_JOINTS).optional().describe("Lines' joint; default butt"),
-    clearance: Src.optional().describe('Key socket clearance; default 0.15 mm'),
+    clearance: Src.optional().describe('Socket clearance (not butt); default 0.15 mm'),
     dowels: z
       .object({
         diameter: Src.optional().describe('Dowel Ø; default: fits'),
@@ -376,7 +376,7 @@ function parseSplit(
   const margin = f.q('split.margin', 'length', a.margin ?? (l.units === 'inch' ? '0.2"' : '5 mm'))
   // keys (4b-2): the clearance given, else the previous one, else the default
   const kind = a.joint ?? 'butt'
-  const clearance = isKeyKind(kind)
+  const clearance = hasClearance(kind)
     ? a.clearance !== undefined
       ? f.q('split.clearance', 'length', a.clearance)
       : prev?.joint.clearance === undefined
@@ -385,7 +385,7 @@ function parseSplit(
     : undefined
   const clearanceDto =
     (clearance?.toDTO() as SplitDTO['margin'] | undefined) ??
-    (isKeyKind(kind) ? prev?.joint.clearance : undefined)
+    (hasClearance(kind) ? prev?.joint.clearance : undefined)
   // dowels: the Ø and depth given, else the previous ones (the depth while the Ø is unchanged)
   const dw = a.dowels ?? undefined
   const before = prev?.joint.dowels
@@ -448,11 +448,18 @@ function parseSplit(
   })
   if (margin.canonical < 0)
     issues.push({ path: ['split', 'margin'], rule: 'nonNegative', message: 'must be ≥ 0' })
-  if (a.clearance !== undefined && !isKeyKind(kind))
+  if (a.clearance !== undefined && !hasClearance(kind))
     issues.push({
       path: ['split', 'clearance'],
       rule: 'keysOnly',
-      message: 'a clearance needs a puzzle or dovetail joint',
+      message: 'a clearance needs a keyed, finger or half-lap joint',
+    })
+  // half laps (4d): where an X and a Y line cross, four laps would claim one corner
+  if (kind === 'halfLap' && new Set(lines.map((x) => x.axis)).size > 1)
+    issues.push({
+      path: ['split', 'joint'],
+      rule: 'lapCrossing',
+      message: 'a half lap needs lines along one axis only (X or Y)',
     })
   if (
     clearance !== undefined &&
@@ -516,19 +523,50 @@ function parseSplit(
         ...(dowels === undefined ? {} : { dowels }),
       },
       ...((a.useStocks ?? prev?.useStocks === true) ? { useStocks: true as const } : {}),
+      // detached pieces (4d) are kept by number while the lines and levels stay
+      ...(prev?.detached !== undefined &&
+      sameCuts(
+        prev,
+        lines.map((x) => ({ axis: x.axis, at: D(x.at) })),
+        levels.map(D),
+      )
+        ? { detached: prev.detached }
+        : {}),
     },
     diameter: diaDto === undefined ? undefined : mmOf(diaDto),
     depth: depthDto === undefined ? undefined : mmOf(depthDto),
   })
 }
 
+/** The same lines and levels (by value), so piece numbers still mean the same cells. */
+function sameCuts(
+  prev: SplitDTO,
+  lines: readonly { axis: 'x' | 'y'; at: SplitDTO['margin'] }[],
+  levels: readonly SplitDTO['margin'][],
+): boolean {
+  return (
+    prev.lines.length === lines.length &&
+    prev.lines.every((l, i) => l.axis === lines[i]!.axis && mmOf(l.at) === mmOf(lines[i]!.at)) &&
+    prev.levels.length === levels.length &&
+    prev.levels.every((z, i) => mmOf(z) === mmOf(levels[i]!))
+  )
+}
+
 // ── follow ────────────────────────────────────────────────────────────────────────────────
 
-/** Design commands a piece takes: its name and blank (split-parts.md § Source and pieces, 4c). */
+/**
+ * Design commands a piece takes: its name and blank (split-parts.md § Source and pieces, 4c) and
+ * Detach (4d).
+ */
 function allowedOnPiece(name: string, args: Record<string, unknown>): boolean {
   if (name === 'design.part.update')
     return Object.keys(args).every(
-      (k) => k === 'partId' || k === 'name' || k === 'blank' || k === 'expectedRevision',
+      (k) =>
+        k === 'partId' ||
+        k === 'name' ||
+        k === 'blank' ||
+        k === 'detach' ||
+        k === 'expectedRevision',
     )
   return false
 }

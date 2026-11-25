@@ -227,9 +227,10 @@ export const SPLIT_ID_PATTERN = /^split[1-9]\d{0,5}$/
 export const SplitIdSchema = z.string().regex(SPLIT_ID_PATTERN)
 /**
  * The lines' joint: butt (glue faces, no geometry), puzzle or dovetail key (split parts 4b-2,
- * docs/modes/split-parts.md#implementation-4b).
+ * docs/modes/split-parts.md#implementation-4b), finger or half lap (4d,
+ * docs/modes/split-parts.md#implementation-4d).
  */
-export const SPLIT_JOINTS = ['butt', 'puzzle', 'dovetail'] as const
+export const SPLIT_JOINTS = ['butt', 'puzzle', 'dovetail', 'finger', 'halfLap'] as const
 export type SplitJoint = (typeof SPLIT_JOINTS)[number]
 
 /**
@@ -271,6 +272,11 @@ export const SplitDtoSchema = z.object({
   }),
   /** Nest the pieces on library stocks (split parts 4c); absent = own blanks as in 4a. */
   useStocks: z.literal(true).optional(),
+  /**
+   * Pieces detached by their number (split parts 4d): plain parts now, no longer regenerated;
+   * dropped when the lines or levels change. Absent = none.
+   */
+  detached: z.array(z.number().int().min(1)).optional(),
 })
 export type SplitDTO = z.output<typeof SplitDtoSchema>
 

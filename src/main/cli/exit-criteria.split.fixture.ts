@@ -2,12 +2,16 @@
 // CLI (exit-criteria.mcp.test.ts): the enclosure (split.fixture.ts, built from scratch) split by
 // one level, then by the level and two lines, then by the level joined by dowels (4b-1), and the
 // proposal's 600 × 400 panel split by one line with a puzzle key (4b-2) and its Test fit coupon
-// (4b-3), and the enclosure split to fit a library board by the suggestion (4c); every piece is
-// planned,
-// exported and run on the virtual machine, setup by setup. Not app code.
+// (4b-3), and the enclosure split to fit a library board by the suggestion (4c), and a shelf longer
+// than the machine's travel split by one line with a finger joint (4d, its pieces' fitted outlines
+// reassembling the shelf); every piece is planned, exported and run on the virtual machine, setup
+// by setup. Not app code.
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
-// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#slices
+// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4d,
+// docs/modes/split-parts.md#slices
 import { readFileSync } from 'node:fs'
+import { strFromU8, unzipSync } from 'fflate'
+import { expectOk } from '../../shared/testing/result'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { len, libraryInput, machineValues } from '../../core/library/library.fixture'
@@ -16,10 +20,21 @@ import {
   ENCLOSURE_LEVEL,
   ENCLOSURE_STOCK,
   enclosureCommands,
+  LONG_PANEL_LINE,
+  LONG_PANEL_STOCK,
+  longPanelCommands,
   PANEL_LINE,
   PANEL_STOCK,
   panelCommands,
 } from '../../core/design/split/split.fixture'
+import { regionArea, type Region } from '../../core/geometry/2d/model'
+import { nodeRegion2d } from '../../core/geometry/2d/testing/node-wasm'
+import { toGeometryInput } from '../../core/design/geometry-input'
+import { loadPart } from '../../core/design/load'
+import type { PartDTO } from '../../core/design/part.dto'
+import { shapeRegion } from '../../core/design/split/layout'
+import type { SnapshotDTO } from '../../core/library/snapshot'
+import type { ProjectDoc } from '../../core/project/document'
 import { withoutAppVersion } from '../../core/post/plan-export'
 import { agentSession, type Call, type RunJobStatus } from './exit-criteria.fixture'
 
@@ -50,6 +65,69 @@ const flat6Long = () => ({
   overallLength: len('90'),
 })
 
+/** A part's through outside profile as a region of its frame (mm), from the saved project. */
+function outlineOf(
+  files: Record<string, Uint8Array>,
+  partId: string,
+): { region: Region; offset: number[] } {
+  const read = <T>(name: string): T => JSON.parse(strFromU8(files[name]!)) as T
+  const part = read<PartDTO>(`parts/${partId}.json`)
+  const snapshots = Object.fromEntries(
+    Object.keys(files)
+      .filter((f) => f.startsWith('snapshots/'))
+      .map((f) => {
+        const x = read<SnapshotDTO>(f)
+        return [x.id, x]
+      }),
+  )
+  const doc = {
+    parts: { [partId]: part },
+    snapshots,
+    unitSystem: 'mm',
+  } as unknown as ProjectDoc
+  const loaded = expectOk(loadPart(doc, partId, 'exit'))
+  const g = expectOk(toGeometryInput(loaded.part, loaded.stock, nodeRegion2d())).operations
+  const at = part.operations.findIndex((o) => o.kind === 'profile' && o.side === 'outside')
+  const og = g[at]
+  const region = og?.kind === 'profile' ? shapeRegion(og.shape) : undefined
+  expect(region, partId).toBeDefined()
+  const mm = (q: { exact: { num: string; den: string } }) =>
+    Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
+  return { region: region!, offset: (part.offset ?? []).map(mm) }
+}
+
+/**
+ * The 4d exit's reassembly: the pieces' fitted outlines (their outline profiles moved back by
+ * their offsets) cover the source outline once, with no overlap, up to the joint's clearance band
+ * and T-bones (under 0.5 % of the area), sampled every 2 mm off the boundaries.
+ */
+function fittedOutlinesReassemble(
+  archive: string,
+  sourceId: string,
+  pieceIds: readonly string[],
+): void {
+  const port = nodeRegion2d()
+  const files = unzipSync(readFileSync(archive))
+  const source = outlineOf(files, sourceId)
+  const pieces = pieceIds.map((id) => outlineOf(files, id))
+  let inSource = 0
+  let missed = 0
+  // off the line, the finger edges and the outline: no sample on a boundary
+  for (let x = 0.7; x < 1010; x += 2)
+    for (let y = 0.7; y < 310; y += 2) {
+      const hits = pieces.filter((p) =>
+        port.contains(p.region, [x + p.offset[0]!, y + p.offset[1]!]),
+      ).length
+      const want = port.contains(source.region, [x, y])
+      expect(hits, `${x} ${y}`).toBeLessThanOrEqual(want ? 1 : 0)
+      if (want) inSource++
+      if (want && hits === 0) missed++
+    }
+  expect(inSource * 4).toBeCloseTo(regionArea(source.region), -3)
+  expect(missed / inSource).toBeLessThan(0.005)
+  expect(missed).toBeGreaterThan(0) // the clearance band and the T-bones are there
+}
+
 export async function exitCriteriaSplitFlow(
   call: Call,
   dir: string,
@@ -76,9 +154,15 @@ export async function exitCriteriaSplitFlow(
     await ok<{ partId: string }>('design.part.add', { name: 'Panel', stock: PANEL_STOCK })
   ).value.partId
   for (const [name, args] of panelCommands(panelId)) await ok(name, args)
+  // split parts 4d: a shelf longer than the machine's 800 mm travel
+  const shelfId = (
+    await ok<{ partId: string }>('design.part.add', { name: 'Shelf', stock: LONG_PANEL_STOCK })
+  ).value.partId
+  for (const [name, args] of longPanelCommands(shelfId)) await ok(name, args)
 
   let pieces = 0
   let setups = 0
+  let shelfPieces: string[] = []
   const splits: [string, object, string?][] = [
     ['level', { levels: [ENCLOSURE_LEVEL] }],
     [
@@ -100,9 +184,11 @@ export async function exitCriteriaSplitFlow(
     // split parts 4c: the enclosure split to fit a 200 × 100.1 × 40 library board by the
     // suggestion, every piece on that board
     ['fit', {}],
+    // split parts 4d: the shelf in two pieces joined by fingers, each within the travel
+    ['shelf-finger', { lines: [LONG_PANEL_LINE], joint: 'finger' }, shelfId],
   ]
   for (const [label, split, splitPart = partId] of splits) {
-    let source = splitPart === panelId ? 'Panel' : 'Enclosure'
+    let source = splitPart === panelId ? 'Panel' : splitPart === shelfId ? 'Shelf' : 'Enclosure'
     let r: SplitResult
     if (label === 'panel-coupon') {
       const fit = (
@@ -162,6 +248,14 @@ export async function exitCriteriaSplitFlow(
     }
     if (label === 'level-dowels')
       expect(r.findings.filter((f) => /^dowel/.test(f.params.rule))).toEqual([])
+    if (label === 'shelf-finger') {
+      // fingers along the whole line; every piece within the travel, the shelf not
+      expect(
+        r.findings.filter((f) => ['keyFit', 'thinJoint', 'outsideTravel'].includes(f.params.rule)),
+      ).toEqual([])
+      expect(r.pieces.every((p) => p.blank[0]! < 800 && p.blank[1]! < 800)).toBe(true)
+      shelfPieces = r.pieces.map((p) => p.partId)
+    }
     // a renamed piece keeps its number in the header and adds its name (split parts 4a polish)
     if (label === 'level')
       await ok('design.part.update', { partId: r.pieces[1]!.partId, name: 'Ring' })
@@ -248,5 +342,8 @@ export async function exitCriteriaSplitFlow(
     }
   }
   await ok('project.save', { target: join(dir, 'enclosure-split.dfyom') })
+  // 4d: the shelf's pieces, as saved, reassemble it
+  expect(shelfPieces).toHaveLength(2)
+  fittedOutlinesReassemble(join(dir, 'enclosure-split.dfyom'), shelfId, shelfPieces)
   return { pieces, setups }
 }

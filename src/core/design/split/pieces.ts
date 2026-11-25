@@ -34,7 +34,8 @@ import {
   type Rect,
 } from './layout'
 import { dowelOperations } from './dowels'
-import { keyItem, planKeys, type KeyPlan, type PathItem } from './keys'
+import { keyItems, planKeys, type KeyPlan, type PathItem } from './keys'
+import { lapBounds, lapOperations, lapRect, planLaps, type Lap } from './laps'
 import { removals } from './removals'
 
 /** Rounding of computed lengths: 1 µm (exact rationals over 10⁶). */
@@ -96,8 +97,10 @@ export interface PiecesResult {
   readonly layout: Layout
   readonly pieces: readonly PiecePlan[]
   readonly findings: readonly DfmWarning[]
-  /** The keys on the lines (4b-2) and why a run has none. */
+  /** The keys on the lines (4b-2; fingers 4d) and why a run has none (half laps' issues too). */
   readonly keys: KeyPlan
+  /** The half laps on the lines (4d). */
+  readonly laps: readonly Lap[]
   /** The outline's tool Ø (mm) the keys are sized for. */
   readonly outlineTool: number
 }
@@ -498,13 +501,12 @@ function pathDTO(it: PathItem, L: (mm: number) => LengthDTO): ShapeItemDTO {
  */
 function keyedRectangle(
   c: Ctx,
-  cell: Cell,
+  bb: Bounds2,
   delta: readonly [number, number],
   b: PieceBuild,
   extra: readonly PathItem[],
 ): AppResult<OperationShapeDTO> {
   const L = (mm: number) => lengthDTO(mm, c.units)
-  const bb = cell.bounds
   const centre: [number, number] = [(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2]
   const rect = {
     kind: 'rectangle' as const,
@@ -593,16 +595,19 @@ function outlineOperation(
   outlineDto: Extract<OperationDTO, { kind: 'profile' }> | undefined,
   outlineGeometry: Extract<OperationGeometry, { kind: 'profile' }> | undefined,
   keys: readonly PathItem[],
+  /** The cell grown over its half laps (4d), else the cell's own rectangle and bounds. */
+  lap: { readonly rect: Rect; readonly bounds: Bounds2 } | undefined,
 ): AppResult<OperationDTO> {
   const L = (mm: number) => lengthDTO(mm, c.units)
   const id = `${c.split.id}_outline`
   const delta: [number, number] = [offset[0], offset[1]]
+  const rect = lap?.rect ?? cell.rect
   let shape: OperationShapeDTO
   if (
     (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) &&
-    keys.length > 0
+    (keys.length > 0 || lap !== undefined)
   ) {
-    const keyed = keyedRectangle(c, cell, delta, b, keys)
+    const keyed = keyedRectangle(c, lap?.bounds ?? cell.bounds, delta, b, keys)
     if (keyed.isErr()) return keyed
     shape = keyed.unwrap()
   } else if (outline === undefined || outlineDto === undefined || outlineGeometry === undefined) {
@@ -618,10 +623,10 @@ function outlineOperation(
       cornerRadius: L(0),
     }
   } else {
-    const whole = inside(c.footprintBounds, cell.rect) && keys.length === 0
+    const whole = inside(c.footprintBounds, rect) && keys.length === 0
     if (whole) shape = shiftedShape(literal(outlineDto.shape, c.units), delta, c.units)
     else {
-      const clipped = clippedShape(c, outline, outlineGeometry, '+z', cell.rect, 0, delta, b, keys)
+      const clipped = clippedShape(c, outline, outlineGeometry, '+z', rect, 0, delta, b, keys)
       if (clipped.isErr()) return clipped
       if (clipped.unwrap() === undefined)
         return fail('internal.unexpected', `piece ${cell.n} has no outline`, {
@@ -889,7 +894,7 @@ function keysOf(
   layout: Layout,
   split: SplitDTO,
   toolDiameter: (op: Operation) => number,
-): { readonly keys: KeyPlan; readonly outlineTool: number } {
+): { readonly keys: KeyPlan; readonly laps: readonly Lap[]; readonly outlineTool: number } {
   const T = loaded.stock.thickness.canonical
   const at = layout.footprint.outline
   const rs = removals(loaded, geometry, at)
@@ -907,7 +912,13 @@ function keysOf(
         : 6
       : toolDiameter(loaded.part.operations[at]!)
   const W = loaded.stock.width.canonical
-  return { keys: planKeys(layout, split, rs, W, outlineTool, top, bottom), outlineTool }
+  const keys = planKeys(layout, split, rs, W, outlineTool, top, bottom)
+  const laps = planLaps(layout, split, rs, W, outlineTool, top, bottom)
+  return {
+    keys: { keys: keys.keys, issues: [...keys.issues, ...laps.issues] },
+    laps: laps.laps,
+    outlineTool,
+  }
 }
 
 /**
@@ -920,6 +931,7 @@ export function splitKeys(
   port: Region2dPort,
 ): AppResult<{
   readonly keys: KeyPlan
+  readonly laps: readonly Lap[]
   readonly outlineTool: number
   /** The source's outline operation (its index), if it has one. */
   readonly outline: number | undefined
@@ -948,7 +960,9 @@ export function splitKeys(
   return Ok({
     ...k,
     outline: layout.unwrap().footprint.outline,
-    needs: new Map(layout.unwrap().cells.map((c) => [c.n, cellNeed(c, k.keys, margin).need])),
+    needs: new Map(
+      layout.unwrap().cells.map((c) => [c.n, cellNeed(c, k.keys, k.laps, margin).need]),
+    ),
   })
 }
 
@@ -956,14 +970,18 @@ export function splitKeys(
  * A cell's extent (with the knobs it carries, which reach past it: the male is the lower piece,
  * towards +x or +y) and its need: the own block's sizes, 4a's blank (4c).
  */
-function cellNeed(cell: Cell, keys: KeyPlan, margin: number) {
+function cellNeed(cell: Cell, keys: KeyPlan, laps: readonly Lap[], margin: number) {
   const knobs = keys.keys.filter((k) => k.male === cell)
   const reach = (axis: 'x' | 'y') =>
     Math.max(0, ...knobs.filter((k) => k.axis === axis).map((k) => k.at + k.size.depth))
-  const bx0 = round(cell.bounds.min[0])
-  const by0 = round(cell.bounds.min[1])
-  const bx1 = round(Math.max(cell.bounds.max[0], reach('x')))
-  const by1 = round(Math.max(cell.bounds.max[1], reach('y')))
+  // half laps (4d): the male's tongue past the line, the female's back over it
+  const lap = lapRect(cell, laps)
+  const grownMin = (v: number, r: number, cellR: number) => (r < cellR - EPS ? Math.min(v, r) : v)
+  const grownMax = (v: number, r: number, cellR: number) => (r > cellR + EPS ? Math.max(v, r) : v)
+  const bx0 = round(grownMin(cell.bounds.min[0], lap.x0, cell.rect.x0))
+  const by0 = round(grownMin(cell.bounds.min[1], lap.y0, cell.rect.y0))
+  const bx1 = round(grownMax(Math.max(cell.bounds.max[0], reach('x')), lap.x1, cell.rect.x1))
+  const by1 = round(grownMax(Math.max(cell.bounds.max[1], reach('y')), lap.y1, cell.rect.y1))
   const need = [
     round(bx1 - bx0 + 2 * margin),
     round(by1 - by0 + 2 * margin),
@@ -1058,17 +1076,25 @@ export function planPieces(
       .map((s) => Number(s.id.slice('shape'.length))),
   )
   // keys on the lines (4b-2)
-  const { keys, outlineTool } = keysOf(loaded, geometry, L, split, c.toolDiameter)
+  const { keys, laps, outlineTool } = keysOf(loaded, geometry, L, split, c.toolDiameter)
   const pieces: PiecePlan[] = []
+  const detached = new Set(split.detached ?? [])
   for (const cell of L.cells) {
+    // a detached piece (4d) is a plain part now: the source no longer makes it
+    if (detached.has(cell.n)) continue
     const m = numbers.margin
     const knobs = keys.keys.filter((k) => k.male === cell)
     const sockets = keys.keys.filter((k) => k.female === cell)
     const items = [
-      ...knobs.map((k) => keyItem(k, 'male')),
-      ...sockets.map((k) => keyItem(k, 'female')),
+      ...knobs.flatMap((k) => keyItems(k, 'male')),
+      ...sockets.flatMap((k) => keyItems(k, 'female')),
     ]
-    const { bx0, by0, bx1, by1, need } = cellNeed(cell, keys, m)
+    const { bx0, by0, bx1, by1, need } = cellNeed(cell, keys, laps, m)
+    const mine = laps.filter((l) => l.male === cell || l.female === cell)
+    const lap =
+      mine.length === 0
+        ? undefined
+        : { rect: lapRect(cell, mine), bounds: lapBounds(cell, mine, fb) }
     const size = blankOf?.(cell.n, need) ?? need
     const blank = { length: round(size[0]), width: round(size[1]), thickness: round(size[2]) }
     // centred in X and Y; the piece's bottom on the blank's bottom, the surplus above (4c)
@@ -1088,7 +1114,17 @@ export function planPieces(
     }
     for (let i = 0; i < loaded.part.operations.length; i++) {
       if (i === outlineAt) {
-        const o = outlineOperation(c, cell, offset, b, outline, outlineDto, outlineGeometry, items)
+        const o = outlineOperation(
+          c,
+          cell,
+          offset,
+          b,
+          outline,
+          outlineDto,
+          outlineGeometry,
+          items,
+          lap,
+        )
         if (o.isErr()) return Err(o.unwrapErr())
         b.ops.push(o.unwrap())
         continue
@@ -1098,7 +1134,7 @@ export function planPieces(
       if (mapped.unwrap() !== undefined) b.ops.push(mapped.unwrap()!)
     }
     if (outlineAt === undefined) {
-      const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined, items)
+      const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined, items, lap)
       if (o.isErr()) return Err(o.unwrapErr())
       b.ops.push(o.unwrap())
     }
@@ -1123,9 +1159,19 @@ export function planPieces(
       (mm) => lengthDTO(mm, loaded.units),
       surplus,
     )
-    if (dowels.length > 0) {
+    // half lap pockets (4d): cut before the piece is cut free, as the dowel holes
+    const lapOps = lapOperations(
+      mine,
+      cell,
+      numbers.id,
+      offset,
+      blank.width,
+      (mm) => lengthDTO(mm, loaded.units),
+      surplus,
+    )
+    if (dowels.length + lapOps.length > 0) {
       const at = b.ops.findIndex((o) => o.id === `${numbers.id}_outline`)
-      b.ops.splice(at < 0 ? b.ops.length : at, 0, ...dowels)
+      b.ops.splice(at < 0 ? b.ops.length : at, 0, ...dowels, ...lapOps)
     }
     // the surplus (4c): faced off by a mapped top facing (it goes the surplus deeper), else by a
     // generated facing first
@@ -1152,7 +1198,7 @@ export function planPieces(
       shapes: b.shapes,
     })
   }
-  return Ok({ layout: L, pieces, findings: [...findings.values()], keys, outlineTool })
+  return Ok({ layout: L, pieces, findings: [...findings.values()], keys, laps, outlineTool })
 }
 
 /** The piece part record (without the id and stock, which the writer gives). */

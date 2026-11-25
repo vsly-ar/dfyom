@@ -1211,7 +1211,8 @@ const partAdd = defineCommand({
 const partUpdate = defineCommand({
   kind: 'document',
   name: 'design.part.update',
-  summary: "Rename the part, change its general tolerance or a split piece's blank.",
+  summary:
+    "Rename the part, change its general tolerance or a split piece's blank, or detach a piece.",
   title: () => 'Update part',
   machine: false,
   args: z.object({
@@ -1222,6 +1223,7 @@ const partUpdate = defineCommand({
       .union([z.enum(['auto', 'own']), z.object({ stockLibraryItemId: ItemIdSchema })])
       .optional()
       .describe('Split piece: auto, own block or a library stock'),
+    detach: z.literal(true).optional().describe('Split piece: make it a plain part'),
   }),
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
@@ -1238,6 +1240,10 @@ const partUpdate = defineCommand({
     if (args.blank !== undefined) {
       const set = pieceBlankChoice(target, args.blank, ctx, where)
       if (set.isErr()) return set
+    }
+    if (args.detach === true) {
+      const done = detachPiece(draft, target, where)
+      if (done.isErr()) return done
     }
     const dto = generalToleranceToDTO(tol)
     if (dto === undefined) delete target.generalTolerance
@@ -1288,6 +1294,33 @@ function pieceBlankChoice(
   const next = choice === undefined ? rest : { ...rest, choice }
   if (Object.keys(next).length === 0) delete target.blank
   else target.blank = next
+  return Ok(undefined)
+}
+
+/**
+ * Detach (split parts 4d, docs/modes/split-parts.md#implementation-4d): the piece becomes a plain
+ * part (no `derivedFrom`, `offset` or `blank`; its operations, shapes, blank snapshot and plans
+ * stay) and its number goes into the source's `split.detached`, so the source no longer makes it.
+ */
+function detachPiece(
+  draft: Draft<ProjectDoc>,
+  target: Draft<PartDTO>,
+  where: string,
+): AppResult<void> {
+  const from = target.derivedFrom
+  if (from === undefined)
+    return malformed(
+      [{ path: ['detach'], rule: 'pieceOnly', message: 'only a split piece can be detached' }],
+      where,
+    )
+  const source = Object.hasOwn(draft.parts, from.partId) ? draft.parts[from.partId] : undefined
+  if (source?.split !== undefined) {
+    const detached = new Set([...(source.split.detached ?? []), from.index])
+    source.split.detached = [...detached].sort((a, b) => a - b)
+  }
+  delete target.derivedFrom
+  delete target.offset
+  delete target.blank
   return Ok(undefined)
 }
 

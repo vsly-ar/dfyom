@@ -240,6 +240,8 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
       return `${op} lies within ${L(p['limit'])} of ${at.length > 0 ? list(at) : 'a split'}: a thin wall at the joint. Move the split.`
     }
     case 'thinJoint': {
+      if (p['what'] === 'fingerWidth')
+        return `The fingers on ${line} are ${L(p['width'])} wide, less than ${L(p['limit'])} (3 × the outline tool's Ø): weak fingers. Use a smaller outline tool or a thicker part.`
       if (p['what'] === 'keyNeck')
         return `The key neck on ${line} is ${L(p['width'])} wide, less than ${L(p['limit'])} (3 × the outline tool's Ø): a weak key. Move the split.`
       const where = typeof p['level'] === 'number' ? `the level at Z ${L(p['level'])}` : line
@@ -253,6 +255,16 @@ function splitText(p: DfmWarning['params'], L: (mm: unknown) => string, name: Df
       const pair = `pieces ${ab[0] ?? '?'} and ${ab[1] ?? '?'}`
       const r = Array.isArray(p['run']) ? (p['run'] as number[]).map(num) : [Number.NaN, Number.NaN]
       const run = `${p['axis'] === 'x' ? 'Y' : 'X'} ${L(r[0])}–${L(r[1])}`
+      // fingers and half laps (split parts 4d)
+      if (p['joint'] === 'halfLap')
+        return `No half lap on ${line} between ${pair}: a feature or the part edge lies within the ${L(p['lap'])} lap or one tool Ø (${L(p['tool'])}) of it. A butt joint there; move the split or the feature.`
+      if (p['joint'] === 'finger') {
+        if (p['reason'] === 'near')
+          return `No fingers on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${L(p['tool'])}) of a finger. A butt joint there; move the split or the feature.`
+        if (p['reason'] === 'tool')
+          return `The run of ${L(r[1]! - r[0]!)} on ${line} between ${pair} holds fingers only for a tool of Ø${L(p['maxTool'])} or smaller (the outline's is Ø${L(p['tool'])}): a butt joint there.`
+        return `The run of ${L(r[1]! - r[0]!)} on ${line} between ${pair} is too short for fingers: a butt joint there.`
+      }
       if (p['reason'] === 'near')
         return `No key on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${L(p['tool'])}) of every place.`
       if (p['reason'] === 'tool')

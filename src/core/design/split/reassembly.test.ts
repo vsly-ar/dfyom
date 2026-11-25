@@ -17,7 +17,7 @@ import { loadPart, partGeometryInput } from '../load'
 import { toGeometryInput } from '../geometry-input'
 import { regionLoops } from '../../geometry/2d/model'
 import { resolveShape } from '../shape'
-import { keyItem } from './keys'
+import { keyItem, tBoneCentres } from './keys'
 import { shapeRegion } from './layout'
 import { planPieces } from './pieces'
 import {
@@ -205,7 +205,8 @@ describe('reassembly: pieces == source', () => {
 // cell, so a point is checked against every piece of its band: in the source ⇔ in exactly one
 // piece, except in the clearance band (the socket around the knob, at most the clearance wide).
 describe('reassembly with keys (4b-2): pieces == source up to the clearance band', () => {
-  it.each(['puzzle', 'dovetail'] as const)(
+  // fingers (4d): their T-bones are relief, missing from both pieces like the clearance band
+  it.each(['puzzle', 'dovetail', 'finger'] as const)(
     '%s on the 600 × 400 panel',
     async (kind) => {
       const s = await designSetup({ stock: PANEL_STOCK, services: { region2d } })
@@ -217,7 +218,7 @@ describe('reassembly with keys (4b-2): pieces == source up to the clearance band
       const source = evaluate(s, s.partId)
       const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
       const planned = expectOk(planPieces(loaded, loaded.dto.split!, region2d))
-      expect(planned.keys.keys.length).toBe(2)
+      expect(planned.keys.keys.length).toBe(kind === 'finger' ? 10 : 2)
       const pieces = planned.pieces.map((plan) => {
         const piece = Object.values(s.d.doc.parts).find((p) => p.derivedFrom?.index === plan.n)!
         // the blank outside the outline's slot stays as an offcut: only the piece is compared
@@ -234,8 +235,19 @@ describe('reassembly with keys (4b-2): pieces == source up to the clearance band
         return r.kind === 'region' ? regionLoops(r.region) : []
       })
       const c = planned.keys.keys[0]!.clearance
+      const tBones = planned.keys.keys.flatMap((k) =>
+        k.size.kind !== 'finger'
+          ? []
+          : (['male', 'female'] as const).flatMap((side) =>
+              tBoneCentres(k.size, c, side).map((q) => ({
+                at: [k.at + q[1], k.u + q[0]] as const,
+                r: k.size.fillet + 0.01,
+              })),
+            ),
+      )
       const inBand = (p: readonly [number, number]) =>
-        knobs.some((loops) => (region2d.distance(loops, p)?.distance ?? Infinity) <= c + 0.01)
+        knobs.some((loops) => (region2d.distance(loops, p)?.distance ?? Infinity) <= c + 0.01) ||
+        tBones.some((t) => Math.hypot(p[0] - t.at[0], p[1] - t.at[1]) <= t.r)
       const random = lcg(11)
       const points: [number, number, number][] = []
       for (let k = 0; k < 300; k++)
@@ -265,8 +277,69 @@ describe('reassembly with keys (4b-2): pieces == source up to the clearance band
         if (want) solid++
       }
       expect(solid).toBeGreaterThan(400)
-      expect(band).toBeLessThan(40)
+      expect(band).toBeLessThan(kind === 'finger' ? 200 : 40)
     },
     60_000,
   )
+})
+
+// Split parts 4d: a half lap. The male keeps the bottom half over the lap, the female the top
+// half; a point of the source is in exactly one piece, or in none only in the clearance at the
+// two ends of the lap (the female's tongue end and its pocket's far wall).
+describe('reassembly with a half lap (4d): pieces == source up to the clearance', () => {
+  it('on the 600 × 400 panel', async () => {
+    const s = await designSetup({ stock: PANEL_STOCK, services: { region2d } })
+    for (const [name, args] of panelCommands(s.partId)) await s.run(name, args)
+    await s.run('design.split.set', {
+      partId: s.partId,
+      split: { lines: [PANEL_LINE], joint: 'halfLap' },
+    })
+    const source = evaluate(s, s.partId)
+    const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+    const planned = expectOk(planPieces(loaded, loaded.dto.split!, region2d))
+    expect(planned.laps).toHaveLength(1)
+    const lap = planned.laps[0]!
+    const pieces = planned.pieces.map((plan) => {
+      const piece = Object.values(s.d.doc.parts).find((p) => p.derivedFrom?.index === plan.n)!
+      const pl = expectOk(loadPart(s.d.doc, piece.id, 'test'))
+      const g = expectOk(toGeometryInput(pl.part, pl.stock, region2d)).operations
+      const og = g[pl.part.operations.findIndex((o) => o.id === 'split1_outline')]
+      const outline = og?.kind === 'profile' ? shapeRegion(og.shape) : undefined
+      expect(outline).toBeDefined()
+      return { off: piece.offset!.map(mm), e: evaluate(s, piece.id), outline: outline! }
+    })
+    const h = lap.length / 2
+    const c = lap.clearance
+    const inBand = (x: number) =>
+      Math.abs(x - (lap.at - h)) <= c + 0.01 || Math.abs(x - (lap.at + h)) <= c + 0.01
+    const random = lcg(13)
+    const points: [number, number, number][] = []
+    for (let k = 0; k < 200; k++)
+      points.push([5 + 600 * random(), 5 + 400 * random(), -18 * (0.01 + 0.98 * random())])
+    // dense over the lap, both halves
+    for (let k = 0; k < 600; k++)
+      points.push([
+        lap.at - h - 4 + (2 * h + 8) * random(),
+        6 + 398 * random(),
+        -18 * (0.01 + 0.98 * random()),
+      ])
+    let solid = 0
+    let band = 0
+    for (const p of points) {
+      const want = inside(source, p)
+      const hits = pieces.filter(
+        ({ off, e, outline }) =>
+          regionContains(outline, [p[0] + off[0]!, p[1] + off[1]!]) &&
+          inside(e, [p[0] + off[0]!, p[1] + off[1]!, p[2] + off[2]!]),
+      ).length
+      if (want && hits === 0 && inBand(p[0])) {
+        band++
+        continue
+      }
+      expect([p, hits]).toEqual([p, want ? 1 : 0])
+      if (want) solid++
+    }
+    expect(solid).toBeGreaterThan(600)
+    expect(band).toBeLessThan(20)
+  }, 60_000)
 })

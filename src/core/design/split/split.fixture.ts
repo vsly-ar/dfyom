@@ -127,3 +127,63 @@ export function panelCommands(partId: string): [string, object][] {
     ],
   ] as [string, object][]
 }
+
+// ── the 4d exit part ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * A 1000 × 300 mm shelf of 18 mm plywood (split parts 4d exit, docs/modes/split-parts.md#slices):
+ * a 1010 × 310 board, longer than the 800 mm travel of the test machine, with a 1000 × 300
+ * outline, two 8 mm holes and a pocket. Split by one line at x = 505 with a finger joint; its two
+ * pieces fit the machine.
+ */
+export const LONG_PANEL_STOCK = {
+  name: 'Plywood 1010 × 310 × 18',
+  shape: 'block' as const,
+  length: '1010',
+  width: '310',
+  thickness: '18',
+  material: { name: 'Birch plywood', class: 'sheetGood' as const },
+}
+
+/** The shelf's line: through the middle, away from its features. */
+export const LONG_PANEL_LINE = { axis: 'x' as const, at: '505' }
+
+export function longPanelCommands(partId: string): [string, object][] {
+  const hole = (x: string, y: string) => [
+    'design.drilling.add',
+    { partId, center: [x, y], diameter: '8', bottom: 'through' },
+  ]
+  return [
+    hole('40', '40'),
+    hole('970', '270'),
+    [
+      'design.pocket.add',
+      {
+        partId,
+        shape: {
+          kind: 'rectangle',
+          center: ['250', '155'],
+          length: '160',
+          width: '80',
+          cornerRadius: '5',
+        },
+        depth: '6',
+      },
+    ],
+    [
+      'design.profile.add',
+      {
+        partId,
+        shape: {
+          kind: 'rectangle',
+          center: ['505', '155'],
+          length: '1000',
+          width: '300',
+          cornerRadius: '3',
+        },
+        slotWidth: '6',
+        tabs: { count: '6', width: '6', thickness: '2' },
+      },
+    ],
+  ] as [string, object][]
+}

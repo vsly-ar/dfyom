@@ -35,22 +35,25 @@ const FLANK = 0.5
 /** Sampling step (mm) along a line and across a key. */
 const STEP = 0.5
 
-export type KeyKind = 'puzzle' | 'dovetail'
+/** Joints made of knobs on the piece outlines: puzzle, dovetail (4b-2) and finger (4d) keys. */
+export type KeyKind = 'puzzle' | 'dovetail' | 'finger'
 export const isKeyKind = (k: SplitDTO['joint']['kind']): k is KeyKind =>
-  k === 'puzzle' || k === 'dovetail'
+  k === 'puzzle' || k === 'dovetail' || k === 'finger'
+/** Joints with a clearance: every one but butt (keys, fingers, half laps; 4d). */
+export const hasClearance = (k: SplitDTO['joint']['kind']): boolean => k !== 'butt'
 
 /** A key's numbers (mm), local frame: u along the line, w across it into the female piece. */
 export interface KeySize {
   readonly kind: KeyKind
-  /** The neck: a puzzle neck's width, a dovetail's width at the line. */
+  /** The neck: a puzzle neck's width, a dovetail's width at the line, a finger's width. */
   readonly neck: number
-  /** Puzzle head radius; dovetail half width at the tip. */
+  /** Puzzle head radius; dovetail half width at the tip; half a finger. */
   readonly head: number
-  /** Puzzle head centre's distance from the line; dovetail depth. */
+  /** Puzzle head centre's distance from the line; dovetail or finger depth. */
   readonly h: number
   /** How far the knob reaches across the line. */
   readonly depth: number
-  /** The knob's corner radius: the outline tool's radius + the clearance. */
+  /** The knob's corner radius (a finger's T-bone radius): the outline tool's radius + the clearance. */
   readonly fillet: number
   /** Half the key's extent along the line, its base strip included. */
   readonly half: number
@@ -67,6 +70,18 @@ export function sized(kind: KeyKind, n: number, tool: number, c: number): KeySiz
   const f = tool / 2 + c
   const q = n / 2
   const grow = 1.2 * c
+  // a square finger (4d): its T-bones need 2f, the gaps between fingers n
+  if (kind === 'finger')
+    return {
+      kind,
+      neck: n,
+      head: q,
+      h: n,
+      depth: n,
+      fillet: f,
+      half: q,
+      maxTool: Math.min(2 * f, n),
+    }
   if (kind === 'puzzle') {
     const a = n * PUZZLE_HEAD
     // the head sits where a fillet of radius f fits between the neck and the head, plus a flank
@@ -110,7 +125,7 @@ export function keySize(
   share: number,
 ): KeySize | undefined {
   const fits = (n: number) => RUN_PER_KEY * 2 * sized(kind, n, tool, c).half <= share + EPS
-  const n0 = Math.max(KEY_NECK_MIN, 3 * tool, thickness / 2)
+  const n0 = nominalNeck(tool, thickness)
   if (fits(n0)) return sized(kind, n0, tool, c)
   const nMin = tool + 2
   if (!fits(nMin)) return undefined
@@ -124,6 +139,33 @@ export function keySize(
   return sized(kind, Math.floor(lo * 100) / 100, tool, c)
 }
 
+/** A key's nominal neck (a finger's width): max(10 mm, 3 × tool Ø, thickness / 2). */
+const nominalNeck = (tool: number, thickness: number) =>
+  Math.max(KEY_NECK_MIN, 3 * tool, thickness / 2)
+
+/**
+ * The fingers on a run of `length` (4d): n fingers of width p and the gaps between and at both
+ * ends (a female finger at each end), p = length / (2n + 1) from the nominal width; on a run
+ * shorter than three nominal widths one finger of length / 3, down to tool Ø + 2 mm. The finger
+ * centres are offsets from the run's start; undefined: none fits.
+ */
+export function fingerLayout(
+  tool: number,
+  c: number,
+  thickness: number,
+  length: number,
+): { readonly size: KeySize; readonly at: readonly number[] } | undefined {
+  const p0 = nominalNeck(tool, thickness)
+  const n = Math.max(1, Math.floor((length / p0 - 1) / 2))
+  const p = Math.floor((length / (2 * n + 1)) * 100) / 100
+  if (p < tool + 2 - EPS) return undefined
+  const start = (length - (2 * n + 1) * p) / 2
+  return {
+    size: sized('finger', p, tool, c),
+    at: Array.from({ length: n }, (_, i) => start + (2 * i + 1) * p + p / 2),
+  }
+}
+
 /** The largest tool Ø (mm, 0.1 steps down) a key on `share` fits with; undefined below 1 mm. */
 function largestTool(
   kind: KeyKind,
@@ -133,7 +175,12 @@ function largestTool(
   share: number,
 ): number | undefined {
   for (let d = Math.floor(tool * 10) / 10; d >= 1; d -= 0.1)
-    if (keySize(kind, d, c, thickness, share) !== undefined) return Math.round(d * 10) / 10
+    if (
+      (kind === 'finger'
+        ? fingerLayout(d, c, thickness, share)
+        : keySize(kind, d, c, thickness, share)) !== undefined
+    )
+      return Math.round(d * 10) / 10
   return undefined
 }
 
@@ -249,10 +296,14 @@ export function planKeys(
         const base = { axis, at, male, female, run, tool, height: zt - zb }
         let count = Math.min(KEYS_MAX, Math.max(1, Math.round(length / KEYS_PER)))
         let size: KeySize | undefined
-        for (; count >= 1; count--) {
-          size = keySize(kind, tool, c, zt - zb, length / count)
-          if (size !== undefined) break
-        }
+        // fingers (4d): the whole run, in one layout
+        const fingers = kind === 'finger' ? fingerLayout(tool, c, zt - zb, length) : undefined
+        if (kind === 'finger') size = fingers?.size
+        else
+          for (; count >= 1; count--) {
+            size = keySize(kind, tool, c, zt - zb, length / count)
+            if (size !== undefined) break
+          }
         if (size === undefined) {
           const maxTool = largestTool(kind, tool, c, zt - zb, length)
           issues.push(
@@ -286,6 +337,15 @@ export function planKeys(
         const clear = (u: number) => {
           for (let x = u - reach; x <= u + reach + EPS; x += STEP) if (!column(x)) return false
           return column(u + reach)
+        }
+        if (fingers !== undefined) {
+          // every finger clear, else none on this run (a butt joint there)
+          const us = fingers.at.map((d) => Math.round((run[0] + d) * 100) / 100)
+          if (us.every((u) => clear(u)))
+            for (const u of us)
+              keys.push({ axis, at, u, male, female, size: s, clearance: c, height: zt - zb })
+          else issues.push({ ...base, reason: 'near' })
+          continue
         }
         const share = length / count
         for (let i = 0; i < count; i++) {
@@ -368,6 +428,20 @@ export function keyLocalPath(size: KeySize, c: number, side: 'male' | 'female'):
   const f = size.fillet
   const B = size.half
   const q = size.neck / 2
+  if (size.kind === 'finger') {
+    // a square finger from the base strip (male), or its socket grown by c at the cheeks and tip
+    const qq = q + g
+    const d = size.depth + g
+    return {
+      start: [-qq, -STRIP],
+      segments: [
+        { kind: 'line', to: [qq, -STRIP] },
+        { kind: 'line', to: [qq, d] },
+        { kind: 'line', to: [-qq, d] },
+      ],
+      fillets: [],
+    }
+  }
   const base = [
     [-B, -STRIP],
     [B, -STRIP],
@@ -443,12 +517,89 @@ export function keyItem(key: Key, side: 'male' | 'female'): PathItem {
     start: P(local.start),
     segments,
     closed: true,
-    fillets: local.fillets.map((f) => ({ vertex: f.vertex, radius: micro(f.radius) })),
+    ...(local.fillets.length === 0
+      ? {}
+      : { fillets: local.fillets.map((f) => ({ vertex: f.vertex, radius: micro(f.radius) })) }),
   }
+}
+
+/**
+ * A finger's T-bones (4d) in the local frame: circles of radius f centred on the cheeks at f from
+ * the inside corners, the male's at the finger's base, the female's at the socket's bottom.
+ */
+export function tBoneCentres(size: KeySize, c: number, side: 'male' | 'female'): Vec2[] {
+  const f = size.fillet
+  const q = size.neck / 2
+  return side === 'male'
+    ? [
+        [q, f],
+        [-q, f],
+      ]
+    : [
+        [q + c, size.depth + c - f],
+        [-q - c, size.depth + c - f],
+      ]
+}
+
+/** A circle as a closed path of four quarter arcs, counter-clockwise (an exact half arc is ill-posed). */
+function circlePath(
+  centre: Vec2,
+  r: number,
+  op: 'add' | 'subtract',
+  P: (p: Vec2) => [number, number],
+  mirrored: boolean,
+): PathItem {
+  const at = (k: number): Vec2 => [
+    centre[0] + r * Math.cos((k * Math.PI) / 2),
+    centre[1] + r * Math.sin((k * Math.PI) / 2),
+  ]
+  return {
+    kind: 'path',
+    op,
+    start: P(at(0)),
+    segments: [1, 2, 3, 4].map((k) => ({
+      kind: 'arc' as const,
+      to: P(at(k % 4)),
+      radius: micro(r),
+      cw: mirrored,
+      large: false,
+    })),
+    closed: true,
+  }
+}
+
+/**
+ * A key's items on a piece outline's shape (mm, part frame): its knob or socket, and for a
+ * finger (4d) the two T-bones (`subtract`) after it.
+ */
+export function keyItems(key: Key, side: 'male' | 'female'): PathItem[] {
+  const item = keyItem(key, side)
+  if (key.size.kind !== 'finger') return [item]
+  const P = (p: Vec2): [number, number] => {
+    const q = toPart(key.axis, key.at, key.u + p[0], p[1])
+    return [micro(q[0]), micro(q[1])]
+  }
+  return [
+    item,
+    ...tBoneCentres(key.size, key.clearance, side).map((c) =>
+      circlePath(c, key.size.fillet, 'subtract', P, key.axis === 'x'),
+    ),
+  ]
 }
 
 /** The knob's outline above the line in the part frame, for a preview (fillets left out). */
 export function keyPreviewPoints(key: Key): Vec2[] {
+  if (key.size.kind === 'finger') {
+    const q = key.size.neck / 2
+    const d = key.size.depth
+    const corners: Vec2[] = [
+      [q, 0],
+      [q, d],
+      [-q, d],
+      [-q, 0],
+    ]
+    return corners.map((p) => toPart(key.axis, key.at, key.u + p[0], p[1]))
+  }
   const local = keyLocalPath(key.size, key.clearance, 'male')
   const pts: Vec2[] = []
   for (const s of local.segments.slice(2, 6)) {

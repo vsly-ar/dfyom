@@ -64,7 +64,12 @@ async function renderSplit(before?: (s: Awaited<ReturnType<typeof planSetup>>) =
   // test windows are narrow: the inspector is an overlay, opened by its toggle
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   await screen.findByRole('region', { name: 'Split' })
-  return { ...r, s, shell, bridge, nav, partRow, split, openMenu, callsOf, pieces }
+  /** Chooses the lines' joint (a select since 4d: five joints). */
+  const lineJoint = async (name: string) => {
+    await r.user.click(within(split()).getByRole('combobox', { name: 'Lines joined by' }))
+    await r.user.click(within(await screen.findByRole('listbox')).getByRole('option', { name }))
+  }
+  return { ...r, s, shell, bridge, nav, partRow, split, openMenu, callsOf, pieces, lineJoint }
 }
 
 describe('split part (split parts 4a)', () => {
@@ -308,8 +313,8 @@ describe('split part (split parts 4a)', () => {
     expect(within(t.split()).queryByRole('group', { name: 'Lines joined by' })).toBeNull()
     await t.user.click(within(t.split()).getByRole('button', { name: 'Add line at X' }))
     await waitFor(() => expect(t.pieces()).toHaveLength(4))
-    const joint = () => within(t.split()).getByRole('group', { name: 'Lines joined by' })
-    await t.user.click(within(joint()).getByRole('radio', { name: 'Puzzle' }))
+    expect(within(t.split()).getByRole('group', { name: 'Lines joined by' })).toBeVisible()
+    await t.lineJoint('Puzzle')
     await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('puzzle'))
     expect(t.callsOf('design.split.set').at(-1)).toMatchObject({ split: { joint: 'puzzle' } })
     const section = t.split()
@@ -327,7 +332,7 @@ describe('split part (split parts 4a)', () => {
       }),
     )
     // a later edit sends the joint and the clearance it shows
-    await t.user.click(within(joint()).getByRole('radio', { name: 'Dovetail' }))
+    await t.lineJoint('Dovetail')
     await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('dovetail'))
     const margin = within(t.split()).getByLabelText('Blank margin', { selector: 'input' })
     await t.user.clear(margin)
@@ -337,7 +342,7 @@ describe('split part (split parts 4a)', () => {
         split: { margin: '6', joint: 'dovetail', clearance: '0.2' },
       }),
     )
-    await t.user.click(within(joint()).getByRole('radio', { name: 'Butt' }))
+    await t.lineJoint('Butt')
     await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('butt'))
     expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.joint')
     expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.clearance')
@@ -350,10 +355,10 @@ describe('split part (split parts 4a)', () => {
     await waitFor(() => expect(t.pieces()).toHaveLength(2))
     await t.user.click(within(t.split()).getByRole('button', { name: 'Add line at X' }))
     await waitFor(() => expect(t.pieces()).toHaveLength(4))
-    const joint = within(t.split()).getByRole('group', { name: 'Lines joined by' })
+    expect(within(t.split()).getByRole('group', { name: 'Lines joined by' })).toBeVisible()
     // butt lines: no Test fit
     expect(within(t.split()).queryByRole('button', { name: 'Test fit…' })).toBeNull()
-    await t.user.click(within(joint).getByRole('radio', { name: 'Puzzle' }))
+    await t.lineJoint('Puzzle')
     await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('puzzle'))
     await t.user.click(within(t.split()).getByRole('button', { name: 'Test fit…' }))
     const menu = await screen.findByRole('menu', { name: 'Test fit…' })
@@ -452,5 +457,63 @@ describe('split part (split parts 4a)', () => {
     expect(
       within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('listitem'),
     ).toHaveLength(2)
+  })
+
+  it('fingers and a half lap on lines (4d): the select, their settings and read-outs, no Test fit for a lap', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Add line at X' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(4))
+    await t.user.click(within(t.split()).getByRole('combobox', { name: 'Lines joined by' }))
+    const list = await screen.findByRole('listbox')
+    expect(
+      within(list)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual([
+      'Butt',
+      'Puzzle',
+      'Dovetail',
+      expect.stringMatching(/^Finger/),
+      expect.stringMatching(/^Half lap/),
+    ])
+    await expectNoAxeViolations()
+    await t.user.click(within(list).getByRole('option', { name: /^Finger/ }))
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('finger'))
+    expect(t.callsOf('design.split.set').at(-1)).toMatchObject({ split: { joint: 'finger' } })
+    let section = t.split()
+    expect(within(section).getByText('Finger settings')).toBeVisible()
+    expect(within(section).getByLabelText('Joint clearance', { selector: 'input' })).toHaveValue(
+      '0.15 mm',
+    )
+    expect(within(section).getByText(/T-bones for the Ø|No fingers fit yet/)).toBeVisible()
+    expect(within(section).getByRole('button', { name: 'Test fit…' })).toBeVisible()
+    await expectNoAxeViolations()
+    await t.lineJoint('Half lap')
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('halfLap'))
+    section = t.split()
+    expect(within(section).getByText('Lap settings')).toBeVisible()
+    expect(
+      within(section).getByText(/cut from its bottom \(a flip\)|No half lap fits yet/),
+    ).toBeVisible()
+    expect(within(section).queryByRole('button', { name: 'Test fit…' })).toBeNull()
+    await expectNoAxeViolations()
+  })
+
+  it('Detach (4d): the piece inspector’s button makes a piece a plain part', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    await t.user.click(within(await t.openMenu()).getAllByRole('menuitemradio')[2]!)
+    expect(await screen.findByText('Piece 2 of 2 of Bracket')).toBeVisible()
+    const piece = t.pieces()[1]!
+    await t.user.click(screen.getByRole('button', { name: 'Detach' }))
+    await waitFor(() => expect(t.s.d.doc.parts[piece.id]!.derivedFrom).toBeUndefined())
+    expect(t.callsOf('design.part.update').at(-1)).toEqual({ partId: piece.id, detach: true })
+    expect(t.s.part().split!.detached).toEqual([2])
+    // a plain part now: its inspector, no piece line
+    await waitFor(() => expect(screen.queryByText('Piece 2 of 2 of Bracket')).toBeNull())
+    await expectNoAxeViolations()
   })
 })

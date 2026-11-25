@@ -46,8 +46,8 @@ export interface SplitArgs {
   readonly lines: readonly { readonly axis: 'x' | 'y'; readonly at: string }[]
   readonly levels: readonly string[]
   readonly margin: string
-  /** The lines' key (4b-2); absent = butt lines. */
-  readonly joint?: 'puzzle' | 'dovetail'
+  /** The lines' joint (4b-2 keys, 4d fingers and half laps); absent = butt lines. */
+  readonly joint?: 'puzzle' | 'dovetail' | 'finger' | 'halfLap'
   /** The keys' socket clearance (4b-2); absent = the stored one, else the default. */
   readonly clearance?: string
   /** Dowels joining the levels (4b); absent = butt levels. */
