@@ -293,7 +293,7 @@ export function wallChamferSection(v: WallChamferSectionValues, units: UnitSyste
   const maxY = bottom + 0.05 * D
   const across = WALL_SECTION_ASPECT * (maxY - minY)
   // a strip of air left of the wall (room for the wall's chip), the material to the right
-  const A = 0.28 * across
+  const A = 0.22 * across
   const S = Math.max(across - A, w + D)
 
   const contour: SketchPoint[] = [[w, 0], [rc, yc], ...(cut ? [] : [[0, wallEnd] as const])]
