@@ -1,5 +1,6 @@
 // The reassembly invariant of split parts 4a (docs/modes/split-parts.md#model): the pieces, each
-// evaluated in its own blank and moved back by its offset, are the source inside their cells.
+// evaluated in its own blank and moved back by its offset, are the source inside their cells; the
+// dowel holes of 4b are the joint and are not compared (docs/modes/split-parts.md#implementation-4b).
 // Oracle: point membership (ray parity) on the evaluated meshes at random points of each cell
 // (inside the footprint, between the part's facings), source vs. piece.
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -83,6 +84,7 @@ async function enclosure(): Promise<DesignSetup> {
 
 const cases: [string, object][] = [
   ['one level', { levels: [ENCLOSURE_LEVEL] }],
+  ['one level with dowels (4b)', { levels: [ENCLOSURE_LEVEL], dowels: {} }],
   [
     'the level and two lines',
     {
@@ -117,6 +119,19 @@ describe('reassembly: pieces == source', () => {
         const waste = geometry.operations.flatMap((g) =>
           g.kind === 'profile' && g.side === 'inside' ? [shapeRegion(g.shape)!] : [],
         )
+        // dowel holes (4b) are the joint, not the source: their columns are not compared
+        const blankW = pieceLoaded.stock.width.canonical
+        const dowels = pieceLoaded.part.operations.flatMap((op, i) => {
+          const g = geometry.operations[i]
+          if (!op.id.startsWith('split1_dowel') || g?.kind !== 'drilling') return []
+          const v = g.direction === '-z' ? blankW - g.center[1] : g.center[1]
+          const depth = g.bottom.kind === 'through' ? 0 : g.bottom.depth
+          const T = pieceLoaded.stock.thickness.canonical
+          const z = g.direction === '-z' ? -T + depth / 2 : -depth / 2
+          return [{ c: [g.center[0], v] as const, r: g.diameter / 2 + 0.01, z }]
+        })
+        // and they are cut: empty at half their depth
+        for (const d of dowels) expect(inside(e, [d.c[0], d.c[1], d.z]), plan.name).toBe(false)
         const { bounds, band } = plan.cell
         // the part between its facings: 9.738 below the top, above the bottom
         const zt = Math.min(band.zt, -9.738)
@@ -129,6 +144,8 @@ describe('reassembly: pieces == source', () => {
           ]
           if (!regionContains(plan.cell.region, [p[0], p[1]])) continue
           if (waste.some((w) => regionContains(w, [p[0] + off[0]!, p[1] + off[1]!]))) continue
+          const q = [p[0] + off[0]!, p[1] + off[1]!] as const
+          if (dowels.some((d) => Math.hypot(q[0] - d.c[0], q[1] - d.c[1]) <= d.r)) continue
           const want = inside(source, p)
           const got = inside(e, [p[0] + off[0]!, p[1] + off[1]!, p[2] + off[2]!])
           expect([plan.n, p, got]).toEqual([plan.n, p, want])

@@ -33,6 +33,7 @@ import {
   type Layout,
   type Rect,
 } from './layout'
+import { dowelOperations } from './dowels'
 
 /** Rounding of computed lengths: 1 µm (exact rationals over 10⁶). */
 const MICRO = 1_000_000
@@ -49,6 +50,8 @@ export type SplitRule =
   | 'noStock'
   | 'outsideTravel'
   | 'fitsWhole'
+  | 'dowelNear'
+  | 'dowelFit'
 
 export function splitFinding(
   splitId: string,
@@ -760,6 +763,14 @@ export function planPieces(
       const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined)
       if (o.isErr()) return Err(o.unwrapErr())
       b.ops.push(o.unwrap())
+    }
+    // dowel holes (4b): drilled before the piece is cut free
+    const dowels = dowelOperations(port, L, split, cell, offset, blank.width, (mm) =>
+      lengthDTO(mm, loaded.units),
+    )
+    if (dowels.length > 0) {
+      const at = b.ops.findIndex((o) => o.id === `${numbers.id}_outline`)
+      b.ops.splice(at < 0 ? b.ops.length : at, 0, ...dowels)
     }
     pieces.push({
       n: cell.n,

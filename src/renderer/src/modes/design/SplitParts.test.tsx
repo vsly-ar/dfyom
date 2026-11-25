@@ -225,4 +225,44 @@ describe('split part (split parts 4a)', () => {
     expect(t.callsOf('design.split.set').at(-1)).toEqual({ partId: t.s.partId, split: null })
     expect(within(t.split()).getByRole('button', { name: 'Split part…' })).toBeVisible()
   })
+
+  it('dowels on the level (4b): the joint control, Ø and depth, positions, Place again', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    const joint = () => within(t.split()).getByRole('group', { name: 'Levels joined by' })
+    await t.user.click(within(joint()).getByRole('radio', { name: 'Dowels' }))
+    await waitFor(() => expect(t.s.part().split?.joint.dowels).toBeDefined())
+    expect(t.callsOf('design.split.set').at(-1)).toMatchObject({ split: { dowels: {} } })
+    const section = t.split()
+    expect(within(section).getByLabelText('Dowel Ø', { selector: 'input' })).toBeVisible()
+    expect(within(section).getByLabelText('Hole depth', { selector: 'input' })).toBeVisible()
+    const holes = t.s.part().split!.joint.dowels!.holes
+    // the level's read-out and the positions list (one X and Y field per hole)
+    expect(within(section).getByText(holes.length === 1 ? '1 dowel' : `${holes.length} dowels`))
+    expect(within(section).getByText(`Dowel positions (${holes.length})`)).toBeInTheDocument()
+    expect(
+      within(section).queryAllByLabelText(/^Dowel \d+ X$/, { selector: 'input' }),
+    ).toHaveLength(holes.length)
+    await expectNoAxeViolations()
+    // a new Ø lets the depth default for it; the holes are kept
+    const dia = within(section).getByLabelText('Dowel Ø', { selector: 'input' })
+    await t.user.clear(dia)
+    await t.user.type(dia, '4{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('design.split.set').at(-1)).toMatchObject({
+        split: { dowels: { diameter: '4', holes: expect.any(Array) } },
+      }),
+    )
+    expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.dowels.depth')
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Place dowels again' }))
+    await waitFor(() =>
+      expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.dowels.holes'),
+    )
+    // Butt again: no dowels sent, none kept
+    await t.user.click(within(joint()).getByRole('radio', { name: 'Butt' }))
+    await waitFor(() => expect(t.s.part().split?.joint.dowels).toBeUndefined())
+    expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.dowels')
+    await expectNoAxeViolations()
+  })
 })

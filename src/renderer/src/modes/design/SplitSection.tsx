@@ -19,6 +19,7 @@ import {
   IconButton,
   PanelHeader,
   QuantityInput,
+  SegmentedControl,
   WarningList,
   type WarningListLabels,
   type WarningView,
@@ -31,14 +32,17 @@ import {
   blankText,
   cutFindings,
   cutSource,
+  dowelHoles,
   firstSplit,
   nextCut,
   pieceViews,
   piecesOf,
   splitArgs,
+  withoutLevel,
   type PieceView,
   type SplitArgs,
 } from './split-view'
+import { DOWEL_SIZES } from '../../../../core/design/dowel'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
 const m = designMessages
@@ -163,13 +167,14 @@ export function SplitSection({
     void send(withLevels([...args.levels, cutSource(v, units)]))
   }
   const pieces = pieceViews(part.doc, part.dto.id)
+  const holes = dowelHoles(split)
   return (
     <section aria-label={t.title} className={styles['splitSection']}>
       <h3 className={styles['groupTitle']}>
         {t.title} · {t.pieces(pieces.length)}
       </h3>
       <p className={styles['muted']}>{t.intro}</p>
-      <SplitPreview part={part} pieces={pieces} />
+      <SplitPreview part={part} pieces={pieces} holes={holes} />
       <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
         {pieces.map((p) => (
           <li key={p.id} className={styles['splitChip']}>
@@ -218,6 +223,9 @@ export function SplitSection({
             key={`level-${i}`}
             onFocus={() => setFocus({ kind: 'level', index: i })}
             onBlur={() => setFocus(null)}
+            {...(split.joint.dowels === undefined
+              ? {}
+              : { note: t.dowelCount(holes.filter((h) => h.level === i).length) })}
             findings={cutFindings(warnings, {
               kind: 'level',
               index: i,
@@ -241,7 +249,7 @@ export function SplitSection({
             <IconButton
               label={t.removeLevel(level.source)}
               icon={<Icon name="delete" />}
-              onClick={() => void send(withLevels(args.levels.filter((_, k) => k !== i)))}
+              onClick={() => void send(withoutLevel(args, i))}
             />
           </CutRow>
         ))}
@@ -265,6 +273,9 @@ export function SplitSection({
         onCommit={(q, gesture) => void send({ ...args, margin: q.source }, false, gesture)}
       />
       <p className={styles['muted']}>{t.joint}</p>
+      {split.levels.length > 0 ? (
+        <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
+      ) : null}
       <div className={styles['addRow']}>
         <Button
           size="sm"
@@ -282,6 +293,118 @@ export function SplitSection({
 }
 
 /**
+ * The levels' joint (split parts 4b): Butt or Dowels; with dowels the dowel Ø (changing it lets
+ * the depth default for the new size), the hole depth, the hole positions (X, Y, remove: a level
+ * left without holes is placed again by the core) and "Place dowels again" (no holes sent).
+ */
+function DowelFields({
+  part,
+  args,
+  send,
+}: {
+  part: DesignPart
+  args: SplitArgs
+  send: (split: SplitArgs, gesture?: string) => void
+}): React.JSX.Element {
+  const split = part.dto.split!
+  const dowels = split.joint.dowels
+  const unit = defaultUnit('length', part.units)
+  const d = args.dowels
+  const holes = dowelHoles(split)
+  const withHoles = (next: NonNullable<SplitArgs['dowels']>['holes']) => ({
+    ...args,
+    dowels: { ...d, holes: next ?? [] },
+  })
+  return (
+    <div className={styles['splitGroup']} role="group" aria-label={t.levelJoint}>
+      <SegmentedControl
+        label={t.levelJoint}
+        size="sm"
+        options={[
+          { value: 'butt', label: t.jointButt },
+          { value: 'dowels', label: t.jointDowels },
+        ]}
+        value={dowels === undefined ? 'butt' : 'dowels'}
+        onValueChange={(v) => {
+          const { dowels: _, ...rest } = args
+          send(v === 'dowels' ? { ...rest, dowels: {} } : rest)
+        }}
+      />
+      {dowels === undefined || d === undefined ? null : (
+        <>
+          <QuantityInput
+            label={t.dowelDiameter}
+            kind="length"
+            defaultUnit={unit}
+            value={quantityOf(dowels.diameter)}
+            onCommit={(q, gesture) => {
+              const { depth: _, ...rest } = d
+              send({ ...args, dowels: { ...rest, diameter: q.source } }, gesture)
+            }}
+          />
+          <p className={styles['muted']}>{t.dowelHint(DOWEL_SIZES.join(', '))}</p>
+          <QuantityInput
+            label={t.dowelDepth}
+            kind="length"
+            defaultUnit={unit}
+            value={quantityOf(dowels.depth)}
+            onCommit={(q, gesture) => send({ ...args, dowels: { ...d, depth: q.source } }, gesture)}
+          />
+          <details className={styles['splitDowels']}>
+            <summary>{t.positions(holes.length)}</summary>
+            <ul>
+              {dowels.holes.map((h, i) => (
+                <li key={i} aria-label={t.dowelLevel(i + 1, split.levels[h.level]?.source ?? '')}>
+                  {(['x', 'y'] as const).map((axis, a) => (
+                    <QuantityInput
+                      key={axis}
+                      label={t.dowelAt(i + 1, axis)}
+                      kind="length"
+                      defaultUnit={unit}
+                      value={quantityOf(h.at[a]!)}
+                      onCommit={(q, gesture) =>
+                        send(
+                          withHoles(
+                            d.holes?.map((x, k) =>
+                              k === i
+                                ? { ...x, at: a === 0 ? [q.source, x.at[1]] : [x.at[0], q.source] }
+                                : x,
+                            ),
+                          ),
+                          gesture,
+                        )
+                      }
+                    />
+                  ))}
+                  <IconButton
+                    label={t.removeDowel(i + 1)}
+                    icon={<Icon name="delete" />}
+                    onClick={() => send(withHoles(d.holes?.filter((_, k) => k !== i)))}
+                  />
+                </li>
+              ))}
+            </ul>
+          </details>
+          <div className={styles['addRow']}>
+            <Button
+              size="sm"
+              icon={<Icon name="refresh" />}
+              title={t.placeAgainDescription}
+              onClick={() => {
+                const { holes: _, ...rest } = d
+                send({ ...args, dowels: rest })
+              }}
+            >
+              {t.placeAgain}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
  * A line's or level's field row: focus within it highlights the cut in the viewport's exploded
  * preview (ui-store `splitFocus`); the split findings on that cut (a thin glue face, a feature
  * near it) list under it, following every source edit.
@@ -289,11 +412,14 @@ export function SplitSection({
 function CutRow({
   children,
   findings,
+  note,
   onFocus,
   onBlur,
 }: {
   children: React.ReactNode
   findings: readonly DfmWarning[]
+  /** A read-out under the field (a level's dowel count, 4b). */
+  note?: string
   onFocus: () => void
   onBlur: () => void
 }): React.JSX.Element {
@@ -311,6 +437,7 @@ function CutRow({
       }}
     >
       <div className={styles['splitRow']}>{children}</div>
+      {note === undefined ? null : <p className={styles['muted']}>{note}</p>}
       {shown.length > 0 ? (
         <ul className={styles['splitFindings']}>
           {shown.map((f, k) => (
@@ -335,7 +462,16 @@ const CUT_FINDINGS_MAX = 3
  * Top (X–Y) and Front (X–Z) of the pieces' blanks, pulled apart from the part's centre once shown
  * (`--motion-slow`; reduced motion zeroes it, so the pieces just appear apart).
  */
-function SplitPreview({ part, pieces }: { part: DesignPart; pieces: readonly PieceView[] }) {
+function SplitPreview({
+  part,
+  pieces,
+  holes,
+}: {
+  part: DesignPart
+  pieces: readonly PieceView[]
+  /** Dowel holes (4b), drawn in Top at their place on the part. */
+  holes: readonly { readonly x: number; readonly y: number }[]
+}) {
   const [apart, setApart] = useState(false)
   useEffect(() => {
     const id = requestAnimationFrame(() => setApart(true))
@@ -377,6 +513,17 @@ function SplitPreview({ part, pieces }: { part: DesignPart; pieces: readonly Pie
           aria-label={`${t.preview}: ${kind === 'top' ? t.top : t.front}`}
         >
           <rect className={styles['splitWhole']} x={0} y={0} width={L} height={h} />
+          {kind === 'top'
+            ? holes.map((d, k) => (
+                <circle
+                  key={`dowel-${k}`}
+                  className={styles['splitDowel']}
+                  cx={d.x}
+                  cy={W - d.y}
+                  r={Math.max(L, W) * 0.012}
+                />
+              ))
+            : null}
           {rects.map(({ key, n, r, dx, dy }) => (
             <g
               key={key}

@@ -30,6 +30,8 @@ import { DfmWarningSchema } from '../warnings'
 import { lengthDTO, pieceName, pieceRecord, planPieces, type PiecePlan } from './pieces'
 import { splitWarnings } from './findings'
 import { derivedPartError } from './derived'
+import { completeDowels } from './dowels'
+import { DOWEL_DEPTH_MAX, DOWEL_DIAMETER_MAX, DOWEL_DIAMETER_MIN } from '../dowel'
 
 export { derivedPartError }
 
@@ -241,7 +243,20 @@ const SplitArg = z
       .optional()
       .describe('Horizontal cuts: part-frame z, between -thickness and 0; default none'),
     margin: Src.optional().describe('Blank margin per side; default 5 mm'),
-    joint: z.enum(SPLIT_JOINTS).optional().describe('Default butt'),
+    joint: z.enum(SPLIT_JOINTS).optional().describe("Lines' joint; default butt"),
+    dowels: z
+      .object({
+        diameter: Src.optional().describe('Dowel Ø; default: fits'),
+        depth: Src.optional().describe('Per piece; default 2.5Ø + 1 mm'),
+        holes: z
+          .array(z.object({ level: z.number().int().min(0), at: z.tuple([Src, Src]) }))
+          .max(64)
+          .optional()
+          .describe('level: index in levels; at: part X, Y. Levels without holes get placed'),
+      })
+      .nullable()
+      .optional()
+      .describe('Dowels on levels; absent = butt'),
   })
   .nullable()
   .describe('The whole split; null removes it and its pieces')
@@ -280,9 +295,16 @@ const splitSet = defineCommand({
     const target = draft.parts[args.partId]!
     if (args.split === null) delete target.split
     else {
-      const parsed = parseSplit(args.split, l)
+      const parsed = parseSplit(args.split, l, baseOf(target).split)
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      if (!deepEqual(baseOf(target).split, parsed.unwrap())) target.split = parsed.unwrap()
+      const port = requirePort(ctx.services.region2d, where)
+      if (port.isErr()) return port
+      const units = draft.unitSystem
+      const done = completeDowels(l, parsed.unwrap().split, port.unwrap(), parsed.unwrap(), (mm) =>
+        lengthDTO(mm, units),
+      )
+      if (done.isErr()) return Err(done.unwrapErr().withContext(where))
+      if (!deepEqual(baseOf(target).split, done.unwrap())) target.split = done.unwrap()
     }
     const r = regeneratePieces(draft, args.partId, ctx, args.confirm === true, where)
     if (r.isErr()) return r
@@ -303,8 +325,20 @@ const splitSet = defineCommand({
   },
 })
 
-/** The split record from its args (lines and levels in range, distinct; margin ≥ 0). */
-function parseSplit(a: NonNullable<z.output<typeof SplitArg>>, l: LoadedPart): AppResult<SplitDTO> {
+/**
+ * The split record from its args (lines and levels in range, distinct; margin ≥ 0; dowels in
+ * range), and the dowel Ø and depth the args (or the previous dowels) fix: undefined = the
+ * placement chooses the Ø, the depth defaults for it.
+ */
+function parseSplit(
+  a: NonNullable<z.output<typeof SplitArg>>,
+  l: LoadedPart,
+  prev: SplitDTO | undefined,
+): AppResult<{
+  split: SplitDTO
+  diameter: number | undefined
+  depth: number | undefined
+}> {
   const f = new Fields(l.units, SurfaceTable.build(l.part.operations, l.stock).resolver(0))
   const lines = (a.lines ?? []).map((line, i) => ({
     axis: line.axis,
@@ -312,6 +346,24 @@ function parseSplit(a: NonNullable<z.output<typeof SplitArg>>, l: LoadedPart): A
   }))
   const levels = (a.levels ?? []).map((s, i) => f.q(`split.levels.${i}`, 'length', s))
   const margin = f.q('split.margin', 'length', a.margin ?? (l.units === 'inch' ? '0.2"' : '5 mm'))
+  // dowels: the Ø and depth given, else the previous ones (the depth while the Ø is unchanged)
+  const dw = a.dowels ?? undefined
+  const before = prev?.joint.dowels
+  const dia =
+    dw?.diameter !== undefined ? f.q('split.dowels.diameter', 'length', dw.diameter) : undefined
+  const diaDto = (dia?.toDTO() as SplitDTO['margin'] | undefined) ?? before?.diameter
+  const depth = dw?.depth !== undefined ? f.q('split.dowels.depth', 'length', dw.depth) : undefined
+  const sameDia =
+    before !== undefined && diaDto !== undefined && mmOf(before.diameter) === mmOf(diaDto)
+  const depthDto =
+    (depth?.toDTO() as SplitDTO['margin'] | undefined) ?? (sameDia ? before.depth : undefined)
+  const holes = (dw?.holes ?? []).map((h, i) => ({
+    level: h.level,
+    at: [
+      f.q(`split.dowels.holes.${i}.at.0`, 'length', h.at[0]),
+      f.q(`split.dowels.holes.${i}.at.1`, 'length', h.at[1]),
+    ] as const,
+  }))
   const done = f.done()
   if (done.isErr()) return done
   const L = l.stock.length.canonical
@@ -356,13 +408,56 @@ function parseSplit(a: NonNullable<z.output<typeof SplitArg>>, l: LoadedPart): A
   })
   if (margin.canonical < 0)
     issues.push({ path: ['split', 'margin'], rule: 'nonNegative', message: 'must be ≥ 0' })
+  if (
+    dia !== undefined &&
+    !(dia.canonical >= DOWEL_DIAMETER_MIN && dia.canonical <= DOWEL_DIAMETER_MAX)
+  )
+    issues.push({
+      path: ['split', 'dowels', 'diameter'],
+      rule: 'range',
+      message: `must be between ${DOWEL_DIAMETER_MIN} and ${DOWEL_DIAMETER_MAX} mm`,
+      params: { min: DOWEL_DIAMETER_MIN, max: DOWEL_DIAMETER_MAX },
+    })
+  if (depth !== undefined && !(depth.canonical > 0 && depth.canonical <= DOWEL_DEPTH_MAX))
+    issues.push({
+      path: ['split', 'dowels', 'depth'],
+      rule: 'range',
+      message: `must be more than 0 and at most ${DOWEL_DEPTH_MAX} mm`,
+      params: { min: 0, max: DOWEL_DEPTH_MAX },
+    })
+  holes.forEach((h, i) => {
+    if (h.level >= levels.length)
+      issues.push({
+        path: ['split', 'dowels', 'holes', i, 'level'],
+        rule: 'range',
+        message: `no level ${h.level}: the split has ${levels.length}`,
+        params: { min: 0, max: levels.length - 1 },
+      })
+  })
   if (issues.length > 0) return invalid(issues, 'design.split.set')
+  const D = (q: { toDTO(): unknown }) => q.toDTO() as SplitDTO['margin']
+  const dowels =
+    dw === undefined
+      ? undefined
+      : {
+          // placeholders until completeDowels fixes them (the given ones are kept)
+          diameter: diaDto ?? D(margin),
+          depth: depthDto ?? D(margin),
+          holes: holes.map((h) => ({
+            level: h.level,
+            at: [D(h.at[0]), D(h.at[1])] as [SplitDTO['margin'], SplitDTO['margin']],
+          })),
+        }
   return Ok({
-    id: SPLIT_ID,
-    lines: lines.map((x) => ({ axis: x.axis, at: x.at.toDTO() as SplitDTO['margin'] })),
-    levels: levels.map((q) => q.toDTO() as SplitDTO['margin']),
-    margin: margin.toDTO() as SplitDTO['margin'],
-    joint: { kind: a.joint ?? 'butt' },
+    split: {
+      id: SPLIT_ID,
+      lines: lines.map((x) => ({ axis: x.axis, at: D(x.at) })),
+      levels: levels.map(D),
+      margin: D(margin),
+      joint: { kind: a.joint ?? 'butt', ...(dowels === undefined ? {} : { dowels }) },
+    },
+    diameter: diaDto === undefined ? undefined : mmOf(diaDto),
+    depth: depthDto === undefined ? undefined : mmOf(depthDto),
   })
 }
 
