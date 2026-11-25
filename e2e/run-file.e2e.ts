@@ -68,6 +68,8 @@ test('Run a gCode file without a project: open → preview and lines → pre-fli
 
   // connect, home, put the work zero where the file fits the travel
   const machine = page.getByRole('group', { name: 'Machine' })
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()

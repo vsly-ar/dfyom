@@ -1,5 +1,6 @@
-/* Jog step picker (DF88): a 4 × 2 grid on the segmented controls' track, the chosen cell in the
-   accent; the custom field is the eighth cell. Doc: docs/conventions/ui.md#jog-position-and-probing-df88 */
+/* Jog step picker (DF88): one row on the segmented controls' track (DF102), the chosen cell in
+   the accent; the custom field is the eighth cell. A row wider than the panel scrolls sideways.
+   Doc: docs/conventions/ui.md#jog-position-and-probing-df88 */
 .root {
   display: grid;
   gap: var(--space-1);
@@ -23,12 +24,36 @@
 }
 
 .grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* the offset parent of the cells (keepInView) */
+  position: relative;
+  display: flex;
   gap: 2px;
   padding: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
   border-radius: var(--radius-sm);
   background: var(--bg-active);
+}
+
+/* cells out of view at an end: that end fades out (DF102) */
+.grid[data-more='end'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+
+.grid[data-more='start'] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 20px), transparent);
+}
+
+.grid[data-more='both'] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 20px,
+    #000 calc(100% - 20px),
+    transparent
+  );
 }
 
 /* the radios sit in the grid's cells like the field */
@@ -47,8 +72,11 @@
 }
 
 .cell {
+  /* as wide as its label, shared out when the row has room */
+  flex: 1 0 auto;
+  min-width: 28px;
   border: 0;
-  padding: 0;
+  padding: 0 4px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -83,7 +111,8 @@
 }
 
 .custom {
-  width: 100%;
+  flex: 1.5 0 56px;
+  width: 56px;
   padding: 0 var(--space-1);
   border: 1px solid var(--border-control);
   background: var(--bg-field);

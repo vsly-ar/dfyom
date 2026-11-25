@@ -14,6 +14,9 @@ export function iconLabel(name: IconName): string {
 
 export type IconSize = 'sm' | 'md' | 'lg' | 'xl'
 
+/** Clockwise quarter turns of the drawing about its centre (DF99: a facing on the bottom or a side). */
+export type IconRotation = 0 | 90 | 180 | 270
+
 export interface IconProps {
   name: IconName
   /** `--icon-sm` 14 / `md` 16 (default) / `lg` 20 / `xl` 28; a control's CSS may size it too. */
@@ -23,6 +26,8 @@ export interface IconProps {
    * icons (aria-hidden): the control or the text beside it names them.
    */
   label?: string
+  /** Turns the drawing clockwise about its centre; 0 (default) draws it as designed. */
+  rotate?: IconRotation | undefined
   className?: string | undefined
   /** Data attributes for styling hooks (e.g. `data-error`). */
   [data: `data-${string}`]: string | boolean | undefined
@@ -43,7 +48,15 @@ function Part({ part }: { part: IconPart }): React.JSX.Element {
   return <circle cx={cx} cy={cy} r={r} {...common} />
 }
 
-export function Icon({ name, size, label, className, ...data }: IconProps): React.JSX.Element {
+export function Icon({
+  name,
+  size,
+  label,
+  rotate = 0,
+  className,
+  ...data
+}: IconProps): React.JSX.Element {
+  const parts = ICON_SET[name].parts.map((p, i) => <Part key={i} part={p} />)
   return (
     <svg
       viewBox="0 0 16 16"
@@ -51,12 +64,11 @@ export function Icon({ name, size, label, className, ...data }: IconProps): Reac
       focusable="false"
       data-icon={name}
       {...(size !== undefined ? { 'data-size': size } : {})}
+      {...(rotate !== 0 ? { 'data-rotate': rotate } : {})}
       {...data}
       className={[styles['icon'], className].filter(Boolean).join(' ')}
     >
-      {ICON_SET[name].parts.map((p, i) => (
-        <Part key={i} part={p} />
-      ))}
+      {rotate === 0 ? parts : <g transform={`rotate(${rotate} 8 8)`}>{parts}</g>}
     </svg>
   )
 }

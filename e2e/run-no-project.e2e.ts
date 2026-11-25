@@ -77,6 +77,8 @@ test('Run without a project: start panel → Run → connect the emulator → ho
   await expect(
     inspector.getByRole('heading', { name: 'Open a project to run a plan' }),
   ).toBeVisible()
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
   await render(page, 'df80-run-no-project')

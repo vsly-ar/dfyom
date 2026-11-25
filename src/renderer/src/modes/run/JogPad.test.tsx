@@ -4,9 +4,11 @@ import { act, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import type { JogKeyStyle } from '../../../../shared/settings'
+import { cssRule } from '../../test/css'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { HOLD_DELAY_MS } from './jog-press'
 import { JogPad, type JogControls } from './JogPad'
+import { hiddenEdges, keepInView } from './JogStepPicker'
 import { jogHotkeysActive, useJogHotkeyListener } from './useJogHotkeys'
 
 function controls(patch: Partial<JogControls> = {}): JogControls & { log: string[] } {
@@ -145,6 +147,54 @@ describe('JogPad', () => {
     )
     expect(screen.getByRole('radio', { name: '0.1 in' })).toBeChecked()
     expect(screen.getByRole('radio', { name: '0.001 in' })).toBeInTheDocument()
+  })
+
+  it('lays the step cells out in one row that scrolls sideways when narrower (DF102)', () => {
+    renderUi(<JogPad controls={controls()} disabledReason={null} reasonId="why" />)
+    const row = document.querySelector('[data-jog-steps]')!
+    // the seven presets and the custom field are the row's cells, in order
+    expect(within(row as HTMLElement).getAllByRole('radio')).toHaveLength(7)
+    expect(row.lastElementChild).toBe(screen.getByRole('textbox', { name: 'Custom jog step (mm)' }))
+    const css = 'src/renderer/src/modes/run/JogStepPicker.module.css'
+    expect(cssRule(css, `.${row.className}`)).toMatchObject({
+      display: 'flex',
+      'overflow-x': 'auto',
+      position: 'relative',
+    })
+    expect(cssRule(css, '.cell')).toMatchObject({ flex: '1 0 auto' })
+  })
+
+  it('keeps the chosen cell in view of the scrolled row, sideways only (DF102)', () => {
+    const box = (props: Record<string, number>) => {
+      const el = document.createElement('div')
+      for (const [k, v] of Object.entries(props))
+        Object.defineProperty(el, k, { value: v, writable: true, configurable: true })
+      return el
+    }
+    const row = box({ clientWidth: 180, scrollLeft: 0 })
+    keepInView(row, box({ offsetLeft: 40, offsetWidth: 30 }))
+    expect(row.scrollLeft).toBe(0)
+    keepInView(row, box({ offsetLeft: 200, offsetWidth: 56 }))
+    expect(row.scrollLeft).toBe(200 + 56 + 2 - 180)
+    keepInView(row, box({ offsetLeft: 2, offsetWidth: 28 }))
+    expect(row.scrollLeft).toBe(0)
+    // the ends with cells out of view, which fade
+    expect(hiddenEdges(box({ clientWidth: 180, scrollWidth: 180, scrollLeft: 0 }))).toEqual({
+      start: false,
+      end: false,
+    })
+    expect(hiddenEdges(box({ clientWidth: 180, scrollWidth: 250, scrollLeft: 0 }))).toEqual({
+      start: false,
+      end: true,
+    })
+    expect(hiddenEdges(box({ clientWidth: 180, scrollWidth: 250, scrollLeft: 30 }))).toEqual({
+      start: true,
+      end: true,
+    })
+    expect(hiddenEdges(box({ clientWidth: 180, scrollWidth: 250, scrollLeft: 70 }))).toEqual({
+      start: true,
+      end: false,
+    })
   })
 })
 

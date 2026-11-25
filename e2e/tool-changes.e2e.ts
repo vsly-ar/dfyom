@@ -285,6 +285,8 @@ test('run: the later tool touches off on the faced floor, moves to its spot and 
   const machine = page.getByRole('group', { name: 'Machine' })
   await navigator.getByRole('combobox', { name: 'Setup' }).click()
   await page.getByRole('option', { name: '2. Top' }).click()
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()

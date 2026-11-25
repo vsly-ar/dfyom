@@ -47,6 +47,7 @@ export {
   type IconGroup,
   type IconName,
   type IconProps,
+  type IconRotation,
   type IconSize,
 } from './icons/Icon'
 export {

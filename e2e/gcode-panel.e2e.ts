@@ -141,6 +141,8 @@ test('run: the gCode panel follows the executing line and stops following on a s
   const box = await panel.boundingBox()
   expect(view!.y + view!.height).toBeLessThanOrEqual(box!.y + 1)
 
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: '10×' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()

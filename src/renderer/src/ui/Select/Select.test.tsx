@@ -1,5 +1,6 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { cssRule } from '../../test/css'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { Field } from '../Field/Field'
 import { groupOptions, Select } from './Select'
@@ -10,6 +11,17 @@ const TOOLS = [
 ] as const
 
 describe('Select', () => {
+  it('starts an option with a picture at the list edge, never centred (DF100)', () => {
+    const css = 'src/renderer/src/ui/Select/Select.module.css'
+    // a described option centres its column vertically; with a picture the row turns, so the row
+    // must say where it starts
+    expect(cssRule(css, '.item[data-described]')).toMatchObject({ 'justify-content': 'center' })
+    expect(cssRule(css, '.item[data-icon]')).toMatchObject({
+      'flex-direction': 'row',
+      'justify-content': 'flex-start',
+    })
+  })
+
   it('is a combobox labelled by its Field and shows the value', () => {
     renderUi(
       <Field label="Tool">

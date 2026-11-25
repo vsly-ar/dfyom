@@ -54,7 +54,7 @@ import { useCommand } from './useDesign'
 import { useRowActions } from './row-actions'
 import { useSkipToggle } from './ClonesInspector'
 import { instanceId } from './clones-view'
-import { featureIcon, partOperationIcon } from './operation-icon'
+import { featureIcon, partOperationIconProps } from './operation-icon'
 
 export { featureIcon, operationIcon } from './operation-icon'
 
@@ -468,7 +468,7 @@ function OperationRow({
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
-          <Icon name={partOperationIcon(ctx.part.dto, op)} />
+          <Icon {...partOperationIconProps(ctx.part.dto, op)} />
           <span className={styles['opName']} title={op.name}>
             {op.name}
           </span>
@@ -638,7 +638,7 @@ function OwnedRow({
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
-          <Icon name={partOperationIcon(ctx.part.dto, op)} />
+          <Icon {...partOperationIconProps(ctx.part.dto, op)} />
           <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
             {roleLabel(featureName, op.name)}
           </span>

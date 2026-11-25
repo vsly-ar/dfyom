@@ -395,6 +395,8 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await page.keyboard.press('ControlOrMeta+3')
   await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked()
   const machine = page.getByRole('group', { name: 'Machine' })
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()

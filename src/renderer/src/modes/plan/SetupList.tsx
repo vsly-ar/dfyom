@@ -40,9 +40,10 @@ import {
   useReorder,
   type MenuEntry,
   type IconName,
+  type IconRotation,
   type Reorder,
 } from '../../ui'
-import { partOperationIcon } from '../design/operation-icon'
+import { partOperationIconProps } from '../design/operation-icon'
 import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
@@ -67,18 +68,20 @@ const m = planMessages
 
 /**
  * A plan operation's row icon: its first design operation's, as the design navigator shows it
- * (DF44: a countersink or chamfer never reads as a facing, a counterbore never as a pocket).
+ * (DF44: a countersink or chamfer never reads as a facing, a counterbore never as a pocket), with
+ * its turn (a bottom or side facing, DF99).
  */
-export function planOperationIcon(
+export function planOperationIconProps(
   plan: PlanDTO,
   designOperationIds: readonly string[],
   aid?: { readonly kind: string } | undefined,
-): IconName {
+): { name: IconName; rotate: IconRotation } {
   // alignment aids (S13): a witness mark is a V-bit's, a registration hole a drill's
-  if (aid !== undefined) return aid.kind === 'witnessMark' ? 'chamfer-mill' : 'drill'
+  if (aid !== undefined)
+    return { name: aid.kind === 'witnessMark' ? 'chamfer-mill' : 'drill', rotate: 0 }
   const part = plan.design.part
   const op = part.operations.find((o) => o.id === designOperationIds[0])
-  return op === undefined ? 'facing' : partOperationIcon(part, op)
+  return op === undefined ? { name: 'facing', rotate: 0 } : partOperationIconProps(part, op)
 }
 
 /**
@@ -550,7 +553,7 @@ function OperationRow({
           onClick={onSelect}
           onKeyDown={onKeyDown}
         >
-          <Icon name={planOperationIcon(plan, op.designOperationIds, op.aid)} />
+          <Icon {...planOperationIconProps(plan, op.designOperationIds, op.aid)} />
           <span className={styles['opText']}>
             <span className={styles['opName']} title={name}>
               <NameWords name={name} />

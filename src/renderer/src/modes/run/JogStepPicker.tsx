@@ -1,10 +1,10 @@
 // Jog step picker (DF88): seven presets as a radio group (one tab stop, arrow keys move and
-// choose) and an inline custom field as the eighth cell of the 4 × 2 grid – no dialog, no
-// popover. The step is in mm; presets and the field are in the project unit. A custom value
+// choose) and an inline custom field as the eighth cell of one row (DF102: one line, scrolled
+// sideways when the panel is narrower, the chosen cell kept in view) – no dialog, no popover. The step is in mm; presets and the field are in the project unit. A custom value
 // is chosen when committed (Enter, leaving the field) or when the field is focused holding a
 // valid value; an invalid one shows its reason in the caption row (reserved: nothing moves).
 // Doc: docs/conventions/ui.md#jog-position-and-probing-df88
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { UnitSystem } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
 import {
@@ -57,6 +57,8 @@ export function JogStepPicker({
   const text = draft ?? shown(customMm)
   const [invalid, setInvalid] = useState(false)
   const radios = useRef<(HTMLButtonElement | null)[]>([])
+  const row = useRef<HTMLDivElement>(null)
+  const field = useRef<HTMLInputElement>(null)
   const errorId = useId()
   const captionId = useId()
 
@@ -87,6 +89,27 @@ export function JogStepPicker({
     radios.current[next]?.focus()
   }
   const tabStop = preset === undefined ? 0 : presets.indexOf(preset)
+  const chosenIndex = preset === undefined ? -1 : presets.indexOf(preset)
+  // DF102: the chosen cell stays in view in the scrolled row (sideways only: the panel never moves)
+  const [more, setMore] = useState<{ start: boolean; end: boolean }>({ start: false, end: false })
+  const measure = () => {
+    if (row.current === null) return
+    const next = hiddenEdges(row.current)
+    setMore((m) => (m.start === next.start && m.end === next.end ? m : next))
+  }
+  useLayoutEffect(() => {
+    const el = chosenIndex < 0 ? field.current : radios.current[chosenIndex]
+    if (row.current !== null && el != null) keepInView(row.current, el)
+    measure()
+  }, [chosenIndex])
+  // the edge with cells out of view fades (the scroll bar may be hidden until scrolled, macOS)
+  useEffect(() => {
+    const el = row.current
+    if (el === null) return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <div className={styles['root']} role="group" aria-labelledby={captionId}>
@@ -104,7 +127,13 @@ export function JogStepPicker({
           {invalid ? m.customInvalid(formatStep(fromMm(MAX_JOG_STEP_MM, units)), unit) : null}
         </span>
       </div>
-      <div className={styles['grid']}>
+      <div
+        ref={row}
+        className={styles['grid']}
+        data-jog-steps=""
+        data-more={more.start ? (more.end ? 'both' : 'start') : more.end ? 'end' : undefined}
+        onScroll={measure}
+      >
         <div role="radiogroup" aria-label={m.stepPresets} className={styles['presets']}>
           {presets.map((p, i) => {
             const checked = p === preset
@@ -131,6 +160,7 @@ export function JogStepPicker({
           })}
         </div>
         <input
+          ref={field}
           type="text"
           inputMode="decimal"
           className={styles['custom']}
@@ -165,4 +195,21 @@ export function JogStepPicker({
       </div>
     </div>
   )
+}
+
+/** Scrolls `row` sideways just enough to show `el` (its offset parent) with the row's padding. */
+export function keepInView(row: HTMLElement, el: HTMLElement): void {
+  const pad = 2
+  const start = el.offsetLeft - pad
+  const end = el.offsetLeft + el.offsetWidth + pad
+  if (start < row.scrollLeft) row.scrollLeft = start
+  else if (end > row.scrollLeft + row.clientWidth) row.scrollLeft = end - row.clientWidth
+}
+
+/** Which ends of the scrolled row have cells (partly) out of view. */
+export function hiddenEdges(row: HTMLElement): { start: boolean; end: boolean } {
+  return {
+    start: row.scrollLeft > 1,
+    end: row.scrollLeft + row.clientWidth < row.scrollWidth - 1,
+  }
 }

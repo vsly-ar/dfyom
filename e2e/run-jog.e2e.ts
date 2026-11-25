@@ -70,6 +70,8 @@ test('jog (DF88): click = step, custom step, hold = continuous, WASD, Escape, ze
   await navigator.getByRole('button', { name: 'Go to Run' }).click()
   await expect(navigator.getByRole('combobox', { name: 'Machine' })).toHaveText('Router')
   // 10×: homing is quick, a slow hold still takes a moment
+  // a serial port is the default connection (DF101): choose the virtual machine
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: '10×' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()

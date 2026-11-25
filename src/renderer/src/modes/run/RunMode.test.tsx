@@ -186,6 +186,8 @@ async function renderRun(opts: { bottom?: boolean; plate?: string; points?: bool
   )
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
   await within(nav()).findByRole('button', { name: 'Connect' })
+  // a serial port is the default (DF101); these tests run the virtual machine unless they choose
+  await r.user.click(within(nav()).getByRole('radio', { name: 'Virtual machine' }))
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   return { ...r, bridge, shell, machine, nav, callsOf, plan: () => s.plan(planId) }
 }
@@ -1434,6 +1436,38 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     await expectNoAxeViolations(t.container)
   })
 
+  it('chooses a serial port by default, listed first, and lists the ports at once (DF101)', async () => {
+    const bridge = createFakeBridge()
+    const s = await planSetup()
+    await s.create()
+    bridge.bind(s.d)
+    scriptMachine(bridge)
+    bridge.handle('run.ports.scan', () =>
+      ok({ ports: [{ path: PORT, manufacturer: 'Arduino (www.arduino.cc)', usb: true }] }),
+    )
+    const shell = createShell(bridge)
+    shell.ui.getState().setMode('run')
+    renderUi(
+      <ShellProvider shell={shell}>
+        <App />
+      </ShellProvider>,
+    )
+    const nav = within(screen.getByRole('navigation', { name: 'Navigator' }))
+    const choice = await nav.findByRole('radiogroup', { name: 'Connect to' })
+    const radios = within(choice).getAllByRole('radio')
+    expect(radios.map((r) => r.textContent)).toEqual(['Serial port', 'Virtual machine'])
+    expect(radios[0]).toBeChecked()
+    // the ports are listed without choosing Serial port first; the USB one is chosen
+    await waitFor(() =>
+      expect(nav.getByRole('combobox', { name: 'Serial port' })).toHaveTextContent(
+        `${PORT} · Arduino`,
+      ),
+    )
+    expect(bridge.calls.filter((c) => c.name === 'run.ports.scan')).toHaveLength(1)
+    expect(nav.queryByRole('combobox', { name: 'Time scale' })).toBeNull()
+    await waitFor(() => expect(nav.getByRole('button', { name: 'Connect' })).toBeEnabled())
+  })
+
   it('says when no port is found', async () => {
     const t = await renderRun()
     t.bridge.handle('run.ports.scan', () => ok({ ports: [] }))
@@ -1473,6 +1507,9 @@ async function renderNoProject(mode: 'run' | 'design' = 'run') {
     </ShellProvider>,
   )
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  // the virtual machine, not the default serial port (DF101)
+  if (mode === 'run')
+    await r.user.click(await within(nav()).findByRole('radio', { name: 'Virtual machine' }))
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   return { ...r, bridge, machine, nav, callsOf, machineId, shell }
 }
@@ -1613,8 +1650,10 @@ describe('an external gCode file without a project (DF93)', () => {
     ).toBeInTheDocument()
     await expectNoAxeViolations(t.container)
 
-    // connect, home: Start run opens the file's pre-flight
+    // connect (the virtual machine, not the default serial port, DF101), home: Start run opens the
+    // file's pre-flight
     const nav = within(t.nav())
+    await t.user.click(await nav.findByRole('radio', { name: 'Virtual machine' }))
     const connect = await nav.findByRole('button', { name: 'Connect' })
     await waitFor(() => expect(connect).toBeEnabled())
     await t.user.click(connect)

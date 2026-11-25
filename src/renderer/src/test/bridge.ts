@@ -270,7 +270,11 @@ export function createFakeBridge(
     ok: true,
     distances: new Float32Array(r.positions.length / 3),
   })
-  const handlers = new Map<string, Handler>()
+  // no serial hardware in tests: Run lists the ports when it opens (DF101); a test scripts ports
+  // with handle('run.ports.scan', …)
+  const handlers = new Map<string, Handler>([
+    ['run.ports.scan', () => ({ ok: true, value: { ports: [] }, revision: 0 })],
+  ])
   const calls: { name: string; args: unknown; gesture?: string }[] = []
   const settingsPatches: unknown[] = []
   const closeCalls: boolean[] = []

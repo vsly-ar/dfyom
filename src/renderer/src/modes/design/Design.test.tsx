@@ -732,3 +732,30 @@ describe('design mode', () => {
     expect(shell.ui.getState().selection.design).toBe('pocket1')
   })
 })
+
+describe('facing row icons (DF99)', () => {
+  it('turns a facing icon to the face it cuts: bottom over, right and left a quarter turn', async () => {
+    const { d, part } = await renderDesign()
+    const partId = part().id
+    const ui = { kind: 'ui', id: 'test' } as const
+    for (const on of [
+      'stock.top',
+      'stock.bottom',
+      'stock.side[0]',
+      'stock.side[1]',
+      'stock.side[3]',
+    ])
+      expectOk(await d.dispatch('design.facing.add', { partId, on, depth: '0.5' }, ui))
+    const icon = (name: string) =>
+      within(navigator())
+        .getByRole('button', { name: new RegExp(`^${name}\\b`) })
+        .querySelector('svg[data-icon="facing"]')
+    await waitFor(() => expect(icon('Facing 5')).not.toBeNull())
+    expect(icon('Facing 1')).not.toHaveAttribute('data-rotate')
+    expect(icon('Facing 2')).toHaveAttribute('data-rotate', '180')
+    // the front, seen face-on in the icon's front view, stays as drawn
+    expect(icon('Facing 3')).not.toHaveAttribute('data-rotate')
+    expect(icon('Facing 4')).toHaveAttribute('data-rotate', '90')
+    expect(icon('Facing 5')).toHaveAttribute('data-rotate', '270')
+  })
+})
