@@ -116,6 +116,8 @@ export function placeErrors(
 export function warningPath(w: DfmWarning, op: OperationDTO): string | undefined {
   // v0.4 U4: "no library tool fits the chamfer" shows at the tool field, with "New tool…"
   if (w.code === 'dfm.chamferNoTool') return 'tool'
+  // U9 P1: a chamfer's reach is about the tools, not its width: at the tool field too
+  if (w.code === 'dfm.reach' && op.kind === 'chamfer') return 'tool'
   const p = w.parameter
   if (p === undefined) return undefined
   if (p === 'center') return 'center.0'
@@ -463,15 +465,19 @@ function ShapeGroup({
       ) : null}
       {shape.kind !== 'circle' ? <RotationField ctx={ctx} /> : null}
       {shape.kind === 'named' ? (
-        <Switch
-          label={t.picker.mirror}
-          checked={shape.mirror === true}
-          disabled={ctx.readOnly}
-          onCheckedChange={(mirror) => {
-            const { mirror: _was, ...rest } = shapeArgs(shape)
-            ctx.send({ shape: mirror ? { ...rest, mirror: true } : rest }, 'shape.mirror')
-          }}
-        />
+        // a toggle Field as every inspector switch: label and switch on one row (U9 Q130)
+        <Field label={t.picker.mirror} kind="toggle" readOnly={ctx.readOnly}>
+          <Switch
+            label={t.picker.mirror}
+            hideLabel
+            checked={shape.mirror === true}
+            disabled={ctx.readOnly}
+            onCheckedChange={(mirror) => {
+              const { mirror: _was, ...rest } = shapeArgs(shape)
+              ctx.send({ shape: mirror ? { ...rest, mirror: true } : rest }, 'shape.mirror')
+            }}
+          />
+        </Field>
       ) : null}
     </Group>
   )

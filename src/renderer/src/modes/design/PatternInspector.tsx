@@ -39,6 +39,7 @@ import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
 import { placeErrors, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
+import { presetThumb, THUMB } from './pattern-thumbs'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -279,6 +280,8 @@ export function PatternInspector({
             label={p.presets}
             items={PATTERN_PRESETS.map((preset) => ({
               label: p.presetNames[preset.id] ?? preset.id,
+              // U9 P5: a few cells in the preset's lattice, as the Cell options' thumbnails
+              icon: <PresetThumb cells={PRESET_THUMBS.get(preset.id) ?? []} />,
               onSelect: () => void update({ ...preset.args }, 'cell'),
             }))}
           >
@@ -626,6 +629,31 @@ function poly(pts: Vec[]): Loop {
     closed: true,
     elements: pts.map((a, i) => ({ kind: 'line' as const, a, b: pts[(i + 1) % pts.length]! })),
   }
+}
+
+/** The Presets menu's thumbnails (U9 P5), computed once. */
+const PRESET_THUMBS = new Map(PATTERN_PRESETS.map((preset) => [preset.id, presetThumb(preset)]))
+
+/** A window onto a preset's lattice, drawn as the mini outlines (`MiniOutline`'s look). */
+function PresetThumb({
+  cells,
+}: {
+  cells: readonly (readonly (readonly [number, number])[])[]
+}): React.JSX.Element {
+  const r = (v: number) => Math.round(v * 10) / 10
+  const d = cells.map((c) => `M${c.map(([x, y]) => `${r(x)} ${r(y)}`).join('L')}Z`).join('')
+  return (
+    <svg
+      className={styles['miniOutline']}
+      width={THUMB.w}
+      height={THUMB.h}
+      viewBox={`0 0 ${THUMB.w} ${THUMB.h}`}
+      aria-hidden="true"
+    >
+      <path className={styles['miniFill']} d={d} />
+      <path className={styles['miniEdge']} d={d} />
+    </svg>
+  )
 }
 
 /** A primitive cell kind's mini outline (the Cell select's thumbnails; not to scale). */

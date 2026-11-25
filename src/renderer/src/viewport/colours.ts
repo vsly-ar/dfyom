@@ -146,12 +146,17 @@ export interface SurfaceState {
   readonly tinted?: ReadonlySet<string> | null | undefined
   /** Operations drawn selected with `selectedOperation` (a Clones selection's source, task U3). */
   readonly selectedAlso?: ReadonlySet<string> | null | undefined
+  /**
+   * Operations whose selection is the amber outline only, no tint (design review U9 P4: a
+   * pattern's pocket, hundreds of cells that a fill would turn into a block of accent).
+   */
+  readonly outlineOnly?: ReadonlySet<string> | null | undefined
 }
 
 /**
  * One surface's colour (sRGB). Outside pick mode, hover previews what a click selects: every
  * surface of the hovered surface's operation. In pick mode, hover is per surface and only on
- * eligible ones.
+ * eligible ones. A selected `outlineOnly` operation keeps its base colour (its outline shows it).
  */
 export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: Palette): Rgb {
   const base = state.outdated ? palette.outdated : palette.part
@@ -162,6 +167,7 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     return mix(base, palette.selected, MIX.pickEligible)
   }
   if (isSelectedOwner(owner, state.selectedOperation) || state.selectedAlso?.has(owner) === true) {
+    if (state.outlineOnly?.has(owner) === true) return base
     const p = Math.min(1, Math.max(0, state.pulse ?? 0))
     return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }

@@ -277,9 +277,14 @@ function PartMesh({
     () => mesh.surfaces.filter((s) => isOutlined(s, surfaceState)),
     [mesh, surfaceState],
   )
+  // keyed by the outlined surfaces, so hovering does not rebuild the edges (a pattern's 2 000
+  // cells are outlined when selected, U9 P4)
+  const outlinedKey = outlined.join('\n')
   const outline = useMemo(() => {
-    if (outlined.length === 0) return null
-    const keep = new Set(outlined.map((s) => mesh.surfaces.indexOf(s)))
+    if (outlinedKey === '') return null
+    const outlinedSet = new Set(outlinedKey.split('\n'))
+    const keep = new Set<number>()
+    mesh.surfaces.forEach((s, i) => outlinedSet.has(s) && keep.add(i))
     const all = geometry.getAttribute('position').array as Float32Array
     const n = triangleCount(mesh)
     const subset: number[] = []
@@ -291,7 +296,7 @@ function PartMesh({
     const e = new EdgesGeometry(g, CREASE_ANGLE_DEG)
     g.dispose()
     return e
-  }, [outlined, mesh, geometry])
+  }, [outlinedKey, mesh, geometry])
   useEffect(() => () => outline?.dispose(), [outline])
 
   const edgeColour = useMemo(() => colour(palette.edge), [palette])

@@ -149,6 +149,18 @@ describe('wallChamferSection (edge chamfers E3)', () => {
     )
   })
 
+  it('fits the box: the box aspect, the bevel a visible share of the width, material fading right (U9 P2)', () => {
+    for (const width of [0.5, 1.5, 6]) {
+      const s = wallChamferSection({ ...wall, width }, 'mm')
+      const bw = s.bounds.maxX - s.bounds.minX
+      const bh = s.bounds.maxY - s.bounds.minY
+      expect(bw / bh).toBeCloseTo(2.3, 1)
+      expect(width / bw).toBeGreaterThan(0.12)
+      const across = s.primitives.filter((p) => p.kind === 'fadeX')
+      expect(across).toHaveLength(1)
+    }
+  })
+
   it('a bevel deeper than a blind pocket is cut at its floor; invalid parts', () => {
     const s = wallChamferSection(
       {

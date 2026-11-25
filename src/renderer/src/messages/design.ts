@@ -499,6 +499,13 @@ export const designMessages = {
     keySummary: (n: number, neck: string, tool: string) =>
       `${n === 1 ? '1 key' : `${n} keys`} · neck ${neck} mm · needs a tool of Ø${tool} mm or smaller (the outline's)`,
     noKeys: 'No key fits yet: see the findings under each line.',
+    /** The joints' settings, collapsed once set (U9 Q131): their disclosure and summary. */
+    keySettings: 'Key settings',
+    keySettingsSummary: (clearance: string, keys: number | undefined) =>
+      `clearance ${clearance}${keys === undefined ? '' : ` · ${keys === 1 ? '1 key' : `${keys} keys`}`}`,
+    dowelSettings: 'Dowel settings',
+    dowelSettingsSummary: (diameter: string, depth: string, holes: number) =>
+      `Ø${diameter} · ${depth} deep · ${holes === 1 ? '1 hole' : `${holes} holes`}`,
     /** Test fit coupon (split parts 4b-3). */
     testFit: 'Test fit…',
     testFitDescription:
@@ -529,6 +536,8 @@ export const designMessages = {
     front: 'Front',
     /** "3 · 135 × 98.5 × 40 · own blank", "3 · 200 × 100.1 × 40 · Block 200 × 100.1 × 40" */
     chip: (n: number, size: string, blank: string) => `${n} · ${size} · ${blank}`,
+    /** The blank of a row of piece chips (U9 Q132): "135 × 98.5 × 40 mm · own blank" */
+    blankLine: (size: string, blank: string) => `${size} · ${blank}`,
     ownBlank: 'own blank',
     /** Blanks on library stocks (split parts 4c). */
     turned: (name: string) => `${name} · turned`,

@@ -372,12 +372,16 @@ function ItemFields({
           {length('protrusion', m.protrusion, item.protrusion)}
           {length('jawLength', m.jawLength, item.jawLength)}
           {length('jawThickness', m.jawThickness, item.jawThickness)}
-          <Switch
-            label={m.soft}
-            checked={item.soft}
-            disabled={readOnly}
-            onCheckedChange={(soft) => onCommit({ soft })}
-          />
+          {/* a toggle Field as every inspector switch: label and switch on one row (U9 Q130) */}
+          <Field label={m.soft} kind="toggle" readOnly={readOnly}>
+            <Switch
+              label={m.soft}
+              hideLabel
+              checked={item.soft}
+              disabled={readOnly}
+              onCheckedChange={(soft) => onCommit({ soft })}
+            />
+          </Field>
         </>
       )
     case 'screw':

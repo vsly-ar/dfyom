@@ -453,3 +453,27 @@
     grid-column: 1 / -1;
   }
 }
+
+/* A switch (U9 Q130): label and switch on one row, the switch at the row's end, in every width;
+   the support area (its note) under both. One bit of state takes one row. */
+.field[data-kind='toggle']:has(> .control [role='switch']) > .control {
+  justify-content: flex-end;
+}
+
+@container (max-width: 20rem) {
+  .field[data-kind='toggle']:has(> .control [role='switch']) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .field[data-kind='toggle']:has(> .control [role='switch']) > .label {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .field[data-kind='toggle']:has(> .control [role='switch']) > .control {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .field[data-kind='toggle']:has(> .control [role='switch']) > .support {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

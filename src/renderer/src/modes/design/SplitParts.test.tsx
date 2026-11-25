@@ -80,20 +80,26 @@ describe('split part (split parts 4a)', () => {
     expect(within(section).getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
     expect(within(section).getByRole('group', { name: 'Split preview' })).toBeVisible()
     expect(within(section).getByRole('img', { name: 'Split preview: Top' })).toBeVisible()
+    // U9 Q132: one row per blank, a numbered chip per piece named by its whole chip text
+    const chipList = within(section).getByRole('list', { name: '2 pieces' })
+    expect(within(chipList).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(chipList).getAllByRole('listitem')[0]!.textContent).toMatch(
+      /^12.* × 10 mm · own blank$/,
+    )
     expect(
-      within(within(section).getByRole('list', { name: '2 pieces' }))
-        .getAllByRole('listitem')
-        .map((li) => li.textContent),
+      within(chipList)
+        .getAllByRole('button')
+        .map((b) => b.getAttribute('aria-label')),
     ).toEqual([
       expect.stringMatching(/^1 · .* × 10 mm · own blank$/),
       expect.stringMatching(/^2 · .* × 10 mm · own blank$/),
     ])
     expect(within(section).getByLabelText('Level at Z', { selector: 'input' })).toBeVisible()
-    // the level's findings under its field (4a polish), at most three and a count
+    // the level's findings under its field (4a polish): one, its glue face (U9 Q131), and a count
     expect(
       within(section).getByText(/^The glue face at the level at Z -10 mm is 4 mm wide/),
     ).toBeVisible()
-    expect(within(section).getByText('2 more in Warnings')).toBeVisible()
+    expect(within(section).getByText('4 more in Warnings')).toBeVisible()
     // the warning list names the split, not an "Unknown operation" (design review U9)
     const list = screen.getByRole('region', { name: 'Warnings' })
     await waitFor(() => expect(within(list).getAllByText('Split').length).toBeGreaterThan(0))
@@ -272,6 +278,28 @@ describe('split part (split parts 4a)', () => {
     await expectNoAxeViolations()
   })
 
+  it('a set joint’s settings are collapsed with a one-line summary; a click opens them (U9 Q131)', async () => {
+    const t = await renderSplit(async (s) => {
+      await s.run('design.split.set', {
+        partId: s.partId,
+        split: { lines: [], levels: ['-10 mm'], margin: '5 mm', dowels: {} },
+      })
+    })
+    const section = t.split()
+    const settings = within(section).getByText('Dowel settings')
+    expect(within(section).getByText(/^Ø.* mm · .* mm deep · \d+ holes?$/)).toBeVisible()
+    expect(within(section).getByLabelText('Dowel Ø', { selector: 'input' })).not.toBeVisible()
+    await t.user.click(settings)
+    await waitFor(() =>
+      expect(within(section).getByLabelText('Dowel Ø', { selector: 'input' })).toBeVisible(),
+    )
+    // the library stocks come after the cuts
+    const level = within(section).getByLabelText('Level at Z', { selector: 'input' })
+    const stocks = within(section).getByRole('switch', { name: 'Use library stocks' })
+    expect(level.compareDocumentPosition(stocks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await expectNoAxeViolations()
+  })
+
   it('keys on lines (4b-2): Puzzle / Dovetail, the clearance kept by later edits, Butt drops it', async () => {
     const t = await renderSplit()
     await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
@@ -393,7 +421,8 @@ describe('split part (split parts 4a)', () => {
     ])
     const chips = () =>
       within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('button')
-    expect(chips().map((c) => c.textContent)).toEqual([
+    const name = (c: HTMLElement) => c.getAttribute('aria-label')
+    expect(chips().map(name)).toEqual([
       '1 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
       '2 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
     ])
@@ -413,11 +442,15 @@ describe('split part (split parts 4a)', () => {
       ]),
     )
     await waitFor(() =>
-      expect(chips()[0]!.textContent).toBe('1 · 200 × 100 × 20 mm · Plate 200 × 100 × 20'),
+      expect(name(chips()[0]!)).toBe('1 · 200 × 100 × 20 mm · Plate 200 × 100 × 20'),
     )
     // library stocks off: the chosen blank stays, the other piece is back on its own block
     await t.user.click(within(t.split()).getByRole('switch', { name: 'Use library stocks' }))
-    await waitFor(() => expect(chips()[1]!.textContent).toMatch(/^2 · .* · own blank$/))
-    expect(chips()[0]!.textContent).toMatch(/Plate 200 × 100 × 20$/)
+    await waitFor(() => expect(name(chips()[1]!)).toMatch(/^2 · .* · own blank$/))
+    expect(name(chips()[0]!)).toMatch(/Plate 200 × 100 × 20$/)
+    // two blanks: two rows
+    expect(
+      within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('listitem'),
+    ).toHaveLength(2)
   })
 })

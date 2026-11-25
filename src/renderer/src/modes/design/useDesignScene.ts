@@ -173,6 +173,19 @@ export function useDesignScene(): SceneProps {
   const selectedOp = ops?.find(
     (o) => o.id === selected || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
   )
+  // U9 P4: a pattern's cells (its owned pocket and chamfer) are selected by their outlines, not
+  // a fill: hundreds of cells filled amber would be a block of accent
+  const dto = part?.dto
+  const outlineOnly = useMemo(() => {
+    const patterns = new Set(
+      (dto?.features ?? []).filter((f) => f.kind === 'pattern').map((f) => f.id),
+    )
+    return new Set(
+      (dto?.operations ?? [])
+        .filter((o) => o.featureId !== undefined && patterns.has(o.featureId))
+        .map((o) => o.id),
+    )
+  }, [dto])
   const overlays = useMemo(() => {
     if (selectedOp === undefined || part?.loaded === undefined || part.table === undefined)
       return null
@@ -270,6 +283,7 @@ export function useDesignScene(): SceneProps {
     guide: overlays?.guide ?? clones.guide,
     clonePath: clones.clonePath,
     selectedAlso: clones.selectedAlso,
+    outlineOnly,
     announcement,
     ghosts,
     referenceOverlay,
