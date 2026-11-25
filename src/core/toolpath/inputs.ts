@@ -278,10 +278,10 @@ export function toGeneratorInputs(
         },
       )
     // generators stay top-down: the operation as read in its face frame, without the direction;
-    // a through profile (DF50) or hole (DF61) cuts the material the plan's earlier setups left
-    // (the plan's setup order, not the design's default one)
+    // a through profile (DF50), hole (DF61) or pocket (patterns P4) cuts the material the plan's
+    // earlier setups left (the plan's setup order, not the design's default one)
     const { direction: _, ...local } = g
-    if (local.kind === 'profile' || local.kind === 'drilling') {
+    if (local.kind === 'profile' || local.kind === 'drilling' || local.kind === 'pocket') {
       const { throughDepth: __, ...rest } = local
       const t = input.throughDepths?.get(op.id)
       ops.push(t === undefined ? rest : { ...rest, throughDepth: t })
@@ -429,11 +429,13 @@ export function toGeneratorInputs(
             finishStepdown: s.finishStepdown,
             direction: s.direction,
           }
-          // a through pocket (patterns P4) goes `breakthrough` below the opposite face
+          // a through pocket (patterns P4) goes `breakthrough` below the opposite face, or below
+          // the material an earlier setup left under it (its `throughDepth`, DF50)
           const outline = pocketRegion(op)
+          const left = op.throughDepth === undefined ? outline.depth : op.throughDepth + outline.onZ
           const placed =
             op.through === true && s.kind === 'pocket'
-              ? { ...outline, depth: outline.depth + (s.breakthrough ?? 0) }
+              ? { ...outline, depth: left + (s.breakthrough ?? 0) }
               : outline
           const R = tool.diameter / 2
           const reach = openReach(R, s.finishAllowance)

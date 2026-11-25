@@ -59,7 +59,7 @@ function derived(plan: LoadedPlan, port: Region2dPort | undefined): Derived {
 }
 
 /**
- * Through depth (mm) by design operation id of every through profile or through hole that an
+ * Through depth (mm) by design operation id of every through profile, hole or pocket that an
  * earlier setup of the plan cleared material under; the others cut the stock extent. Without the
  * 2D port only facings count (pockets need region booleans).
  */

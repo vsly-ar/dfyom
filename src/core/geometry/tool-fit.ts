@@ -111,13 +111,14 @@ type Cutting = Exclude<OperationGeometry, { kind: 'facing' }>
  * Depth from the stock's outer face of the operation's direction to its deepest point, and the
  * parameter it is measured at: pocket and flat/point hole to the floor, a through hole by the
  * stock extent along the normal (`stock` is the local stock), a through profile or hole by its
- * `throughDepth` (material an earlier setup left, DF50, DF61) else that extent, a blind `on`
+ * `throughDepth` (material an earlier setup left, DF50, DF61; a through pocket's too) else that extent, a blind `on`
  * groove (v0.3) by its depth below the stock face it starts from.
  */
 export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] {
   if (op.kind === 'profile')
     return op.depth === undefined ? [op.throughDepth ?? stock.thickness, 'on'] : [op.depth, 'depth']
-  if (op.kind === 'pocket') return [op.depth - op.onZ, 'depth']
+  // a through pocket (patterns P4) as a through profile: its `throughDepth` when set
+  if (op.kind === 'pocket') return [op.throughDepth ?? op.depth - op.onZ, 'depth']
   // the cone's bottom (the tool tip when contoured; a plunged tip goes deeper, `toolFit`)
   if (op.kind === 'chamfer')
     return isLoopChamfer(op)

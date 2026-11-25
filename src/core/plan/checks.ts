@@ -117,9 +117,9 @@ export interface ToolCheckInput {
   readonly part: Part
   readonly stock: Stock
   /**
-   * Through depth (mm) by design operation id of the through profiles (DF50) and through holes
-   * (DF61) over material an earlier setup cleared (`planThroughDepths`); the others cut the
-   * stock thickness.
+   * Through depth (mm) by design operation id of the through profiles (DF50), through holes
+   * (DF61) and through pockets (patterns P4) over material an earlier setup cleared
+   * (`planThroughDepths`); the others cut the stock thickness.
    */
   readonly throughDepths?: ReadonlyMap<string, number>
   readonly tool: Tool
@@ -221,7 +221,7 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
             })
         } else if (tool.type !== 'flatEndMill')
           add('tool', 'floorRadius', 'a sharp floor needs a flat end mill', { floorRadius })
-        const depth = belowTop(table, `${op.id}.floor`) + pocketBreakthrough(op, i)
+        const depth = pocketFloor(op, i, table) + pocketBreakthrough(op, i)
         if (depth > i.stickout + EPS)
           add('stickout', 'reach', 'pocket depth must be at most the stickout', {
             depth,
@@ -374,6 +374,14 @@ const pocketBreakthrough = (op: Operation, i: ToolCheckInput): number =>
     : 0
 
 /**
+ * A pocket's floor below the stock face (mm): a through pocket's the material an earlier setup
+ * left under it (`throughDepths`, DF50), else its floor surface.
+ */
+const pocketFloor = (op: Operation, i: ToolCheckInput, table: SurfaceTable): number =>
+  (op.kind === 'pocket' && op.through === true ? i.throughDepths?.get(op.id) : undefined) ??
+  belowTop(table, `${op.id}.floor`)
+
+/**
  * The depth of each cut below the stock face the `reach` rule compares with the stickout (mm):
  * pocket floor, hole (with breakthrough), profile cut, chamfer tip, facing depth.
  */
@@ -383,7 +391,7 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
     case 'facing':
       return belowTop(table, op.on) + op.depth.canonical
     case 'pocket':
-      return belowTop(table, `${op.id}.floor`) + pocketBreakthrough(op, i)
+      return pocketFloor(op, i, table) + pocketBreakthrough(op, i)
     case 'drilling': {
       const through = op.bottom === 'through'
       const left = through ? i.throughDepths?.get(op.id) : undefined
