@@ -1,0 +1,13 @@
+// Spike S8 (docs/research/2026-11-25-spike-s8-patterns.md): vitest-run TypeScript against
+// src/core, not part of the app build. Run: `npx vitest run -c spikes/patterns/vitest.config.mts`;
+// typecheck: `npx tsc -p spikes/patterns`.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["*.ts", "*.mts"]
+}
