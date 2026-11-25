@@ -5,14 +5,16 @@
 // and the piece chips; a piece's own inspector ("Piece 3 of 8 of Enclosure · Edit the split") and
 // the read-only note for its operations. Since 4b the joints: dowels on levels, keys on lines
 // (Puzzle / Dovetail with the clearance; the keys drawn in Top) and, 4b-3, "Test fit…" (coupon
-// parts of the key at one or three clearances; the first is shown).
-// Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design
+// parts of the key at one or three clearances; the first is shown). Since 4c each piece chip names
+// its blank and opens a menu to change it, "Use library stocks" and "Split to fit…".
+// Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design,
+// docs/modes/split-parts.md#implementation-4c
 import { useEffect, useMemo, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { useRegion2d, useUi } from '../../shell/ShellContext'
+import { useLibraryVersion, useRegion2d, useUi } from '../../shell/ShellContext'
 import {
   Button,
   ConfirmDialog,
@@ -23,6 +25,7 @@ import {
   PanelHeader,
   QuantityInput,
   SegmentedControl,
+  Switch,
   WarningList,
   type WarningListLabels,
   type WarningView,
@@ -37,12 +40,16 @@ import {
   cutSource,
   dowelHoles,
   firstSplit,
+  libraryStockViews,
   nextCut,
   pieceViews,
   piecesOf,
   splitArgs,
+  stocksHolding,
+  stocksOfClass,
   testFitClearances,
   withoutLevel,
+  type LibraryStockView,
   type PieceView,
   type SplitArgs,
 } from './split-view'
@@ -62,6 +69,28 @@ const t = m.split
 
 const mmOf = (q: { exact: { num: string; den: string } }): number =>
   Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
+
+/** The library's block stocks, re-read when the library changes (split parts 4c). */
+function useLibraryStocks(): readonly LibraryStockView[] {
+  const call = useCommand()
+  const version = useLibraryVersion()
+  const [stocks, setStocks] = useState<readonly LibraryStockView[]>([])
+  useEffect(() => {
+    let live = true
+    void call('library.stock.list', {}).then((r) => {
+      if (live && r.ok) setStocks(libraryStockViews((r.value as { items: unknown[] }).items ?? []))
+    })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read on library changes only
+  }, [version])
+  return stocks
+}
+
+/** A piece's blank in words: the library stock (turned) or "own blank". */
+const blankName = (p: PieceView): string =>
+  p.stock === undefined ? t.ownBlank : p.stock.turned ? t.turned(p.stock.name) : p.stock.name
 
 /** `design.split.set` with a confirmation when pieces with plans would go. */
 function useSplitSet(part: DesignPart) {
@@ -133,12 +162,13 @@ export function SplitSection({
   // keys on the lines (4b-2): placed by the core from the source, for the preview and read-outs
   const port = useRegion2d()
   const loaded = part.loaded
-  const keys = useMemo(() => {
+  const info = useMemo(() => {
     if (port === undefined || loaded === undefined || split === undefined) return undefined
-    if (!isKeyKind(split.joint.kind)) return undefined
     const r = splitKeys(loaded, split, port)
     return r.isOk() ? r.unwrap() : undefined
   }, [port, loaded, split])
+  const keys = split !== undefined && isKeyKind(split.joint.kind) ? info : undefined
+  const stocks = useLibraryStocks()
   const units = part.units
   const unit = defaultUnit('length', units)
   const confirmDialog = (
@@ -168,6 +198,9 @@ export function SplitSection({
         >
           {t.action}
         </Button>
+        {stock === undefined ? null : (
+          <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} />
+        )}
         {error ? <ErrorMessage error={error} /> : null}
         {confirmDialog}
       </section>
@@ -201,11 +234,27 @@ export function SplitSection({
       <SplitPreview part={part} pieces={pieces} holes={holes} knobs={knobs} />
       <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
         {pieces.map((p) => (
-          <li key={p.id} className={styles['splitChip']}>
-            {t.chip(p.n, blankText(p.blank, units))}
+          <li key={p.id}>
+            <BlankMenu
+              piece={p}
+              need={info?.needs.get(p.n)}
+              stocks={stocks}
+              materialClass={stock.material.class}
+            >
+              <button type="button" className={styles['splitChip']}>
+                {t.chip(p.n, blankText(p.blank, units), blankName(p))}
+              </button>
+            </BlankMenu>
           </li>
         ))}
       </ul>
+      <Switch
+        label={t.useStocks}
+        checked={split.useStocks === true}
+        onCheckedChange={(on) => void send({ ...args, useStocks: on })}
+      />
+      <p className={styles['muted']}>{t.useStocksHint}</p>
+      <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
       <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
         {split.lines.length === 0 && split.levels.length === 0 ? (
           <p className={styles['muted']}>{t.noCuts}</p>
@@ -382,6 +431,123 @@ function KeyFields({
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * A piece chip's menu (split parts 4c): Automatic, Own block, the library stocks of the class
+ * that hold the piece (smallest first); `design.part.update { blank }` on the piece.
+ */
+function BlankMenu({
+  piece,
+  need,
+  stocks,
+  materialClass,
+  children,
+}: {
+  piece: PieceView
+  need: readonly [number, number, number] | undefined
+  stocks: readonly LibraryStockView[]
+  materialClass: string
+  children: React.ReactElement
+}): React.JSX.Element {
+  const call = useCommand()
+  const [error, setError] = useState<AppErrorData | undefined>(undefined)
+  const choose = (blank: 'auto' | 'own' | { stockLibraryItemId: string }) =>
+    void call('design.part.update', { partId: piece.id, blank }).then((r) =>
+      setError(r.ok ? undefined : r.error),
+    )
+  const holding = need === undefined ? [] : stocksHolding(stocks, need, materialClass)
+  const items: MenuEntry[] = [
+    {
+      label: t.blankAuto,
+      description: t.blankAutoDescription,
+      checked: piece.choice === undefined,
+      onSelect: () => choose('auto'),
+    },
+    {
+      label: t.blankOwn,
+      description: t.blankOwnDescription,
+      checked: piece.choice === 'own',
+      onSelect: () => choose('own'),
+    },
+    {
+      group: t.blankStocks,
+      items:
+        holding.length === 0
+          ? [{ label: t.noStockHolds, disabled: true, onSelect: () => undefined }]
+          : holding.map(({ stock, turned }) => ({
+              id: stock.id,
+              label: t.blankStock(stock.name, turned),
+              checked: piece.choice === stock.id,
+              onSelect: () => choose({ stockLibraryItemId: stock.id }),
+            })),
+    },
+  ]
+  return (
+    <>
+      {/* named by its chip (Radix labels the menu by the trigger) */}
+      <Menu items={items}>{children}</Menu>
+      {error ? <ErrorMessage error={error} /> : null}
+    </>
+  )
+}
+
+/**
+ * "Split to fit…" (split parts 4c): the library stocks of the source's class; choosing one asks
+ * `design.split.suggest` and applies its lines and levels with `design.split.set` (library stocks
+ * on, margin and joint kept, dowel holes placed again).
+ */
+function SplitToFit({
+  part,
+  stocks,
+  send,
+  args,
+}: {
+  part: DesignPart
+  stocks: readonly LibraryStockView[]
+  send: (args: SplitArgs) => void
+  args?: SplitArgs
+}): React.JSX.Element {
+  const call = useCommand()
+  const [error, setError] = useState<AppErrorData | undefined>(undefined)
+  const cls = part.loaded?.stock.material.class ?? ''
+  const options = stocksOfClass(stocks, cls)
+  const fit = async (id: string) => {
+    const r = await call('design.split.suggest', { partId: part.dto.id, stockLibraryItemId: id })
+    if (!r.ok) return setError(r.error)
+    setError(undefined)
+    const s = r.value as { lines: SplitArgs['lines']; levels: SplitArgs['levels'] }
+    const { dowels, ...rest } = args ?? firstSplit(0, part.units)
+    // dowel holes are placed again on the new levels
+    const placed = dowels === undefined ? undefined : (({ holes: _, ...d }) => d)(dowels)
+    send({
+      ...rest,
+      ...(placed === undefined ? {} : { dowels: placed }),
+      lines: s.lines,
+      levels: s.levels,
+      useStocks: true,
+    })
+  }
+  const items: MenuEntry[] =
+    options.length === 0
+      ? [{ label: t.fitNoStocks, disabled: true, onSelect: () => undefined }]
+      : options.map((o) => ({
+          id: o.id,
+          label: `${o.name} · ${blankText(o.size, part.units)}`,
+          onSelect: () => void fit(o.id),
+        }))
+  return (
+    <>
+      <div className={styles['addRow']}>
+        <Menu label={t.fit} items={items}>
+          <Button size="sm" icon={<Icon name="split" />} title={t.fitDescription}>
+            {t.fit}
+          </Button>
+        </Menu>
+      </div>
+      {error ? <ErrorMessage error={error} /> : null}
+    </>
   )
 }
 
@@ -737,7 +903,7 @@ export function PieceInspector({
         <p className={styles['muted']}>{t.pieceOf(from.index, total, source?.name ?? '')}</p>
         {view !== undefined ? (
           <p className={styles['muted']}>
-            {m.stock.title}: {blankText(view.blank, part.units)} · {t.ownBlank}
+            {m.stock.title}: {blankText(view.blank, part.units)} · {blankName(view)}
           </p>
         ) : null}
         <div className={styles['addRow']}>

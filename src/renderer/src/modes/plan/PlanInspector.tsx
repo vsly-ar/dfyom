@@ -38,6 +38,7 @@ import {
   type WarningView,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
+import { blankText } from '../design/split-view'
 import {
   allPlanOperations,
   defaultPresetName,
@@ -48,6 +49,7 @@ import {
   FEED_KIND,
   lengthText,
   findingNames,
+  pieceBlank,
   planOperationName,
   snapshotName,
   type PlanOperationView,
@@ -131,6 +133,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   return op === undefined ? (
     <PlanSummary
       plan={plan}
+      blank={pieceBlank(doc, plan)}
       units={doc.unitSystem}
       warnings={data?.warnings ?? []}
       error={data?.error}
@@ -158,12 +161,15 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
 function PlanSummary({
   plan,
+  blank,
   units,
   warnings,
   error,
   outdated,
 }: {
   plan: PlanDTO
+  /** A split piece's blank (split parts 4c). */
+  blank: ReturnType<typeof pieceBlank>
   units: UnitSystem
   warnings: readonly PlanWarning[]
   error: AppErrorData | undefined
@@ -204,6 +210,14 @@ function PlanSummary({
           </StatusChip>{' '}
           {machine === undefined ? m.machine.missing : `${m.machine.title}: ${machine}`}
         </p>
+        {blank === undefined ? null : (
+          <p className={styles['muted']}>
+            {t.pieceBlank(
+              blank.stock,
+              blankText([blank.size.length, blank.size.width, blank.size.thickness], units),
+            )}
+          </p>
+        )}
         <p className={styles['muted']}>{t.noSelection}</p>
         <section aria-label={m.warnings.title} className={styles['warnings']}>
           <h3 className={styles['groupTitle']}>{m.warnings.title}</h3>

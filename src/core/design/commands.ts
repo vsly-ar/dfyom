@@ -1169,13 +1169,17 @@ const partAdd = defineCommand({
 const partUpdate = defineCommand({
   kind: 'document',
   name: 'design.part.update',
-  summary: 'Rename the part or change its general tolerance.',
+  summary: "Rename the part, change its general tolerance or a split piece's blank.",
   title: () => 'Update part',
   machine: false,
   args: z.object({
     ...PartArg,
     name: NameArg.optional(),
     generalTolerance: ToleranceArg.optional(),
+    blank: z
+      .union([z.enum(['auto', 'own']), z.object({ stockLibraryItemId: ItemIdSchema })])
+      .optional()
+      .describe('Split piece: auto, own block or a library stock'),
   }),
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
@@ -1189,12 +1193,61 @@ const partUpdate = defineCommand({
     if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
     const target = draft.parts[args.partId]!
     if (args.name !== undefined) target.name = args.name
+    if (args.blank !== undefined) {
+      const set = pieceBlankChoice(target, args.blank, ctx, where)
+      if (set.isErr()) return set
+    }
     const dto = generalToleranceToDTO(tol)
     if (dto === undefined) delete target.generalTolerance
     else if (!deepEqual(target.generalTolerance, dto)) target.generalTolerance = dto
     return withWarnings({}, loaded.unwrap(), part.operations, ctx, where)
   },
 })
+
+/**
+ * A split piece's blank choice (split parts 4c, docs/modes/split-parts.md#implementation-4c):
+ * stored on the piece; the split follow regenerates it and refuses a stock too small.
+ */
+const malformed = (issues: Issue[], where: string): AppResult<never> =>
+  fail('input.malformed', issues.map((x) => x.message).join('; '), { issues, where })
+
+function pieceBlankChoice(
+  target: Draft<PartDTO>,
+  blank: 'auto' | 'own' | { stockLibraryItemId: string },
+  ctx: CommandContext,
+  where: string,
+): AppResult<void> {
+  if (target.derivedFrom === undefined)
+    return malformed(
+      [{ path: ['blank'], rule: 'pieceOnly', message: 'only a split piece has a blank choice' }],
+      where,
+    )
+  if (typeof blank === 'object') {
+    const found = ctx.services.library?.lookup('stock', blank.stockLibraryItemId)
+    if (found?.state !== 'found')
+      return malformed(
+        [
+          {
+            path: ['blank', 'stockLibraryItemId'],
+            rule: 'unknownItem',
+            message: 'no such library stock',
+          },
+        ],
+        where,
+      )
+  }
+  const { choice: _, ...rest } = target.blank ?? {}
+  const choice =
+    blank === 'auto'
+      ? undefined
+      : blank === 'own'
+        ? { kind: 'own' as const }
+        : { kind: 'library' as const, libraryItemId: blank.stockLibraryItemId }
+  const next = choice === undefined ? rest : { ...rest, choice }
+  if (Object.keys(next).length === 0) delete target.blank
+  else target.blank = next
+  return Ok(undefined)
+}
 
 /**
  * Removes a part with what belongs only to it: its references, its plans (`confirm` when it has

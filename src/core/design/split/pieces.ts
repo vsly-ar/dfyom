@@ -76,8 +76,15 @@ export function splitFinding(
 export interface PiecePlan {
   readonly n: number
   readonly cell: Cell
-  /** Blank sizes (mm): bounds + margin per side in X and Y, the band in Z. */
+  /**
+   * Blank sizes (mm): the need (bounds + margin per side in X and Y, the band in Z), or the
+   * library stock the piece is nested on (4c).
+   */
   readonly blank: { readonly length: number; readonly width: number; readonly thickness: number }
+  /** The own block's sizes (4a's blank): what a library stock must hold (4c). */
+  readonly need: readonly [number, number, number]
+  /** Blank thickness above the piece, faced off from the top (4c; 0 on its own block). */
+  readonly surplus: number
   /** Source part frame + offset = piece frame (mm). */
   readonly offset: readonly [number, number, number]
   readonly name: string
@@ -603,6 +610,7 @@ function mapOperation(
   offset: readonly [number, number, number],
   blankW: number,
   b: PieceBuild,
+  surplus = 0,
 ): AppResult<OperationDTO | undefined> {
   const op = c.loaded.part.operations[i]!
   const g = c.geometry[i]!
@@ -631,10 +639,12 @@ function mapOperation(
   delete base['featureRole']
   const L = (mm: number) => lengthDTO(mm, c.units)
   const depthChanged = z.fromFace || z.capped
+  // from the piece's top on a thicker blank (4c): from the blank's top, the surplus deeper
+  const zDepth = z.depth + (dir === '+z' && z.fromFace ? surplus : 0)
   let out: OperationDTO
   switch (base.kind) {
     case 'facing':
-      out = { ...base, on, ...(depthChanged ? { depth: L(z.depth) } : {}) }
+      out = { ...base, on, ...(depthChanged ? { depth: L(zDepth) } : {}) }
       break
     case 'drilling': {
       const centre = toPart(dir, c.W, [
@@ -661,7 +671,7 @@ function mapOperation(
         d.bottom = 'through'
         delete d.depth
         delete d.pointAngle
-      } else if (z.fromFace) d.depth = L(z.depth)
+      } else if (z.fromFace) d.depth = L(zDepth)
       out = d
       break
     }
@@ -711,7 +721,7 @@ function mapOperation(
         }
       } else if (base.kind === 'pocket') {
         const p: OperationDTO & { kind: 'pocket' } = { ...base, on: on!, shape }
-        if (depthChanged) p.depth = L(z.depth)
+        if (depthChanged) p.depth = L(zDepth)
         const fr = mmOf(base.floorRadius)
         if (z.capped && fr > 0) {
           p.floorRadius = L(0)
@@ -728,7 +738,7 @@ function mapOperation(
         if (z.capped) {
           delete p.depth
           p.on = STOCK_FACE[dir]
-        } else if (z.fromFace && p.depth !== undefined) p.depth = L(z.depth)
+        } else if (z.fromFace && p.depth !== undefined) p.depth = L(zDepth)
         if (p.tabs.positions !== undefined && shape !== base.shape) {
           const { positions: _, ...tabs } = p.tabs
           p.tabs = tabs
@@ -809,6 +819,8 @@ export function splitKeys(
   readonly outlineTool: number
   /** The source's outline operation (its index), if it has one. */
   readonly outline: number | undefined
+  /** Each piece's need by its number (4c): what a library stock must hold. */
+  readonly needs: ReadonlyMap<number, readonly [number, number, number]>
 }> {
   const input = toGeometryInput(loaded.part, loaded.stock, port)
   if (input.isErr()) return Err(input.unwrapErr().withContext('splitKeys'))
@@ -821,16 +833,39 @@ export function splitKeys(
   const layout = splitLayout(port, splitNumbers(split), stock, loaded.part.operations, geometry)
   if (layout.isErr()) return Err(layout.unwrapErr().withContext('splitKeys'))
   const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
+  const k = keysOf(
+    loaded,
+    geometry,
+    layout.unwrap(),
+    split,
+    (op) => tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
+  )
+  const margin = splitNumbers(split).margin
   return Ok({
-    ...keysOf(
-      loaded,
-      geometry,
-      layout.unwrap(),
-      split,
-      (op) => tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
-    ),
+    ...k,
     outline: layout.unwrap().footprint.outline,
+    needs: new Map(layout.unwrap().cells.map((c) => [c.n, cellNeed(c, k.keys, margin).need])),
   })
+}
+
+/**
+ * A cell's extent (with the knobs it carries, which reach past it: the male is the lower piece,
+ * towards +x or +y) and its need: the own block's sizes, 4a's blank (4c).
+ */
+function cellNeed(cell: Cell, keys: KeyPlan, margin: number) {
+  const knobs = keys.keys.filter((k) => k.male === cell)
+  const reach = (axis: 'x' | 'y') =>
+    Math.max(0, ...knobs.filter((k) => k.axis === axis).map((k) => k.at + k.size.depth))
+  const bx0 = round(cell.bounds.min[0])
+  const by0 = round(cell.bounds.min[1])
+  const bx1 = round(Math.max(cell.bounds.max[0], reach('x')))
+  const by1 = round(Math.max(cell.bounds.max[1], reach('y')))
+  const need = [
+    round(bx1 - bx0 + 2 * margin),
+    round(by1 - by0 + 2 * margin),
+    round(cell.band.zt - cell.band.zb),
+  ] as const
+  return { bx0, by0, bx1, by1, need }
 }
 
 /** The default piece name, "<source> · <n>". */
@@ -844,6 +879,14 @@ export function planPieces(
   loaded: LoadedPart,
   split: SplitDTO,
   port: Region2dPort,
+  /**
+   * The blank of piece `n` of `need` (4c: a library stock that holds it, turned or not);
+   * undefined or absent = the own block of the need.
+   */
+  blankOf?: (
+    n: number,
+    need: readonly [number, number, number],
+  ) => readonly [number, number, number] | undefined,
 ): AppResult<PiecesResult> {
   const where = 'planPieces'
   const input = toGeometryInput(loaded.part, loaded.stock, port)
@@ -915,19 +958,16 @@ export function planPieces(
       ...knobs.map((k) => keyItem(k, 'male')),
       ...sockets.map((k) => keyItem(k, 'female')),
     ]
-    // a knob reaches past the cell (the male is the lower piece: towards +x or +y)
-    const reach = (axis: 'x' | 'y') =>
-      Math.max(0, ...knobs.filter((k) => k.axis === axis).map((k) => k.at + k.size.depth))
-    const bx0 = round(cell.bounds.min[0])
-    const by0 = round(cell.bounds.min[1])
-    const bx1 = round(Math.max(cell.bounds.max[0], reach('x')))
-    const by1 = round(Math.max(cell.bounds.max[1], reach('y')))
-    const blank = {
-      length: round(bx1 - bx0 + 2 * m),
-      width: round(by1 - by0 + 2 * m),
-      thickness: round(cell.band.zt - cell.band.zb),
-    }
-    const offset = [round(m - bx0), round(m - by0), round(-cell.band.zt)] as const
+    const { bx0, by0, bx1, by1, need } = cellNeed(cell, keys, m)
+    const size = blankOf?.(cell.n, need) ?? need
+    const blank = { length: round(size[0]), width: round(size[1]), thickness: round(size[2]) }
+    // centred in X and Y; the piece's bottom on the blank's bottom, the surplus above (4c)
+    const surplus = Math.max(0, round(blank.thickness - need[2]))
+    const offset = [
+      round((blank.length - (bx1 - bx0)) / 2 - bx0),
+      round((blank.width - (by1 - by0)) / 2 - by0),
+      round(-cell.band.zt - surplus),
+    ] as const
     const b: PieceBuild = {
       ops: [],
       shapes: literal(loaded.dto.shapes ?? [], loaded.units),
@@ -942,7 +982,7 @@ export function planPieces(
         b.ops.push(o.unwrap())
         continue
       }
-      const mapped = mapOperation(c, i, cell, offset, blank.width, b)
+      const mapped = mapOperation(c, i, cell, offset, blank.width, b, surplus)
       if (mapped.isErr()) return Err(mapped.unwrapErr().withContext(where, { piece: cell.n }))
       if (mapped.unwrap() !== undefined) b.ops.push(mapped.unwrap()!)
     }
@@ -952,17 +992,39 @@ export function planPieces(
       b.ops.push(o.unwrap())
     }
     // dowel holes (4b): drilled before the piece is cut free
-    const dowels = dowelOperations(port, L, split, cell, offset, blank.width, (mm) =>
-      lengthDTO(mm, loaded.units),
+    const dowels = dowelOperations(
+      port,
+      L,
+      split,
+      cell,
+      offset,
+      blank.width,
+      (mm) => lengthDTO(mm, loaded.units),
+      surplus,
     )
     if (dowels.length > 0) {
       const at = b.ops.findIndex((o) => o.id === `${numbers.id}_outline`)
       b.ops.splice(at < 0 ? b.ops.length : at, 0, ...dowels)
     }
+    // the surplus (4c): faced off by a mapped top facing (it goes the surplus deeper), else by a
+    // generated facing first
+    const topFacing = b.ops.some(
+      (o) => o.kind === 'facing' && (o.on ?? STOCK_FACE['+z']) === STOCK_FACE['+z'],
+    )
+    if (surplus > EPS && !topFacing)
+      b.ops.unshift({
+        kind: 'facing',
+        id: `${numbers.id}_glueFace`,
+        name: cell.band.zt >= -EPS ? 'Top face' : 'Glue face',
+        on: STOCK_FACE['+z'],
+        depth: lengthDTO(surplus, loaded.units),
+      })
     pieces.push({
       n: cell.n,
       cell,
       blank,
+      need,
+      surplus,
       offset,
       name: pieceName(loaded.part.name, cell.n),
       operations: b.ops,

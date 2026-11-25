@@ -12,6 +12,7 @@ import type { DfmWarning } from '../../geometry/model'
 import type { Library } from '../../library/library'
 import { Machine } from '../../library/machine'
 import { Stock } from '../../library/stock'
+import { libraryStockOptions, shortOf } from './blanks'
 import type { ProjectDoc } from '../../project/document'
 import type { LoadedPart } from '../load'
 import type { SplitDTO } from '../part.dto'
@@ -33,6 +34,8 @@ const SAMPLES_MAX = 60_000
 
 const fmt = (mm: number) => +mm.toFixed(2)
 const size3 = (a: readonly number[]) => a.map(fmt).join(' × ')
+const mmOf = (q: { exact: { num: string; den: string } }) =>
+  Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
 
 /**
  * The narrowest width of a sampled face: per solid sample the shorter of its runs along the two
@@ -109,13 +112,13 @@ function samples(lo: number, hi: number, step: number): { at: number[]; size: nu
   }
 }
 
-interface MachineTravel {
+export interface MachineTravel {
   readonly name: string
   readonly travel: readonly [number, number, number]
 }
 
 /** The project's plans' machines, else the library's. */
-function machines(doc: ProjectDoc, library: Library | undefined): MachineTravel[] {
+export function machines(doc: ProjectDoc, library: Library | undefined): MachineTravel[] {
   const mm = (q: { exact: { num: string; den: string } }) =>
     Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
   const out = new Map<string, MachineTravel>()
@@ -183,7 +186,9 @@ export function splitDfm(
   library: Library | undefined,
 ): DfmWarning[] {
   const g = geometricDfm(loaded, split, planned, port)
-  return g === undefined ? [] : [...g.findings, ...stockDfm(doc, split, planned, g, library)]
+  return g === undefined
+    ? []
+    : [...g.findings, ...stockDfm(doc, loaded.dto.id, split, planned, g, library)]
 }
 
 /** What the library rules need from the geometric pass. */
@@ -495,6 +500,7 @@ function keyFindings(planned: PiecesResult, name: (n: number) => string, id: str
 /** `noStock`, `outsideTravel`, `fitsWhole`: the library and the project's machines (cheap). */
 function stockDfm(
   doc: ProjectDoc,
+  sourceId: string,
   split: SplitDTO,
   planned: PiecesResult,
   g: GeometricDfm,
@@ -509,23 +515,63 @@ function stockDfm(
   // ── noStock, outsideTravel, fitsWhole ────────────────────────────────────────────────────
   const stocks = libraryStocks(library)
   const ms = machines(doc, library)
+  const records = new Map(
+    Object.values(doc.parts)
+      .filter((q) => q.derivedFrom?.partId === sourceId)
+      .map((q) => [q.derivedFrom!.index, q]),
+  )
+  const options = libraryStockOptions(library)
   for (const p of pieces) {
-    const blank = [p.blank.length, p.blank.width, p.blank.thickness]
-    if (stocks.length > 0 && !stocks.some((s) => shortfall(blank, s.size) === 0)) {
+    const need = p.need
+    const record = records.get(p.n)
+    const choice = record?.blank?.choice
+    // the blank the piece is on (4c): its snapshot, else the need
+    const snap = record === undefined ? undefined : doc.snapshots[record.stock]
+    const blank =
+      snap?.values.kind === 'stock'
+        ? [mmOf(snap.values.length), mmOf(snap.values.width), mmOf(snap.values.thickness)]
+        : need
+    if (choice?.kind === 'library' && record?.blank?.libraryItemId !== choice.libraryItemId) {
+      // the user's choice no longer holds the piece (or left the library): own block (4c)
+      const chosen = options.find((o) => o.id === choice.libraryItemId)
+      const short = chosen === undefined ? 0 : shortOf(need, chosen.size)
+      out.push(
+        splitFinding(
+          id,
+          'noStock',
+          'warning',
+          chosen === undefined
+            ? `${p.name}: the chosen stock is no longer in the library; own blank`
+            : `${p.name}: the chosen stock ${chosen.name} is ${fmt(short)} mm short of ${size3(need)}; own blank`,
+          {
+            piece: p.n,
+            blank: need,
+            chosen: choice.libraryItemId,
+            reason: chosen === undefined ? 'missing' : 'short',
+            short,
+          },
+        ),
+      )
+    } else if (
+      record?.blank?.libraryItemId === undefined &&
+      choice?.kind !== 'own' &&
+      stocks.length > 0 &&
+      !stocks.some((s) => shortfall(need, s.size) === 0)
+    ) {
       const nearest = [...stocks].sort(
-        (a, b) => shortfall(blank, a.size) - shortfall(blank, b.size),
+        (a, b) => shortfall(need, a.size) - shortfall(need, b.size),
       )[0]!
       out.push(
         splitFinding(
           id,
           'noStock',
           'info',
-          `${p.name}: blank ${size3(blank)} fits no library stock; nearest ${nearest.name} is ${fmt(shortfall(blank, nearest.size))} mm short; own blank`,
+          `${p.name}: blank ${size3(need)} fits no library stock; nearest ${nearest.name} is ${fmt(shortfall(need, nearest.size))} mm short; own blank`,
           {
             piece: p.n,
-            blank,
+            blank: need,
             nearest: nearest.name,
-            short: shortfall(blank, nearest.size),
+            short: shortfall(need, nearest.size),
           },
         ),
       )
@@ -582,7 +628,7 @@ export function splitWarnings(
     ...planned.findings,
     ...(g === undefined
       ? []
-      : [...g.findings, ...stockDfm(doc, split, planned, g, services.library)]),
+      : [...g.findings, ...stockDfm(doc, loaded.dto.id, split, planned, g, services.library)]),
   ]
 }
 

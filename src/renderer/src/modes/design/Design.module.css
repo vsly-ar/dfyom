@@ -1843,10 +1843,25 @@
   padding: 1px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
+  background: none;
+  font: inherit;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* The chip opens the piece's blank menu (split parts 4c). */
+.splitChip:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.splitChip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 .splitMore {

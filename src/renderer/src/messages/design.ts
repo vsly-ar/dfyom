@@ -438,9 +438,26 @@ export const designMessages = {
     preview: 'Split preview',
     top: 'Top',
     front: 'Front',
-    /** "3 · 135 × 98.5 × 40 · own blank" */
-    chip: (n: number, size: string) => `${n} · ${size} · own blank`,
+    /** "3 · 135 × 98.5 × 40 · own blank", "3 · 200 × 100.1 × 40 · Block 200 × 100.1 × 40" */
+    chip: (n: number, size: string, blank: string) => `${n} · ${size} · ${blank}`,
     ownBlank: 'own blank',
+    /** Blanks on library stocks (split parts 4c). */
+    turned: (name: string) => `${name} · turned`,
+    blankAuto: 'Automatic',
+    blankAutoDescription:
+      'The smallest library stock of the material class that holds the piece, if "Use library stocks" is on; else its own block.',
+    blankOwn: 'Own block',
+    blankOwnDescription: 'A block of the piece’s size plus the margins.',
+    blankStocks: 'Library stocks that hold it',
+    blankStock: (name: string, turned: boolean) => (turned ? `${name} (turned)` : name),
+    noStockHolds: 'No library stock of this material class holds the piece.',
+    useStocks: 'Use library stocks',
+    useStocksHint:
+      'Cut each piece from the smallest library stock that holds it; a thicker board is faced down.',
+    fit: 'Split to fit…',
+    fitDescription:
+      'Choose a library stock: the fewest levels and lines so every piece fits it and the machine.',
+    fitNoStocks: 'No library stock of this material class yet.',
     pieceTitle: 'Piece',
     pieceOf: (n: number, of: number, source: string) => `Piece ${n} of ${of} of ${source}`,
     editSplit: 'Edit the split',

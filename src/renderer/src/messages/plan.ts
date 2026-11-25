@@ -488,6 +488,9 @@ export const planMessages = {
     plan: 'Plan',
     name: 'Plan name',
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
+    /** A split piece's plan (split parts 4c): "Blank: Block 200 × 100.1 × 40 · 200 × 100.1 × 40". */
+    pieceBlank: (stock: string | undefined, size: string) =>
+      `Blank: ${stock === undefined ? `own block · ${size}` : `${stock} · ${size}`}`,
     noPlan: 'Create the plan in the view to start.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
     /** The count's tooltip (DF44): equal holes and chamfers share one plan operation. */
