@@ -4,7 +4,8 @@
 // pulled apart in Top and Front, each with its blank, `--motion-slow`, none under reduced motion)
 // and the piece chips; a piece's own inspector ("Piece 3 of 8 of Enclosure · Edit the split") and
 // the read-only note for its operations. Since 4b the joints: dowels on levels, keys on lines
-// (Puzzle / Dovetail with the clearance; the keys drawn in Top).
+// (Puzzle / Dovetail with the clearance; the keys drawn in Top) and, 4b-3, "Test fit…" (coupon
+// parts of the key at one or three clearances; the first is shown).
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design
 import { useEffect, useMemo, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
@@ -18,6 +19,7 @@ import {
   ErrorMessage,
   Icon,
   IconButton,
+  Menu,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -39,13 +41,20 @@ import {
   pieceViews,
   piecesOf,
   splitArgs,
+  testFitClearances,
   withoutLevel,
   type PieceView,
   type SplitArgs,
 } from './split-view'
 import { DOWEL_SIZES } from '../../../../core/design/dowel'
-import { isKeyKind, keyPreviewPoints, type KeyPlan } from '../../../../core/design/split/keys'
-import { splitKeys } from '../../../../core/design/split/pieces'
+import {
+  isKeyKind,
+  keyClearance,
+  keyPreviewPoints,
+  KEY_CLEARANCE_MAX,
+  type KeyPlan,
+} from '../../../../core/design/split/keys'
+import { lengthDTO, splitKeys } from '../../../../core/design/split/pieces'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
 const m = designMessages
@@ -369,9 +378,57 @@ function KeyFields({
                   )}
             </p>
           )}
+          <TestFit part={part} />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * "Test fit…" (split parts 4b-3): a menu adding one coupon at the split's clearance or three
+ * side by side (`design.split.testFit`, one undo step); the first coupon is shown.
+ */
+function TestFit({ part }: { part: DesignPart }): React.JSX.Element {
+  const call = useCommand()
+  const setPart = useUi((st) => st.setDesignPart)
+  const [, select] = useDesignSelection()
+  const [error, setError] = useState<AppErrorData | undefined>(undefined)
+  const c = keyClearance(part.dto.split!)
+  const label = (v: number) => lengthDTO(v, part.units).source
+  const add = async (cs: readonly number[]) => {
+    const r = await call('design.split.testFit', {
+      partId: part.dto.id,
+      clearances: cs.map((v) => `${v} mm`),
+    })
+    if (!r.ok) return setError(r.error)
+    setError(undefined)
+    const first = (r.value as { parts: { partId: string }[] }).parts[0]
+    if (first !== undefined) {
+      setPart(first.partId)
+      select(null)
+    }
+  }
+  const several = testFitClearances(c, KEY_CLEARANCE_MAX)
+  return (
+    <>
+      <div className={styles['addRow']}>
+        <Menu
+          label={t.testFit}
+          items={[
+            { label: t.testFitOne(label(c)), onSelect: () => void add([c]) },
+            ...(several.length > 1
+              ? [{ label: t.testFitSeveral(several.map(label)), onSelect: () => void add(several) }]
+              : []),
+          ]}
+        >
+          <Button size="sm" icon={<Icon name="add" />} title={t.testFitDescription}>
+            {t.testFit}
+          </Button>
+        </Menu>
+      </div>
+      {error ? <ErrorMessage error={error} /> : null}
+    </>
   )
 }
 

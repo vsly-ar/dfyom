@@ -410,6 +410,12 @@ export const designMessages = {
     keySummary: (n: number, neck: string, tool: string) =>
       `${n === 1 ? '1 key' : `${n} keys`} · neck ${neck} mm · needs a tool of Ø${tool} mm or smaller (the outline's)`,
     noKeys: 'No key fits yet: see the findings under each line.',
+    /** Test fit coupon (split parts 4b-3). */
+    testFit: 'Test fit…',
+    testFitDescription:
+      'Add a small two-piece part with this key: cut it on scrap, try the fit, then set the clearance here.',
+    testFitOne: (c: string) => `One coupon at ${c}`,
+    testFitSeveral: (cs: readonly string[]) => `${cs.length} coupons: ${cs.join(', ')}`,
     /** Dowels on levels (split parts 4b). */
     levelJoint: 'Levels joined by',
     jointButt: 'Butt',

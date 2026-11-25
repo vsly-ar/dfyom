@@ -1,7 +1,8 @@
 // Test-only: the split parts 4a exit criterion (hardening DF91), run headless through the bundled
 // CLI (exit-criteria.mcp.test.ts): the enclosure (split.fixture.ts, built from scratch) split by
 // one level, then by the level and two lines, then by the level joined by dowels (4b-1), and the
-// proposal's 600 × 400 panel split by one line with a puzzle key (4b-2); every piece is planned,
+// proposal's 600 × 400 panel split by one line with a puzzle key (4b-2) and its Test fit coupon
+// (4b-3); every piece is planned,
 // exported and run on the virtual machine, setup by setup. Not app code.
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
 // docs/modes/split-parts.md#slices
@@ -93,13 +94,28 @@ export async function exitCriteriaSplitFlow(
     ['level-dowels', { levels: [ENCLOSURE_LEVEL], dowels: {} }],
     // split parts 4b-2: the panel in two pieces joined by puzzle keys
     ['panel-puzzle', { lines: [PANEL_LINE], joint: 'puzzle' }, panelId],
+    // split parts 4b-3: the panel's Test fit coupon, its own two-piece part
+    ['panel-coupon', {}, panelId],
   ]
   for (const [label, split, splitPart = partId] of splits) {
-    const r = (
-      await ok<SplitResult>('design.split.set', { partId: splitPart, split, confirm: true })
-    ).value
+    let source = splitPart === panelId ? 'Panel' : 'Enclosure'
+    let r: SplitResult
+    if (label === 'panel-coupon') {
+      const fit = (
+        await ok<{ parts: { name: string; size: number[]; pieces: SplitResult['pieces'] }[] }>(
+          'design.split.testFit',
+          { partId: panelId },
+        )
+      ).value.parts
+      expect(fit).toHaveLength(1)
+      expect(fit[0]!.name).toBe('Panel · test fit 0.15 mm')
+      expect(fit[0]!.size[2]).toBe(18)
+      source = fit[0]!.name
+      r = { pieces: fit[0]!.pieces, findings: [] }
+    } else
+      r = (await ok<SplitResult>('design.split.set', { partId: splitPart, split, confirm: true }))
+        .value
     expect(r.pieces).toHaveLength(label === 'level-lines' ? 8 : 2)
-    const source = splitPart === panelId ? 'Panel' : 'Enclosure'
     if (label === 'panel-puzzle') {
       // every run holds its keys; the male piece's blank holds its knobs
       expect(r.findings.filter((f) => f.params.rule === 'keyFit')).toEqual([])
@@ -143,10 +159,10 @@ export async function exitCriteriaSplitFlow(
         dowelHoles += gcode.match(/Dowel hole \d+/g)?.length ?? 0
         expect(gcode).toContain(`(Stock X ${bl} Y ${bw} Z ${bt} mm`)
         // the header names the piece after the plan (split parts 4a polish; golden for the first)
-        // (a non-default name stays with the number through the second split)
+        // (a non-default name stays with the number through the second split; comments are ASCII)
         const renamed = piece.index === 2 && source === 'Enclosure' ? ': Ring' : ''
         expect(gcode).toContain(
-          `(Program: ${plan.name})\n(Piece ${piece.index} of ${r.pieces.length} of ${source}${renamed})\n`,
+          `(Program: ${plan.name})\n(Piece ${piece.index} of ${r.pieces.length} of ${source.replaceAll(' · ', ' - ')}${renamed})\n`,
         )
         if (label === 'level' && piece.index === 1 && n === 0)
           await expect(programHeader(gcode)).toMatchFileSnapshot(

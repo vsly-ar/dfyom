@@ -70,10 +70,14 @@ function keptName(prev: PartDTO | undefined, plan: PiecePlan): string {
   return prev.name
 }
 
-/** The piece's blank as an own block snapshot (values of the source stock, sizes of the blank). */
-function blankSnapshot(
+/**
+ * An own block snapshot with the source stock's values and the given sizes (mm), named
+ * "<label> L × W × T": a piece's blank, a Test fit coupon's block.
+ */
+export function ownBlock(
   sourceStock: SnapshotDTO,
-  plan: PiecePlan,
+  size: { readonly length: number; readonly width: number; readonly thickness: number },
+  label: string,
   id: string,
   takenAt: string,
   units: UnitSystem,
@@ -87,10 +91,10 @@ function blankSnapshot(
     takenAt,
     values: {
       ...values,
-      name: `Blank ${fmt(plan.blank.length)} × ${fmt(plan.blank.width)} × ${fmt(plan.blank.thickness)}`,
-      length: lengthDTO(plan.blank.length, units),
-      width: lengthDTO(plan.blank.width, units),
-      thickness: lengthDTO(plan.blank.thickness, units),
+      name: `${label} ${fmt(size.length)} × ${fmt(size.width)} × ${fmt(size.thickness)}`,
+      length: lengthDTO(size.length, units),
+      width: lengthDTO(size.width, units),
+      thickness: lengthDTO(size.thickness, units),
     },
   } as SnapshotDTO
 }
@@ -208,9 +212,10 @@ export function regeneratePieces(
       stock: snapshotId,
     }
     const prevSnap = prev === undefined ? undefined : draft.snapshots[snapshotId]
-    const snap = blankSnapshot(
+    const snap = ownBlock(
       baseOf(sourceStock),
-      plan,
+      plan.blank,
+      'Blank',
       snapshotId,
       prevSnap?.takenAt ?? new Date(ctx.clock.now()).toISOString(),
       units,

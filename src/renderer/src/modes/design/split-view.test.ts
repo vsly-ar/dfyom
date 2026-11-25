@@ -1,6 +1,6 @@
 // The exploded split preview's view model (split parts 4a polish): grid cells pulled along the cut
 // normals, the handles in the gaps, snapping and the findings of a cut; the editor's args with
-// dowels (4b: a removed level drops its holes, the later ones renumbered).
+// dowels (4b: a removed level drops its holes, the later ones renumbered); the Test fit clearances.
 // Spec: docs/conventions/ui.md#split-part-split-parts-4a
 import { describe, expect, it } from 'vitest'
 import { easeEmphasized } from '../../viewport/SplitLayer'
@@ -10,6 +10,7 @@ import {
   explodeGap,
   explodedCells,
   snapCut,
+  testFitClearances,
   withoutLevel,
   type SplitCut,
 } from './split-view'
@@ -135,5 +136,14 @@ describe('split editor args with dowels (4b)', () => {
     // without dowels only the level goes
     const { dowels: _, ...butt } = args
     expect(withoutLevel(butt, 0)).toEqual({ ...butt, levels: ['-40 mm', '-20 mm'] })
+  })
+})
+
+describe('Test fit clearances (4b-3)', () => {
+  it('offers the clearance and it ± 0.05 mm, within the range, distinct', () => {
+    expect(testFitClearances(0.15, 1)).toEqual([0.1, 0.15, 0.2])
+    expect(testFitClearances(0.02, 1)).toEqual([0, 0.02, 0.07])
+    expect(testFitClearances(0, 1)).toEqual([0, 0.05])
+    expect(testFitClearances(1, 1)).toEqual([0.95, 1])
   })
 })

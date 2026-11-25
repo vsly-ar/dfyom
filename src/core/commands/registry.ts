@@ -24,6 +24,7 @@ import {
 } from '../design/clones/commands'
 import { HOLE_COMMANDS } from '../design/hole-commands'
 import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
+import { TEST_FIT_COMMANDS } from '../design/split/test-fit'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -84,6 +85,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...HOLE_COMMANDS,
   ...CLONES_COMMANDS,
   ...SPLIT_COMMANDS,
+  ...TEST_FIT_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,

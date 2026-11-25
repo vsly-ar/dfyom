@@ -182,13 +182,13 @@ describe('exit criteria headless: dfyom mcp, alignment phase 1', { timeout: 180_
 
 // hardening DF91: docs/modes/split-parts.md#implementation-4a, #implementation-4b (dowels, keys)
 describe('exit criteria headless: dfyom mcp, split parts 4a', { timeout: 300_000 }, () => {
-  it('splits the enclosure by a level, the level and two lines, the level with dowels, and the 600 × 400 panel with a puzzle key; every piece runs', async () => {
+  it('splits the enclosure by a level, the level and two lines, the level with dowels, the 600 × 400 panel with a puzzle key and its Test fit coupon; every piece runs', async () => {
     const { client, call, stderr } = await connect(dirSplit)
     expect((await client.listTools()).tools.map((t) => t.name)).toContain('design_split_set')
     const r = await exitCriteriaSplitFlow(call, dirSplit)
     await client.close()
     expect(stderr.join('')).toBe('')
-    expect(r.pieces).toBe(14)
+    expect(r.pieces).toBe(16)
   })
 })
 

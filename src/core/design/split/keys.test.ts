@@ -63,7 +63,7 @@ const area = regionArea
 function testKey(kind: KeyKind, tool: number, c: number, axis: 'x' | 'y' = 'x'): Key {
   const size = keySize(kind, tool, c, 18, 400)!
   const cell = {} as Cell
-  return { axis, at: 100, u: 100, male: cell, female: cell, size, clearance: c }
+  return { axis, at: 100, u: 100, male: cell, female: cell, size, clearance: c, height: 18 }
 }
 
 describe('key generator (4b-2)', () => {

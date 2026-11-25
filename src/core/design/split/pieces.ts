@@ -160,7 +160,7 @@ const isQuantity = (v: unknown): v is QuantityDTO =>
  * A deep copy with every formula source replaced by its value (piece operations hold resolved
  * values; the source keeps the expressions, split-parts.md § Mapping).
  */
-function literal<T>(value: T, units: UnitSystem): T {
+export function literal<T>(value: T, units: UnitSystem): T {
   if (Array.isArray(value)) return value.map((v: unknown) => literal(v, units)) as T
   if (typeof value !== 'object' || value === null) return value
   if (isQuantity(value)) {
@@ -804,7 +804,12 @@ export function splitKeys(
   loaded: LoadedPart,
   split: SplitDTO,
   port: Region2dPort,
-): AppResult<{ readonly keys: KeyPlan; readonly outlineTool: number }> {
+): AppResult<{
+  readonly keys: KeyPlan
+  readonly outlineTool: number
+  /** The source's outline operation (its index), if it has one. */
+  readonly outline: number | undefined
+}> {
   const input = toGeometryInput(loaded.part, loaded.stock, port)
   if (input.isErr()) return Err(input.unwrapErr().withContext('splitKeys'))
   const geometry = input.unwrap().operations
@@ -816,15 +821,16 @@ export function splitKeys(
   const layout = splitLayout(port, splitNumbers(split), stock, loaded.part.operations, geometry)
   if (layout.isErr()) return Err(layout.unwrapErr().withContext('splitKeys'))
   const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
-  return Ok(
-    keysOf(
+  return Ok({
+    ...keysOf(
       loaded,
       geometry,
       layout.unwrap(),
       split,
       (op) => tools[op.id]?.tool.diameter ?? (op.kind === 'profile' ? op.slotWidth.canonical : 6),
     ),
-  )
+    outline: layout.unwrap().footprint.outline,
+  })
 }
 
 /** The default piece name, "<source> · <n>". */

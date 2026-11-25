@@ -309,4 +309,46 @@ describe('split part (split parts 4a)', () => {
     expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.clearance')
     await expectNoAxeViolations()
   })
+
+  it('Test fit… (4b-3): one or three coupon parts of the key; the first is shown', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Add line at X' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(4))
+    const joint = within(t.split()).getByRole('group', { name: 'Lines joined by' })
+    // butt lines: no Test fit
+    expect(within(t.split()).queryByRole('button', { name: 'Test fit…' })).toBeNull()
+    await t.user.click(within(joint).getByRole('radio', { name: 'Puzzle' }))
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('puzzle'))
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Test fit…' }))
+    const menu = await screen.findByRole('menu', { name: 'Test fit…' })
+    expect(within(menu).getByRole('menuitem', { name: 'One coupon at 0.15 mm' })).toBeVisible()
+    await expectNoAxeViolations()
+    await t.user.click(
+      within(menu).getByRole('menuitem', { name: '3 coupons: 0.1 mm, 0.15 mm, 0.2 mm' }),
+    )
+    await waitFor(() =>
+      expect(t.callsOf('design.split.testFit')).toEqual([
+        { partId: t.s.partId, clearances: ['0.1 mm', '0.15 mm', '0.2 mm'] },
+      ]),
+    )
+    const coupons = Object.values(t.s.d.doc.parts).filter((p) =>
+      / · test fit [\d.]+ mm$/.test(p.name),
+    )
+    expect(coupons.map((p) => p.name.replace(/^.* · /, ''))).toEqual([
+      'test fit 0.1 mm',
+      'test fit 0.15 mm',
+      'test fit 0.2 mm',
+    ])
+    // the first coupon shows: an ordinary split source with its own Split section
+    await waitFor(() => expect(t.shell.ui.getState().designPart).toBe(coupons[0]!.id))
+    await waitFor(() =>
+      expect(within(t.split()).getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible(),
+    )
+    expect(within(t.split()).getByLabelText('Key clearance', { selector: 'input' })).toHaveValue(
+      '0.1 mm',
+    )
+    await expectNoAxeViolations()
+  })
 })

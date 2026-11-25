@@ -325,3 +325,12 @@ export function cutFindings<W extends { code: string; params?: Record<string, un
     )
   })
 }
+
+/**
+ * The clearances "Test fit…" offers side by side (split parts 4b-3): the split's and it ± 0.05 mm,
+ * within 0 and `max`, distinct, rounded to 1 µm.
+ */
+export function testFitClearances(c: number, max: number): number[] {
+  const r = (v: number) => Math.round(v * 1000) / 1000
+  return [...new Set([r(Math.max(0, c - 0.05)), r(c), r(Math.min(max, c + 0.05))])]
+}
