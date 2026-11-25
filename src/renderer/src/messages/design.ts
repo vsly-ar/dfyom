@@ -405,7 +405,19 @@ export const designMessages = {
     variantName: (parent: string, summary: string) => `${parent} · ${summary}`,
     saveFailed: 'The stock was not saved to the library.',
     name: 'Stock name',
-    defaultName: (l: string, w: string, t: string) => `Block ${l} × ${w} × ${t}`,
+    /**
+     * DF96: a block's automatic name, its material class (not Other) and material, then its size:
+     * "Aluminium 6061-T6 100 × 60 × 20"; the class is left out when the material starts with it
+     * ("Hardwood" class, "Hardwood oak"), "Block" when both say nothing.
+     */
+    defaultName: (classLabel: string, cls: string, material: string, summary: string) => {
+      const name = material.trim()
+      const withClass =
+        cls === 'other' || name.toLowerCase().startsWith(classLabel.toLowerCase())
+          ? name
+          : `${classLabel} ${name}`.trim()
+      return `${withClass === '' ? 'Block' : withClass} ${summary}`
+    },
     length: 'Length (X)',
     width: 'Width (Y)',
     thickness: 'Thickness (Z)',
@@ -423,6 +435,11 @@ export const designMessages = {
       other: 'Other',
     } satisfies Record<MaterialClass, string>,
     create: 'Create part',
+    /** DF95: the Stock dialog of an existing part edits its stock. */
+    update: 'Update stock',
+    editTitle: 'Change the stock',
+    editNote:
+      'Operations keep their values: one that no longer fits the new stock shows a warning; nothing is moved or clamped.',
     summary: (l: string, w: string, t: string) => `${l} × ${w} × ${t}`,
     material_: (name: string) => `Material: ${name}`,
   },
@@ -435,6 +452,9 @@ export const designMessages = {
     reference: 'Reference',
     done: 'Done',
     stockDescription: 'The block the part is cut from.',
+    /** DF95: the Stock dialog of a part edits its stock. */
+    stockEditDescription:
+      'The block the part is cut from. Change its size or material; Undo takes the change back.',
     /** "Choose one" only while there is one to choose (DF48). */
     shapesDescription: (any: boolean) =>
       any
@@ -649,6 +669,8 @@ export const designMessages = {
       // DF48: no "starting with facing" (wrong for sheet goods); features are offered too
       description: 'Add an operation or a feature to cut the stock.',
       addHole: 'Add bolt hole',
+      /** DF98: every Add item is offered here too (add-items.ts). */
+      addPattern: 'Add pattern',
     },
     /** The row menu's Remove (DF16). */
     removeItem: 'Remove',
@@ -682,6 +704,17 @@ export const designMessages = {
     generalTolerance: 'General tolerance (length)',
     /** The empty field's placeholder: no scope sets one, so untoleranced lengths are exact. */
     generalToleranceNone: 'None: lengths are exact',
+    /** DF97: the field's presets (ui.md § General tolerance presets). */
+    tolerancePresets: 'Common tolerances',
+    tolerancePreset: (source: string, units: 'mm' | 'inch') =>
+      units === 'mm' ? `±${source} mm` : `±${source}"`,
+    toleranceUse: {
+      precision: 'Precision fits in metal',
+      fine: 'Fine: metal parts',
+      standard: 'Standard CNC work',
+      woodPlastic: 'Wood and plastics',
+      rough: 'Rough work, wood that moves',
+    },
     shapeKind: 'Shape',
     shapes: { rectangle: 'Rectangle', circle: 'Circle' },
     centerX: 'Centre X',
@@ -944,6 +977,7 @@ export const designMessages = {
         chamfer: 'Add chamfer here',
       })[kind],
     addHole: 'Add bolt hole here',
+    addPattern: 'Add pattern here',
     /** The empty part inspector: how operations get onto a face. */
     emptyHint: 'Select a face in the viewport (Alt+click for a floor) to add operations on it.',
     summary: (label: string) => `Selected face: ${label}; operations you add start on it.`,

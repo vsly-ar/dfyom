@@ -14,6 +14,7 @@ import { expectOk } from '../../../../shared/testing/result'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
+import { ADD_ITEMS, addItemLabel, addItemsFor, type AddSurface } from './add-items'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -117,9 +118,10 @@ describe('design mode', () => {
     // Create part closes it; the sidebar starts with the part row, then the operations (DF15)
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
-    // the empty state offers the Add menu's operations in its order, then the bolt hole (DF48)
+    // the empty state offers the Add menu's items in its order: operations, then features (DF48,
+    // DF98: the pattern too)
     const empty = within(navigator())
-      .getAllByRole('button', { name: /^Add (facing|pocket|profile|drilling|bolt hole)$/ })
+      .getAllByRole('button', { name: /^Add (facing|pocket|profile|drilling|bolt hole|pattern)$/ })
       .map((b) => b.textContent)
     expect(empty).toEqual([
       'Add facing',
@@ -127,6 +129,7 @@ describe('design mode', () => {
       'Add profile',
       'Add drilling',
       'Add bolt hole',
+      'Add pattern',
     ])
     expect(
       within(navigator()).getByText('Add an operation or a feature to cut the stock.'),
@@ -151,14 +154,20 @@ describe('design mode', () => {
         }
       ).items,
     ).toHaveLength(0)
-    // the read-out opens the Stock dialog again: the part's copy of the stock, Show part
+    // DF96: the own block is named after its material class and material, not "Block"
+    expect((snap.values as { name: string }).name).toBe('Aluminium 6061-T6 120 × 60 × 20')
+    // the read-out opens the Stock dialog again, now to change the stock (DF95)
     await user.click(within(navigator()).getByRole('button', { name: /^Stock: 120/ }))
     const again = await screen.findByRole('dialog', { name: 'Stock' })
-    expect(within(again).getByText('120 × 60 × 20')).toBeInTheDocument()
-    expect(within(again).getByText('6061-T6 (Aluminium)')).toBeInTheDocument()
+    const change = within(again).getByRole('region', { name: 'Change the stock' })
+    expect(within(change).getByRole('combobox', { name: 'Length (X)' })).toHaveValue('120')
+    expect(within(change).getByText(/nothing is moved or clamped/)).toBeVisible()
     await expectNoAxeViolations()
-    await user.click(within(again).getByRole('button', { name: 'Show part' }))
+    // nothing changed: Update stock just closes, no undo step
+    const revision = d.revision
+    await user.click(within(again).getByRole('button', { name: 'Update stock' }))
     await waitFor(() => expect(again).not.toBeInTheDocument())
+    expect(d.revision).toBe(revision)
     // it opens by itself only once per project: undoing the part leaves the empty state
     await user.keyboard('{Control>}z{/Control}')
     await within(navigator()).findByRole('heading', { name: 'Set up the stock' })
@@ -366,6 +375,110 @@ describe('design mode', () => {
     ).toBeVisible()
     expect(part().operations[0]).toMatchObject({ shape: { cornerRadius: { source: '3 mm' } } })
     expect(radius).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('changes the stock of a part in the Stock dialog as one undo step (DF95)', async () => {
+    const { user, d, part } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    const opsBefore = structuredClone(part().operations)
+    const snapshotId = part().stock
+    await user.click(within(navigator()).getByRole('button', { name: /^Stock: 100/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Stock' })
+    const form = within(dialog).getByRole('region', { name: 'Change the stock' })
+    // the part's copy of a library stock: that stock is chosen, its material locked
+    expect(within(form).getByRole('combobox', { name: 'From library' })).toHaveTextContent('Block')
+    expect(within(form).getByRole('textbox', { name: 'Material name' })).toHaveAttribute('readonly')
+    await retype(user, within(form).getByRole('combobox', { name: 'Length (X)' }), '150{Enter}')
+    await retype(user, within(form).getByRole('combobox', { name: 'Thickness (Z)' }), '12{Enter}')
+    await user.click(within(dialog).getByRole('button', { name: 'Update stock' }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    const snap = d.doc.snapshots[part().stock]!
+    expect(part().stock).toBe(snapshotId)
+    expect((snap.values as { length: { source: string } }).length.source).toBe('150')
+    // a changed library stock becomes the part's own block (DF13), named as DF96 says
+    expect(snap.libraryItemId).toBeUndefined()
+    expect((snap.values as { name: string }).name).toBe('Aluminium 6061-T6 150 × 60 × 12')
+    // the operations keep their values (no clamp)
+    expect(part().operations).toEqual(opsBefore)
+    expect(within(navigator()).getByText(/^Stock: 150 × 60 × 12/)).toBeInTheDocument()
+    // one undo step takes it back
+    await user.keyboard('{Control>}z{/Control}')
+    await waitFor(() =>
+      expect(
+        (d.doc.snapshots[part().stock]!.values as { length: { source: string } }).length.source,
+      ).toBe('100'),
+    )
+    expect(d.doc.snapshots[part().stock]!.libraryItemId).toBeDefined()
+  })
+
+  it('offers common general tolerances, each one command (DF97)', async () => {
+    const { user, d } = await renderDesign()
+    const tol = () => Object.values(d.doc.parts)[0]!.generalTolerance?.length?.source
+    await user.click(await within(inspector()).findByRole('button', { name: 'Common tolerances' }))
+    const menu = await screen.findByRole('menu', { name: 'Common tolerances' })
+    const items = within(menu).getAllByRole('menuitemradio')
+    expect(items.map((i) => i.querySelector('span')?.textContent)).toEqual([
+      '±0.02 mm',
+      '±0.05 mm',
+      '±0.1 mm',
+      '±0.2 mm',
+      '±0.5 mm',
+      'None: lengths are exact',
+    ])
+    expect(items.at(-1)).toHaveAttribute('aria-checked', 'true')
+    await expectNoAxeViolations()
+    await user.click(within(menu).getByRole('menuitemradio', { name: /±0\.1 mm/ }))
+    await waitFor(() => expect(tol()).toBe('0.1'))
+    const field = within(inspector()).getByLabelText('General tolerance (length)', {
+      selector: 'input',
+    })
+    await waitFor(() => expect(field).toHaveValue('0.1'))
+    await user.click(within(inspector()).getByRole('button', { name: 'Common tolerances' }))
+    const again = await screen.findByRole('menu', { name: 'Common tolerances' })
+    expect(within(again).getByRole('menuitemradio', { name: /±0\.1 mm/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await user.click(within(again).getByRole('menuitemradio', { name: /None/ }))
+    await waitFor(() => expect(tol()).toBeUndefined())
+  })
+
+  it('every Add list offers the same items: the menu, the empty list and a face (DF98)', async () => {
+    const { user, shell, bridge } = await renderDesign()
+    const ids = (labels: (string | null | undefined)[], surface: AddSurface) =>
+      labels.map((l) => ADD_ITEMS.find((i) => addItemLabel(i.id, surface) === l)?.id ?? l)
+    const want = (surface: AddSurface) => addItemsFor(surface).map((i) => i.id)
+    // the empty operation list
+    const empty = within(navigator())
+      .getAllByRole('button', { name: /^Add / })
+      .filter((b) => b.closest('[class*="emptyOps"]') !== null)
+      .map((b) => b.textContent)
+    // the Add menu
+    within(navigator()).getByRole('button', { name: 'Add' }).focus()
+    await user.keyboard('{Enter}')
+    const menu = await screen.findByRole('menu', { name: 'Add' })
+    const listed = within(menu)
+      .getAllByRole('menuitem')
+      .map((i) => i.querySelector('span')?.textContent)
+    await user.keyboard('{Escape}')
+    // a selected face's inspector
+    act(() => shell.ui.getState().select('design', 'face:stock.top'))
+    const face = within(inspector())
+      .getAllByRole('button', { name: / here$/ })
+      .map((b) => b.textContent)
+    expect(ids(listed, 'menu')).toEqual(want('menu'))
+    expect(ids(empty, 'empty')).toEqual(want('empty'))
+    expect(ids(face, 'face')).toEqual(want('face'))
+    // one list: what one surface has, the others have too (ADD_EXCEPTIONS lists the gaps; none)
+    expect(want('empty')).toEqual(want('menu'))
+    expect(want('face')).toEqual(want('menu'))
+    // Pattern from a face sends the pattern on it (the test host has no 2D port to place it)
+    await user.click(within(inspector()).getByRole('button', { name: 'Add pattern here' }))
+    await waitFor(() =>
+      expect(bridge.calls.find((c) => c.name === 'design.pattern.add')?.args).toMatchObject({
+        on: 'stock.top',
+      }),
+    )
   })
 
   it('shows the general tolerance’s effective value while empty, and emptying it clears it', async () => {

@@ -440,6 +440,8 @@ export const DFM_WARNING_CODES = [
   'dfm.toolNotInLibrary',
   // no tool fits at all (hardening DF52): docs/modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55
   'dfm.noFittingTool',
+  // a limit the changed stock no longer allows (hardening DF95): docs/modes/design.md#changing-the-stock-df95
+  'dfm.stockLimit',
   // shapes (v0.3): docs/modes/design-v0.3.md#dfm-checks-for-shapes
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',

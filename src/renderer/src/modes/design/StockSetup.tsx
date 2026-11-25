@@ -6,7 +6,10 @@
 // stock, else the project's own block; nothing is added to the library by itself). Since D45 the
 // Stock dialog without a part: it renders the whole dialog (the caller titles and describes it),
 // so "Create part" sits beside Cancel in the footer (dialog actions, DF12 re-report);
-// `onCreated` closes the dialog.
+// `onCreated` closes the dialog. Since DF95 the same form edits the stock of an existing part
+// (`edit`): it starts from the part's copy, and "Update stock" sends `design.part.update` with the
+// new stock (one undo step; operations that no longer fit show as warnings). Since DF96 a block's
+// automatic name is its material class (not Other) and material, then its size.
 // Doc: docs/conventions/ui.md#stock-dialog-df11df13, docs/modes/design.md#workflow,
 // docs/architecture/library.md#stock-variants-df13, docs/conventions/ui.md#radix-wrapping-pattern
 import { useEffect, useRef, useState } from 'react'
@@ -83,6 +86,18 @@ export function stockOrder(items: readonly LibraryStock[]): LibraryStock[] {
     .flatMap((r) => [r, ...items.filter((i) => !isRoot(i) && i.parentId === r.id).sort(byName)])
 }
 
+/** The stock of an existing part the form edits (DF95). */
+export interface StockEdit {
+  partId: string
+  partName: string
+  length: Quantity
+  width: Quantity
+  thickness: Quantity
+  material: { name: string; class: MaterialClass }
+  /** The library stock the part's copy was taken from, if any. */
+  libraryItemId?: string
+}
+
 /** The dialog's own props (title, description, open state, focus return). */
 type StockDialogProps = Pick<
   DialogProps,
@@ -94,6 +109,8 @@ export function StockSetup({
   projectName,
   partName: initialName,
   onCreated,
+  edit,
+  onUpdated,
   dialog,
 }: {
   units: UnitSystem
@@ -103,18 +120,28 @@ export function StockSetup({
   partName?: string
   /** The part was created. */
   onCreated?: (partId: string) => void
+  /** Edit this part's stock instead of creating a part (DF95). */
+  edit?: StockEdit
+  /** The stock was updated (or nothing changed): close the dialog. */
+  onUpdated?: () => void
   dialog: StockDialogProps
 }): React.JSX.Element {
   const call = useCommand()
-  const fallbackName = initialName ?? m.firstPartName(projectName)
+  const fallbackName = edit?.partName ?? initialName ?? m.firstPartName(projectName)
   const [partName, setPartName] = useState(fallbackName)
   const [library, setLibrary] = useState<readonly LibraryStock[]>([])
-  const [itemId, setItemId] = useState<string | null>(null)
-  const [size, setSize] = useState(() => DEFAULT_SIZE[units].map((s) => parseLength(s, units)))
+  const [itemId, setItemId] = useState<string | null>(edit?.libraryItemId ?? null)
+  const [size, setSize] = useState(() =>
+    edit !== undefined
+      ? [edit.length, edit.width, edit.thickness]
+      : DEFAULT_SIZE[units].map((s) => parseLength(s, units)),
+  )
   // bumped when a library stock fills the fields, so the inputs show the new values
   const [fill, setFill] = useState(0)
-  const [material, setMaterial] = useState('6061-T6')
-  const [materialClass, setMaterialClass] = useState<MaterialClass>('aluminum')
+  const [material, setMaterial] = useState(edit?.material.name ?? '6061-T6')
+  const [materialClass, setMaterialClass] = useState<MaterialClass>(
+    edit?.material.class ?? 'aluminum',
+  )
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [failures, setFailures] = useState(0)
@@ -165,6 +192,8 @@ export function StockSetup({
 
   const [l, w, t] = size as [Quantity, Quantity, Quantity]
   const summary = m.summary(l.source, w.source, t.source)
+  // DF96: "Aluminium 6061-T6 100 × 60 × 20", not "Block 100 × 60 × 20"
+  const autoName = () => m.defaultName(m.classes[materialClass], materialClass, material, summary)
   /** The block's values as `library.stock.add` and `design.part.add { stock }` take them. */
   const blockValues = (name: string, notes?: string) => ({
     name,
@@ -189,11 +218,36 @@ export function StockSetup({
       'design.part.add',
       item !== undefined && !changed
         ? { name, stockLibraryItemId: item.id }
-        : { name, stock: blockValues(m.defaultName(l.source, w.source, t.source)) },
+        : { name, stock: blockValues(autoName()) },
     )
     setBusy(false)
     if (!r.ok) return failed(r.error)
     onCreated?.((r.value as { partId: string }).partId)
+  }
+
+  /** DF95: the part's stock (and name) in one `design.part.update`, so one undo step. */
+  const update = async (e: StockEdit) => {
+    const name = partName.trim() || e.partName
+    const same =
+      itemId === (e.libraryItemId ?? null) &&
+      [e.length, e.width, e.thickness].every((q, i) => sameSize(size[i] as Quantity, q.toDTO())) &&
+      material === e.material.name &&
+      materialClass === e.material.class
+    const args = {
+      ...(name === e.partName ? {} : { name }),
+      ...(same
+        ? {}
+        : item !== undefined && !changed
+          ? { stockLibraryItemId: item.id }
+          : { stock: blockValues(autoName()) }),
+    }
+    if (Object.keys(args).length === 0) return onUpdated?.()
+    setBusy(true)
+    setError(undefined)
+    const r = await call('design.part.update', { partId: e.partId, ...args })
+    setBusy(false)
+    if (!r.ok) return failed(r.error)
+    onUpdated?.()
   }
 
   /** Saves to the library: add (no stock chosen, or a variant) or update the chosen one. */
@@ -214,7 +268,7 @@ export function StockSetup({
             values: blockValues(
               how === 'variant' && root !== undefined
                 ? m.variantName(root.name, summary)
-                : m.defaultName(l.source, w.source, t.source),
+                : autoName(),
             ),
             units, // bare numbers as the fields read them (library.md#command-input)
             ...(how === 'variant' && root !== undefined ? { parentId: root.id } : {}),
@@ -297,11 +351,11 @@ export function StockSetup({
       </DialogClose>
       <Button
         variant="primary"
-        onClick={() => void create()}
+        onClick={() => void (edit !== undefined ? update(edit) : create())}
         icon={<Icon name="stock" />}
         disabled={busy}
       >
-        {m.create}
+        {edit !== undefined ? m.update : m.create}
       </Button>
     </>
   )
@@ -311,7 +365,11 @@ export function StockSetup({
       {/* not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
         form state, so Enter never applies (apply.md#keyboard) */}
       <ApplyScope onApply={null}>
-        <section ref={section} className={styles['setup']} aria-label={m.setupTitle}>
+        <section
+          ref={section}
+          className={styles['setup']}
+          aria-label={edit !== undefined ? m.editTitle : m.setupTitle}
+        >
           <Field label={m.partName}>
             <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
           </Field>
@@ -327,7 +385,7 @@ export function StockSetup({
           >
             <Select
               options={options}
-              value={itemId ?? NONE}
+              value={item?.id ?? NONE}
               disabled={library.length === 0}
               onValueChange={(id) => choose(id)}
             />
@@ -373,6 +431,8 @@ export function StockSetup({
               {m.saveToLibrary}
             </Button>
           </div>
+          {/* DF95: what a changed stock does to the operations */}
+          {edit !== undefined ? <p className={styles['setupEmpty']}>{m.editNote}</p> : null}
           {rest !== undefined ? <ErrorMessage error={rest} /> : null}
         </section>
         {item !== undefined ? (

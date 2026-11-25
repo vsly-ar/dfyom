@@ -34,6 +34,16 @@ Operations specify tool _requirements_ (e.g. facing: "a fly cutter or any flat e
 - **Part zero** is the top face's front-left corner: X right, Y back, Z up; the stock occupies `0..length × 0..width × −thickness..0`.
 - Stock surfaces: `stock.top`, `stock.bottom`, `stock.side[0..3]` (0 = front, then counter-clockwise seen from above).
 
+### Changing the stock (DF95)
+
+Hardening DF95 (user TG #347: "I just changed my mind after creating the project … It may break some operations, which is okay for now"; decisions taken by delegation, D70):
+
+- **Command:** `design.part.update { partId, stock }` (the block's values as `design.part.add` takes them: the part's own block) or `{ partId, stockLibraryItemId }` (a linked copy of that library block); both at once is `input.malformed` (rule `stockSource`). The part's stock snapshot is **replaced in place** (its id kept, so plans and references still name it), in the same command as a rename or tolerance change, so **one undo step**. The same values and link write nothing. A split piece refuses it (`derivedPart`: its blank comes from its source; the source's new stock regenerates the pieces).
+- **Operations keep their values.** Nothing is moved, scaled or clamped. What depends on the stock follows as it does after "Update from library" (`design.snapshot.update`): expressions and through depths re-resolve, patterns re-expand (`design.patternFollow`), split pieces regenerate, plans go stale.
+- **What no longer fits shows as findings**, never as a refusal: positions outside the stock as before (`dfm.holeOutsideStock`, `dfm.shapeOutsideFace`, `dfm.cloneOutsideStock`, …); a limit the new stock breaks that commands otherwise refuse (a pocket or drilling below the new stock bottom, rule `aboveStockBottom`; a facing or tab as thick as the stock) as **`dfm.stockLimit`** (warning) at that operation and parameter, its `params` the limit's (`rule`, `detail`, `max`, `actual`). `design.warning.list` and every design command result carry it (it also covers a thinner library stock taken by `design.snapshot.update`).
+- **Known limit (for now):** while an operation breaks a stock limit, a command that edits another operation of the part is still refused by the whole-part check, naming the broken operation (`operations.<id>.depth: must end above the stock bottom`); fix that operation (or the stock) first.
+- **UI:** the Stock dialog of a part edits its stock ([ui.md § Stock dialog](../conventions/ui.md#stock-dialog-df11df13)).
+
 ## Positioning (v0.1)
 
 Each operation has:
@@ -128,7 +138,7 @@ Names follow [commands.md](../architecture/commands.md#naming); all are `documen
 | Command                                                                | Args                                                                             | Result                      |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------- |
 | `design.part.add`                                                      | `{ name, stockLibraryItemId }` or `{ name, stock }` – takes the snapshot         | `{ partId }`                |
-| `design.part.update`                                                   | `{ partId, name?, generalTolerance? }`                                           | `{ warnings }`              |
+| `design.part.update`                                                   | `{ partId, name?, generalTolerance?, stock? \| stockLibraryItemId? }` (DF95)     | `{ warnings }`              |
 | `design.part.remove` (S0)                                              | `{ partId, confirm? }` – with its references, plans (`confirm: true`), snapshots | `{ removedPlans }`          |
 | `design.facing.add` / `.pocket.add` / `.drilling.add` / `.profile.add` | `{ partId, name?, on?, …parameters }` – omitted parameters take defaults         | `{ operationId, warnings }` |
 | `design.facing.update` / `.pocket.update` / …                          | `{ partId, operationId, …parameters to change }`                                 | `{ warnings }`              |

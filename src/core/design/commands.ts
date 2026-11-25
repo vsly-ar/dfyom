@@ -23,13 +23,20 @@ import {
   type Option,
 } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import { listedAs } from '../commands/json-schema'
 import type { PendingChange } from '../commands/apply'
 import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import { ItemIdSchema, NAME_MAX } from '../library/item'
 import { valuesFromDTO, type ItemValuesDTO } from '../library/library-item'
-import { deepEqual, ownSnapshot, SnapshotDtoSchema, takeSnapshot } from '../library/snapshot'
+import {
+  deepEqual,
+  ownSnapshot,
+  SnapshotDtoSchema,
+  takeSnapshot,
+  type SnapshotDTO,
+} from '../library/snapshot'
 import { StockValuesDtoSchema } from '../library/stock.dto'
 import { valuesFromInput, valuesInputSchema } from '../library/values-input'
 import type { Stock } from '../library/stock'
@@ -1168,67 +1175,110 @@ const partAdd = defineCommand({
         where,
       })
     const snapshotId = ctx.ids.next('snapshot')
-    const takenAt = new Date(ctx.clock.now()).toISOString()
-    if (args.stock !== undefined) {
-      // the project's own block, linked to no library item (library.md#snapshots)
-      const own = valuesFromInput(STOCK_VALUES, args.stock, draft.unitSystem, ['stock'])
-        .andThen((v) => valuesFromDTO({ ...(v as object), kind: 'stock' } as ItemValuesDTO))
-        .mapErr((e) => (e.issues.some((i) => i.path[0] === 'stock') ? e : e.prefixIssues('stock')))
-        .andThen((values) => ownSnapshot(values, snapshotId, takenAt))
-      if (own.isErr()) return Err(own.unwrapErr().withContext(where))
-      const partId = ctx.ids.next('part')
-      draft.snapshots[snapshotId] = own.unwrap().toDTO()
-      draft.parts[partId] = { id: partId, name: args.name, stock: snapshotId, operations: [] }
-      return Ok({ partId })
-    }
-    const stockLibraryItemId = args.stockLibraryItemId!
-    // a synchronous, read-only library lookup (docs/architecture/commands.md#command-definition)
-    const library = ctx.services.library
-    if (library === undefined)
-      return fail('internal.unexpected', 'no library service configured', { where })
-    const found = library.lookup('stock', stockLibraryItemId)
-    if (found.state !== 'found')
-      return fail('input.malformed', `stock ${stockLibraryItemId} is not in the library`, {
-        issues: [
-          {
-            path: ['stockLibraryItemId'],
-            rule: found.state === 'missing' ? 'unknownItem' : 'unreadableItem',
-            message:
-              found.state === 'missing' ? 'no such library stock' : 'the stock file does not load',
-          },
-        ],
-        where,
-      })
+    const snap = stockSnapshot(draft, args, snapshotId, ctx, where)
+    if (snap.isErr()) return snap
     const partId = ctx.ids.next('part')
-    const snap = takeSnapshot(found.item, snapshotId, takenAt)
-    if (snap.isErr()) return Err(snap.unwrapErr().withContext(where))
-    draft.snapshots[snapshotId] = snap.unwrap().toDTO()
+    draft.snapshots[snapshotId] = snap.unwrap()
     draft.parts[partId] = { id: partId, name: args.name, stock: snapshotId, operations: [] }
     return Ok({ partId })
   },
 })
 
+/**
+ * A part's stock snapshot `snapshotId` from exactly one of `stock` (the project's own block,
+ * linked to no library item, library.md#snapshots) and `stockLibraryItemId` (a linked copy).
+ * Shared by `design.part.add` and the stock change of `design.part.update` (hardening DF95).
+ */
+function stockSnapshot(
+  draft: Draft<ProjectDoc>,
+  args: { stock?: object | undefined; stockLibraryItemId?: string | undefined },
+  snapshotId: string,
+  ctx: CommandContext,
+  where: string,
+): AppResult<SnapshotDTO> {
+  const takenAt = new Date(ctx.clock.now()).toISOString()
+  if (args.stock !== undefined) {
+    const own = valuesFromInput(STOCK_VALUES, args.stock, draft.unitSystem, ['stock'])
+      .andThen((v) => valuesFromDTO({ ...(v as object), kind: 'stock' } as ItemValuesDTO))
+      .mapErr((e) => (e.issues.some((i) => i.path[0] === 'stock') ? e : e.prefixIssues('stock')))
+      .andThen((values) => ownSnapshot(values, snapshotId, takenAt))
+    if (own.isErr()) return Err(own.unwrapErr().withContext(where))
+    return Ok(own.unwrap().toDTO())
+  }
+  const stockLibraryItemId = args.stockLibraryItemId!
+  // a synchronous, read-only library lookup (docs/architecture/commands.md#command-definition)
+  const library = ctx.services.library
+  if (library === undefined)
+    return fail('internal.unexpected', 'no library service configured', { where })
+  const found = library.lookup('stock', stockLibraryItemId)
+  if (found.state !== 'found')
+    return fail('input.malformed', `stock ${stockLibraryItemId} is not in the library`, {
+      issues: [
+        {
+          path: ['stockLibraryItemId'],
+          rule: found.state === 'missing' ? 'unknownItem' : 'unreadableItem',
+          message:
+            found.state === 'missing' ? 'no such library stock' : 'the stock file does not load',
+        },
+      ],
+      where,
+    })
+  const snap = takeSnapshot(found.item, snapshotId, takenAt)
+  if (snap.isErr()) return Err(snap.unwrapErr().withContext(where))
+  return Ok(snap.unwrap().toDTO())
+}
+
 const partUpdate = defineCommand({
   kind: 'document',
   name: 'design.part.update',
   summary:
-    "Rename the part, change its general tolerance or a split piece's blank, or detach a piece.",
+    "Rename the part, change its stock or general tolerance, a split piece's blank, or detach a piece.",
   title: () => 'Update part',
   machine: false,
   args: z.object({
     ...PartArg,
     name: NameArg.optional(),
     generalTolerance: ToleranceArg.optional(),
+    stock: StockArg.optional() as z.ZodOptional<z.ZodType<object>>,
+    stockLibraryItemId: ItemIdSchema.optional(),
     blank: z
       .union([z.enum(['auto', 'own']), z.object({ stockLibraryItemId: ItemIdSchema })])
       .optional()
       .describe('Split piece: auto, own block or a library stock'),
     detach: z.literal(true).optional().describe('Split piece: make it a plain part'),
   }),
+  // the stock is listed on design.part.add only (tools/list budget, DF95); validated in full
+  listedArgs: { stock: listedAs('object', 'design.part.add stock (changes the stock)') },
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
     const where = 'design.part.update'
-    const loaded = load(draft, args.partId, where)
+    const first = load(draft, args.partId, where)
+    if (first.isErr()) return first
+    // a new stock (DF95): the part's snapshot replaced in place (its id kept), one undo step;
+    // operations that no longer fit show as warnings, nothing is clamped
+    const restock = args.stock !== undefined || args.stockLibraryItemId !== undefined
+    if (restock) {
+      if (args.stock !== undefined && args.stockLibraryItemId !== undefined)
+        return malformed(
+          [
+            {
+              path: ['stock'],
+              rule: 'stockSource',
+              message: 'pass at most one of stockLibraryItemId and stock',
+            },
+          ],
+          where,
+        )
+      const target = draft.parts[args.partId]!
+      const snap = stockSnapshot(draft, args, target.stock, ctx, where)
+      if (snap.isErr()) return snap
+      // the same values and link write nothing (not even a new takenAt)
+      const prev = draft.snapshots[target.stock]
+      const next = snap.unwrap()
+      if (prev?.libraryItemId !== next.libraryItemId || !deepEqual(prev?.values, next.values))
+        draft.snapshots[target.stock] = next
+    }
+    const loaded = restock ? load(draft, args.partId, where) : first
     if (loaded.isErr()) return loaded
     const { part, stock, units } = loaded.unwrap()
     const f = new Fields(units, SurfaceTable.build(part.operations, stock).resolver(0))

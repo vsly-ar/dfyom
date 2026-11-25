@@ -3,7 +3,8 @@
 // "Reference" button toggles the Reference panel in the right sidebar (dogfood DF3). The Stock
 // dialog opens by itself once per project and window while the project has no part (a new
 // project starts there); choosing a shape selects it and closes its dialog, so the Shape Editor
-// shows as before.
+// shows as before. With a part the Stock dialog edits its stock (DF95; a split piece's blank comes
+// from its source, so a piece shows the read-out).
 // Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, #reference-panel-hardening-df2df8
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -16,7 +17,7 @@ import styles from './Design.module.css'
 import type { DesignPart } from './model'
 import { partReferences } from './reference-view'
 import { ShapeList } from './ShapeList'
-import { StockSetup } from './StockSetup'
+import { StockSetup, type StockEdit } from './StockSetup'
 import { useDesignPartOf, useDesignSelection } from './useDesign'
 
 const m = designMessages.setup
@@ -196,6 +197,21 @@ export function PartSetupDialogs({
             onCloseAutoFocus: returnFocus,
           }}
         />
+      ) : dialog === 'stock' && part.dto.derivedFrom === undefined && part.loaded !== undefined ? (
+        // DF95: the part's stock, editable; mounted while open, so it starts from the part's copy
+        <StockSetup
+          units={doc.unitSystem}
+          projectName={doc.name}
+          edit={stockEdit(part)}
+          onUpdated={close}
+          dialog={{
+            title: m.stock,
+            description: m.stockEditDescription,
+            open: true,
+            onOpenChange,
+            onCloseAutoFocus: returnFocus,
+          }}
+        />
       ) : (
         <Dialog
           title={m.stock}
@@ -234,7 +250,25 @@ export function PartSetupDialogs({
   )
 }
 
-/** The Stock dialog with a part: what the part is cut from (its own snapshot of the stock). */
+/** The part's stock as the Stock dialog edits it (DF95). */
+function stockEdit(part: DesignPart): StockEdit {
+  const st = part.loaded!.stock
+  const libraryItemId = part.doc.snapshots[part.dto.stock]?.libraryItemId
+  return {
+    partId: part.dto.id,
+    partName: part.dto.name,
+    length: st.length,
+    width: st.width,
+    thickness: st.thickness,
+    material: { name: st.material.name, class: st.material.class },
+    ...(libraryItemId === undefined ? {} : { libraryItemId }),
+  }
+}
+
+/**
+ * The Stock dialog of a split piece (or a part whose stock does not load): what it is cut from
+ * (its own snapshot of the stock), read-only.
+ */
 function StockFacts({
   part,
   onShowPart,

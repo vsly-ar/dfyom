@@ -143,6 +143,10 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   // no tool fits at all (hardening DF52): the blocking rule, worded for the smallest standard tool
   'dfm.noFittingTool': (p, L) =>
     `No tool fits this operation, not even the smallest standard one. ${toolUnfitText(p, L)}`,
+  // DF95: a limit the changed stock no longer allows (the core's issue text, e.g. "must end above
+  // the stock bottom")
+  'dfm.stockLimit': (p) =>
+    `The stock changed: ${typeof p['detail'] === 'string' ? p['detail'] : 'a value no longer fits it'}. Change this value or the stock.`,
   // v0.3 shapes (design-v0.3.md § DFM checks for shapes)
   'dfm.restMaterial': (p) =>
     num(p['pieces']) > 1
