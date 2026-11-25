@@ -135,3 +135,101 @@ describe('generateEdgeChamfer', () => {
     )
   })
 })
+
+// ── E2: outside edges (docs/modes/edge-chamfers.md#implementation-e2) ─────────────────────────
+
+/** A 30 × 20 R2 part at (15..45, 10..30), profiled outside. */
+const PART: Region = numberRegion({
+  pieces: [{ outer: roundedRectLoop(15, 10, 45, 30, 2), holes: [] }],
+})
+
+const outside = (
+  over: Partial<EdgeChamferOperation['edge']> = {},
+): Partial<EdgeChamferOperation> => ({
+  edgeOf: 'profile1',
+  edge: {
+    shape: { center: [0, 0], contour: { kind: 'region', region: PART } },
+    side: 'outside',
+    ...over,
+  },
+})
+
+const partDistance = (p: Vec2): number => port.distance(regionLoops(PART), p)!.distance
+
+/** The cut points (feed moves) of a toolpath. */
+const cutPoints = (i: EdgeChamferInput) =>
+  generateEdgeChamfer(i, port)
+    .unwrap()
+    .passes.flatMap((p) => p.moves.filter((m) => m.kind === 'line' || m.kind === 'arc'))
+
+describe('generateEdgeChamfer (E2, outside edges)', () => {
+  it('the bevel round the part, the tip in the air, within a cell of the heightmap', () => {
+    const i = input(chamferMill(6, 90, 0.2), { ...outside(), width: 1.2 })
+    const o = i.operation
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    expect(
+      violations(tp, {
+        feedRate: i.cutting.feedRate,
+        plungeRate: i.cutting.plungeRate,
+        verticalAtMostPlunge: true,
+        retractZ: o.onZ + i.heights.retractHeight,
+        clearanceZ: i.heights.clearanceHeight,
+        targetZ: edgeChamferTipZ(o),
+        contains: (p) =>
+          p[2] > o.onZ ||
+          (!port.contains(PART, [p[0], p[1]]) && partDistance([p[0], p[1]]) >= 0.1 - 1e-6),
+      }),
+    ).toEqual([])
+    const map = new Heightmap(stock.length, stock.width, 0.08)
+    map.z.fill(o.onZ)
+    map.sweep(i.tool, tp, 0.04)
+    const wrong: string[] = []
+    for (let a = 0; a < map.nx; a++)
+      for (let b = 0; b < map.ny; b++) {
+        const [x, y] = map.center(a, b)
+        if (!port.contains(PART, [x, y])) continue
+        const d = partDistance([x, y])
+        const h = map.z[b * map.nx + a]!
+        const bevel = d >= o.width ? o.onZ : o.onZ - (o.width - d)
+        if (h < bevel - 1e-6) wrong.push(`gouge at ${x},${y}: ${h} < ${bevel}`)
+        if (h > bevel + 0.12) wrong.push(`left at ${x},${y}: ${h} > ${bevel}`)
+      }
+    expect(wrong.slice(0, 3)).toEqual([])
+  })
+
+  it('climb runs clockwise round the part, conventional counter-clockwise', () => {
+    const turn = (direction: 'climb' | 'conventional') => {
+      const pts = cutPoints(input(undefined, outside(), direction))
+        .slice(1)
+        .map((m) => m.to)
+      let a = 0
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k]!
+        const q = pts[(k + 1) % pts.length]!
+        a += p[0] * q[1] - q[0] * p[1]
+      }
+      return Math.sign(a)
+    }
+    expect(turn('climb')).toBe(-1)
+    expect(turn('conventional')).toBe(1)
+  })
+
+  it('a split piece (`within`): open runs along the real edges only, past the cell by the reach', () => {
+    const i = input(chamferMill(6, 90, 0), outside({ within: { min: [0, 0], max: [30, 40] } }))
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    const moves = tp.passes[0]!.moves
+    // one open run: the front, the left edge and the back up to x = 30 + reach (one plunge)
+    const plunges = moves.filter((m, k) => m.kind === 'line' && moves[k - 1]?.kind === 'rapid')
+    expect(plunges).toHaveLength(1)
+    const xs = moves.flatMap((m) => (m.kind === 'line' || m.kind === 'arc' ? [m.to[0]] : []))
+    expect(Math.max(...xs)).toBeCloseTo(30 + 1, 6)
+    // a pointed tip runs on the part's left edge itself
+    expect(Math.min(...xs)).toBeCloseTo(15, 6)
+  })
+
+  it('golden: a part outline, 1 × 45°, climb', async () => {
+    await expect(
+      render(generateEdgeChamfer(input(undefined, outside()), port).unwrap()),
+    ).toMatchFileSnapshot('__golden__/edge-chamfer-outside.txt')
+  })
+})

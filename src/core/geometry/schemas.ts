@@ -139,7 +139,7 @@ export const ChamferGeometrySchema = z.object({
   stepdown: z.number().exactOptional(),
 })
 
-/** Edge chamfer (E1): a bevel along a general edge (docs/modes/edge-chamfers.md#implementation-e1). */
+/** Edge chamfer (E1, E2): a bevel along a general edge (docs/modes/edge-chamfers.md#implementation-e1). */
 export const LoopChamferGeometrySchema = z.object({
   kind: z.literal('chamfer'),
   id: z.string(),
@@ -148,8 +148,9 @@ export const LoopChamferGeometrySchema = z.object({
   edgeOf: z.string(),
   edge: z.object({
     shape: ShapeSchema,
-    side: z.literal('inside'),
+    side: z.enum(['inside', 'outside']),
     depth: z.number().exactOptional(),
+    within: z.object({ min: Vec2Schema, max: Vec2Schema }).exactOptional(),
   }),
   width: z.number(),
   angle: z.number(),

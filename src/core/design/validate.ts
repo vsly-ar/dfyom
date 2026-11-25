@@ -358,7 +358,7 @@ export function operationIssues(
         edgeKind !== undefined,
         'edgeOf',
         'chamferEdge',
-        `must be an earlier drilling, pocket or inside profile${chamferEdgeWhyNot(edge)}`,
+        `must be an earlier drilling, pocket or outside/inside profile${chamferEdgeWhyNot(edge)}`,
         { actual: op.edgeOf },
       )
       // F7 terraces stay circular (edge-chamfers.md § Model)
@@ -435,7 +435,5 @@ function chamferEdgeWhyNot(edge: Operation | undefined): string {
   if (edge?.kind === 'chamfer') return ' (not another chamfer)'
   if (edge?.kind === 'profile' && edge.side === 'on')
     return ' (an "on" profile cuts a groove with two edges)'
-  if (edge?.kind === 'profile' && edge.side === 'outside')
-    return ' (outside edges are not chamfered yet)'
   return ''
 }

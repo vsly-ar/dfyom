@@ -1,10 +1,13 @@
 /**
- * Edge chamfer (E1): a chamfer along a general edge, the top edge of a pocket of any shape or of
- * an inside profile, every loop (islands included). The path is the edge's air region shrunk by
- * the tip radius (the 2D port), at tip Z = face − width / tan(α / 2), so the cone reaches `width`
- * into the material at the face; one loop each, one `finish` pass. Circular chamfers keep
- * `generateChamfer` (chamfer.ts).
- * Doc: docs/modes/edge-chamfers.md#toolpath-plan, docs/modes/edge-chamfers.md#implementation-e1
+ * Edge chamfer (E1, E2): a chamfer along a general edge, the top edge of a pocket of any shape or
+ * of an inside profile (E1), or of an outside profile (E2), every loop (islands included). The
+ * path is the edge moved into the air by the tip radius (the 2D port: the air shrunk, or the part
+ * grown), at tip Z = face − width / tan(α / 2), so the cone reaches `width` into the material at
+ * the face; one loop each, one `finish` pass. On a split piece (`edge.within`, E2) the loops are
+ * clipped to the piece's cell grown by the tool's radius at the face: open runs along the
+ * source's real edges only. Circular chamfers keep `generateChamfer` (chamfer.ts).
+ * Doc: docs/modes/edge-chamfers.md#toolpath-plan, docs/modes/edge-chamfers.md#implementation-e1,
+ * docs/modes/edge-chamfers.md#implementation-e2
  */
 import { Err, Ok, type AppResult } from '../../shared/result'
 import {
@@ -15,20 +18,23 @@ import {
   type Vec2,
   type Vec3,
 } from '../geometry/model'
-import { loopChamferAir } from '../geometry/outline'
+import { loopChamferAxis } from '../geometry/outline'
 import { regionLoops } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, toolpath } from './common'
 import type { CutDirection, DrillCuttingParams, GeneratorInput, Toolpath } from './model'
-import { flat, MoveBuilder, segLength, segReverse, type Seg } from './path'
+import { flat, MoveBuilder, segLength, segPoint, segReverse, segSlice, type Seg } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
 import { loopRing, ringFrom, ringStart } from './region-rings'
 
 /** A loop chamfer as the generator reads it: its geometry input without the face direction. */
 export type EdgeChamferOperation = Omit<LoopChamferGeometry, 'direction'>
 
-/** Climb runs each loop with the air on its left (counter-clockwise in a pocket); one ring. */
+/**
+ * Climb runs each loop with the air on its left (counter-clockwise in a pocket, clockwise round
+ * an outside edge); one ring.
+ */
 export interface EdgeChamferStrategy {
   readonly direction: CutDirection
 }
@@ -42,15 +48,24 @@ export type EdgeChamferInput = GeneratorInput<
 /** The tip Z of an edge chamfer: the bevel's depth below its face. */
 export const edgeChamferTipZ = (op: EdgeChamferOperation): number => op.onZ - loopChamferDepth(op)
 
-/** The tool axis loops: the air region shrunk by the tip radius, in the face frame. */
+/**
+ * The tool axis loops: the edge moved into the air by the tip radius, in the face frame, each with
+ * the air on its left (the climb sense).
+ */
 export function edgeChamferLoops(
   op: EdgeChamferOperation,
   tipDiameter: number,
   port: Region2dPort,
 ): AppResult<Seg[][]> {
-  return port
-    .offset(loopChamferAir(op), tipDiameter / 2)
-    .map((p) => regionLoops(p).map((l) => loopRing(l)))
+  return loopChamferAxis(op, port, tipDiameter / 2).map((p) =>
+    regionLoops(p).map((l) => loopRing(l, op.edge.side === 'outside')),
+  )
+}
+
+/** A run of the tool axis: a whole loop, or an open stretch of one clipped to a piece's cell. */
+interface Run {
+  readonly segs: Seg[]
+  readonly closed: boolean
 }
 
 export function generateEdgeChamfer(
@@ -86,6 +101,15 @@ export function generateEdgeChamfer(
   const loops = edgeChamferLoops(op, tip, port)
   if (loops.isErr()) return Err(loops.unwrapErr())
   const rings = loops.unwrap().filter((r) => r.length > 0)
+  const w = op.edge.within
+  // on a split piece: the stretches within the cell grown by the tool's radius at the face
+  const reach = tip / 2 + op.width
+  const runs: Run[] =
+    w === undefined
+      ? rings.map((segs) => ({ segs, closed: true }))
+      : rings.flatMap((r) =>
+          clipRing(r, [w.min[0] - reach, w.min[1] - reach], [w.max[0] + reach, w.max[1] + reach]),
+        )
   // air narrower than the tip everywhere: nothing of the edge is reached
   if (rings.length === 0)
     issues.rule('check', 'tool.tipDiameter', 'tip', "the tip does not fit the edge's opening", {
@@ -100,14 +124,15 @@ export function generateEdgeChamfer(
   const b = new MoveBuilder()
   b.pass('finish')
   let here: Vec2 = [0, 0]
-  const left = rings.map((r) =>
-    startAtLongest(st.direction === 'climb' ? r : [...r].reverse().map(segReverse)),
-  )
+  const left = runs.map((r) => {
+    const segs = st.direction === 'climb' ? r.segs : [...r.segs].reverse().map(segReverse)
+    return r.closed ? startAtLongest(segs) : segs
+  })
   for (let k = 0; left.length > 0; k++) {
     const step = steps.step({
       done: k,
-      total: rings.length,
-      label: `loop ${k + 1}/${rings.length}`,
+      total: runs.length,
+      label: `loop ${k + 1}/${runs.length}`,
     })
     if (step.isErr()) return Err(step.unwrapErr())
     // loops in nearest-neighbour order of their start points
@@ -129,6 +154,71 @@ export function generateEdgeChamfer(
 }
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a[0] - b[0], a[1] - b[1])
+
+const TAU = 2 * Math.PI
+
+/** Fractions u ∈ (0, 1) where `s` crosses the vertical (axis 0) or horizontal (axis 1) line at c. */
+function crossings(s: Seg, axis: 0 | 1, c: number): number[] {
+  if (s.kind === 'line') {
+    const d = s.to[axis] - s.from[axis]
+    if (Math.abs(d) < 1e-12) return []
+    const u = (c - s.from[axis]) / d
+    return u > 0 && u < 1 ? [u] : []
+  }
+  const k = (c - s.center[axis]) / s.radius
+  if (Math.abs(k) > 1) return []
+  const base = axis === 0 ? Math.acos(k) : Math.asin(k)
+  const angles = axis === 0 ? [base, -base] : [base, Math.PI - base]
+  const out: number[] = []
+  for (const a of angles) {
+    const rel =
+      s.sweep >= 0 ? (((a - s.start) % TAU) + TAU) % TAU : (((s.start - a) % TAU) + TAU) % TAU
+    const u = rel / Math.abs(s.sweep)
+    if (u > 0 && u < 1) out.push(u)
+  }
+  return out
+}
+
+/**
+ * The stretches of `ring` inside the box [lo, hi] (E2, a split piece's cell grown by the tool's
+ * reach), in ring order: the whole ring when it lies inside, else open runs from where it enters
+ * the box to where it leaves.
+ */
+export function clipRing(ring: readonly Seg[], lo: Vec2, hi: Vec2): Run[] {
+  const inside = (p: Vec2) =>
+    p[0] >= lo[0] - 1e-9 && p[0] <= hi[0] + 1e-9 && p[1] >= lo[1] - 1e-9 && p[1] <= hi[1] + 1e-9
+  const pieces: { seg: Seg; keep: boolean }[] = []
+  for (const s of ring) {
+    const us = [
+      0,
+      ...crossings(s, 0, lo[0]),
+      ...crossings(s, 0, hi[0]),
+      ...crossings(s, 1, lo[1]),
+      ...crossings(s, 1, hi[1]),
+      1,
+    ].sort((a, b) => a - b)
+    for (let i = 0; i + 1 < us.length; i++) {
+      if (us[i + 1]! - us[i]! < 1e-9) continue
+      const piece = segSlice(s, us[i]!, us[i + 1]!)
+      pieces.push({ seg: piece, keep: inside(segPoint(piece, 0.5)) })
+    }
+  }
+  if (pieces.every((p) => p.keep)) return [{ segs: [...ring], closed: true }]
+  // start after a dropped piece, so no run wraps round the ring's start
+  const first = pieces.findIndex((p) => !p.keep)
+  const ordered = [...pieces.slice(first), ...pieces.slice(0, first)]
+  const runs: Run[] = []
+  let cur: Seg[] = []
+  for (const p of ordered) {
+    if (p.keep) cur.push(p.seg)
+    else if (cur.length > 0) {
+      runs.push({ segs: cur, closed: false })
+      cur = []
+    }
+  }
+  if (cur.length > 0) runs.push({ segs: cur, closed: false })
+  return runs
+}
 
 /**
  * The ring from the middle of its longest line, else its longest arc (the pocket finishing

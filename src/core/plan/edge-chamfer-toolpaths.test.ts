@@ -2,8 +2,11 @@
 // the rim of a named-shape pocket with an island, its tool chosen (a chamfer mill), entry contour,
 // F10 feeds at the bevel's depth, the plunge refused (`loopEntry`), the slant check; and the E1
 // exit-style flow headless: planned, generated, exported (GRBL) and streamed through the virtual
-// machine, the bevel's tip Z in the program.
+// machine, the bevel's tip Z in the program. E2: the enclosure outline (the split fixture)
+// chamfered on its faced top, planned after its profile, exported and run per setup; and a split
+// piece whose chamfer follows only the source's outline, never the split line.
 import { describe, expect, it } from 'vitest'
+import { ENCLOSURE_STOCK, enclosureCommands } from '../design/split/split.fixture'
 import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers } from '../commands/jobs'
@@ -16,7 +19,7 @@ import { createToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { PlanWarning } from './checks'
 import { loadPlan } from './plan'
-import { designIds, opsOf, planSetup } from './plan.fixture'
+import { designIds, flat6, opsOf, planSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
 const ui = uiSource()
@@ -137,5 +140,132 @@ describe('edge chamfers in a plan (E1)', () => {
     const machine = loadPlan(t.s.d.doc, t.planId, 'test').unwrap().machine.unwrap()
     const run = await streamProgram(e.lines, machine)
     expect(run.lines).toBe(e.lines.length)
+  })
+})
+
+// ── E2: outside edges (docs/modes/edge-chamfers.md#implementation-e2) ─────────────────────────
+
+type Setup = Awaited<ReturnType<typeof planSetup>>
+
+const services = () => ({
+  region2d,
+  toolpaths: createToolpathCache(),
+  workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+})
+
+/** The enclosure (split fixture) with a 90° Ø 6 chamfer mill, its outline chamfered 1.5 × 45°. */
+async function enclosurePlan() {
+  const svc = services()
+  const s = await planSetup({ part: false, services: svc, stock: ENCLOSURE_STOCK })
+  // Ø 6: its touch-off spot fits the enclosure's 11 mm back rim, all the top left by then
+  await s.run('library.tool.add', { values: libraryInput(chamferMill('6')) })
+  // a 6 mm flat that reaches through the 60.5 mm part (the split exit flow's is for 40 mm pieces)
+  await s.run('library.tool.add', {
+    values: libraryInput({
+      ...flat6(),
+      name: 'Flat 6 long',
+      fluteLength: len('75'),
+      overallLength: len('110'),
+    }),
+  })
+  for (const [name, args] of enclosureCommands(s.partId)) await s.run(name, args)
+  const outline = s.part().operations.find((o) => o.kind === 'profile')!.id
+  await s.run('design.chamfer.add', { partId: s.partId, edgeOf: outline, width: '1.5' })
+  await s.run('project.apply', {})
+  return { s, svc, outline }
+}
+
+async function generateAll(s: Setup, planId: string): Promise<void> {
+  const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+    .value as { jobId: string }
+  const generated = expectOk(await s.d.job(jobId).unwrap().result) as {
+    operations: { planOperationId: string; status: string }[]
+  }
+  expect(generated.operations.every((o) => o.status === 'generated')).toBe(true)
+}
+
+const chamferToolpath = (s: Setup, planId: string): Toolpath => {
+  const op = s
+    .plan(planId)
+    .setups.flatMap((x) => x.operations)
+    .find((o) => o.designOperationIds.includes('chamfer1'))!
+  return (
+    s.query('plan.toolpath.get', { planId, planOperationId: op.id }) as { toolpath: Toolpath }
+  ).toolpath
+}
+
+const mmOf = (q: { exact: { num: string; den: string } }) =>
+  Number(BigInt(q.exact.num)) / Number(BigInt(q.exact.den))
+
+describe('edge chamfers in a plan (E2, outside edges)', () => {
+  it('E2 exit: the enclosure outline 1.5 × 45° after its profile, exported and run per setup', async () => {
+    const { s, svc, outline } = await enclosurePlan()
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const ids = s
+      .plan(planId)
+      .setups.flatMap((x) => x.operations.map((o) => o.designOperationIds.join('+')))
+    expect(ids.indexOf('chamfer1')).toBeGreaterThan(ids.indexOf(outline))
+    const errors = (
+      s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }
+    ).warnings.filter((w) => w.severity === 'error')
+    expect(errors).toEqual([])
+    await generateAll(s, planId)
+    // the bevel sits on the faced top (−9.738), not on the stock top the outline starts from
+    const tp = chamferToolpath(s, planId)
+    const zs = tp.passes.flatMap((p) => p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])))
+    expect(Math.min(...zs)).toBeCloseTo(-9.738 - 1.5, 6)
+    const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+    const lines: string[] = []
+    for (const setup of s.plan(planId).setups) {
+      const e = expectOk(await exportPlan(s.d.doc, planId, svc, { setupId: setup.id }))
+      expect(e.regenerated).toEqual([])
+      const run = await streamProgram(e.lines, machine)
+      expect(run.lines).toBe(e.lines.length)
+      lines.push(...e.lines)
+    }
+    // the chamfer mill touches off on the faced top: the bevel's tip is Z−1.5 in its program
+    expect(lines.some((l) => /Z-1\.5\b/.test(l))).toBe(true)
+  })
+
+  it('a split piece chamfers only the source outline, never the split line', async () => {
+    const { s } = await enclosurePlan()
+    await s.run('design.split.set', {
+      partId: s.partId,
+      split: { lines: [{ axis: 'x', at: '125' }] },
+    })
+    const pieces = Object.values(s.d.doc.parts)
+      .filter((p) => p.derivedFrom?.partId === s.partId)
+      .sort((a, b) => a.derivedFrom!.index - b.derivedFrom!.index)
+    expect(pieces).toHaveLength(2)
+    for (const p of pieces)
+      expect(
+        p.operations.find((o) => o.kind === 'chamfer'),
+        p.name,
+      ).toMatchObject({
+        edgeOf: 'split1_outline',
+        on: 'stock.top',
+        sourceEdge: { shape: { kind: 'rectangle' } },
+      })
+    // piece 1 (x < 125): its bevel stays left of the split line plus the tool's reach, and runs
+    // the source's left edge
+    const piece = pieces[0]!
+    const dx = mmOf(piece.offset![0]!)
+    const dy = mmOf(piece.offset![1]!)
+    const planId = (
+      (await s.run('plan.create', { partId: piece.id, machineLibraryItemId: s.machineId })) as {
+        planId: string
+      }
+    ).planId
+    await generateAll(s, planId)
+    const cuts = chamferToolpath(s, planId).passes.flatMap((p) =>
+      p.moves.filter((m) => m.kind === 'line' || m.kind === 'arc').map((m) => m.to),
+    )
+    expect(cuts.length).toBeGreaterThan(0)
+    const xs = cuts.map((p) => p[0])
+    expect(Math.max(...xs)).toBeLessThan(125 + dx + 1.5 + 0.1)
+    expect(Math.min(...xs)).toBeLessThan(0.25 + dx + 1)
+    // nothing along the split line (x = 125) between the front and back edges (y 11.5 … 188.5)
+    const alongLine = cuts.filter((p) => p[0] > 125 + dx - 5 && p[1] > 30 + dy && p[1] < 170 + dy)
+    expect(alongLine).toEqual([])
   })
 })

@@ -3,7 +3,7 @@
  * contour kind) as exact 2D loops in its face frame, in surface-numbering order, plus the nominal
  * tab centres along a profile's loop (resolved against the stock in `tab-hold.ts`). What G1
  * (prisms), T1 (`generateRegionPocket`) and T2 (profiles on general loops) consume. Pure; no port
- * call.
+ * call (except `loopChamferAxis`, which takes the port).
  * Doc: docs/architecture/shapes.md#implementation-k3, docs/modes/design-v0.3.md#surfaces,
  * docs/modes/design-v0.3.md#tabs-on-shapes
  */
@@ -18,6 +18,8 @@ import {
   type Region,
 } from './2d/model'
 import { translatePath, translateRegion } from './2d/place'
+import type { AppResult } from '../../shared/result'
+import type { Region2dPort } from './2d/port'
 import type { LoopChamferGeometry, OperationGeometry, Shape } from './model'
 
 /** A shape placed in its face frame: a region (closed) or one open path, in mm. */
@@ -108,13 +110,33 @@ export function tabCentres(
 }
 
 /**
- * The air side of a loop chamfer's edge (edge-chamfers.md E1): its edge operation's shape region
- * (a pocket's region with its islands as holes, an inside profile's opening), in the face frame,
- * or about the shape's centre with `local`. The toolpath (`generateEdgeChamfer`) and the removal
- * solid (`chamfer-solids.ts`) both offset this region.
+ * The region a loop chamfer's edge bounds, in the face frame (or about the shape's centre with
+ * `local`): `inside` (E1) the air, its edge operation's shape region (a pocket's region with its
+ * islands as holes, an inside profile's opening); `outside` (E2) the part, the profile's loop
+ * (`profileChain`: a profile takes one loop). The toolpath (`generateEdgeChamfer`) and the removal
+ * solid (`chamfer-solids.ts`) both offset it through `loopChamferAxis`.
+ * Doc: docs/modes/edge-chamfers.md#implementation-e2
  */
-export function loopChamferAir(op: Pick<LoopChamferGeometry, 'edge'>, local = false): Region {
+export function loopChamferRegion(op: Pick<LoopChamferGeometry, 'edge'>, local = false): Region {
   const shape = local ? { center: [0, 0] as const, contour: op.edge.shape.contour } : op.edge.shape
   const o = shapeOutline(shape)
-  return o.kind === 'region' ? o.region : { pieces: [] }
+  if (o.kind !== 'region') return { pieces: [] }
+  if (op.edge.side === 'inside') return o.region
+  const outer = o.region.pieces[0]?.outer
+  return outer === undefined ? { pieces: [] } : { pieces: [{ outer, holes: [] }] }
+}
+
+/**
+ * The edge moved `d` into the air (d ≥ 0): the tool axis region of a chamfer whose tip radius is
+ * `d`. `inside`: the air shrunk, its loops with the air on their left; `outside`: the part grown,
+ * its loops with the part on their left (climb runs them reversed).
+ */
+export function loopChamferAxis(
+  op: Pick<LoopChamferGeometry, 'edge'>,
+  port: Region2dPort,
+  d: number,
+  local = false,
+): AppResult<Region> {
+  const r = loopChamferRegion(op, local)
+  return port.offset(r, op.edge.side === 'inside' ? d : -d)
 }

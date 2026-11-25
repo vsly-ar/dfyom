@@ -11,11 +11,12 @@
 // doweled two-piece split planned and run. 4b-2: Puzzle on the lines in the editor (the clearance
 // field and the keys' read-out; the enclosure's cavity leaves no room for a key, so back to Butt).
 // 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed). 4c:
-// "Split to fit…" a library board: every chip names it, and the eight pieces run on it.
+// "Split to fit…" a library board: every chip names it, and the eight pieces run on it. Edge
+// chamfers E2: Chamfer from the enclosure outline's row menu, planned, its toolpath generated.
 // Selectors are roles and accessible names (the viewport handles by their `data-split-cut`
 // anchors).
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
-// docs/modes/split-parts.md#implementation-4c,
+// docs/modes/split-parts.md#implementation-4c, docs/modes/edge-chamfers.md#implementation-e2,
 // docs/conventions/ui.md#split-part-split-parts-4a
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -338,5 +339,77 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     ran++
   }
   expect(ran).toBe(10)
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+// Edge chamfers E2 (docs/modes/edge-chamfers.md#implementation-e2): the enclosure's outline (an
+// outside profile) gets Chamfer from its row menu, 1.5 × 45°; planned, its toolpath generated.
+test('edge chamfer: Chamfer on the enclosure outline from its row menu, planned with a toolpath', async ({
+  dfyom,
+}) => {
+  test.setTimeout(180_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
+  // a 6 mm flat through the 60.5 mm part, a 4 mm flat for the rim holes, a 90° Ø 6 chamfer mill
+  await call('library.tool.add', { values: tool('Flat 6 long', '6', '75', '110') })
+  await call('library.tool.add', { values: tool('Flat 4', '4', '25', '60') })
+  await call('library.tool.add', {
+    values: { ...tool('Chamfer 6', '6', '8', '50'), type: 'chamferMill', angle: '90' },
+  })
+  await call('library.machine.add', {
+    values: {
+      name: 'Shapeoko',
+      controller: 'grbl',
+      travel: { x: '800', y: '800', z: '100' },
+      maxFeedRate: { x: '5000', y: '5000', z: '1000' },
+      spindle: { control: 'manual', maxSpeed: '30000' },
+      programUnits: 'mm',
+      toolChanger: 'none',
+    },
+  })
+  await call('project.create', { name: 'Enclosure chamfer', unitSystem: 'mm' })
+  const { partId } = await call<{ partId: string }>('design.part.add', {
+    name: 'Enclosure',
+    stock: ENCLOSURE_STOCK,
+  })
+  for (const [name, args] of enclosureCommands(partId)) await call(name, args)
+
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const outline = navigator.getByRole('button', { name: /^Profile 1/ })
+  await expect(outline).toBeVisible()
+  await outline.click({ button: 'right' })
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Chamfer' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
+  await expect(inspector.getByRole('combobox', { name: 'Edge' })).toContainText('Profile 1')
+  const width = inspector.getByLabel('Width', { exact: true }).and(inspector.locator('input'))
+  await width.fill('1.5')
+  await width.press('Enter')
+  await width.blur()
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const start = page.getByRole('dialog', { name: 'Plan the part' })
+  await start.getByRole('button', { name: 'Create plan' }).click()
+  await expect(start).toBeHidden()
+  const planned = navigator.getByRole('button', { name: /^Chamfer 1\s*Chamfer 6/ })
+  await expect(planned).toBeVisible()
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 60_000 })
+  // the chamfer's toolpath: its bevel's tip on the faced top (−9.738 − 1.5)
+  const { plans } = await call<{ plans: { id: string }[] }>('plan.list')
+  const ops = (
+    await call<{
+      plan: { setups: { operations: { id: string; designOperationIds: string[] }[] }[] }
+    }>('plan.get', { planId: plans[0]!.id })
+  ).plan.setups.flatMap((s) => s.operations)
+  const op = ops.find((o) => o.designOperationIds.includes('chamfer1'))!
+  const tp = await call<{ toolpath: { passes: { moves: { kind: string; to: number[] }[] }[] } }>(
+    'plan.toolpath.get',
+    { planId: plans[0]!.id, planOperationId: op.id },
+  )
+  const zs = tp.toolpath.passes.flatMap((p) => p.moves.map((m) => m.to[2]!))
+  expect(Math.min(...zs)).toBeCloseTo(-11.238, 3)
   expect(dfyom.rendererErrors).toEqual([])
 })

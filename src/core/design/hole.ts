@@ -391,6 +391,7 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
           width: width.unwrap(),
           angle: h.head.csAngle,
           stepdown: h.head.csStepdown,
+          sourceEdge: None,
         },
       },
     ])

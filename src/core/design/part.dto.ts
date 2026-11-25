@@ -183,6 +183,18 @@ export const ChamferDtoSchema = z.object({
   angle: quantityDto('angle'),
   /** Present = stepped (v0.4 F7): terraces of at most this height by a flat end mill. */
   stepdown: length().optional(),
+  /**
+   * Written by a split only, on a piece's loop chamfer whose edge the split clipped
+   * (edge-chamfers.md E2): the source's edge shape in the piece's face frame and the piece's
+   * cell there (`min`, `max`). The bevel follows that shape within the cell, so the split line
+   * and keys are never chamfered. Absent everywhere else.
+   */
+  sourceEdge: z
+    .object({
+      shape: OperationShapeDtoSchema,
+      within: z.object({ min: PointDtoSchema, max: PointDtoSchema }),
+    })
+    .optional(),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [

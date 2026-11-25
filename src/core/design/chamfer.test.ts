@@ -111,7 +111,7 @@ describe('design.chamfer.add / update', () => {
     expect(s.op('chamfer1')).toMatchObject({ on: 'facing1.floor', angle: { source: '60' } })
   })
 
-  it('an inside circle profile (a through opening) is an edge; outside and on profiles are not', async () => {
+  it('inside and outside profiles are edges (E1, E2); an on profile is not', async () => {
     const s = await designSetup()
     const circle = { kind: 'circle', center: ['50', '30'], diameter: '22' }
     await s.run('design.profile.add', {
@@ -132,9 +132,17 @@ describe('design.chamfer.add / update', () => {
       side: 'outside',
       tabs: { count: '0' },
     })
+    await chamfer(s, { edgeOf: 'profile2' })
+    expect(s.op('chamfer2')).toMatchObject({ on: 'stock.top', edgeOf: 'profile2' })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { ...circle, center: ['80', '30'], diameter: '10' },
+      side: 'on',
+      tabs: { count: '0' },
+    })
     const e = await s.fail(
       'design.chamfer.add',
-      { partId: s.partId, edgeOf: 'profile2' },
+      { partId: s.partId, edgeOf: 'profile3' },
       'model.invariant',
     )
     expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
@@ -460,6 +468,7 @@ const sinkSpec: FeatureCommandSpec<typeof sinkParams, Sink> = {
           ).unwrap(),
           angle: Quantity.parse('90°', fieldContext('angle', ctx.units)).unwrap(),
           stepdown: None,
+          sourceEdge: None,
         },
       },
     ]),

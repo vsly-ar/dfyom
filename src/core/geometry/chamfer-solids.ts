@@ -1,17 +1,23 @@
 /**
  * Removal solid of an edge chamfer along a general edge (E1: inside edges, the top edge of a
- * pocket or an inside profile, every loop incl. islands). Spike S7: a V-bit whose axis follows
- * the toolpath region P (the air region shrunk by the tip radius) has swept P ⊕ ρ(z) at height z,
- * ρ(z) the tool's radius there. The solid is that sweep, so it is what the tool cuts:
+ * pocket or an inside profile, every loop incl. islands; E2: the outside edge of an outside
+ * profile). Spike S7: a V-bit whose axis follows the toolpath region P (the edge moved into the
+ * air by the tip radius) has swept P ⊕ ρ(z) at height z, ρ(z) the tool's radius there (inside),
+ * or the band (P ⊕ ρ) − (P ⊖ ρ) round P's loops (outside: the V-groove only, so the part inside
+ * stays). The solid is that sweep, so it is what the tool cuts:
  * - offset-loft (normal path): P's analytic offsets (parallels, joint arcs, trims; an arc whose
  *   radius reaches 0 collapses into its neighbours' trim point) at a few levels, ruled bands,
  *   triangulated caps; vertical from the face to the overshoot, 0.04 mm past the edge into the
- *   air below (no film, the C2 rule). Every level is checked against the 2D port's offset (loop
- *   count, area within the chord band);
+ *   air below (no film, the C2 rule). An outside edge is one annular mesh: the grown rings and
+ *   the shrunk ones reversed, at the same levels. Every level is checked against the 2D port's
+ *   offset (loop count, area within the chord band);
  * - fallback (the offset changes structure between levels): the tool swept along each chord of
  *   P as its own labelled mesh (a stadium frustum), unioned in the kernel by the evaluation (a
  *   float32 round trip of a unioned mesh is not a valid solid, S7 failure 1).
- * Doc: docs/modes/edge-chamfers.md#removal-solid, docs/modes/edge-chamfers.md#implementation-e1
+ * - a split piece's chamfer (`edge.within`, E2) subtracts everything outside its cell (grown by
+ *   the tool's radius at the face) as a `cut`, so only the source's real edges are bevelled.
+ * Doc: docs/modes/edge-chamfers.md#removal-solid, docs/modes/edge-chamfers.md#implementation-e1,
+ * docs/modes/edge-chamfers.md#implementation-e2
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { AIR, localSolids, Table, type LocalMesh, type LocalSolids } from './local-solids'
@@ -24,7 +30,7 @@ import {
   type LoopChamferGeometry,
   type Vec2,
 } from './model'
-import { loopChamferAir } from './outline'
+import { loopChamferAxis } from './outline'
 import { flattenLoop, type Triangulate } from './prism'
 import { regionArea, regionLoops, type Element, type Loop, type Region } from './2d/model'
 import type { Region2dPort } from './2d/port'
@@ -67,12 +73,11 @@ function sweepOf(
   port: Region2dPort,
   tip = 0,
 ): AppResult<ChamferSweep | undefined> {
-  const air = loopChamferAir(op, true)
   const r0 = tip / 2
   const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
   const tipZ = op.onZ - loopChamferDepth(op) - LOOP_CHAMFER_RUN / tan
   const rhoB = Math.max(r0, LOOP_CHAMFER_RUN / 2)
-  return port.offset(air, r0 + LOOP_CHAMFER_RUN).map((path) =>
+  return loopChamferAxis(op, port, r0 + LOOP_CHAMFER_RUN, true).map((path) =>
     path.pieces.length === 0
       ? undefined
       : {
@@ -109,14 +114,87 @@ export function loopChamferSolids(
         where: 'loopChamferSolids',
       })
     const levels = loftLevels(sweep)
-    const loft = loopLoft(sweep.path, levels, bevel, ctx)
+    const outside = op.edge.side === 'outside'
+    const loft = loopLoft(sweep.path, levels, bevel, ctx, outside)
     const meshes = loft.isOk() ? Ok([loft.unwrap()]) : sweptChords(sweep, bevel)
-    return meshes.map((ms) =>
+    if (meshes.isErr()) return Err(meshes.unwrapErr())
+    const mask = withinMask(op, sweep, levels, bevel, ctx.triangulate)
+    if (mask.isErr()) return Err(mask.unwrapErr())
+    return Ok(
       localSolids(op.id, table, {
-        removal: ms.map((mesh): LocalMesh => ({ mesh, at })),
+        removal: meshes.unwrap().map((mesh): LocalMesh => ({ mesh, at })),
+        cut: mask.unwrap().map((mesh): LocalMesh => ({ mesh, at })),
       }),
     )
   })
+}
+
+interface Box {
+  readonly min: Vec2
+  readonly max: Vec2
+}
+
+/**
+ * A split piece's mask (E2, `edge.within`): an annular prism from beyond the sweep's bounds in
+ * to the cell grown by the tool's radius at the face, through the removal's height. Subtracted
+ * from the removal, it keeps the bevel of the source's real edges in the cell and drops the rest
+ * of the source loop (the neighbouring pieces' edges). None when the sweep lies inside.
+ */
+function withinMask(
+  op: LoopChamferGeometry,
+  s: ChamferSweep,
+  levels: readonly LoftLevel[],
+  label: number,
+  triangulate: Triangulate,
+): AppResult<LabelledMesh[]> {
+  const w = op.edge.within
+  if (w === undefined) return Ok([])
+  const c = op.edge.shape.center
+  const m = s.faceRho
+  const inner: Box = {
+    min: [w.min[0] - c[0] - m, w.min[1] - c[1] - m],
+    max: [w.max[0] - c[0] + m, w.max[1] - c[1] + m],
+  }
+  let lo: Vec2 = [Infinity, Infinity]
+  let hi: Vec2 = [-Infinity, -Infinity]
+  for (const l of regionLoops(s.path))
+    for (const p of flattenLoop(l, 'shrink').points) {
+      lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]
+      hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]
+    }
+  if (
+    lo[0] - m >= inner.min[0] &&
+    lo[1] - m >= inner.min[1] &&
+    hi[0] + m <= inner.max[0] &&
+    hi[1] + m <= inner.max[1]
+  )
+    return Ok([])
+  const pad = m + 1
+  const outer: Box = {
+    min: [Math.min(lo[0], inner.min[0]) - pad, Math.min(lo[1], inner.min[1]) - pad],
+    max: [Math.max(hi[0], inner.max[0]) + pad, Math.max(hi[1], inner.max[1]) + pad],
+  }
+  const rect = (b: Box, ccw: boolean): Vec2[] => {
+    const r: Vec2[] = [
+      [b.min[0], b.min[1]],
+      [b.max[0], b.min[1]],
+      [b.max[0], b.max[1]],
+      [b.min[0], b.max[1]],
+    ]
+    return ccw ? r : r.reverse()
+  }
+  const ring = [rect(outer, true), rect(inner, false)]
+  const z0 = levels[0]!.z - 1
+  const z1 = levels.at(-1)!.z + 1
+  return loftMesh(
+    [ring, ring],
+    [
+      { z: z0, rho: 0 },
+      { z: z1, rho: 0 },
+    ],
+    label,
+    triangulate,
+  ).map((mesh) => [mesh])
 }
 
 /** Which construction `loopChamferSolids` takes for `op` (tests, perf): `loft` or `fallback`. */
@@ -127,7 +205,8 @@ export function loopChamferConstruction(
   const sweep = sweepOf(op, ctx.region2d)
   if (sweep.isErr() || sweep.unwrap() === undefined) return 'empty'
   const s = sweep.unwrap()!
-  return loopLoft(s.path, loftLevels(s), 0, ctx).isOk() ? 'loft' : 'fallback'
+  const outside = op.edge.side === 'outside'
+  return loopLoft(s.path, loftLevels(s), 0, ctx, outside).isOk() ? 'loft' : 'fallback'
 }
 
 interface LoftLevel {
@@ -160,34 +239,43 @@ function loftInvalid(message: string, data: Readonly<Record<string, unknown>> = 
 
 /**
  * One closed mesh through `path` grown by each level's ρ (bottom first): per loop a ring of the
- * same point count at every level, bands between them, caps by `triangulate`. Fails (rule
- * `chamferLoft`) where the analytic offset is not valid: the caller then sweeps the chords.
+ * same point count at every level, bands between them, caps by `triangulate`. With `band`
+ * (outside edges, E2) the path shrunk by ρ joins as reversed rings: the annular V-groove between
+ * them. Fails (rule `chamferLoft`) where the analytic offset is not valid: the caller then sweeps
+ * the chords.
  */
 function loopLoft(
   path: Region,
   levels: readonly LoftLevel[],
   label: number,
   ctx: ChamferSolidsContext,
+  band = false,
 ): AppResult<LabelledMesh> {
   const loops = regionLoops(path)
-  const dMax = -Math.max(...levels.map((l) => l.rho))
-  const plans = loops.map((l) => planFor(l, dMax, CHORD_TOLERANCE))
+  const rhoMax = Math.max(...levels.map((l) => l.rho))
+  const sides = band ? [-1, 1] : [-1]
+  const plans = sides.map((sg) => loops.map((l) => planFor(l, sg * rhoMax, CHORD_TOLERANCE)))
   const rings: Vec2[][][] = []
   let checked = -1
   for (const lv of levels) {
-    const d = -lv.rho
     const rs: Vec2[][] = []
-    for (const [k, l] of loops.entries()) {
-      const r = offsetRing(l, d, plans[k]!)
-      if (typeof r === 'string') return loftInvalid(r, { offset: d })
-      rs.push(r)
+    for (const [j, sg] of sides.entries()) {
+      const d = sg * lv.rho
+      const side: Vec2[][] = []
+      for (const [k, l] of loops.entries()) {
+        const r = offsetRing(l, d, plans[j]![k]!)
+        if (typeof r === 'string') return loftInvalid(r, { offset: d })
+        side.push(r)
+      }
+      // the vertical top repeats the face level's rings: checked once
+      if (lv.rho !== checked) {
+        const ok = sameAsPort(path, side, d, ctx.region2d)
+        if (ok !== undefined) return loftInvalid(ok, { offset: d })
+      }
+      // the shrunk rings reversed: the region between them is on every ring's left
+      rs.push(...(sg > 0 ? side.map((r) => [...r].reverse()) : side))
     }
-    // the vertical top repeats the face level's rings: checked once
-    if (lv.rho !== checked) {
-      const ok = sameAsPort(path, rs, d, ctx.region2d)
-      if (ok !== undefined) return loftInvalid(ok, { offset: d })
-      checked = lv.rho
-    }
+    checked = lv.rho
     rings.push(rs)
   }
   return loftMesh(rings, levels, label, ctx.triangulate)

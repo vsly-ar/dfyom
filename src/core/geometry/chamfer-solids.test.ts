@@ -1,8 +1,10 @@
 // Edge chamfers E1 (inside edges): the removal solid of a chamfer along a pocket's loops,
 // islands included, against the analytic volume (rectangles, circles) or the 2D oracle (spike
 // S7's morphological opening by Simpson's rule), within half the chord-tolerance band (edge length ×
-// depth × 0.01 mm). The offset-loft and the swept-chords fallback.
-// Doc: docs/modes/edge-chamfers.md#implementation-e1, docs/research/2026-11-25-spike-s7-edge-chamfers.md
+// depth × 0.01 mm). The offset-loft and the swept-chords fallback. E2: outside edges (the annular
+// V-groove against M − M⊖ρ), a split piece's `within` mask and the enclosure outline.
+// Doc: docs/modes/edge-chamfers.md#implementation-e1, docs/modes/edge-chamfers.md#implementation-e2,
+// docs/research/2026-11-25-spike-s7-edge-chamfers.md
 import { beforeAll, describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
 import { loopChamferConstruction, type ChamferSolidsContext } from './chamfer-solids'
@@ -15,7 +17,7 @@ import {
   type StockGeometry,
 } from './model'
 import { needsRegion2d } from './operations'
-import { loopChamferAir } from './outline'
+import { loopChamferRegion } from './outline'
 import { parameterChecks } from './dfm'
 import { regionArea, regionLoops, type Region } from './2d/model'
 import { numberRegion } from './2d/place'
@@ -41,6 +43,8 @@ const evaluate = (operations: OperationGeometry[], stock = STOCK): PartEvaluatio
 
 /** Big enough for the enclosure placed with a 12 mm margin (spike S7). */
 const ENCLOSURE_STOCK: StockGeometry = { length: 260, width: 200, thickness: 40 }
+/** The enclosure's outline (249.5 × 177) at a 12 mm margin with its 6 mm slot inside the stock. */
+const OUTLINE_STOCK: StockGeometry = { length: 285, width: 215, thickness: 40 }
 
 function chamferOf(edge: OperationGeometry, width: number, angle = 90): LoopChamferGeometry {
   if (edge.kind !== 'pocket') throw new Error('test: a pocket edge')
@@ -61,6 +65,7 @@ function removed(
   chamfer: LoopChamferGeometry,
   before: OperationGeometry[] = [],
   stock = STOCK,
+  pieces = 1,
 ): number {
   const without = evaluate([...before, edge], stock)
   const withC = evaluate([...before, edge, chamfer], stock)
@@ -69,7 +74,7 @@ function removed(
     triangles: withC.indices,
   })
   expect(v).toBeCloseTo(withC.volume, 0)
-  expect(withC.pieces ?? 1).toBe(1)
+  expect(withC.pieces ?? 1).toBe(pieces)
   expect(kernel.liveObjects()).toBe(0)
   return without.volume - withC.volume
 }
@@ -114,7 +119,7 @@ describe('loop chamfer solids (E1, inside edges)', () => {
     const P = port.length(outer)
     const analytic = P * 0.5 + Math.PI / 3
     expect(loopChamferConstruction(c, ctx)).toBe('loft')
-    expect(Math.abs(removed(pocket, c) - analytic)).toBeLessThan(band(loopChamferAir(c), 1) / 2)
+    expect(Math.abs(removed(pocket, c) - analytic)).toBeLessThan(band(loopChamferRegion(c), 1) / 2)
   })
 
   it('an analytic rectangle pocket (v0.1 contour) takes the general path too', () => {
@@ -133,7 +138,7 @@ describe('loop chamfer solids (E1, inside edges)', () => {
     expect(needsRegion2d({ stock: STOCK, operations: [pocket, c] })).toBe(true)
     const P = 2 * (80 + 50) - 8 * 3 + 2 * Math.PI * 3
     expect(Math.abs(removed(pocket, c) - (P * 0.5 + Math.PI / 3))).toBeLessThan(
-      band(loopChamferAir(c), 1) / 2,
+      band(loopChamferRegion(c), 1) / 2,
     )
   })
 
@@ -144,7 +149,7 @@ describe('loop chamfer solids (E1, inside edges)', () => {
     const mitred = (80 + 50) * 2 * 2 + (4 * 4 * 2) / 3
     const cones = 4 * ((4 - Math.PI) / 12) * 2 * 4
     expect(Math.abs(removed(pocket, c) - (mitred - cones))).toBeLessThan(
-      band(loopChamferAir(c), 2) / 2,
+      band(loopChamferRegion(c), 2) / 2,
     )
   })
 
@@ -217,5 +222,133 @@ describe('loop chamfer solids (E1, inside edges)', () => {
     expect(tooDeep).toHaveLength(1)
     expect(tooDeep[0]!.suggestion).toEqual({ relation: 'atMost', value: expect.closeTo(1, 6) })
     expect(codes([deep, chamferOf(deep, 1)])).not.toContain('dfm.chamferTooDeep')
+  })
+})
+
+/** A through outside profile on `region`'s loop (6 mm slot, no tabs), its edge chamfered. */
+function outsideOf(region: Region, id = 'profile1'): OperationGeometry {
+  return {
+    kind: 'profile',
+    id,
+    shape: { center: [0, 0], contour: { kind: 'region', region } },
+    side: 'outside',
+    slotWidth: 6,
+    tabs: { count: 0, width: 6, thickness: 2 },
+  }
+}
+
+function outsideChamfer(
+  edge: OperationGeometry,
+  width: number,
+  extra: Partial<LoopChamferGeometry['edge']> = {},
+): LoopChamferGeometry {
+  if (edge.kind !== 'profile') throw new Error('test: a profile edge')
+  return {
+    kind: 'chamfer',
+    id: 'chamfer1',
+    onZ: 0,
+    edgeOf: edge.id,
+    edge: { shape: edge.shape, side: 'outside', ...extra },
+    width,
+    angle: 90,
+  }
+}
+
+/**
+ * Spike S7's oracle for an outside edge of the part M: at depth t the removed area is M minus
+ * (M ⊖ ρ(t)), ρ(t) = (h − t)·tan(α/2); Simpson's rule over t.
+ */
+function outsideOracle(part: Region, width: number, angle = 90, n = 24): number {
+  const tan = Math.tan(((angle / 2) * Math.PI) / 180)
+  const h = width / tan
+  const base = regionArea(part)
+  const f = (t: number): number => {
+    const rho = (h - t) * tan
+    return rho <= 0 ? 0 : base - regionArea(expectOk(port.offset(part, rho)))
+  }
+  let sum = f(0) + f(h)
+  for (let k = 1; k < n; k++) sum += (k % 2 === 1 ? 4 : 2) * f((k * h) / n)
+  return (sum * h) / (3 * n)
+}
+
+describe('loop chamfer solids (E2, outside edges)', () => {
+  it('a rectangle outline 100 × 60: 355.5 mm³ (S7), one annular loft, part and offcut', () => {
+    const part = numberRegion({
+      pieces: [{ outer: roundedRectLoop(10, 10, 110, 70, 0), holes: [] }],
+    })
+    const profile = outsideOf(part)
+    const c = outsideChamfer(profile, 1.5)
+    expect(loopChamferConstruction(c, ctx)).toBe('loft')
+    // h((a+b)w − 4w²/3) (spike S7): 320 mm of edge × w·h/2, less the mitred corners
+    const analytic = 1.5 * (160 * 1.5 - (4 * 1.5 * 1.5) / 3)
+    expect(analytic).toBeCloseTo(355.5, 9)
+    const v = removed(profile, c, [], STOCK, 2)
+    expect(Math.abs(v - analytic)).toBeLessThan(band(part, 1.5) / 2)
+  })
+
+  it('a rounded outline with fitted arcs against the 2D oracle, 60°', () => {
+    const part = numberRegion({
+      pieces: [{ outer: roundedRectLoop(15, 12, 105, 68, 8), holes: [] }],
+    })
+    const profile = outsideOf(part)
+    const c = { ...outsideChamfer(profile, 1), angle: 60 }
+    const depth = 1 / Math.tan(Math.PI / 6)
+    expect(loopChamferConstruction(c, ctx)).toBe('loft')
+    expect(Math.abs(removed(profile, c, [], STOCK, 2) - outsideOracle(part, 1, 60))).toBeLessThan(
+      band(part, depth) / 2,
+    )
+  })
+
+  it('a part narrower than 2 × width: the swept-chords fallback, still the oracle', () => {
+    const part = numberRegion({
+      pieces: [{ outer: roundedRectLoop(20, 39, 100, 41, 0), holes: [] }],
+    })
+    const profile = outsideOf(part)
+    const c = outsideChamfer(profile, 1.5)
+    expect(loopChamferConstruction(c, ctx)).toBe('fallback')
+    expect(Math.abs(removed(profile, c, [], STOCK, 2) - outsideOracle(part, 1.5))).toBeLessThan(
+      band(part, 1.5) / 2,
+    )
+  })
+
+  it('a split piece (`within`): only the edge in the cell, the bevel stops past the split line', () => {
+    const part = numberRegion({
+      pieces: [{ outer: roundedRectLoop(10, 10, 110, 70, 0), holes: [] }],
+    })
+    const profile = outsideOf(part)
+    const full = removed(profile, outsideChamfer(profile, 1.5), [], STOCK, 2)
+    const half = removed(
+      profile,
+      outsideChamfer(profile, 1.5, { within: { min: [-10, -10], max: [60, 90] } }),
+      [],
+      STOCK,
+      2,
+    )
+    // the left half, and the top and bottom bevels on to the mask at 60 + the reach at the face
+    const reach = 1.5 + 4 * CHORD_TOLERANCE
+    const expected = full / 2 + 2 * reach * ((1.5 * 1.5) / 2)
+    expect(Math.abs(half - expected)).toBeLessThan(band(part, 1.5) / 2)
+  })
+
+  it('the enclosure outline, 1.5 × 45° (DF77, E2 exit): the oracle within the band, one loft', () => {
+    const proc = (
+      globalThis as unknown as {
+        process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, e: 'utf8'): string } }
+      }
+    ).process
+    const svg = proc.getBuiltinModule('node:fs').readFileSync(ENCLOSURE_SECTIONS_SVG, 'utf8')
+    const item = expectOk(importSvg(svg)).shapes.find((x) => x.name === 'outline')!
+    const loopItem = item.items[0]!
+    if (loopItem.kind !== 'loop') throw new Error('test: the outline is a loop')
+    const outline = placeLoops([loopItem.loop], 12).loops[0]!
+    const part = numberRegion({ pieces: [{ outer: outline, holes: [] }] })
+    const profile = outsideOf(part)
+    const c = outsideChamfer(profile, 1.5)
+    expect(loopChamferConstruction(c, ctx)).toBe('loft')
+    // fitted arcs: the profile's part is flattened circumscribed and the bevel inscribed, both
+    // by the chord tolerance, so the error reaches ≈ 0.7 of the band (S7 measured 0.69–0.71)
+    expect(
+      Math.abs(removed(profile, c, [], OUTLINE_STOCK, 2) - outsideOracle(part, 1.5)),
+    ).toBeLessThan(band(part, 1.5))
   })
 })

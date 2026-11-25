@@ -19,7 +19,7 @@ import {
   type Region,
 } from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
-import { pocketRegion, shapeOutline } from './outline'
+import { loopChamferRegion, pocketRegion } from './outline'
 import {
   frameMap,
   holeRegion,
@@ -79,13 +79,16 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
       ]
     case 'chamfer': {
       if (isLoopChamfer(op)) {
-        // a general edge (E1): its shape's region grown by the bevel's width
-        const outline = shapeOutline(op.edge.shape)
-        const grown =
-          outline.kind === 'region'
-            ? port.offset(outline.region, -op.width).mapOr(undefined, (x) => x)
-            : undefined
-        return [{ direction, lowest: op.onZ - loopChamferDepth(op), region: clip(grown) }]
+        // a general edge: inside (E1) the air grown by the bevel's width; outside (E2) the band
+        // the bevel's width on both sides of the part's loop
+        const r = loopChamferRegion(op)
+        const grown = port.offset(r, -op.width)
+        const band =
+          op.edge.side === 'inside'
+            ? grown
+            : grown.andThen((g) => port.offset(r, op.width).andThen((s) => port.difference(g, s)))
+        const region = band.mapOr(undefined, (x) => x)
+        return [{ direction, lowest: op.onZ - loopChamferDepth(op), region: clip(region) }]
       }
       const r = op.diameter / 2
       const a: Vec2 = [op.center[0] + r, op.center[1]]

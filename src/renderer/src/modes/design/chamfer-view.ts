@@ -1,6 +1,6 @@
 // Pure helpers of the chamfer UI (v0.4 task U4): which operations can be a chamfer's edge (a
-// drilling, a pocket of any shape or an inside profile; edge chamfers E1 widened the circular
-// edges of v0.4 to general loops), the edge the Add menu's Chamfer uses (the selected one, else the
+// drilling, a pocket of any shape or an outside/inside profile; edge chamfers E1/E2 widened the
+// circular edges of v0.4 to general loops), the edge the Add menu's Chamfer uses (the selected one, else the
 // last in design order, else disabled with the reason), the Edge field's options ("Drilling 2 ·
 // Ø 3.4 mm", earlier operations only), the derived diameter and depth (D45: a chamfer stores its
 // width) and the section illustration's values from the part.
@@ -32,15 +32,18 @@ function edgeDiameterDto(op: OperationDTO) {
 
 /**
  * Whether a chamfer can break this operation's edge (design-v0.4.md rule `chamferEdge`, widened
- * by edge-chamfers.md E1): a drilling, any pocket, any inside profile.
+ * by edge-chamfers.md E1/E2): a drilling, any pocket, any outside or inside profile.
  */
 export const isChamferEdge = (op: OperationDTO): boolean =>
   edgeDiameterDto(op) !== undefined || isLoopEdge(op)
 
-/** A general edge (edge-chamfers.md E1): a pocket or inside profile that is not round. */
+/**
+ * A general edge (edge-chamfers.md E1/E2): a pocket or inside profile that is not round, or any
+ * outside profile.
+ */
 export const isLoopEdge = (op: OperationDTO): boolean =>
   edgeDiameterDto(op) === undefined &&
-  (op.kind === 'pocket' || (op.kind === 'profile' && op.side === 'inside'))
+  (op.kind === 'pocket' || (op.kind === 'profile' && op.side !== 'on'))
 
 /** The edge's diameter in mm (NaN when not round or not loadable). */
 export function edgeDiameter(op: OperationDTO): number {

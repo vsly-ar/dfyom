@@ -239,11 +239,12 @@ interface CircleChamferFields {
 }
 
 /**
- * Edge chamfer (E1): a bevel along every loop of a general edge, the top edge of an earlier
- * pocket of any other shape or `inside` profile on the same face (`edge.shape`; its region is the
- * air side; `outside` edges follow with E2). `onZ` is the edge's face. A present `edge` tells it
- * from the circular chamfer, whose input stays byte-identical.
- * Doc: docs/modes/edge-chamfers.md#implementation-e1
+ * Edge chamfer (E1, E2): a bevel along every loop of a general edge, the top edge of an earlier
+ * pocket of any other shape or `inside` profile (E1), or `outside` profile (E2), on the same face
+ * (`edge.shape`). `onZ` is the material's top at the edge: the edge's face, or the deepest earlier
+ * facing's floor of that face when the edge starts on a faced stock face (E2). A present `edge`
+ * tells it from the circular chamfer, whose input stays byte-identical.
+ * Doc: docs/modes/edge-chamfers.md#implementation-e1, docs/modes/edge-chamfers.md#implementation-e2
  */
 interface LoopChamferFields {
   readonly kind: 'chamfer'
@@ -261,12 +262,21 @@ interface LoopChamferFields {
 
 /** The general edge a loop chamfer follows, in the edge operation's face frame. */
 export interface LoopChamferEdge {
-  /** The edge operation's shape: its region is the air side of every chamfered loop. */
+  /**
+   * The edge operation's shape. `inside`: its region is the air side of every chamfered loop.
+   * `outside`: its (first) loop's region is the part, the air is around it (E2).
+   */
   readonly shape: Shape
-  /** Which side of the loops is air: `inside` (a pocket or an inside profile; E1). */
-  readonly side: 'inside'
+  /** Which side of the loops is air: `inside` (a pocket or an inside profile; E1), `outside` (E2). */
+  readonly side: 'inside' | 'outside'
   /** The edge operation's depth below `onZ` (a pocket, a step); absent = through. */
   readonly depth?: number
+  /**
+   * On a split piece only (E2): the piece's cell in the face frame. The bevel stays within it
+   * (grown by the tool's reach at the face), so `shape` (then the source's edge, unclipped) is
+   * chamfered only where it is the source's real edge, never along the split line.
+   */
+  readonly within?: { readonly min: Vec2; readonly max: Vec2 }
 }
 
 export type ChamferGeometry = Extract<OperationGeometry, { kind: 'chamfer' }>
