@@ -57,7 +57,7 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
   // Save to library adds the block and chooses it; its material is locked then
   await setup.getByRole('button', { name: 'Save to library' }).click()
   const from = setup.getByRole('combobox', { name: 'From library' })
-  await expect(from).toContainText('Block 100 × 60 × 20')
+  await expect(from).toContainText('Aluminium 6061-T6 100 × 60 × 20')
   await expect(setup.getByRole('textbox', { name: 'Material name' })).toHaveAttribute('readonly')
   await expect(setup.getByRole('button', { name: 'Save to library' })).toBeDisabled()
 
@@ -67,14 +67,14 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
   const ask = page.getByRole('dialog', { name: 'Save to library' })
   await ask.getByRole('button', { name: 'Save as variant' }).click()
   await expect(ask).toBeHidden()
-  await expect(from).toContainText('Block 100 × 60 × 20 · 50 × 60 × 20')
+  await expect(from).toContainText('Aluminium 6061-T6 100 × 60 × 20 · 50 × 60 × 20')
 
   if (RENDERS) {
     for (const t of ['light', 'dark'] as const) {
       await closeDialog(stock, 'Cancel')
       await theme(page, t)
       stock = await openPartSetup(page, 'Stock')
-      await choose(page, setup, 'From library', 'Block 100 × 60 × 20')
+      await choose(page, setup, 'From library', 'Aluminium 6061-T6 100 × 60 × 20')
       await setField(setup, 'Length (X)', '80')
       await page.waitForTimeout(400)
       await page.screenshot({ path: `${rendersDir}/df13-stock-${t}.png` })
@@ -90,7 +90,7 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
 
   // the variant unchanged: Create part links the part's copy to it
   stock = await openPartSetup(page, 'Stock')
-  await choose(page, setup, 'From library', 'Block 100 × 60 × 20 · 50 × 60 × 20')
+  await choose(page, setup, 'From library', 'Aluminium 6061-T6 100 × 60 × 20 · 50 × 60 × 20')
   await page
     .getByRole('dialog', { name: 'Stock' })
     .getByRole('button', { name: 'Create part' })
@@ -114,6 +114,26 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
       await page.screenshot({ path: `${rendersDir}/df15-sidebar-${t}.png` })
     }
 
+  // DF95: the Stock dialog of the part changes its stock (one undo step)
+  stock = await openPartSetup(page, 'Stock')
+  const change = page.getByRole('region', { name: 'Change the stock' })
+  await expect(change.getByRole('combobox', { name: 'Length (X)' })).toHaveValue('50')
+  await setField(change, 'Length (X)', '80')
+  if (RENDERS)
+    for (const t of ['light', 'dark'] as const) {
+      await closeDialog(stock, 'Cancel')
+      await theme(page, t)
+      stock = await openPartSetup(page, 'Stock')
+      await setField(change, 'Length (X)', '80')
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: `${rendersDir}/df95-stock-change-${t}.png` })
+    }
+  await stock.getByRole('button', { name: 'Update stock' }).click()
+  await expect(stock).toBeHidden()
+  await expect(partRow).toContainText('Stock: 80 × 60 × 20')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(partRow).toContainText('Stock: 50 × 60 × 20')
+
   // the Library window lists the variant under its parent
   const opened = dfyom.app.waitForEvent('window')
   await page.getByRole('button', { name: 'Library', exact: true }).click()
@@ -123,11 +143,13 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
   await lib.getByRole('tab', { name: 'Stock' }).click()
   const grid = lib.getByRole('grid', { name: 'Stock' })
   const variant = grid.getByRole('row', {
-    name: 'Block 100 × 60 × 20 · 50 × 60 × 20, variant of Block 100 × 60 × 20',
+    name: 'Aluminium 6061-T6 100 × 60 × 20 · 50 × 60 × 20, variant of Aluminium 6061-T6 100 × 60 × 20',
   })
   await variant.click()
   const editor = lib.getByRole('region', { name: 'Item editor' })
-  await expect(editor.getByRole('button', { name: 'Variant of Block 100 × 60 × 20' })).toBeVisible()
+  await expect(
+    editor.getByRole('button', { name: 'Variant of Aluminium 6061-T6 100 × 60 × 20' }),
+  ).toBeVisible()
   if (RENDERS)
     for (const t of ['light', 'dark'] as const) {
       await theme(page, t)

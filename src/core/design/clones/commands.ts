@@ -211,6 +211,7 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
         false,
         where,
         shapeEnv(l, ctx.services.region2d),
+        l.part.operations,
       )
       if (settled.isErr()) return settled
       const list = draft.parts[partId]!.operations

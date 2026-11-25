@@ -22,7 +22,10 @@ import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import { useShell, useUi } from '../../shell/ShellContext'
 import {
+  Button,
   ErrorMessage,
+  Icon,
+  Menu,
   newGestureId,
   PanelHeader,
   QuantityInput,
@@ -40,6 +43,7 @@ import { PatternInspector } from './PatternInspector'
 import { FaceInspector } from './FaceInspector'
 import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
+import { currentTolerancePreset, TOLERANCE_PRESETS } from './tolerance-presets'
 import { ReferencePanel } from './ReferencePanel'
 import { useOpenShape } from './useOpenShape'
 import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
@@ -252,6 +256,30 @@ function PartInspector({
           }
           onCancelGesture={cancelGesture}
         />
+        {/* DF97: common general tolerances, one command each (one undo step) */}
+        <div className={styles['setupButtons']}>
+          <Menu
+            label={t.tolerancePresets}
+            items={[
+              ...TOLERANCE_PRESETS[part.units].map((p) => ({
+                label: t.tolerancePreset(p.source, part.units),
+                description: t.toleranceUse[p.use],
+                checked: currentTolerancePreset(part.units, tolerance)?.source === p.source,
+                onSelect: () => void updatePart({ generalTolerance: { length: p.source } }),
+              })),
+              'separator' as const,
+              {
+                label: t.generalToleranceNone,
+                checked: tolerance === undefined,
+                onSelect: () => void updatePart({ generalTolerance: { length: null } }),
+              },
+            ]}
+          >
+            <Button size="sm" icon={<Icon name="chevron-down" />}>
+              {t.tolerancePresets}
+            </Button>
+          </Menu>
+        </div>
         {error ? <ErrorMessage error={error} /> : null}
         <EvaluationLine status={evaluation?.status} />
         {/* how operations get onto a face (DF22) */}

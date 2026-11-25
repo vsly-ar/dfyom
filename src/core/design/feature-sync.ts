@@ -18,6 +18,7 @@ import { shapesOf, type Operation } from './operation'
 import { shapeFacts } from './placement'
 import { recalculate, SurfaceTable } from './surfaces'
 import { checkOperations } from './validate'
+import { knownIssues, withoutKnown } from './known-issues'
 
 const toPath = (path: string) => path.split('.').map((s) => (/^\d+$/.test(s) ? Number(s) : s))
 
@@ -143,7 +144,10 @@ export function settleFeatures(
   if (shapes.isErr()) return mapped(shapes.unwrapErr(), next)
   const facts = shapeFacts(next, shapes.unwrap(), env.port)
   if (facts.isErr()) return mapped(facts.unwrapErr(), next)
-  const checked = checkOperations(next, stock, undefined, facts.unwrap(), shapes.unwrap())
+  const checked = withoutKnown(
+    checkOperations(next, stock, undefined, facts.unwrap(), shapes.unwrap()),
+    () => knownIssues(ops, stock, env),
+  )
   if (checked.isErr()) return mapped(checked.unwrapErr(), next)
   return r
 }

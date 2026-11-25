@@ -138,7 +138,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(stock).toBeHidden()
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
-  await renderDialog(page, 'stock', () => openPartSetup(page, 'Stock'))
+  await renderDialog(page, 'stock', () => openPartSetup(page, 'Stock'), 'Cancel')
   await renderDialog(page, 'shapes', () => openPartSetup(page, 'Shapes'))
   if (RENDERS) {
     // the Reference panel in the right sidebar (DF3; the Reference dialog until then), empty

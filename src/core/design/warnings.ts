@@ -16,9 +16,11 @@ import type { ProjectDoc, UnitSystem } from '../project/document'
 import { toGeometryInput } from './geometry-input'
 import { featureBlock, ownedOperationId, type LoadedFeature, type SpanGeometry } from './feature'
 import type { Part } from './operation'
+import { shapeFacts } from './placement'
 import type { ShapeDTO } from './shape.dto'
 import { designToolLabel } from './tool'
 import { dfmTool, noFittingTool, operationTools } from './tool-choice'
+import { checkOperations } from './validate'
 
 /** `DfmWarning` as a result schema (defined with the other boundary schemas). */
 export { DfmWarningSchema }
@@ -60,9 +62,48 @@ export function partWarnings(
           region2d,
         }),
         ...noToolWarnings(part, input, stock, units, tools, snapshots, features, region2d),
+        ...stockLimitWarnings(part, stock, region2d),
       ],
     ),
   )
+}
+
+/**
+ * `dfm.stockLimit` (hardening DF95, docs/modes/design.md#changing-the-stock-df95): an operation
+ * limit the part's stock no longer allows (a depth below the new stock bottom, a tab as thick as
+ * the stock), after the stock was changed (`design.part.update { stock }`, or from the library).
+ * Commands check these limits, so a part edited only by them has none; nothing is clamped.
+ * Shapes that do not load or place leave this check out (their own warnings say why).
+ */
+function stockLimitWarnings(
+  part: Part,
+  stock: Stock,
+  region2d: Region2dPort | undefined,
+): DfmWarning[] {
+  const facts = shapeFacts(part.operations, part.shapes, region2d)
+  if (facts.isErr()) return []
+  const checked = checkOperations(part.operations, stock, undefined, facts.unwrap(), part.shapes)
+  if (checked.isOk()) return []
+  return checked.unwrapErr().issues.flatMap((issue): DfmWarning[] => {
+    const [head, operation, ...rest] = issue.path
+    if (head !== 'operations' || typeof operation !== 'string') return []
+    const parameter = rest.join('.')
+    const values = Object.fromEntries(
+      Object.entries(issue.params ?? {}).filter(([, v]) =>
+        ['number', 'string', 'boolean'].includes(typeof v),
+      ),
+    ) as Record<string, number | string | boolean>
+    return [
+      {
+        code: 'dfm.stockLimit',
+        severity: 'warning',
+        message: `${operation}${parameter === '' ? '' : `.${parameter}`}: ${issue.message} (the stock changed)`,
+        operation,
+        ...(parameter === '' ? {} : { parameter }),
+        params: { ...values, rule: issue.rule, detail: issue.message },
+      },
+    ]
+  })
 }
 
 /**
