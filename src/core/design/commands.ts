@@ -83,6 +83,7 @@ import {
 } from './part.dto'
 import { checkReferences, recalculate, STOCK_TOP, SurfaceTable } from './surfaces'
 import { checkOperations, operationIssues } from './validate'
+import { knownIssues, withoutKnown } from './known-issues'
 import {
   EvaluationErrorSchema,
   EvaluationStatusSchema,
@@ -518,7 +519,8 @@ export function invalid(issues: Issue[], where: string): AppResult<never> {
 /**
  * Whole-part check after an edit of `edited`: its constraints, references of all operations,
  * recalculation of its dependants (`recalc`), constraints of the others. Named shapes are loaded
- * from `env` and placed for their checks (validate.ts `ShapeFacts`).
+ * from `env` and placed for their checks (validate.ts `ShapeFacts`). Issues other operations
+ * already had in `before` (the operations before the edit) don't refuse it (known-issues.ts).
  */
 export function settle(
   ops: readonly Operation[],
@@ -527,6 +529,7 @@ export function settle(
   recalc: boolean,
   where: string,
   env: ShapeEnv = { dto: {} },
+  before?: readonly Operation[],
 ): AppResult<readonly Operation[]> {
   const loadedShapes = shapesOf(ops, env.dto)
   if (loadedShapes.isErr()) return Err(loadedShapes.unwrapErr().withContext(where))
@@ -547,7 +550,8 @@ export function settle(
   if (refs.isErr()) return Err(refs.unwrapErr().withContext(where))
   const next = recalc && edited !== undefined ? recalculate(ops, stock, edited) : Ok([...ops])
   if (next.isErr()) return Err(next.unwrapErr().withContext(where))
-  return checkOperations(next.unwrap(), stock, edited, facts.unwrap(), shapes)
+  const checked = checkOperations(next.unwrap(), stock, edited, facts.unwrap(), shapes)
+  return withoutKnown(checked, () => (before ? knownIssues(before, stock, env) : []))
     .map(() => next.unwrap())
     .mapErr((e) => e.withContext(where))
 }
@@ -1013,7 +1017,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         toolLocked: args.tool !== undefined,
         owner: None as Option<FeatureOwner>,
       } as O
-      let settled = settle([...ops, op], stock, id, false, where, env)
+      let settled = settle([...ops, op], stock, id, false, where, env, ops)
       if (settled.isErr()) return settled
       // DF51: a profile's default slot is widened to the library's tool when none fits it
       if (spec.kind === 'profile' && (args as { slotWidth?: unknown }).slotWidth === undefined) {
@@ -1027,7 +1031,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         const q = wider.map((w) => Quantity.parse(w, fieldContext('length', units)))
         if (q.isSome() && q.unwrap().isOk()) {
           const widened = { ...op, slotWidth: q.unwrap().unwrap() } as O
-          const again = settle([...ops, widened], stock, id, false, where, env)
+          const again = settle([...ops, widened], stock, id, false, where, env, ops)
           if (again.isOk()) settled = again
         }
       }
@@ -1137,7 +1141,7 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   const parsed = f.done()
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
   const next = ops.map((o, k) => (k === i ? op : o))
-  return settle(next, stock, prev.id, true, where, env)
+  return settle(next, stock, prev.id, true, where, env, ops)
 }
 
 // ── part and shared operation commands ────────────────────────────────────────────────────

@@ -95,6 +95,37 @@ describe('design.part.update { stock } (DF95)', () => {
     expect(found.filter((c) => c === 'dfm.stockLimit')).toHaveLength(1)
   })
 
+  it('a broken operation does not block edits of the others; fixing it clears it', async () => {
+    const s = await designSetup({ services: { region2d } })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'rectangle', center: ['50', '30'], length: '20', width: '10' },
+      depth: '15',
+    })
+    await s.run('design.drilling.add', { partId: s.partId, center: ['20', '20'], diameter: '6' })
+    const idOf = (kind: string) => s.part().operations.find((o) => o.kind === kind)!.id
+    await s.run('design.part.update', { partId: s.partId, stock: testStock('10') })
+    expect(await rules(s)).toContain('dfm.stockLimit')
+    // another operation's edit that doesn't make things worse passes
+    await s.run('design.drilling.update', {
+      partId: s.partId,
+      operationId: idOf('drilling'),
+      diameter: '8',
+    })
+    // the broken operation keeps its own invariants: only a fix passes
+    await s.fail(
+      'design.pocket.update',
+      { partId: s.partId, operationId: idOf('pocket'), name: 'Deep' },
+      'model.invariant',
+    )
+    await s.run('design.pocket.update', {
+      partId: s.partId,
+      operationId: idOf('pocket'),
+      depth: '5',
+    })
+    expect(await rules(s)).not.toContain('dfm.stockLimit')
+  })
+
   it('refuses both sources at once, an unknown stock and a split piece', async () => {
     const s = await designSetup({ services: { region2d } })
     const both = expectErrCode(

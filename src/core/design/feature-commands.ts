@@ -54,6 +54,7 @@ import type { ShapeDTO } from './shape.dto'
 import { shapeFacts } from './placement'
 import { checkReferences, recalculate, SurfaceTable } from './surfaces'
 import { checkOperations } from './validate'
+import { knownIssues, withoutKnown } from './known-issues'
 
 const FeatureArg = { partId: PartIdSchema, featureId: FeatureIdSchema }
 
@@ -90,7 +91,8 @@ function findFeature(
  * Whole-part check after the block `[start, start + owned.length)` was replaced: references
  * (a role that disappeared while a later operation refers to it is `design.referenced`),
  * recalculation of what depends on the owned operations (on update), every operation's
- * constraints (issues at `operations.<id>.<path>`).
+ * constraints (issues at `operations.<id>.<path>`). Issues other operations already had in
+ * `before` don't refuse it; the owned operations' always do (known-issues.ts).
  */
 function settleBlock(
   ops: readonly Operation[],
@@ -99,6 +101,7 @@ function settleBlock(
   recalc: boolean,
   where: string,
   env: ShapeEnv,
+  before: readonly Operation[],
 ): AppResult<readonly Operation[]> {
   const shapes = shapesOf(ops, env.dto)
   if (shapes.isErr()) return Err(shapes.unwrapErr().withContext(where))
@@ -113,7 +116,11 @@ function settleBlock(
       if (r.isErr()) return Err(r.unwrapErr().withContext(where))
       next = r.unwrap()
     }
-  return checkOperations(next, stock, undefined, facts.unwrap(), shapes.unwrap())
+  const ownedIds = new Set(owned.map((o) => o.id))
+  const checked = checkOperations(next, stock, undefined, facts.unwrap(), shapes.unwrap())
+  return withoutKnown(checked, () =>
+    knownIssues(before, stock, env).filter((is) => !ownedIds.has(String(is.path[1]))),
+  )
     .map(() => next)
     .mapErr((e) => e.withContext(where))
 }
@@ -203,7 +210,15 @@ export function placeFeature<F extends FeatureBase>(
     prev === undefined
       ? [...loaded.features, self]
       : loaded.features.map((l) => (l.feature.id === feature.id ? self : l))
-  const settled = settleBlock(next, owned.unwrap(), stock, prev !== undefined, where, env)
+  const settled = settleBlock(
+    next,
+    owned.unwrap(),
+    stock,
+    prev !== undefined,
+    where,
+    env,
+    part.operations,
+  )
   if (settled.isErr()) return Err(mapFeatureIssues(settled.unwrapErr(), next, features, feature.id))
   // later features whose expression fields read this one's surfaces follow it (F3)
   const synced =
