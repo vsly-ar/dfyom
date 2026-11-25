@@ -163,6 +163,12 @@ function statusJob(j: NonNullable<HostStatus['job']>): Omit<typeof j, 'ackedAtRe
 
 const WHERE = 'MachineClient'
 
+const hostExited = (code: number | null): AppError =>
+  new AppError('machine.connection', 'the machine host exited', {
+    where: WHERE,
+    data: { exitCode: code },
+  })
+
 export class MachineClient implements MachineService {
   private host: Host | undefined
   private readonly pending = new Map<string, (r: AppResult<unknown>) => void>()
@@ -564,7 +570,11 @@ export class MachineClient implements MachineService {
   // ── host lifecycle ────────────────────────────────────────────────────────────────────────
 
   private spawn(): Host {
-    if (this.host !== undefined) return this.host
+    const current = this.host
+    if (current !== undefined && !current.expectExit) return current
+    // A host told to end whose exit is still on its way (a worker's or utility process's comes
+    // late under load) is not reused: it would take the next connect and then exit under it.
+    if (current !== undefined) this.drop(current, hostExited(null))
     let resolveReady: (r: AppResult<void>) => void = () => {}
     const ready = new Promise<AppResult<void>>((r) => (resolveReady = r))
     const events = {
@@ -671,26 +681,28 @@ export class MachineClient implements MachineService {
 
   private onExit(host: Host, code: number | null): void {
     if (host !== this.host) return
-    this.host = undefined
-    const e = new AppError('machine.connection', 'the machine host exited', {
-      where: WHERE,
-      data: { exitCode: code },
-    })
+    const e = hostExited(code)
     if (!host.expectExit && this.conn !== undefined) {
       this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
       this.markLost()
     }
+    this.drop(host, e)
+    this.conn = undefined
+    this.hostStatus = undefined
+    this.step = undefined
+    this.reserved = undefined
+    this.notify()
+  }
+
+  /** Forgets the current `host`: its waiters and its job get `e`; the next spawn starts afresh. */
+  private drop(host: Host, e: AppError): void {
+    this.host = undefined
     host.resolveReady(Err(e))
     for (const resolve of this.pending.values()) resolve(Err(e))
     this.pending.clear()
     const job = this.job
     this.job = undefined
     job?.end(Err(e))
-    this.conn = undefined
-    this.hostStatus = undefined
-    this.step = undefined
-    this.reserved = undefined
-    this.notify()
   }
 
   private markLost(): void {

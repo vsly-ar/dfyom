@@ -48,6 +48,27 @@ describe('OverridesSection (DF85)', () => {
     expect(onChange).toHaveBeenLastCalledWith({ feed: '+10' })
   })
 
+  it("a ±10 % step right after a slider key press is not undone by the key's debounce", async () => {
+    // The arrow key arms the drag debounce; a step inside its quiet time ended up followed by the
+    // stale slider target (101 after +10). Seen as a flake under load (hardening P1–P3).
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const onChange = vi.fn<(c: OverrideChange) => Promise<void>>(async () => {})
+      const { user } = renderUi(<OverridesSection status={statusWith()} onChange={onChange} />)
+      const feed = group('Feed').getByRole('slider', { name: 'Feed override' })
+      act(() => feed.focus())
+      await user.keyboard('{ArrowRight}')
+      await user.click(
+        group('Feed').getByRole('button', { name: 'Increase feed override by 10 %' }),
+      )
+      expect(onChange).toHaveBeenLastCalledWith({ feed: '+10' })
+      await act(async () => vi.advanceTimersByTimeAsync(OVERRIDE_DEBOUNCE_MS * 2))
+      expect(onChange.mock.calls).toEqual([[{ feed: 101 }], [{ feed: '+10' }]])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('caps the slider at the machine maximum for the programmed F and S and says why', async () => {
     const onChange = vi.fn(async () => {})
     const { user } = renderUi(
