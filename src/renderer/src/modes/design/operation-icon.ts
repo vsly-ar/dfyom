@@ -21,9 +21,10 @@ export function operationIcon(op: Pick<OperationDTO, 'kind'> & { side?: unknown 
   return op.kind === 'profile' && op.side === 'on' ? 'groove' : ICON[op.kind]
 }
 
-/** A feature's icon (L1, ui.md § Icons (v0.4)): the hole type, or Clones. */
+/** A feature's icon (L1, ui.md § Icons (v0.4)): the hole type, Clones or a pattern. */
 export function featureIcon(feature: Pick<FeatureDTO, 'kind'> & Record<string, unknown>): IconName {
   if (feature.kind === 'clones') return 'clones'
+  if (feature.kind === 'pattern') return 'pattern'
   if (feature.kind !== 'hole') return 'design'
   return feature['type'] === 'counterbore'
     ? 'hole-counterbore'

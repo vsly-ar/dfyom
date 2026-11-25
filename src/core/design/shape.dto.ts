@@ -14,6 +14,16 @@ import type { QuantityDTO } from '../quantity/quantity.dto'
 /** `shape1`, `shape2`, …: immutable (design.md § Implementation). */
 export const SHAPE_ID_PATTERN = /^shape[1-9][0-9]{0,5}$/
 export const ShapeIdSchema = z.string().regex(SHAPE_ID_PATTERN).describe('Shape id, e.g. shape1')
+/**
+ * A feature's owned shape (patterns P1, docs/modes/patterns.md#owned-shape-and-operations):
+ * `<featureId>_cells`. Stored and placed like a named shape, never an argument of the shape
+ * tools (which take `ShapeIdSchema`).
+ */
+export const OWNED_SHAPE_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*_cells$/
+/** Any stored shape id: a named shape's or a feature's owned shape's. */
+export const StoredShapeIdSchema = z
+  .string()
+  .regex(new RegExp(`${SHAPE_ID_PATTERN.source}|${OWNED_SHAPE_ID_PATTERN.source}`))
 
 /** How an item combines with the items before it; the first item is always `add`. */
 export const SHAPE_OPS = ['add', 'subtract', 'intersect'] as const
@@ -184,18 +194,81 @@ export const ShapeSourceDtoSchema = z.object({
   element: z.string().min(1).max(NAME_MAX).optional(),
 })
 
-/** A part's named shape (docs/modes/design-v0.3.md#what-a-shape-is). */
-export const ShapeDtoSchema = z.object({
-  id: ShapeIdSchema,
-  name: z.string().min(1).max(NAME_MAX),
-  items: z.array(ShapeItemDtoSchema).min(1).max(SHAPE_ITEMS_MAX),
-  source: ShapeSourceDtoSchema.optional().describe('Import origin, information only'),
-})
+// ── pattern (owned shape of a pattern feature, patterns P1) ─────────────────────────────────
+
+/** Lattices of a pattern (docs/modes/patterns.md#model); `polar` comes with P2. */
+export const PATTERN_LATTICES = ['square', 'staggered', 'hex'] as const
+export type PatternLattice = (typeof PATTERN_LATTICES)[number]
+
+/** Cell primitives of a pattern: the shape items without a centre (it sits on the node). */
+export const PATTERN_PRIMITIVES = ['circle', 'rectangle', 'obround', 'polygon'] as const
+export type PatternPrimitive = (typeof PATTERN_PRIMITIVES)[number]
+
+/**
+ * The pattern record of an owned shape: the feature's geometry fields resolved to numbers (mm,
+ * degrees) by its expansion, so the 2D layer resolves it like any shape (shape.ts). The cell is
+ * a primitive item centred on the origin, or a named shape of the part by id (resolved from the
+ * part's shapes when placed, so it follows edits of that shape). `boundary` is the face rectangle
+ * in the face frame; cells keep face-frame coordinates.
+ */
+export interface PatternRecord {
+  cell: { item: ShapeItem<number> } | { shapeId: string }
+  /** Degrees about the cell's box centre, before the lattice angle. */
+  cellRotation: number
+  lattice: PatternLattice
+  /** Degrees: the whole lattice (cells included) turns about `origin`. */
+  angle: number
+  /** Face frame; absent = the centre of the boundary less the margin. */
+  origin?: [number, number] | undefined
+  spacing: { gap: number } | { pitch: [number, number] }
+  boundary: { min: [number, number]; max: [number, number] }
+  margin: number
+}
+
+const num = z.number().refine(Number.isFinite)
+const pair = z.tuple([num, num])
+export const ShapeItemNumberSchema = itemSchema(() => num, 'dto') as unknown as z.ZodType<
+  ShapeItem<number>
+>
+export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
+  cell: z.union([z.object({ item: ShapeItemNumberSchema }), z.object({ shapeId: ShapeIdSchema })]),
+  cellRotation: num,
+  lattice: z.enum(PATTERN_LATTICES),
+  angle: num,
+  origin: pair.optional(),
+  spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),
+  boundary: z.object({ min: pair, max: pair }),
+  margin: num,
+}) as unknown as z.ZodType<PatternRecord>
+
+/**
+ * A part's named shape (docs/modes/design-v0.3.md#what-a-shape-is), or a feature's owned shape
+ * (`owner`, patterns P1): read-only, no items, its geometry in `pattern`.
+ */
+export const ShapeDtoSchema = z
+  .object({
+    id: StoredShapeIdSchema,
+    name: z.string().min(1).max(NAME_MAX),
+    items: z.array(ShapeItemDtoSchema).max(SHAPE_ITEMS_MAX),
+    source: ShapeSourceDtoSchema.optional().describe('Import origin, information only'),
+    owner: z.string().optional().describe('The feature owning this shape (read-only)'),
+    pattern: PatternRecordSchema.optional(),
+  })
+  .refine(
+    (s) =>
+      s.owner === undefined
+        ? s.items.length > 0 && s.pattern === undefined && SHAPE_ID_PATTERN.test(s.id)
+        : s.items.length === 0 && s.pattern !== undefined && s.id === `${s.owner}_cells`,
+    'a named shape has items; an owned shape <owner>_cells has a pattern and no items',
+  )
 export interface ShapeDTO {
   id: string
   name: string
   items: ShapeItemDTO[]
   source?: ShapeSource | undefined
+  /** A feature's owned shape (patterns P1): its id is `<owner>_cells`. */
+  owner?: string | undefined
+  pattern?: PatternRecord | undefined
 }
 
 /** Quantity as entered, as for operation parameters (commands.ts `Src`). */

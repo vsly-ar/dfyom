@@ -10,7 +10,7 @@
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Vec2 } from '../geometry/model'
-import { chainBounds, regionLoops, type Bounds2 } from '../geometry/2d/model'
+import { chainBounds, line, regionLoops, type Bounds2 } from '../geometry/2d/model'
 import {
   numberRegion,
   orientPath,
@@ -23,23 +23,39 @@ import type { Region2dPort } from '../geometry/2d/port'
 import { Rational } from '../quantity/rational'
 import { chainLength } from '../geometry/2d/measure'
 import { shapeRotation, type Operation, type Part, type Shape } from './operation'
-import { definitionOf, resolveShape, type ResolvedShape, type ShapeDefinition } from './shape'
+import type { ShapeDefinition } from './shape'
+import { definitionOf, resolveShape, type AnyShapeDefinition, type ResolvedShape } from './shape'
 import { isOpenShape } from './surfaces'
 import type { ShapeFacts, ShapeFactsTable } from './validate'
 
 const WHERE = 'placeShape'
 
-/** The resolver's definition of an operation's shape: a named shape's items, else one item. */
-export function shapeDefinition(s: Shape, shapes: Part['shapes']): AppResult<ShapeDefinition> {
+/**
+ * The resolver's definition of an operation's shape: a named shape's items, else one item. An
+ * owned pattern shape (patterns P1) is its pattern with the cell's items in place (a named cell
+ * from `shapes`, so the pattern follows edits of that shape: the definition is the cache key).
+ */
+export function shapeDefinition(s: Shape, shapes: Part['shapes']): AppResult<AnyShapeDefinition> {
+  const missing = (shapeId: string) =>
+    fail('internal.unexpected', `shape ${shapeId} is not loaded`, {
+      where: WHERE,
+      data: { shapeId },
+    })
   switch (s.kind) {
     case 'named': {
       const named = shapes?.get(s.shapeId)
-      if (named === undefined)
-        return fail('internal.unexpected', `shape ${s.shapeId} is not loaded`, {
-          where: WHERE,
-          data: { shapeId: s.shapeId },
-        })
-      return Ok(definitionOf(named.items))
+      if (named === undefined) return missing(s.shapeId)
+      const p = named.pattern
+      if (p === undefined) return Ok(definitionOf(named.items))
+      let cell: ShapeDefinition
+      if ('item' in p.cell) cell = [p.cell.item]
+      else {
+        const c = shapes?.get(p.cell.shapeId)
+        if (c === undefined) return missing(p.cell.shapeId)
+        cell = definitionOf(c.items)
+      }
+      const { cell: _, ...rest } = p
+      return Ok([{ kind: 'pattern', op: 'add', ...rest, cell }])
     }
     case 'rectangle':
       return Ok([
@@ -76,8 +92,27 @@ const caches = new WeakMap<Region2dPort, Map<string, AppResult<OrientedShape>>>(
 function orient(r: ResolvedShape, o: Orientation): OrientedShape {
   const shape: ResolvedShape =
     r.kind === 'region'
-      ? { kind: 'region', region: numberRegion(orientRegion(r.region, o)) }
+      ? {
+          kind: 'region',
+          region: numberRegion(orientRegion(r.region, o)),
+          ...(r.cells === undefined ? {} : { cells: r.cells }),
+        }
       : { kind: 'path', path: orientPath(r.path, o) }
+  if (r.kind === 'region' && r.frame !== undefined) {
+    // a pattern anchors by its frame (the boundary rectangle), whatever cells fit (patterns P1)
+    const { min, max } = r.frame
+    const corner = (x: number, y: number) =>
+      orientPath({ elements: [line([x, y], [x, y + 1])] }, o).elements[0]!.a
+    const pts = [corner(min[0], min[1]), corner(max[0], min[1]), corner(max[0], max[1])]
+    pts.push(corner(min[0], max[1]))
+    const xs = pts.map((p) => p[0])
+    const ys = pts.map((p) => p[1])
+    const bounds: Bounds2 = {
+      min: [Math.min(...xs), Math.min(...ys)],
+      max: [Math.max(...xs), Math.max(...ys)],
+    }
+    return { shape, bounds }
+  }
   const loops = shape.kind === 'region' ? regionLoops(shape.region) : [shape.path]
   const bounds = chainBounds(loops.flatMap((l) => l.elements)) ?? { min: [0, 0], max: [0, 0] }
   return { shape, bounds }
@@ -90,7 +125,7 @@ function orient(r: ResolvedShape, o: Orientation): OrientedShape {
  */
 export function orientedShape(
   port: Region2dPort,
-  def: ShapeDefinition,
+  def: AnyShapeDefinition,
   o: Orientation,
 ): AppResult<OrientedShape> {
   let cache = caches.get(port)

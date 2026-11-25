@@ -447,6 +447,9 @@ export const DFM_WARNING_CODES = [
   // tabs off free sides (v0.4 TB1): docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
   'dfm.tabsRelocated',
   'dfm.tabsNoHold',
+  // patterns P1 (`operation` = the feature id): docs/modes/patterns.md#checks-and-dfm
+  'dfm.patternEmpty',
+  'dfm.patternHeavy',
   // split parts 4a (`operation` = the split id, `params.rule` the rule): docs/modes/split-parts.md#dfm-near-a-split
   'design.split',
 ] as const

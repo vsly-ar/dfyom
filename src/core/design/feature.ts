@@ -23,6 +23,7 @@ import type { PartDTO } from './part.dto'
 import type { ShapeDTO } from './shape.dto'
 import { holeSpec } from './hole'
 import { clonesKindSpec } from './clones/clones'
+import { patternSpec } from './pattern/pattern'
 
 /** Fields every feature model has; a kind adds its parameters (as quantities). */
 export interface FeatureBase {
@@ -107,6 +108,22 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
    * undefined = not mapped (the issue keeps `operations.<id>.<path>`).
    */
   fieldOf?(role: string, path: IssuePath): IssuePath | undefined
+  /**
+   * Shapes the feature owns (patterns P1: `<id>_cells`, A1 extended to shapes), written with its
+   * owned operations in the same command, read-only, removed with the feature. Each has `owner` =
+   * the feature id. Absent = none.
+   */
+  ownedShapes?(feature: F, ctx: ExpansionContext): AppResult<readonly ShapeDTO[]>
+  /**
+   * Extra result fields of `design.<kind>.add` / `.update` (patterns P1: `cells`), from the
+   * feature's owned shapes and the part's shapes after the edit; the port is absent headless
+   * without one.
+   */
+  resultOf?(
+    feature: F,
+    shapes: readonly ShapeDTO[],
+    port: Region2dPort | undefined,
+  ): Record<string, number>
   /** Notes about the feature itself (`dfm.holeCustomSize`), on its owned operations' ids. */
   warnings?(feature: F, ownedId: (role: string) => string): DfmWarning[]
   /**
@@ -179,6 +196,7 @@ export interface SpanGeometry {
 const BUILT_IN_KINDS: readonly FeatureKindSpec[] = [
   holeSpec as unknown as FeatureKindSpec,
   clonesKindSpec as unknown as FeatureKindSpec,
+  patternSpec as unknown as FeatureKindSpec,
 ]
 
 const kinds = new Map<string, FeatureKindSpec>(BUILT_IN_KINDS.map((k) => [k.kind, k]))
@@ -528,6 +546,22 @@ export function checkFeatures(
         },
       )
   }
+  // owned shapes (patterns P1): each names a feature that owns shapes, and such a feature has one
+  for (const [k, sh] of (dto.shapes ?? []).entries()) {
+    if (sh.owner === undefined) continue
+    if (features.get(sh.owner)?.spec.ownedShapes === undefined)
+      return malformed(
+        `shape ${sh.id}: no feature ${sh.owner} owning shapes`,
+        ['shapes', k, 'owner'],
+        'unknownFeature',
+        { shapeId: sh.id },
+      )
+  }
+  for (const { spec, feature } of loaded.unwrap())
+    if (spec.ownedShapes !== undefined && !(dto.shapes ?? []).some((sh) => sh.owner === feature.id))
+      return malformed(`feature ${feature.id} has no owned shape`, ['features'], 'featureShape', {
+        featureId: feature.id,
+      })
   const nestedBy = new Map<string, string>()
   for (const [i, { spec, feature }] of loaded.unwrap().entries()) {
     const { start, end } = featureBlock(ops, feature.id)

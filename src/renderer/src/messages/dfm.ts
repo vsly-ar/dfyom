@@ -168,6 +168,13 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.cloneOverlap': (p) => `Instances ${numbers(p)} overlap.`,
   'dfm.clonesHeavy': (p) =>
     `${num(p['operations'])} cloned operations: the part updates more slowly.`,
+  // patterns P1 (patterns.md § DFM)
+  'dfm.patternEmpty': () =>
+    'No cell fits the face less the margin: make the cell or the margin smaller.',
+  'dfm.patternHeavy': (p) =>
+    p['cells'] === undefined
+      ? `The pattern's outlines have ${num(p['chords'])} segments: the part updates more slowly.`
+      : `${num(p['cells'])} cells: the part updates more slowly.`,
   // v0.4 chamfer (design-v0.4.md § Chamfer operation)
   'dfm.chamferTooDeep': (p, L, name) => {
     const edge = name.item(String(p['edgeOf']))

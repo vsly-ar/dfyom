@@ -159,6 +159,18 @@ export const ICON_SET = {
       { d: 'M7 3.5h2M12.5 7v2', a: true, dash: '0 2' },
     ],
   },
+  // patterns P1: a staggered lattice of round cells inside a face outline (patterns.md § UI)
+  pattern: {
+    label: 'Pattern',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { rect: [1.5, 1.5, 13, 13, 1.5] },
+      { circle: [5, 5.5, 1.6], a: true },
+      { circle: [11, 5.5, 1.6], a: true },
+      { circle: [8, 10.5, 1.6], a: true },
+    ],
+  },
   // Clones path-row kinds (the Add row menu): dots in the row's layout; may fall back to the label
   // alone if they don't read at 16 px (L2).
   'row-grid': {

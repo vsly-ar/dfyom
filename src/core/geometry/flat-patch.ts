@@ -15,6 +15,7 @@ import {
   chainBounds,
   regionArea,
   regionLoops,
+  type Bounds2,
   type Loop,
   type Region,
 } from './2d/model'
@@ -235,6 +236,85 @@ const MAX_SEEDS = 64
 /** Lattice points the fallback scans at most (thin patches). */
 const MAX_SCAN = 200_000
 
+/** Loops from which the spot search buckets them (patterns: a face with many holes, S8 finding 7). */
+const INDEX_MIN_LOOPS = 32
+
+/**
+ * `port.contains(region, p) ? distance to the region's loops : −1` with the loops bucketed on a
+ * grid over `bounds` (by their boxes, grown by a margin): containment reads the loops of p's
+ * bucket only, the distance the buckets ring by ring until the next ring lies farther than the
+ * best distance. Same answers as the plain scan, linear in the loops near p instead of all of
+ * them (patterns P1: ≈ 2 000 holes took 1.8 s per touch-off spot).
+ */
+export function spotIndex(
+  port: Region2dPort,
+  region: Region,
+  bounds: Bounds2,
+): (p: Vec2) => number {
+  const loops = regionLoops(region)
+  const w = Math.max(bounds.max[0] - bounds.min[0], EPSILON)
+  const h = Math.max(bounds.max[1] - bounds.min[1], EPSILON)
+  const n = Math.max(1, Math.min(INDEX_CELLS_MAX, Math.ceil(Math.sqrt(loops.length))))
+  const cell = Math.max(w, h) / n
+  const nx = Math.ceil(w / cell) + 1
+  const ny = Math.ceil(h / cell) + 1
+  const at = (x: number, lo: number, m: number) =>
+    Math.min(m - 1, Math.max(0, Math.floor((x - lo) / cell)))
+  const bucket = (i: number, j: number) => i * ny + j
+  const loopIds: number[][] = Array.from({ length: nx * ny }, () => [])
+  // a piece per bucket: its outer and the holes reaching the bucket (containment)
+  const pieceSets: { outer: Loop; holes: Loop[] }[][] = Array.from({ length: nx * ny }, () => [])
+  const spread = (l: Loop, visit: (k: number) => void) => {
+    const lb = chainBounds(l.elements)
+    if (lb === undefined) return
+    const i0 = at(lb.min[0] - INDEX_MARGIN, bounds.min[0], nx)
+    const i1 = at(lb.max[0] + INDEX_MARGIN, bounds.min[0], nx)
+    const j0 = at(lb.min[1] - INDEX_MARGIN, bounds.min[1], ny)
+    const j1 = at(lb.max[1] + INDEX_MARGIN, bounds.min[1], ny)
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) visit(bucket(i, j))
+  }
+  loops.forEach((l, k) => spread(l, (b) => loopIds[b]!.push(k)))
+  for (const piece of region.pieces) {
+    const local = new Map<number, { outer: Loop; holes: Loop[] }>()
+    spread(piece.outer, (b) => {
+      const one = { outer: piece.outer, holes: [] as Loop[] }
+      local.set(b, one)
+      pieceSets[b]!.push(one)
+    })
+    for (const hole of piece.holes) spread(hole, (b) => local.get(b)?.holes.push(hole))
+  }
+  return (p) => {
+    const bi = Math.floor((p[0] - bounds.min[0]) / cell)
+    const bj = Math.floor((p[1] - bounds.min[1]) / cell)
+    if (bi < 0 || bj < 0 || bi >= nx || bj >= ny) return port.contains(region, p) ? 0 : -1
+    if (!port.contains({ pieces: pieceSets[bucket(bi, bj)]! }, p)) return -1
+    const seen = new Set<number>()
+    let best = Infinity
+    for (let r = 0; r <= Math.max(nx, ny); r++) {
+      const near: Loop[] = []
+      for (let i = bi - r; i <= bi + r; i++)
+        for (let j = bj - r; j <= bj + r; j++) {
+          if (Math.max(Math.abs(i - bi), Math.abs(j - bj)) !== r) continue
+          if (i < 0 || j < 0 || i >= nx || j >= ny) continue
+          for (const k of loopIds[bucket(i, j)]!)
+            if (!seen.has(k)) {
+              seen.add(k)
+              near.push(loops[k]!)
+            }
+        }
+      if (near.length > 0) best = Math.min(best, port.distance(near, p)?.distance ?? Infinity)
+      // a loop not seen yet lies outside these rings: at least r cells from p
+      if (best <= r * cell) break
+    }
+    return Number.isFinite(best) ? best : -1
+  }
+}
+
+/** Grid cells per axis of the spot index at most. */
+const INDEX_CELLS_MAX = 128
+/** Loop boxes grow by this (mm) when bucketed: points on a loop find it in their bucket. */
+const INDEX_MARGIN = 1e-6
+
 export interface TouchSpot {
   /** WCS position (mm), on the grid. */
   readonly at: Vec2
@@ -281,13 +361,15 @@ export function touchOffSpot(
   const ny = k1[1] - k0[1] + 1
   if (nx <= 0 || ny <= 0) return undefined
   const memo = new Map<string, number>()
+  const index = loops.length > INDEX_MIN_LOOPS ? spotIndex(port, eroded, b) : undefined
   const score = (i: number, j: number): number => {
     const key = `${i},${j}`
     const known = memo.get(key)
     if (known !== undefined) return known
     const p = frame.fromWcs([i * grid, j * grid])
     let v = -1
-    if (port.contains(eroded, p)) v = port.distance(loops, p)?.distance ?? -1
+    if (index !== undefined) v = index(p)
+    else if (port.contains(eroded, p)) v = port.distance(loops, p)?.distance ?? -1
     memo.set(key, v)
     return v
   }

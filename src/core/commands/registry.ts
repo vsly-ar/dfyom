@@ -23,6 +23,7 @@ import {
   clonesFollowHook,
 } from '../design/clones/commands'
 import { HOLE_COMMANDS } from '../design/hole-commands'
+import { PATTERN_COMMANDS } from '../design/pattern/commands'
 import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
 import { TEST_FIT_COMMANDS } from '../design/split/test-fit'
 import { SPLIT_QUERIES } from '../design/split/suggest'
@@ -85,6 +86,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...FEATURE_COMMANDS,
   ...HOLE_COMMANDS,
   ...CLONES_COMMANDS,
+  ...PATTERN_COMMANDS,
   ...SPLIT_COMMANDS,
   ...TEST_FIT_COMMANDS,
   ...REFERENCE_COMMANDS,

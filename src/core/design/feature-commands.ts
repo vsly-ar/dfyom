@@ -50,6 +50,7 @@ import { FeatureDtoSchema, FeatureIdSchema, type FeatureDTO } from './feature.dt
 import type { LoadedPart } from './load'
 import { operationToDTO, shapesOf, type Operation } from './operation'
 import { OperationIdSchema, PartIdSchema, type OperationDTO, type PartDTO } from './part.dto'
+import type { ShapeDTO } from './shape.dto'
 import { shapeFacts } from './placement'
 import { checkReferences, recalculate, SurfaceTable } from './surfaces'
 import { checkOperations } from './validate'
@@ -62,6 +63,7 @@ const FeatureResult = z.object({
   operationIds: z
     .array(OperationIdSchema)
     .describe('Owned operations in design order (remove: the removed ones)'),
+  cells: z.number().int().optional().describe('pattern: cells laid out'),
   warnings: Warnings,
 })
 
@@ -128,6 +130,8 @@ export interface Placed {
   readonly features: readonly LoadedFeature[]
   /** Other features recalculated by the edit (their records are rewritten). */
   readonly changed: readonly string[]
+  /** The feature's owned shapes after the edit (patterns P1); absent: it owns none. */
+  readonly shapes?: readonly ShapeDTO[]
 }
 
 /**
@@ -140,8 +144,9 @@ export function placeFeature<F extends FeatureBase>(
   feature: F,
   prev: F | undefined,
   where: string,
-  env: ShapeEnv,
+  shapeEnv: ShapeEnv,
 ): AppResult<Placed> {
+  let env = shapeEnv
   const { part, stock, units } = loaded
   const issues = spec.invariants(feature)
   if (issues.length > 0) return invalid(issues, where)
@@ -163,6 +168,26 @@ export function placeFeature<F extends FeatureBase>(
     shapes: env.dto.shapes ?? [],
   })
   if (expanded.isErr()) return Err(expanded.unwrapErr().withContext(where))
+  // owned shapes (patterns P1) take the place of the feature's previous ones before the checks
+  const ownedShapes: AppResult<readonly ShapeDTO[] | undefined> =
+    spec.ownedShapes?.(feature, {
+      units,
+      stock,
+      before: ops.slice(0, start),
+      ownedId: (role) => ownedOperationId(feature.id, role),
+      shapes: env.dto.shapes ?? [],
+    }) ?? Ok(undefined)
+  if (ownedShapes.isErr()) return Err(ownedShapes.unwrapErr().withContext(where))
+  if (ownedShapes.unwrap() !== undefined)
+    env = {
+      ...env,
+      dto: {
+        shapes: [
+          ...(env.dto.shapes ?? []).filter((x) => x.owner !== feature.id),
+          ...ownedShapes.unwrap()!,
+        ],
+      },
+    }
   const owned = materialize(
     feature,
     expanded.unwrap(),
@@ -193,6 +218,7 @@ export function placeFeature<F extends FeatureBase>(
     reordered,
     features,
     changed: changed.filter((id) => id !== feature.id),
+    ...(ownedShapes.unwrap() === undefined ? {} : { shapes: ownedShapes.unwrap()! }),
   }))
 }
 
@@ -229,11 +255,33 @@ export function writePlaced(
     list.splice(placed.start, placed.replaced, ...block)
     writeOperationList(list, placed.ops)
   }
+  if (placed.shapes !== undefined) writeOwnedShapes(target, feature.id, placed.shapes)
   const features = (target.features ??= [])
   const i = features.findIndex((f) => f.id === feature.id)
   if (i < 0) features.push(feature)
   else if (!deepEqual(features[i], feature)) features[i] = feature
   writeFeatures(draft, partId, placed.features, placed.changed)
+}
+
+/**
+ * The part's shapes owned by `featureId` replaced by `shapes` (patterns P1): an unchanged record
+ * keeps its identity, a new one goes at the end.
+ */
+function writeOwnedShapes(
+  target: Draft<PartDTO>,
+  featureId: string,
+  shapes: readonly ShapeDTO[],
+): void {
+  const list = (target.shapes ??= [])
+  for (const sh of shapes) {
+    const i = list.findIndex((x) => x.id === sh.id)
+    if (i < 0) list.push(sh as Draft<ShapeDTO>)
+    else if (!deepEqual(list[i], sh)) list[i] = sh as Draft<ShapeDTO>
+  }
+  for (let i = list.length - 1; i >= 0; i--)
+    if (list[i]!.owner === featureId && !shapes.some((sh) => sh.id === list[i]!.id))
+      list.splice(i, 1)
+  if (list.length === 0) delete target.shapes
 }
 
 function nextFeatureNumber(dto: PartDTO, prefix: string): number {
@@ -416,7 +464,12 @@ function finish<F extends FeatureBase>(
   )
   if (placed.isErr()) return placed
   writePlaced(draft, partId, placed.unwrap(), spec.toDTO(feature))
-  const result = { featureId: feature.id, operationIds: placed.unwrap().owned.map((o) => o.id) }
+  const shapes = draft.parts[partId]?.shapes ?? []
+  const result = {
+    featureId: feature.id,
+    operationIds: placed.unwrap().owned.map((o) => o.id),
+    ...(spec.resultOf?.(feature, shapes as readonly ShapeDTO[], ctx.services.region2d) ?? {}),
+  }
   return withWarnings(result, loaded, placed.unwrap().ops, ctx, where, placed.unwrap().features)
 }
 
@@ -479,6 +532,9 @@ const featureRemove = defineCommand({
       1,
     )
     if (target.features!.length === 0) delete target.features
+    // its owned shapes go with it (patterns P1)
+    if (target.shapes?.some((x) => x.owner === args.featureId) === true)
+      writeOwnedShapes(target, args.featureId, [])
     const result = {
       featureId: args.featureId,
       operationIds: ops.slice(start, end).map((o) => o.id),

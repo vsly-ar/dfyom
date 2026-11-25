@@ -206,7 +206,7 @@ export function ShapeList({
     target?.focus()
   }
 
-  const empty = (part.dto.shapes?.length ?? 0) === 0
+  const empty = !(part.dto.shapes ?? []).some((s) => s.owner === undefined)
   /** A row's item kind (one item) and read-out "Path · 250 × 178" (DF48). */
   const rowLook = (row: ShapeRow): { single?: ShapeItemKind; readout: string } => {
     const items = part.dto.shapes?.find((s) => s.id === row.id)?.items ?? []
