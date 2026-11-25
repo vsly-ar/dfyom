@@ -1,13 +1,16 @@
-// The Presets menu's thumbnails (design review U9 P5): a few cells of each preset in its lattice,
-// as the Cell and Boundary options' mini outlines (`MiniOutline`). Pure: the preset's sources are
-// read as millimetres (they are metric, presets.ts), the cell drawn at the preset's proportions
-// and rotation, its neighbours at the lattice's pitch (cell extent + gap). Not to scale with the
-// part; a picture of the arrangement.
+// The Presets menu's thumbnails (design review U9 P5): a window onto each preset's lattice, drawn
+// like the Cell and Boundary options' mini outlines (`MiniOutline`'s size and strokes). Pure: the
+// preset's sources are read as millimetres (they are metric, presets.ts), the cell drawn at the
+// preset's proportions and rotation, its neighbours at the lattice's pitch (cell extent + gap);
+// the window is about 2.4 pitches wide, so a cell is a readable few pixels and the arrangement
+// shows, the cells at its edges cut by the box.
 // Doc: docs/conventions/ui.md#pattern-inspector-p1
 import type { PatternPreset } from '../../../../core/design/pattern/presets'
 
 type Vec = [number, number]
-export type ThumbLoop = { elements: { kind: 'line'; a: Vec; b: Vec }[]; closed: boolean }
+
+/** The thumbnail's size in px (MiniOutline's). */
+export const THUMB = { w: 28, h: 18 } as const
 
 /** "6 mm", "30°", "6" → the number (presets use mm and ° only). */
 const num = (source: string | undefined, fallback = 0): number => {
@@ -43,15 +46,13 @@ function roundedRect(l: number, w: number, r: number): Vec[] {
   ]
 }
 
-/** The preset's cell outline, centred on the origin, rotated. */
+/** The preset's cell outline (mm), centred on the origin, rotated. */
 export function cellPoints(cell: Readonly<Record<string, string>>): Vec[] {
   let pts: Vec[]
   switch (cell['kind']) {
-    case 'circle': {
-      const r = num(cell['diameter'], 6) / 2
-      pts = arc([0, 0], r, 0, 360 - 360 / 24, 24)
+    case 'circle':
+      pts = arc([0, 0], num(cell['diameter'], 6) / 2, 0, 360 - 360 / 24, 24)
       break
-    }
     case 'rectangle':
       pts = roundedRect(num(cell['length'], 10), num(cell['width'], 6), num(cell['cornerRadius']))
       break
@@ -77,17 +78,12 @@ export function cellPoints(cell: Readonly<Record<string, string>>): Vec[] {
   return pts.map(([x, y]) => [x * c - y * s, x * s + y * c])
 }
 
-const loop = (pts: readonly Vec[]): ThumbLoop => ({
-  closed: true,
-  elements: pts.map((a, i) => ({ kind: 'line' as const, a, b: pts[(i + 1) % pts.length]! })),
-})
-
 /**
- * A few cells of the preset in its lattice: two rows of three (staggered and hex: the second row
- * shifted half a pitch; hex rows √3/2 of the pitch apart, square and staggered the cell's height
- * plus the gap).
+ * The cells of the preset's lattice that meet the thumbnail's window, in px (y down, THUMB box).
+ * Rows are the cell's height plus the gap apart (hex: at least √3/2 of the pitch), every other
+ * row shifted half a pitch (staggered, hex).
  */
-export function presetLoops(preset: PatternPreset): ThumbLoop[] {
+export function presetThumb(preset: PatternPreset): Vec[][] {
   const { cell, lattice, spacing } = preset.args
   const pts = cellPoints(cell)
   const xs = pts.map((p) => p[0])
@@ -98,12 +94,17 @@ export function presetLoops(preset: PatternPreset): ThumbLoop[] {
   const px = w + gap
   const py = lattice === 'hex' ? Math.max((px * Math.sqrt(3)) / 2, h + gap) : h + gap
   const shift = lattice === 'square' ? 0 : px / 2
-  const out: ThumbLoop[] = []
-  for (let row = 0; row < 2; row++)
-    for (let col = 0; col < 3; col++) {
-      const ox = col * px + (row % 2 === 1 ? shift : 0)
-      const oy = row * py
-      out.push(loop(pts.map(([x, y]) => [x + ox, y + oy] as Vec)))
+  // the window: about 2.4 pitches across (a tall cell: one cell high), the thumbnail's aspect
+  const scale = Math.min(THUMB.w / (2.4 * px), THUMB.h / (1.05 * h))
+  const [ww, wh] = [THUMB.w / scale, THUMB.h / scale]
+  const out: Vec[][] = []
+  for (let row = -1; row * py < wh + py; row++)
+    for (let col = -1; col * px < ww + px; col++) {
+      // the first cell's centre a quarter pitch in from the window's corner
+      const ox = px * 0.25 + col * px + (Math.abs(row) % 2 === 1 ? shift : 0)
+      const oy = py * 0.3 + row * py
+      if (ox + w / 2 < 0 || ox - w / 2 > ww || oy + h / 2 < 0 || oy - h / 2 > wh) continue
+      out.push(pts.map(([x, y]) => [(x + ox) * scale, (y + oy) * scale] as Vec))
     }
   return out
 }
