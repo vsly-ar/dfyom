@@ -95,6 +95,16 @@ export interface FakeBridge extends PreloadApi {
   emitRunStatus(status: RunStatus): void
   /** The program main keeps for a run job (`run.program`, DF84); `undefined` forgets it. */
   setRunProgram(program: RunProgram | undefined): void
+  /**
+   * DF93: a gCode file `run.readFile` answers (null: unreadable, `persist.io`); `run.openFile`
+   * without a path answers `choice` (the dialog; null = cancelled).
+   */
+  setRunFile(path: string, text: string | null): void
+  setRunFileChoice(choice: string | null): void
+  /** `run.openFile` calls (their path, undefined = the dialog), in order. */
+  readonly runFileOpens: (string | undefined)[]
+  /** Main hands the window a gCode file to show in Run mode (DF93). */
+  emitShowRunFile(path: string): void
   setLocalHttp(state: LocalHttpState): void
   /** Push a part evaluation (main's mesh push); `get` / `getPlan` answer the last one per subject. */
   emitEvaluation(view: PartEvaluationView): void
@@ -204,6 +214,11 @@ export function createFakeBridge(
   const closeRequests = channel<WindowCloseRequest>()
   const runStatus = channel<RunStatus>()
   let runProgram: RunProgram | undefined
+  const runFiles = new Map<string, string | null>()
+  const runFileOpens: (string | undefined)[] = []
+  const runFileShows = channel<string>()
+  let runFileChoice: string | null = null
+  let recentRunFiles: string[] = []
   const evaluationPush = channel<PartEvaluationView>()
   const menu = channel<MenuAction>()
   const openFiles = channel<string>()
@@ -267,6 +282,41 @@ export function createFakeBridge(
     run: {
       onStatus: runStatus.on,
       program: (jobId) => Promise.resolve(runProgram?.jobId === jobId ? runProgram : null),
+      openFile(path) {
+        runFileOpens.push(path)
+        const file = path ?? runFileChoice
+        if (file === null) return Promise.resolve(null)
+        const window = project === undefined ? 'this' : 'new'
+        if (window === 'this') runFileShows.emit(file)
+        return Promise.resolve({ path: file, window })
+      },
+      onShowFile: runFileShows.on,
+      readFile(path) {
+        const text = runFiles.get(path)
+        if (text === undefined || text === null)
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: 'persist.io',
+              message: 'the file does not exist',
+              issues: [],
+              frames: [],
+            },
+          })
+        recentRunFiles = [path, ...recentRunFiles.filter((p) => p !== path)].slice(0, 8)
+        return Promise.resolve({ ok: true, text })
+      },
+      recentFiles: () => Promise.resolve(recentRunFiles),
+    },
+    runFileOpens,
+    setRunFile(path, text) {
+      runFiles.set(path, text)
+    },
+    setRunFileChoice(choice) {
+      runFileChoice = choice
+    },
+    emitShowRunFile(path) {
+      runFileShows.emit(path)
     },
     async call(name, args, opts) {
       const gesture = opts?.gesture

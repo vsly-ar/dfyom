@@ -92,6 +92,8 @@ settingsCheck: {
 4. **Soft-limit check** (existing, [run-v0.1.md](run-v0.1.md#work-zero-and-the-soft-limit-check)): the program's extent at the live G54 against the travel; any `softLimit` finding refuses with `run.softLimit` before a byte is sent. The travel is the plan's machine copy, which the settings check holds equal to the controller's `$130–$132` (with soft limits on), so DFYOM's check and GRBL's agree.
 5. **Confirmation** (M2): the pre-flight is the UI's only way to start a setup's first run job; on a real connection it shows more and words its button for the machine ([below](#pre-flight-on-a-real-machine)). The setup-change prompt's "Start setup n" confirms the later setups (existing). `run.job.start` itself takes no confirmation flag: on a real connection only the UI may call it ([run.md § Safety 2](run.md#2-who-may-command-a-real-connection-q50)).
 
+An external G-code file (DF93) follows the same rules with its own step 1 (the file prepares without refusals) and the connection's machine in place of the plan's copy in steps 2 and 4 ([run.md § Run an external G-code file](run.md#run-an-external-g-code-file-df93)).
+
 While it streams, a hold from the machine itself – its feed-hold or cycle-start button, its safety door – is followed by the run job like the app's own ([run.md § External holds](run.md#external-holds-df82), DF82): paused once held, resumed by Resume (the door closed first) or by the machine's cycle start. A Probe Z job does the same.
 
 ### Pre-flight on a real machine

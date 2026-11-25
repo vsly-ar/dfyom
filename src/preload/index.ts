@@ -16,6 +16,8 @@ import {
   type ReferenceMeshReply,
   type ReferenceCompareViewReply,
   type ReferenceSectionReply,
+  type RunFileOpened,
+  type RunFileReadReply,
   type WindowCloseRequest,
   WINDOW_KIND_ARG,
   type LibraryCloseRequest,
@@ -57,6 +59,14 @@ ipcRenderer.on(IPC.windowOpenFile, (_e, file: unknown) => {
   else openFiles.listener(file)
 })
 
+/** DF93: gCode files main hands this window before Run mode subscribes wait here. */
+const runFiles: { queued: string[]; listener?: (file: string) => void } = { queued: [] }
+ipcRenderer.on(IPC.runFileShow, (_e, file: unknown) => {
+  if (typeof file !== 'string') return
+  if (runFiles.listener === undefined) runFiles.queued.push(file)
+  else runFiles.listener(file)
+})
+
 const api: PreloadApi = {
   windowKind: flagValue(process.argv, WINDOW_KIND_ARG) === 'library' ? 'library' : 'project',
   versions: {
@@ -71,6 +81,16 @@ const api: PreloadApi = {
   run: {
     onStatus: (listener) => on<RunStatus>(RUN_STATUS_IPC_CHANNEL, listener),
     program: (jobId) => ipcRenderer.invoke(IPC.runProgram, jobId) as Promise<RunProgram | null>,
+    openFile: (path) => ipcRenderer.invoke(IPC.runFileOpen, path) as Promise<RunFileOpened | null>,
+    onShowFile(listener) {
+      runFiles.listener = listener
+      for (const file of runFiles.queued.splice(0)) listener(file)
+      return () => {
+        if (runFiles.listener === listener) delete runFiles.listener
+      }
+    },
+    readFile: (path) => ipcRenderer.invoke(IPC.runFileRead, path) as Promise<RunFileReadReply>,
+    recentFiles: () => ipcRenderer.invoke(IPC.runFileRecent) as Promise<readonly string[]>,
   },
   call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {

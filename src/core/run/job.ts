@@ -4,8 +4,9 @@
  * job's pause (a feed hold confirmed at `Hold:0`, DF82) and abort mapping. One job per setup: the
  * result names the next setup, which the setup-change prompt runs after re-fixturing (task E2).
  * `from` resumes at an operation's start (hardening M5); the job tells the machine port its plan and setup for the status (M7).
+ * `file` runs an external gCode file instead of a plan (DF93): read, prepared and checked here.
  * Doc: docs/modes/run-v0.1.md#run-job, docs/modes/plan-v0.2.md#implementation-task-e2,
- * docs/modes/run-machine.md#section-resume-m5
+ * docs/modes/run-machine.md#section-resume-m5, docs/modes/run.md#run-an-external-g-code-file-df93
  */
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
@@ -30,6 +31,22 @@ import { RunSummarySchema } from './host/protocol'
 import { alignmentGate } from './alignment'
 import { runPlanHash } from './plan-hash'
 import type { JobAbout, JobListener, MachineService, RunningJob, RunPlan } from './service'
+import { envelopeOf } from './grbl/envelope'
+import {
+  fileNameOf,
+  fileSoftLimits,
+  GCODE_RUN_EXTENSIONS,
+  isRunnableGcodeFileName,
+  prepareGcodeFile,
+  type PreparedGcodeFile,
+} from './gcode-file'
+
+/** `file` of `run.job.start` / `run.job.check` (docs/modes/run.md#run-an-external-g-code-file-df93). */
+const FileArg = z
+  .string()
+  .max(1000)
+  .optional()
+  .describe(`Absolute path of a gCode file (${GCODE_RUN_EXTENSIONS.join(' ')}) instead of a plan`)
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
 
@@ -84,8 +101,9 @@ const RunJobResult = RunSummarySchema.extend({
   warnings: z
     .array(PlanWarningSchema)
     .describe('plan.machine findings of the export other than softLimit'),
-  planId: z.string().describe('The plan this run machined'),
-  setupId: z.string().describe('The setup this run machined'),
+  planId: z.string().optional().describe('The plan this run machined'),
+  setupId: z.string().optional().describe('The setup this run machined'),
+  file: z.string().optional().describe('The gCode file this run streamed (DF93)'),
   next: NextSetupSchema.optional().describe(
     'The next setup: re-fixture, set its work zero, then run.job.start with its setupId',
   ),
@@ -520,24 +538,31 @@ export const runJobStart = defineCommand({
   kind: 'job',
   name: 'run.job.start',
   summary:
-    "Run a plan's program (one setup) on the connected machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
-  title: () => 'Run plan',
+    "Run a plan's program (one setup), or a gCode file, on the connected machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
+  title: (a) => ((a as { file?: string }).file === undefined ? 'Run plan' : 'Run gCode file'),
   machine: true,
   // job.pause is a feed hold, paused once the controller reports Hold:0 (DF82)
   pause: { kind: 'handled' },
-  // apply first: docs/architecture/apply.md#implicit-apply
-  applyFirst: true,
+  // apply first (a plan run): docs/architecture/apply.md#implicit-apply
+  applyFirst: (a) => (a as { planId?: string }).planId !== undefined,
   args: z.object({
-    planId: PlanIdSchema,
+    planId: PlanIdSchema.optional().describe('The plan to run; or give file'),
     setupId: PlanRecordIdSchema.optional().describe(
       'Setup to run; required when the plan has several',
     ),
     from: PlanRecordIdSchema.optional().describe(
       "Resume at this operation's start (after a stop): waits at its tool first",
     ),
+    file: FileArg,
   }),
   result: RunJobResult,
-  run: (doc, args, ctx) => runJob(doc, args.planId, args.setupId, args.from, ctx),
+  run: (doc, args, ctx) => {
+    const one = oneOfPlanOrFile(args, 'run.job.start')
+    if (one.isErr()) return Promise.resolve(Err(one.unwrapErr()))
+    return args.file !== undefined
+      ? runFileJob(args.file, ctx)
+      : runJob(doc, args.planId ?? '', args.setupId, args.from, ctx)
+  },
 })
 
 /**
@@ -552,27 +577,222 @@ export const runJobCheck = defineCommand({
   title: () => 'Check run',
   machine: false,
   // the same program run.job.start would export: docs/architecture/apply.md#implicit-apply
-  applyFirst: true,
+  applyFirst: (a) => (a as { planId?: string }).planId !== undefined,
   args: z.object({
-    planId: PlanIdSchema,
+    planId: PlanIdSchema.optional(),
     setupId: PlanRecordIdSchema.optional().describe('Required when the plan has several setups'),
+    file: FileArg,
   }),
   result: z.object({
-    setupId: z.string(),
+    setupId: z.string().optional(),
     findings: z.array(PlanWarningSchema).describe('softLimit findings; empty = inside the travel'),
   }),
   async run(doc, args, ctx) {
     const where = 'run.job.check'
-    const checked = startChecks(doc, args.planId, args.setupId, ctx.services, where)
+    const one = oneOfPlanOrFile(args, where)
+    if (one.isErr()) return one
+    if (args.file !== undefined) {
+      const file = await fileChecks(args.file, ctx.services, where)
+      return file.map((f) => ({ findings: f.findings }))
+    }
+    const planId = args.planId ?? ''
+    const checked = startChecks(doc, planId, args.setupId, ctx.services, where)
     if (checked.isErr()) return checked
     const { setup, workZero } = checked.unwrap()
-    const exported = await exportPlan(doc, args.planId, ctx.services, {
+    const exported = await exportPlan(doc, planId, ctx.services, {
       setupId: setup.id,
       workZero,
     })
-    if (exported.isErr())
-      return Err(exported.unwrapErr().withContext(where, { planId: args.planId }))
+    if (exported.isErr()) return Err(exported.unwrapErr().withContext(where, { planId }))
     const findings = exported.unwrap().warnings.filter((w) => w.rule === 'softLimit')
     return Ok({ setupId: setup.id, findings: [...findings] })
   },
 })
+
+// --- DF93: an external gCode file ---------------------------------------------------------
+
+function oneOfPlanOrFile(
+  args: { planId?: string | undefined; file?: string | undefined },
+  where: string,
+): AppResult<void> {
+  if ((args.planId === undefined) !== (args.file === undefined)) return Ok(undefined)
+  return fail('input.malformed', 'give exactly one of planId or file', {
+    where,
+    issues: [{ path: ['planId'], rule: 'oneOf', message: 'give planId or file' }],
+  })
+}
+
+/**
+ * The file run's checks (docs/modes/run.md#run-an-external-g-code-file-df93, gates 1–3): the
+ * connection Idle and homed without a job, on a real connection the controller's `$$` against the
+ * connection's machine, the file read and prepared without refusals, and the soft-limit check at
+ * the live work zero from the machine position.
+ */
+async function fileChecks(
+  path: string,
+  services: Services,
+  where: string,
+): AsyncAppResult<{
+  m: MachineService
+  file: PreparedGcodeFile
+  workZero: readonly [number, number, number]
+  findings: PlanWarning[]
+}> {
+  const data = { file: path }
+  if (!isRunnableGcodeFileName(path))
+    return fail('input.malformed', `not a gCode file: ${fileNameOf(path)}`, {
+      where,
+      data,
+      issues: [
+        {
+          path: ['file'],
+          rule: 'gcodeFile',
+          message: `give a ${GCODE_RUN_EXTENSIONS.join(', ')} file`,
+        },
+      ],
+    })
+  const machine = machineOf(services, where)
+  if (machine.isErr()) return machine
+  const m = machine.unwrap()
+  const status = m.status()
+  if (status.job !== undefined || status.connection.state !== 'open')
+    return fail(
+      'run.busy',
+      status.job ? `job ${status.job.jobId} is running` : 'still connecting',
+      { where },
+    )
+  if (m.target === 'serial') {
+    const real = fileSettingsCheck(m, status.state, where)
+    if (real.isErr()) return real
+  }
+  if (status.state !== 'Idle' || !status.homed)
+    return fail(
+      'run.state',
+      `the machine must be Idle and homed (is ${status.state}${status.homed ? '' : ', not homed'})`,
+      { where, data: { state: status.state, homed: status.homed } },
+    )
+  const reader = services.gcodeFiles
+  if (reader === undefined)
+    return fail('internal.unexpected', 'no gCode file reader', { where, data })
+  const text = await reader.read(path)
+  if (text.isErr()) return Err(text.unwrapErr().withContext(where, data))
+  const file = prepareGcodeFile(text.unwrap())
+  if (file.refusalCount > 0)
+    return fail('run.program', `${file.refusalCount} line(s) of ${fileNameOf(path)} cannot run`, {
+      where,
+      data,
+      issues: file.refusals.map((r) => ({
+        path: ['file', r.line],
+        rule: r.rule,
+        message: `line ${r.line}: ${r.message}`,
+        params: { line: r.line },
+      })),
+    })
+  const envelope = envelopeOf(m.controllerSettings ?? {})
+  if (envelope === undefined)
+    return fail('run.state', "the machine's travel is not known ($130–$132)", {
+      where,
+      data: { state: status.state },
+    })
+  const findings = fileSoftLimits(file.lines, {
+    workZero: status.workZero,
+    mpos: status.mpos,
+    travel: envelope.travel,
+  })
+  return Ok({ m, file, workZero: status.workZero, findings })
+}
+
+/** A real connection: the controller's `$$` against the connection's machine, homing on. */
+function fileSettingsCheck(m: MachineService, state: string, where: string): AppResult<void> {
+  const values = m.connectedMachine
+  const settings = m.controllerSettings
+  if (values === undefined || settings === undefined)
+    return fail('run.state', "the controller's settings are not known", {
+      where,
+      data: { state },
+    })
+  const check = settingsCheck(values, settings, 'machine')
+  if (check.matches) return Ok(undefined)
+  const message = check.homingEnabled
+    ? "the controller's settings differ from the connection's machine; fix them in the Library or on the controller"
+    : 'homing is off on the controller ($22=0): DFYOM runs only on a homed machine'
+  return fail('run.state', message, {
+    where,
+    data: { state, differences: check.differences, homingEnabled: check.homingEnabled },
+    issues: [{ path: ['file'], rule: 'settingsMismatch', message }],
+  })
+}
+
+/** `run.job.start { file }`: the plan run's steps with the file in place of the export (DF93). */
+async function runFileJob(path: string, ctx: JobContext): AsyncAppResult<RunJobResult> {
+  const pause = new RunPause(() => ctx.services.machine, ctx)
+  const unregister = pause.register()
+  try {
+    return await runFileSteps(path, ctx, pause)
+  } finally {
+    pause.over()
+    unregister()
+  }
+}
+
+async function runFileSteps(
+  path: string,
+  ctx: JobContext,
+  pause: RunPause,
+): AsyncAppResult<RunJobResult> {
+  const where = 'run.job.start'
+  const data = { file: path }
+  const checked = await fileChecks(path, ctx.services, where)
+  if (checked.isErr()) return checked
+  const { m, file, workZero, findings } = checked.unwrap()
+  if (findings.length > 0)
+    return fail(
+      'run.softLimit',
+      `${findings.length} soft-limit finding(s) at the current work zero`,
+      { where, data: { ...data, workZero: [...workZero], findings } },
+    )
+  // held for the job from here to the stream (no jog or work-zero change in between)
+  const reserved = m.reserve(ctx.jobId)
+  if (reserved.isErr()) return reserved
+  const started = await startFile(path, file, ctx, m, workZero, pause)
+  m.release(ctx.jobId)
+  if (started.isErr()) return started
+  const unbind = bindJobAbort(m, ctx)
+  const ended = await started.unwrap().ended
+  pause.over()
+  unbind()
+  if (ended.isErr()) return Err(ended.unwrapErr().withContext(where, data))
+  return Ok({ ...ended.unwrap(), warnings: [], file: path })
+}
+
+async function startFile(
+  path: string,
+  file: PreparedGcodeFile,
+  ctx: JobContext,
+  m: MachineService,
+  workZero: readonly [number, number, number],
+  pause: RunPause,
+): AsyncAppResult<RunningJob> {
+  const where = 'run.job.start'
+  // a pause before the stream parks the job here, before anything moves (DF82)
+  await pause.beforeStart()
+  if (ctx.signal.aborted) {
+    pause.started(false)
+    return fail('op.aborted', 'the run was aborted before it started', { where })
+  }
+  ctx.progress({ done: 0, total: file.lines.length, label: 'started' })
+  // the host refuses if the G54, the machine copy or the target changed since the check
+  const started = await m.startJob(
+    ctx.jobId,
+    { lines: file.lines, sections: file.sections },
+    {
+      progress: (p) => ctx.progress({ done: p.done, total: p.total, label: p.label }),
+      phase: (p) => pause.phase(p),
+    },
+    { workZero, machineKey: m.machineKey ?? '' },
+    { file: { name: fileNameOf(path), path } },
+  )
+  pause.started(started.isOk())
+  if (started.isErr()) return Err(started.unwrapErr().withContext(where, { file: path }))
+  return started
+}

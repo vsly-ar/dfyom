@@ -20,15 +20,18 @@ import type { Vec3 } from '../../toolpath/model'
 import type { RunSummary, SenderProgram } from '../grbl/sender'
 import {
   closedStatus,
+  type FileJobAbout,
   type JobAbout,
   type JobListener,
   type LastRun,
   type MachineService,
   type RunningJob,
   type RunPlan,
+  type RunFile,
   type RunProgram,
   type RunStatus,
 } from '../service'
+import type { MachineValuesDTO } from '../../library/machine.dto'
 import type { SerialPortInfo } from '../serial'
 import { programmedRates, type ProgrammedRates } from '../override'
 import {
@@ -93,7 +96,7 @@ interface Job {
   readonly listener: JobListener
   readonly startedAt: string
   readonly end: (r: AppResult<RunSummary>) => void
-  readonly about: JobAbout | undefined
+  readonly about: JobAbout | FileJobAbout | undefined
   /** Lines acknowledged (last progress). */
   done: number
   /** Waiting at a tool change (last phase). */
@@ -169,6 +172,7 @@ export class MachineClient implements MachineService {
         state: 'connecting' | 'open'
         machineKey: string
         spindleMinSpeed?: number | undefined
+        machine?: MachineValuesDTO | undefined
         target?: TargetKind | undefined
         port?: { path: string; baud: number } | undefined
         settings?: Readonly<Record<string, number>> | undefined
@@ -216,6 +220,10 @@ export class MachineClient implements MachineService {
 
   get spindleMinSpeed(): number | undefined {
     return this.conn?.state === 'open' ? this.conn.spindleMinSpeed : undefined
+  }
+
+  get connectedMachine(): MachineValuesDTO | undefined {
+    return this.conn?.state === 'open' ? this.conn.machine : undefined
   }
 
   status(): RunStatus {
@@ -275,9 +283,13 @@ export class MachineClient implements MachineService {
   }
 
   /** The plan, setup and current operation of a job (M7). */
-  private aboutJob(job: Job, line: number): { plan?: RunPlan; planOperationId?: string } {
+  private aboutJob(
+    job: Job,
+    line: number,
+  ): { plan?: RunPlan; planOperationId?: string; file?: RunFile } {
     const about = job.about
     if (about === undefined) return {}
+    if ('file' in about) return { file: { ...about.file } }
     const op = operationAt(about, Math.max(1, line))
     return { plan: { ...about.plan }, ...(op === undefined ? {} : { planOperationId: op }) }
   }
@@ -285,7 +297,8 @@ export class MachineClient implements MachineService {
   /** Records how a job ended (M5). */
   private ended(job: Job, r: AppResult<RunSummary>): void {
     const about = job.about
-    if (about === undefined) return
+    // a file run is not resumed (docs/modes/run.md#run-an-external-g-code-file-df93)
+    if (about === undefined || 'file' in about) return
     const op = r.isOk() ? undefined : stoppedOperation(about, job.done, job.atToolChange)
     this.lastRun = {
       jobId: job.jobId,
@@ -342,7 +355,10 @@ export class MachineClient implements MachineService {
 
   async connect(
     target: ConnectTarget,
-    profile?: { readonly spindleMinSpeed?: number | undefined },
+    profile?: {
+      readonly spindleMinSpeed?: number | undefined
+      readonly machine?: MachineValuesDTO | undefined
+    },
   ): AsyncAppResult<ConnectedInfo> {
     const machineKey = target.machineKey
     if (this.conn !== undefined)
@@ -370,6 +386,7 @@ export class MachineClient implements MachineService {
       ...(profile?.spindleMinSpeed === undefined
         ? {}
         : { spindleMinSpeed: profile.spindleMinSpeed }),
+      ...(profile?.machine === undefined ? {} : { machine: profile.machine }),
     }
     this.log.info({ target: connected.target, version: connected.version }, 'connected')
     this.notify()
@@ -439,7 +456,7 @@ export class MachineClient implements MachineService {
     program: SenderProgram,
     listener: JobListener,
     expect: { readonly workZero: Vec3; readonly machineKey: string },
-    about?: JobAbout,
+    about?: JobAbout | FileJobAbout,
   ): AsyncAppResult<RunningJob> {
     if (this.conn?.state !== 'open' || this.conn.target === undefined) return this.notConnected()
     if (this.job !== undefined || (this.reserved !== undefined && this.reserved !== jobId))
@@ -472,7 +489,7 @@ export class MachineClient implements MachineService {
       jobId,
       lines: program.lines,
       sections: program.sections,
-      operations: about?.operations ?? [],
+      operations: about !== undefined && 'operations' in about ? about.operations : [],
     }
     this.traceSlices(job)
     const r = await this.request({

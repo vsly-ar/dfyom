@@ -16,8 +16,17 @@ export const APP_STATE_FILE = 'app-state.json'
  * (`reference-import` is for the reference STL/STEP import, task R3; `svg-import` for the SVG
  * shape import, I1).
  */
-export const DIALOG_KINDS = ['project', 'gcode-export', 'reference-import', 'svg-import'] as const
+export const DIALOG_KINDS = [
+  'project',
+  'gcode-export',
+  'reference-import',
+  'svg-import',
+  'gcode-run',
+] as const
 export type DialogKind = (typeof DIALOG_KINDS)[number]
+
+/** How many recently run gCode files are remembered (DF93). */
+export const RECENT_RUN_FILES = 8
 
 const RectSchema = z.object({
   x: z.number().int(),
@@ -40,6 +49,8 @@ export const AppStateSchema = z.object({
   /** The Library window's own bounds (docs/conventions/ui-library-window.md, L1). */
   libraryWindow: WindowStateSchema.optional().catch(undefined),
   dialogFolders: z.record(z.string(), z.string().min(1)).default({}).catch({}),
+  /** External gCode files run lately, newest first (DF93, docs/modes/run.md#run-an-external-g-code-file-df93). */
+  recentRunFiles: z.array(z.string().min(1)).max(RECENT_RUN_FILES).default([]).catch([]),
 })
 export type AppState = Readonly<z.output<typeof AppStateSchema>>
 
@@ -53,6 +64,10 @@ export interface AppStateStore {
   setLibraryWindow(state: WindowState): void
   dialogFolder(kind: DialogKind): string | undefined
   rememberDialogFolder(kind: DialogKind, folder: string): void
+  /** DF93: puts `path` first in the recent gCode files (at most `RECENT_RUN_FILES`). */
+  rememberRunFile(path: string): void
+  /** DF93: drops `path` from the recent gCode files (it is gone). */
+  forgetRunFile(path: string): void
   /** Writes a pending change now and resolves when every write has finished (tests, quit). */
   flush(): Promise<void>
 }
@@ -125,6 +140,15 @@ export function createAppStateStore(o: {
     rememberDialogFolder(kind, folder) {
       if (current.dialogFolders[kind] === folder) return
       change({ ...current, dialogFolders: { ...current.dialogFolders, [kind]: folder } })
+    },
+    rememberRunFile(path) {
+      if (current.recentRunFiles[0] === path) return
+      const next = [path, ...current.recentRunFiles.filter((p) => p !== path)]
+      change({ ...current, recentRunFiles: next.slice(0, RECENT_RUN_FILES) })
+    },
+    forgetRunFile(path) {
+      if (!current.recentRunFiles.includes(path)) return
+      change({ ...current, recentRunFiles: current.recentRunFiles.filter((p) => p !== path) })
     },
     flush() {
       if (timer !== undefined) {

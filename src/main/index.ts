@@ -17,6 +17,8 @@ import { libraryHandlesMenuAction } from './library-context'
 import { installAppMenu } from './menu'
 import { createFileQueue, fileRoute, projectFilesFromArgv, takesInstanceLock } from './open-file'
 import { createExportFiles } from './persistence/export-file'
+import { createGcodeFiles } from './persistence/gcode-file'
+import { openRunFile, registerRunFileIpc, type RunFileDeps } from './run-file'
 import { resolveAppData } from './persistence/paths'
 import {
   quitSteps,
@@ -260,6 +262,7 @@ void app.whenReady().then(async () => {
     proc: 'utility',
   })
   machine.onStatus(pushRunStatus)
+  const gcodeFiles = createGcodeFiles()
   const created = await createAppHost({
     appData: app.getPath('userData'),
     appVersion: app.getVersion(),
@@ -269,6 +272,7 @@ void app.whenReady().then(async () => {
     workers,
     machine,
     exportFiles: createExportFiles(),
+    gcodeFiles,
     region2d: region2dPort,
   })
   if (created.isErr()) {
@@ -334,6 +338,24 @@ void app.whenReady().then(async () => {
   })
   // DF84: the streamed program for run mode's gCode panel (renderer only)
   registerRunProgramIpc(machine, (id) => sessions.isWindow(id))
+  // DF93: external gCode files for a run (docs/modes/run.md#run-an-external-g-code-file-df93)
+  const runFiles: RunFileDeps = {
+    folders: appState,
+    recent: appState,
+    files: gcodeFiles,
+    isWindow: (id) => sessions.isWindow(id),
+    hasProject: (id) => sessions.boundProject(id) !== undefined,
+    openWindow: () => sessions.open(),
+    show(win, path) {
+      windows.focus(win)
+      const send = () => {
+        if (!win.isDestroyed()) win.webContents.send(IPC.runFileShow, path)
+      }
+      if (loaded.has(win)) send()
+      else win.webContents.once('did-finish-load', send)
+    },
+  }
+  registerRunFileIpc(runFiles)
   // The one Library window (docs/conventions/ui-library-window.md): created hidden, shown by the
   // factory (never in hidden test runs).
   const libraryWindows = createLibraryWindows(host, sessions, {
@@ -356,6 +378,12 @@ void app.whenReady().then(async () => {
   installAppMenu({
     noWindow: () => sessions.open(),
     openLicences: () => licences.open(),
+    openRunFile: () => {
+      const focused = BrowserWindow.getFocusedWindow() ?? undefined
+      const asking =
+        focused !== undefined && sessions.isWindow(focused.webContents.id) ? focused : undefined
+      void openRunFile(asking, undefined, runFiles)
+    },
     openLibrary: () => {
       const focused = BrowserWindow.getFocusedWindow() ?? undefined
       libraryWindows.open(

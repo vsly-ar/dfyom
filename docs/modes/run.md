@@ -124,6 +124,46 @@ The program as it streams, in a collapsible panel under the 3D view, following t
 - **Before a run:** the panel says "The program shows here once a run starts." The setup's program is exported at the start (stale toolpaths regenerated, the live work zero); a preview before it would need its own command (tool budget) or an export per setup choice; left out (DF84 open).
 - **Tests:** `src/core/run/executing.test.ts` (blocks per line, the `Bf` walk, arcs split past the planner, no `Bf`, the floor; against the emulator: the estimate equals the line the emulator's planner executes at nearly every report of a program with arcs, with and without `Bf`), `host/client` (the program kept, `sent` and `executing` in the status), `GcodePanel.test.tsx` (rows, the executing row, follow and pause on scroll, collapse, axe), `e2e/gcode-panel.e2e.ts` (a run on the virtual machine: the highlighted line advances and the list follows it; renders `df84-gcode-panel-{light,dark}.png`).
 
+### Run an external G-code file (DF93)
+
+Status: accepted by delegation (hardening DF93, user TG #343: "add an ability to run external gcode to the Run mode when no project is open, or if project already open – in a new window with no project"; the user delegated the choices, D70: the recommended options below) · Safety: [§ Safety](#safety) (§ 4 and § 7 amended for files) · GRBL subset: [grbl.md § Protocol subset](../architecture/grbl.md#protocol-subset) · UI: [ui.md § Run-mode safety UI](../conventions/ui.md#run-mode-safety-ui) · Agents: [llm-api.md § Machine scope](../architecture/llm-api.md#machine-scope-df80)
+
+A G-code file from another CAM (Fusion, Estlcam, Carbide Create, an earlier DFYOM export) runs in Run mode without a project, through the same sender, run job, dialogs and stop paths as a plan run, after checks that stand in for the plan's.
+
+**Opening (D1).**
+
+- **File → "Run gCode file…"** in every window, and **"Run gCode file…"** in the Run inspector of a window without a project (with its **recent files**, the last 8 opened, newest first; one that is gone says so and leaves the list). The native dialog filters `.nc .gcode .ngc .tap .cnc .gc` and starts in the folder of the last file run (dialog kind `gcode-run`, [ui.md § Remembered window state](../conventions/ui.md#remembered-window-state-and-dialog-folders)).
+- **Which window:** the asking window when it has no project, else a **new window without a project** (cascaded); either switches to Run mode and loads the file. Without any window (macOS menu) a new window. Main decides (`window.dfyom.run.openFile(path?)`, renderer only: a path skips the dialog, which is how the recent list and the end-to-end test open a file). A window with a file loaded that opens a project shows the project; the file is dropped.
+- **Loading:** main reads the file (at most 50 MB, `input.malformed` rule `fileTooLarge`), the window prepares it with the core function below and shows the preview in the 3D view, the prepared program in the [gCode panel](#gcode-panel-df84) and the file card in the inspector: name, lines, units, tool changes, the program's extent (work coordinates, display units), warnings and refusals with their line numbers.
+
+**Preparing a file (D2, `src/core/run/gcode-file.ts`, headless).** Each line through the virtual machine's GRBL parser (`parseBlock`, [grbl.md](../architecture/grbl.md#protocol-subset)), so DFYOM checks, previews and the emulator runs the same subset:
+
+- **Cleaned, not changed in motion:** CR, blank lines and `%` lines dropped; inline comments dropped from a line longer than GRBL's 80 bytes, whole-line comments shortened to fit; `?`, `!`, `~` and non-ASCII characters in comments replaced by a space (they are GRBL real-time bytes). Code words are never rewritten except `M6`.
+- **Tool changes (D6):** GRBL 1.1 has no `M6` (`error:20`), so a line with `M6` becomes DFYOM's tool-change marker and its `M0` ([grbl.md § Output dialect](../architecture/grbl.md#output-dialect)): `(DFYOM TOOL CHANGE n: name)` where `n` is the line's `T` (else the last `T`) and `name` the comment on that line, else the header's `(T2 …)` tool line (Fusion lists the tools so), else the whole-line comment just before it, else "Tool n". Other words on the line stay on their own line. The run then waits in the tool-change dialog (jog, Probe Z, set Z zero, Continue) exactly as for a plan. A DFYOM export's own markers pass unchanged. `M0` is a program pause with the comment before it as its message (as now).
+- **Runs (D3):** `G0–G3` (G17 plane, IJ or R), `G4`, `G17`, `G20/G21`, `G53` (with G0/G1), `G54`, `G90/G91`, `G91.1`, `G94`, `G40`, `G49`, `G61`, `G80`, `M0`, `M2`, `M30`, `M3/M4/M5`, `M7/M8/M9` (coolant: GRBL switches its pins; the emulator ignores them), `S`, `F`, `T`, `N`, comments, `/` (ignored, as GRBL).
+- **Warnings (shown, the run is allowed):** `M1` (GRBL ignores the optional stop, the run does not stop there); no `G20`/`G21` before the first move (runs in mm, GRBL's power-up mode, but the controller keeps the last program's mode); a first move with incremental (`G91`) or partial axes from an unknown position (the extent of that axis starts where the machine is); lines after `M2`/`M30`; a feed move before any spindle start (fine for a hand-switched spindle, else check).
+- **Refused (Start disabled, each with its line):** `$` lines (no system commands from a file, § 7), `G28`/`G30` (stored positions DFYOM cannot check against the travel), `G92` (offsets), `G10` (a program setting the work zero), `G55–G59` (DFYOM runs at G54), `G38.x` (probing: use Probe Z), `G41/G42` (cutter compensation), `G43`/`G43.1` (tool length offsets), `G81–G89` (canned cycles: post them expanded), `G93` (inverse time), `G18/G19` (arcs outside XY), any other word or form GRBL refuses (its `error:N` text), a code part longer than 79 characters, `?`/`!`/`~` in code. The message names the word and what to change in the post ("Fusion: turn off 'Use G28'").
+
+**The extent and the soft-limit check (D4).** The program parsed again at the live G54 from the machine's current position (a first partial move starts there): X and Y over the whole program, Z until the first tool change (after it the Z zero is set again, as for plans, [grbl.md](../architecture/grbl.md#plan-export-command)), `G53` targets always (machine coordinates). Each axis must stay in `[−travel, 0]` of the connection's machine (its library machine; on a real connection the [settings check](run-machine.md#settings-check) holds it equal to `$130–$132`). Findings have the plan shape (`softLimit`, `axis`, `min`, `max`, `travel`), so the pre-flight shows them the same way.
+
+**Gates before Start (D5)** – the plan run's ([§ 4](#4-before-a-real-run-streams)) with the file in place of the plan:
+
+1. Connected, no job, Idle and homed in this connection; the file reads, prepares without refusals and fits GRBL's line rules.
+2. On a real connection: the controller's `$$` matches the connection's machine with homing on (`settingsMismatch`, as plans); started from the app only (Q50 unchanged: `run.job.start` is denied to agents on a real connection).
+3. The soft-limit check passed; the host re-checks the work zero at `jobStart` (`workZeroChanged`).
+4. Confirmed in the **pre-flight** (file, lines, tool changes, target, work zero, soft limits; on a real connection the air-cut note and "Start on the machine").
+
+`run.job.start` reads and checks the file again when it starts: the run uses the file as it is then, and the gCode panel shows what was streamed.
+
+**During the run (D7).** Feed hold, Resume, Stop, overrides, external holds, the tool-change and pause dialogs, the lost-connection rules: unchanged. The status names the file (`job.file { name, path }`) instead of a plan, so every window shows "File underside.nc" and Stop. **No section resume** for files ([§ 7](#7-what-dfyom-never-does-on-a-real-machine): no restart at an arbitrary line); a file run clears `lastRun`. **No dry-run mode** (D8): the air-cut note says how (spindle off, Z zero raised); a real dry run (`$C` check mode, Z offset) is open.
+
+**Agents (D9).** No new tool: `run.job.start` and `run.job.check` take `file` (an absolute path with one of the extensions above) instead of `planId`, in the machine scope (a session without a project) and in a project. On the virtual machine an agent may run a file; on a real connection the policy refuses `run.job.start` as for plans. Without a project `run.job.start`/`check` with `planId` still answer `noProject`.
+
+**Large files (D10).** The 3D preview draws the prepared moves (arcs at 0.02 mm, rapids and feeds), the gCode panel is the virtualized DF84 list (≈ 150 k lines tested), and main reads the file once per load and once per check or start.
+
+- **Not yet:** G28/G30 with the controller's stored positions (`$#`), G55–G59, dry run, section resume of a file, a preview of a file in a project window, a file's units for the DRO.
+- **Tests:** `src/core/run/gcode-file.test.ts` (preparation, M6, refusals and warnings, inch files, the extent and the soft-limit findings; samples: a DFYOM export from the user's `temp/`, Fusion-, Estlcam- and gSender-style files under `src/core/run/__fixtures__/`), `src/main/host/machine-scope.test.ts` (a file run on the in-process virtual machine without a project, headless: check, tool changes and continue, the status's `job.file`, no `lastRun`, an unbound agent's run; refusals, soft limits, file names, `oneOf`, a missing file; agents on a real connection are refused by the per-command policy, `dispatcher.test.ts`), `src/main/persistence/gcode-file.test.ts` (reading: absolute paths, folders, the size cap), `app-state.test.ts` (recent files), `RunMode.test.tsx` (main hands the window a file: Run mode, the file card, the gCode panel, the pre-flight and start; refusals, the open button and recent files; an unreadable file), `e2e/run-file.e2e.ts` (hidden: a fixture `.nc` opened through the bridge in a window without a project, card and gCode panel, run on the virtual machine through both tool changes to the end; from a window with a project, a new window shows it).
+
 ## Safety
 
 Status: accepted (hardening 1.1, 2026-11-23; accepted by the user 2026-11-25, TG #268 "machine ok" and TG #331 "go" (Q122), on the [Q49–Q52](../plans/hardening.md#questions-for-the-user) recommendations) · Real-machine lane: [run-machine.md](run-machine.md) · Virtual-machine rules: [run-v0.1.md § Safety (v0.1)](run-v0.1.md#safety-v01) · Protocol facts: [grbl.md](../architecture/grbl.md#transport-and-sender)
@@ -190,7 +230,7 @@ Jogs are not confirmed: they are short, cancellable, refused outside the travel 
 
 Checked by `run.job.start` (main) and again by the host at `jobStart` ([run-v0.1.md § Run job](run-v0.1.md#run-job)); any failure refuses the start before a byte is sent.
 
-1. The plan is `finalized` or `inUse` ([run-machine.md amendment of decision 5](run-machine.md#amendments-to-run-v01md)). **M1.**
+1. The plan is `finalized` or `inUse` ([run-machine.md amendment of decision 5](run-machine.md#amendments-to-run-v01md)). **M1.** An external file instead prepares without refusals ([DF93](#run-an-external-g-code-file-df93)); 2–4 apply to it with the connection's machine in place of the plan's copy.
 2. The controller's `$$` matches the connection's machine copy in every mapped setting and has homing enabled ([run-machine.md § Settings check](run-machine.md#settings-check)); else `run.state`, rule `settingsMismatch`. **M1.**
 3. Idle, homed in this connection (not after an unexpected controller reset: M2), the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing; covered on the serial path in M2).
 4. The connection is reserved for the job from its checks to its stream (existing).
@@ -222,7 +262,7 @@ A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is i
 ### 7. What DFYOM never does on a real machine
 
 - Write GRBL settings (`$x=`), send raw gCode or `$` lines (no MDI console, Q52), restart a program at an arbitrary line, or reconnect on its own.
-- Stream a program it did not export, in the same job, from a finalized plan at the live work zero.
+- Stream a program it did not export, in the same job, from a finalized plan at the live work zero; except an external G-code file the user starts from the app after its own checks ([DF93](#run-an-external-g-code-file-df93)), streamed as the file says (only `M6` becomes the tool-change marker).
 - Change a plan's machine copy to match the controller silently ([library.md](../architecture/library.md#grbl--import)).
 
 ### Testing the rules

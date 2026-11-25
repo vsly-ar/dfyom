@@ -385,6 +385,34 @@ export const runMessages = {
     startedElsewhere: 'Started in another window or by an agent.',
   },
 
+  /** DF93: an external gCode file (docs/modes/run.md#run-an-external-g-code-file-df93). */
+  file: {
+    open: 'Run gCode file…',
+    openHint:
+      'A program from another CAM, or an earlier export. It runs after the same checks as a plan.',
+    recent: 'Recent files',
+    close: 'Close file',
+    loading: (name: string) => `Reading ${name}…`,
+    failed: (name: string) => `${name} cannot be read.`,
+    facts: 'File',
+    lines: 'Lines',
+    units: 'Units',
+    unitNames: { mm: 'mm (G21)', inch: 'inch (G20)', unknown: 'not set (runs in mm)' },
+    toolChanges: 'Tool changes',
+    noToolChanges: 'None',
+    toolChange: (n: number, name: string) => `${n}: ${name}`,
+    extent: 'Extent (work coordinates)',
+    extentAxis: (axis: string, min: string, max: string, unit: string) =>
+      `${axis} ${min} to ${max} ${unit}`,
+    warnings: 'Warnings',
+    refusals: (n: number) => (n === 1 ? '1 line cannot run' : `${n} lines cannot run`),
+    refusalsFix: 'Change these lines in the CAM post, then open the file again.',
+    issue: (line: number, message: string) => `Line ${line}: ${message}`,
+    more: (n: number) => `and ${n} more`,
+    runOf: (name: string) => `File ${name}`,
+    startRun: 'Start run',
+  },
+
   preflight: {
     title: 'Start run?',
     description: 'Check the run before the machine moves.',
@@ -433,6 +461,10 @@ export const runMessages = {
     stoppedRemoved:
       'The operation the run stopped in is no longer in this setup. Choose where to resume.',
     reordered: 'The operations were reordered since the stop. Check where to resume.',
+    /** DF93: a file run. */
+    file: 'File',
+    fileSettingsMismatch:
+      'The controller’s settings differ from the connection’s machine (see Connection).',
   },
 
   toolChange: {

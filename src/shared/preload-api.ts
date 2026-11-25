@@ -71,6 +71,18 @@ export const IPC = {
    * no longer kept (DF84, docs/modes/run.md#gcode-panel-df84).
    */
   runProgram: 'dfyom:run.program',
+  /**
+   * Renderer → main (invoke): run an external gCode file (DF93): the dialog unless a path is
+   * given, then the window without a project that shows it (`RunFileOpened`, or null if cancelled).
+   * Doc: docs/modes/run.md#run-an-external-g-code-file-df93
+   */
+  runFileOpen: 'dfyom:run.fileOpen',
+  /** Main → renderer: show this gCode file in Run mode (DF93). */
+  runFileShow: 'dfyom:run.fileShow',
+  /** Renderer → main (invoke): a gCode file's text (`RunFileReadReply`, DF93). */
+  runFileRead: 'dfyom:run.fileRead',
+  /** Renderer → main (invoke): the recently run gCode files, newest first (DF93). */
+  runFileRecent: 'dfyom:run.fileRecent',
   /** Renderer → main (invoke): the native "Open project" dialog; the chosen path or null. */
   fileChooseOpen: 'dfyom:file.chooseOpen',
   /** Renderer → main (invoke): the native "Save project" dialog; the chosen path or null. */
@@ -238,6 +250,17 @@ export interface ReferenceCompareViewRequest {
   readonly threshold: number
 }
 
+/** `run.openFile`'s answer: the file and whether this window or a new one shows it (DF93). */
+export interface RunFileOpened {
+  readonly path: string
+  readonly window: 'this' | 'new'
+}
+
+/** `run.readFile`'s answer: the file's text, or the error (DF93). */
+export type RunFileReadReply =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly error: AppErrorData }
+
 export type ReferenceCompareViewReply =
   | { readonly ok: true; readonly distances: Float32Array; readonly missing?: Float32Array }
   | { readonly ok: false; readonly error: AppErrorData }
@@ -373,6 +396,17 @@ export interface PreloadApi {
      * otherwise. Renderer only, no agent tool (DF84, docs/modes/run.md#gcode-panel-df84).
      */
     program(jobId: string): Promise<RunProgram | null>
+    /**
+     * Run an external gCode file (DF93, docs/modes/run.md#run-an-external-g-code-file-df93): the
+     * open dialog unless `path` is given; a window with a project hands it to a new window.
+     */
+    openFile(path?: string): Promise<RunFileOpened | null>
+    /** A gCode file to show in Run mode (main's answer to `openFile`); queued until subscribed. */
+    onShowFile(listener: (path: string) => void): () => void
+    /** The file's text (an absolute gCode path, ≤ 50 MB); remembered in the recent files. */
+    readFile(path: string): Promise<RunFileReadReply>
+    /** The recently run gCode files, newest first (at most 8). */
+    recentFiles(): Promise<readonly string[]>
   }
   /**
    * One command, query or session tool by registry name, through this window's session (the same

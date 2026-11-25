@@ -17,6 +17,11 @@ import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useSettings, useShell } from '../../shell/ShellContext'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { activeJob, isHeld } from './machine-state'
+import {
+  fileNameOf,
+  prepareGcodeFile,
+  type PreparedGcodeFile,
+} from '../../../../core/run/gcode-file'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -74,6 +79,26 @@ export interface GcodePanelState {
 
 /** Open height of the gCode panel in a new window (rem). */
 export const GCODE_HEIGHT_REM = 12
+
+/**
+ * DF93: the external gCode file this window shows in Run mode
+ * (docs/modes/run.md#run-an-external-g-code-file-df93): read and prepared here, run by
+ * `run.job.start { file }`, which reads and checks it again.
+ */
+export type RunFileView =
+  | { readonly state: 'loading'; readonly path: string; readonly name: string }
+  | {
+      readonly state: 'ready'
+      readonly path: string
+      readonly name: string
+      readonly prepared: PreparedGcodeFile
+    }
+  | {
+      readonly state: 'failed'
+      readonly path: string
+      readonly name: string
+      readonly error: AppErrorData
+    }
 
 /** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
 export const NO_PLAN = '__noPlan__'
@@ -145,7 +170,17 @@ export interface RunState {
   readonly probeJobId: string | undefined
   /** DF84: the gCode panel under the 3D view, per window (docs/modes/run.md#gcode-panel-df84). */
   readonly gcode: GcodePanelState
+  /** DF93: the external gCode file shown, while one is. */
+  readonly file: RunFileView | undefined
+  /** DF93: the recently run gCode files (main's list), newest first. */
+  readonly recentFiles: readonly string[]
 
+  /** DF93: reads and prepares a gCode file (main chose it and this window). */
+  loadFile(path: string): Promise<void>
+  /** DF93: "Run gCode file…": main's dialog (or `path`), then the window that shows it. */
+  openFile(path?: string): Promise<void>
+  closeFile(): void
+  refreshRecentFiles(): Promise<void>
   setPlan(planId: string | undefined): void
   setGcode(patch: Partial<GcodePanelState>): void
   setMachine(machineId: string | undefined): void
@@ -338,6 +373,30 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       pending: [],
       probeJobId: undefined,
       gcode: { open: false, height: GCODE_HEIGHT_REM, follow: true },
+      file: undefined,
+      recentFiles: [],
+      async loadFile(path) {
+        const name = fileNameOf(path)
+        set({ file: { state: 'loading', path, name }, preflightCheck: { state: 'idle' } })
+        const r = await bridge.run.readFile(path)
+        if (get().file?.path !== path) return // another file meanwhile
+        set({
+          file: r.ok
+            ? { state: 'ready', path, name, prepared: prepareGcodeFile(r.text) }
+            : { state: 'failed', path, name, error: r.error },
+          // the panel shows the file's lines before a run (DF84)
+          ...(r.ok ? { gcode: { ...get().gcode, open: true } } : {}),
+        })
+        void get().refreshRecentFiles()
+      },
+      async openFile(path) {
+        await bridge.run.openFile(path)
+      },
+      closeFile: () => set({ file: undefined, preflightCheck: { state: 'idle' } }),
+      async refreshRecentFiles() {
+        const recentFiles = await bridge.run.recentFiles()
+        set({ recentFiles })
+      },
 
       setGcode: (patch) => set((s) => ({ gcode: { ...s.gcode, ...patch } })),
       setPlan: (planId) =>
@@ -472,6 +531,22 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
       async startRun(chosen, from) {
+        const file = get().file
+        if (file?.state === 'ready') {
+          set({ preflightOpen: false, setupChangeOpen: false, resumeFrom: undefined })
+          const r = await call('run.job.start', { file: file.path })
+          if (!r.ok) return
+          const { jobId } = r.value as { jobId: string }
+          set({
+            jobId,
+            startedHere: jobId,
+            progress: undefined,
+            ended: undefined,
+            failureOpen: false,
+          })
+          follow(jobId)
+          return
+        }
         const planId = get().planId
         const setupId = chosen ?? get().setupId
         set({ preflightOpen: false, setupChangeOpen: false, resumeFrom: undefined })
@@ -496,14 +571,16 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       async checkRun(setupId, key) {
         const planId = get().planId
         const now = get().preflightCheck
-        if (planId === undefined || planId === NO_PLAN) return
+        const file = get().file
+        const ofFile = file?.state === 'ready'
+        if (!ofFile && (planId === undefined || planId === NO_PLAN)) return
         if (now.state !== 'idle' && now.key === key) return
         set({ preflightCheck: { state: 'checking', key } })
         // not through `call`: a failed check shows in the dialog, not in the action banner
-        const r = await bridge.call('run.job.check', {
-          planId,
-          ...(setupId === undefined ? {} : { setupId }),
-        })
+        const r = await bridge.call(
+          'run.job.check',
+          ofFile ? { file: file.path } : { planId, ...(setupId === undefined ? {} : { setupId }) },
+        )
         const cur = get().preflightCheck
         if (cur.state !== 'checking' || cur.key !== key) return // closed or superseded
         set({
@@ -664,15 +741,24 @@ export function createRunStore(bridge: PreloadApi): RunStore {
 
 const stores = new WeakMap<PreloadApi, { store: RunStore; users: number; stop?: () => void }>()
 
-/** The window's run store (one per bridge); follows main while any component uses it. */
-export function useRunStore(): RunStore {
-  const { bridge } = useShell()
+function storeEntry(bridge: PreloadApi): { store: RunStore; users: number; stop?: () => void } {
   let entry = stores.get(bridge)
   if (entry === undefined) {
     entry = { store: createRunStore(bridge), users: 0 }
     stores.set(bridge, entry)
   }
-  const e = entry
+  return entry
+}
+
+/** The window's run store outside a component (DF93: main hands the window a gCode file). */
+export function runStoreOf(bridge: PreloadApi): RunStore {
+  return storeEntry(bridge).store
+}
+
+/** The window's run store (one per bridge); follows main while any component uses it. */
+export function useRunStore(): RunStore {
+  const { bridge } = useShell()
+  const e = storeEntry(bridge)
   useEffect(() => {
     e.users += 1
     if (e.users === 1) e.stop = e.store.start()

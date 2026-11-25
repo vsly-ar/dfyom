@@ -40,6 +40,7 @@ import {
 } from '../../core/design/evaluation'
 import { Library } from '../../core/library/library'
 import type { ExportFiles } from '../../core/post/plan-export'
+import type { GcodeFiles } from '../../core/run/gcode-file'
 import { newProjectDoc, type UnitSystem } from '../../core/project/document'
 import { INCOMPATIBLE_PROJECT, isIncompatibleProject } from '../../core/project/layout'
 import type { HostPort, OpenedResult, OpenProjectInfo } from '../../core/project/lifecycle'
@@ -96,6 +97,8 @@ export interface AppHostOptions {
   /** The instance's machine connection (`services.machine` of every project). */
   readonly machine?: MachineService
   readonly exportFiles?: ExportFiles
+  /** Reads external gCode files for a run (DF93); absent = `run.job.start { file }` fails. */
+  readonly gcodeFiles?: GcodeFiles
   /** The 2D port of the instance (`services.region2d` of every project). */
   readonly region2d?: Region2dPort
   /** Defaults: storage under `appData`, library under `<appData>/library`. */
@@ -281,6 +284,7 @@ class Host implements AppHost {
           workers: o.workers,
           library,
           ...(o.machine === undefined ? {} : { machine: o.machine }),
+          ...(o.gcodeFiles === undefined ? {} : { gcodeFiles: o.gcodeFiles }),
         },
         ...this.common(),
       }),
@@ -540,6 +544,7 @@ class Host implements AppHost {
       project: session,
       ...(this.o.machine === undefined ? {} : { machine: this.o.machine }),
       ...(this.o.exportFiles === undefined ? {} : { exportFiles: this.o.exportFiles }),
+      ...(this.o.gcodeFiles === undefined ? {} : { gcodeFiles: this.o.gcodeFiles }),
       ...(this.o.region2d === undefined ? {} : { region2d: this.o.region2d }),
       appVersion: this.o.appVersion,
     }

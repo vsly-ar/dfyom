@@ -14,6 +14,7 @@ import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
 import { testFs } from '../persistence/fs.testing'
 import { createProjectStorage } from '../persistence/storage'
+import { createGcodeFiles } from '../persistence/gcode-file'
 import { createAppHost, type AppHost } from './app-host'
 
 /** A temp folder removed by `cleanup()`. */
@@ -46,6 +47,7 @@ export async function testHost(
       report: () => {},
       workers: createInProcessWorkers(o.files === undefined ? {} : { files: o.files }),
       exportFiles: { write: async (target) => Ok({ filePath: target }) },
+      gcodeFiles: createGcodeFiles(),
       ...(o.machine === undefined ? {} : { machine: o.machine }),
     }),
   )

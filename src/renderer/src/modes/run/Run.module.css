@@ -111,6 +111,40 @@
   gap: var(--space-1);
 }
 
+/* DF93: a file's refusals (Start stays disabled) */
+.notice[data-tone='danger'] {
+  border-color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.notice[data-tone='danger'] > svg {
+  color: var(--danger);
+}
+
+/* DF93: the inspector's external gCode file section (docs/modes/run.md#run-an-external-g-code-file-df93) */
+.fileSection,
+.fileCard {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.fileCard {
+  justify-items: stretch;
+}
+
+.fileCard > button {
+  justify-self: start;
+}
+
+.recentFiles {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* serial port select + refresh (run-machine.md#ports-and-the-port-picker) */
 .portRow {
   display: grid;
