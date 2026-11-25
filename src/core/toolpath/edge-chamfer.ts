@@ -8,14 +8,18 @@
  * `edgeChamferPasses`); `cornerLift` climbs the V-bit up the mitre of sharp inside corners (E4a).
  * On a split piece (`edge.within`, E2) the loops are clipped to the piece's cell grown by the
  * tool's radius at the face: open runs along the source's real edges only. Circular chamfers
- * keep `generateChamfer` (chamfer.ts).
+ * keep `generateChamfer` (chamfer.ts). E4b: a ring inside the material is entered by a plunge
+ * on its level's air ring and a feed across at depth (no plunge into material); a bottom
+ * chamfer's tabs (`edge.tabs`) are skipped within the tab gap, giving open runs between them.
  * Doc: docs/modes/edge-chamfers.md#toolpath-plan, docs/modes/edge-chamfers.md#implementation-e1,
- * docs/modes/edge-chamfers.md#implementation-e2, docs/modes/edge-chamfers.md#implementation-e4a
+ * docs/modes/edge-chamfers.md#implementation-e2, docs/modes/edge-chamfers.md#implementation-e4a,
+ * docs/modes/edge-chamfers.md#implementation-e4b
  */
 import { Err, Ok, type AppResult } from '../../shared/result'
 import {
   CHAMFER_ANGLE_TOLERANCE,
   loopChamferDepth,
+  loopChamferTabGap,
   type LoopChamferGeometry,
   type Vec2,
   type Vec3,
@@ -29,6 +33,7 @@ import {
   type LiftCorner,
 } from '../geometry/outline'
 import { regionLoops } from '../geometry/2d/model'
+import { closestOnChains } from '../geometry/2d/measure'
 import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, toolpath } from './common'
@@ -126,6 +131,30 @@ export function edgeChamferPasses(
   return levels
 }
 
+/** One run as cut: its items at tip Z, and where a ring in the material is entered (E4b). */
+interface Group {
+  readonly items: Item[]
+  readonly kind: PassKind
+  readonly z: number
+  readonly entry?: Vec2
+}
+
+/** The point of `rings` nearest `p`; undefined without rings. */
+function nearestOn(rings: readonly (readonly Seg[])[], p: Vec2): Vec2 | undefined {
+  let best: Vec2 | undefined
+  let d = Infinity
+  for (const r of rings)
+    for (const s of r) {
+      const q = segPoint(s, segClosest(s, p))
+      const e = dist(q, p)
+      if (e < d) {
+        d = e
+        best = q
+      }
+    }
+  return best
+}
+
 /** A run of the tool axis: a whole loop, or an open stretch of one. */
 interface Run {
   readonly segs: Seg[]
@@ -192,6 +221,24 @@ export function generateEdgeChamfer(
           [w.max[0] + reach, w.max[1] + reach],
         ]
   const keep = every ? undefined : (p: Vec2) => nearChosenLoop(edges, p)
+  // E4b, a bottom chamfer: lift over the through profile's tabs (the stretches whose nearest edge
+  // point lies within the tab's gap), so the tabs holding the part stay whole
+  const tabs = op.edge.tabs ?? []
+  const skip =
+    tabs.length === 0
+      ? undefined
+      : (p: Vec2) => {
+          const q = closestOnChains(
+            edges.map((e) => e.loop),
+            p,
+          )?.point
+          return (
+            q !== undefined && tabs.some((t) => dist(q, t.at) < loopChamferTabGap(t, op.width, tip))
+          )
+        }
+  // where a ring inside the material is entered: the nearest point of its level's first ring,
+  // in the air beside the edge (E4b: never a plunge into material)
+  const airRings = loops.unwrap().filter((r) => r.length > 0)
 
   const retract = op.onZ + heights.retractHeight
   const at = (p: Vec2, z: number): Vec3 => [p[0], p[1], z]
@@ -199,20 +246,24 @@ export function generateEdgeChamfer(
   let kind: PassKind | undefined
   let here: Vec2 = [0, 0]
   // per level the rings from the edge out to the bevel; each ring's loops nearest-neighbour
-  const groups: { items: Item[]; kind: PassKind; z: number }[][] = []
+  const groups: Group[][] = []
   for (const ring of levels.flat()) {
     const rings = ring.offset === tip / 2 ? loops : edgeChamferRings(op, ring.offset, port)
     if (rings.isErr()) return Err(rings.unwrapErr())
     const z = op.onZ - ring.depth
     const lifts = ring.bevel ? corners.map((c) => liftAt(c, ring, op.width, tip / 2)) : []
-    const group: { items: Item[]; kind: PassKind; z: number }[] = []
+    const group: Group[] = []
     for (const r of rings.unwrap().filter((x) => x.length > 0))
-      for (const run of runsOf(r, box, keep)) {
+      for (const run of runsOf(r, box, keep, skip)) {
         const segs = st.direction === 'climb' ? run.segs : [...run.segs].reverse().map(segReverse)
+        const items = withLifts(run.closed ? startAtLongest(segs) : segs, lifts)
+        const entry =
+          ring.offset < tip / 2 - 1e-9 ? nearestOn(airRings, itemsStart(items)) : undefined
         group.push({
-          items: withLifts(run.closed ? startAtLongest(segs) : segs, lifts),
+          items,
           kind: ring.bevel ? 'finish' : 'rough',
           z,
+          ...(entry === undefined ? {} : { entry }),
         })
       }
     groups.push(group)
@@ -235,10 +286,13 @@ export function generateEdgeChamfer(
       const k = single ? 'finish' : ring.kind
       if (k !== kind) b.pass((kind = k))
       const start = itemsStart(ring.items)
-      // down in the air beside the edge (the edge's operation cut it), one loop, out
-      b.rapid(at(start, heights.clearanceHeight))
-      b.rapid(at(start, retract))
-      b.line(at(start, ring.z), cutting.plungeRate)
+      // down in the air beside the edge (the edge's operation cut it), one loop, out; a ring in
+      // the material steps in from the air at its depth (E4b: the cut beside it is cleared)
+      const down = ring.entry ?? start
+      b.rapid(at(down, heights.clearanceHeight))
+      b.rapid(at(down, retract))
+      b.line(at(down, ring.z), cutting.plungeRate)
+      if (ring.entry !== undefined) b.line(at(start, ring.z), cutting.feedRate)
       let p = start
       for (const it of ring.items) {
         if ('seg' in it) {
@@ -252,8 +306,9 @@ export function generateEdgeChamfer(
         b.line(at(it.lift.crease, ring.z), cutting.feedRate)
         b.line(at(p, ring.z), cutting.feedRate)
       }
-      b.rapid(at(start, heights.clearanceHeight))
-      here = start
+      // straight up where the run ends (a closed ring ends at its start)
+      b.rapid(at(p, heights.clearanceHeight))
+      here = p
       done++
     }
   }
@@ -360,12 +415,47 @@ export function clipRing(ring: readonly Seg[], lo: Vec2, hi: Vec2): Run[] {
   return runsOf(ring, [lo, hi])
 }
 
+/** Sample spacing along a segment when looking for where `skip` changes (mm, E4b). */
+const SKIP_SAMPLE = 0.25
+
+/**
+ * Fractions u ∈ (0, 1) where `skip` changes along `s` (E4b tabs): sampled every `SKIP_SAMPLE`,
+ * each change bisected to 1e-9 of the segment.
+ */
+function skipChanges(s: Seg, skip: (p: Vec2) => boolean): number[] {
+  const n = Math.max(2, Math.ceil(segLength(s) / SKIP_SAMPLE))
+  const out: number[] = []
+  let prev = skip(segPoint(s, 0))
+  for (let k = 1; k <= n; k++) {
+    const u = k / n
+    const cur = skip(segPoint(s, u))
+    if (cur !== prev) {
+      let a = (k - 1) / n
+      let b = u
+      while (b - a > 1e-9) {
+        const m = (a + b) / 2
+        if (skip(segPoint(s, m)) === prev) a = m
+        else b = m
+      }
+      out.push((a + b) / 2)
+    }
+    prev = cur
+  }
+  return out
+}
+
 /**
  * The stretches of `ring` to cut: within `box` (a split piece, E2) and beside a chosen loop
  * (`keep`, E4a), in ring order; the whole ring when nothing is dropped.
  */
-function runsOf(ring: readonly Seg[], box?: [Vec2, Vec2], keep?: (p: Vec2) => boolean): Run[] {
-  if (box === undefined && keep === undefined) return [{ segs: [...ring], closed: true }]
+function runsOf(
+  ring: readonly Seg[],
+  box?: [Vec2, Vec2],
+  keep?: (p: Vec2) => boolean,
+  skip?: (p: Vec2) => boolean,
+): Run[] {
+  if (box === undefined && keep === undefined && skip === undefined)
+    return [{ segs: [...ring], closed: true }]
   const inside = (p: Vec2) =>
     box === undefined ||
     (p[0] >= box[0][0] - 1e-9 &&
@@ -374,22 +464,28 @@ function runsOf(ring: readonly Seg[], box?: [Vec2, Vec2], keep?: (p: Vec2) => bo
       p[1] <= box[1][1] + 1e-9)
   const pieces: { seg: Seg; keep: boolean }[] = []
   for (const s of ring) {
-    const us =
-      box === undefined
-        ? [0, 1]
+    const us = [
+      0,
+      ...(box === undefined
+        ? []
         : [
-            0,
             ...crossings(s, 0, box[0][0]),
             ...crossings(s, 0, box[1][0]),
             ...crossings(s, 1, box[0][1]),
             ...crossings(s, 1, box[1][1]),
-            1,
-          ].sort((a, b) => a - b)
+          ]),
+      ...(skip === undefined ? [] : skipChanges(s, skip)),
+      1,
+    ].sort((a, b) => a - b)
     for (let i = 0; i + 1 < us.length; i++) {
       if (us[i + 1]! - us[i]! < 1e-9) continue
       const piece = us.length === 2 ? s : segSlice(s, us[i]!, us[i + 1]!)
       const mid = segPoint(piece, 0.5)
-      pieces.push({ seg: piece, keep: inside(mid) && (keep === undefined || keep(mid)) })
+      pieces.push({
+        seg: piece,
+        keep:
+          inside(mid) && (keep === undefined || keep(mid)) && (skip === undefined || !skip(mid)),
+      })
     }
   }
   if (pieces.every((p) => p.keep)) return [{ segs: [...ring], closed: true }]

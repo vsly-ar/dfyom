@@ -27,6 +27,7 @@ import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { Tolerance } from '../quantity/tolerance'
 import {
+  bottomEdgeFace,
   isGeneralShape,
   quantityParams,
   withParam,
@@ -435,15 +436,17 @@ export function recalculate(
 
 /**
  * Chamfers keep their edge's face: each chamfer's `on` is set to its `edgeOf` operation's `on`
- * (an edited drilling moved to another face takes its chamfers along). Pure; unchanged
- * operations keep their identity.
+ * (an edited drilling moved to another face takes its chamfers along). A bottom chamfer (E4b)
+ * stays on the face opposite its through profile's; one whose profile stopped being through (or
+ * moved to a side) follows the profile's face. Pure; unchanged operations keep their identity.
  */
 export function followEdges(ops: readonly Operation[]): Operation[] {
   const byId = new Map(ops.map((o) => [o.id, o]))
   return ops.map((op) => {
     if (op.kind !== 'chamfer') return op
     const edge = byId.get(op.edgeOf)
-    return edge === undefined || edge.on === op.on ? op : { ...op, on: edge.on }
+    if (edge === undefined || edge.on === op.on || op.on === bottomEdgeFace(edge)) return op
+    return { ...op, on: edge.on }
   })
 }
 

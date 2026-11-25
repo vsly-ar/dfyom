@@ -5,7 +5,7 @@
 // Spec: docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges,
 // docs/modes/design-v0.4.md#implementation-c2
 import { describe, expect, it } from 'vitest'
-import { collect, None, Ok } from '../../shared/result'
+import { collect, None, Ok, Some } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
 import type { AppError } from '../../shared/errors/app-error'
 import { uiSource } from '../commands/testing'
@@ -292,6 +292,96 @@ describe('design.chamfer.add / update', () => {
       o.kind === 'drilling' ? { ...o, on: 'stock.bottom' } : o,
     )
     expect(followEdges(moved).find((o) => o.id === 'chamfer1')!.on).toBe('stock.bottom')
+  })
+})
+
+describe('bottom chamfers (E4b)', () => {
+  const outline = async (s: DesignSetup, extra: object = {}) =>
+    s.run('design.profile.add', {
+      partId: s.partId,
+      shape: {
+        kind: 'rectangle',
+        center: ['50', '30'],
+        length: '80',
+        width: '40',
+        cornerRadius: '0',
+      },
+      tabs: { count: '4', width: '6', thickness: '2' },
+      ...extra,
+    })
+
+  it("a through profile's bottom edge from the opposite stock face; mirrored, tabs left out", async () => {
+    const s = await designSetup()
+    await outline(s)
+    const out = await chamfer(s, { edgeOf: 'profile1', on: 'stock.bottom', width: '1' })
+    expect(s.op('chamfer1')).toMatchObject({ on: 'stock.bottom', edgeOf: 'profile1' })
+    // two setups (dfm.setups) and the tabs the bevel stops at
+    expect(out.warnings.map((w) => w.code).sort()).toEqual(['dfm.chamferTabs', 'dfm.setups'])
+    const tabs = out.warnings.find((w) => w.code === 'dfm.chamferTabs')!
+    expect(tabs).toMatchObject({ severity: 'info', parameter: 'edgeOf' })
+    // gap 6 + 2 × 1 + 2 × 1 mm per tab (pointed bit); tab centres in the bottom frame, v = 60 − y
+    expect(tabs.params['gap']).toBeCloseTo(10, 9)
+    expect(tabs.params['points']).toEqual([50, 50, 90, 30, 50, 10, 10, 30])
+    // an update without `on` keeps the bottom; a removed tab count drops the finding
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      width: '0.5',
+    })
+    expect(s.op('chamfer1').on).toBe('stock.bottom')
+    await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      tabs: { count: '0' },
+    })
+    expect(warnings(s).map((w) => w.code)).not.toContain('dfm.chamferTabs')
+    expect(s.op('chamfer1').on).toBe('stock.bottom')
+  })
+
+  it('refused for a blind profile, a pocket, a drilling or a side face (chamferOn)', async () => {
+    const s = await designSetup()
+    await outline(s, { depth: '5' })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'rectangle', center: ['50', '30'], length: '20', width: '10' },
+      depth: '3',
+    })
+    await drill(s)
+    for (const edgeOf of ['profile1', 'pocket1', 'drill1']) {
+      const e = await s.fail(
+        'design.chamfer.add',
+        { partId: s.partId, edgeOf, on: 'stock.bottom' },
+        'model.invariant',
+      )
+      expect(e.issues.map((i) => i.rule)).toEqual(['chamferOn'])
+    }
+    await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      depth: null,
+    })
+    const e = await s.fail(
+      'design.chamfer.add',
+      { partId: s.partId, edgeOf: 'profile1', on: 'stock.side[1]' },
+      'model.invariant',
+    )
+    expect(e.issues[0]).toMatchObject({
+      rule: 'chamferOn',
+      params: { allowed: ['stock.top', 'stock.bottom'] },
+    })
+  })
+
+  it('followEdges keeps a bottom chamfer opposite its through profile', async () => {
+    const s = await designSetup()
+    await outline(s)
+    await chamfer(s, { edgeOf: 'profile1', on: 'stock.bottom' })
+    const l = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+    expect(followEdges(l.part.operations).find((o) => o.id === 'chamfer1')!.on).toBe('stock.bottom')
+    // a profile made blind takes the chamfer back to its own face
+    const blind = l.part.operations.map((o) =>
+      o.kind === 'profile' ? { ...o, depth: Some(o.slotWidth) } : o,
+    )
+    expect(followEdges(blind).find((o) => o.id === 'chamfer1')!.on).toBe('stock.top')
   })
 })
 

@@ -16,8 +16,10 @@
  *   float32 round trip of a unioned mesh is not a valid solid, S7 failure 1).
  * - a split piece's chamfer (`edge.within`, E2) subtracts everything outside its cell (grown by
  *   the tool's radius at the face) as a `cut`, so only the source's real edges are bevelled.
+ * - a bottom chamfer's tabs (`edge.tabs`, E4b) subtract a disc prism round each tab as a `cut`:
+ *   the toolpath lifts over the tabs, so the edge stays sharp there.
  * Doc: docs/modes/edge-chamfers.md#removal-solid, docs/modes/edge-chamfers.md#implementation-e1,
- * docs/modes/edge-chamfers.md#implementation-e2
+ * docs/modes/edge-chamfers.md#implementation-e2, docs/modes/edge-chamfers.md#implementation-e4b
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { AIR, localSolids, Table, type LocalMesh, type LocalSolids } from './local-solids'
@@ -27,6 +29,7 @@ import {
   EPSILON,
   OVERSHOOT,
   loopChamferDepth,
+  loopChamferTabGap,
   type LoopChamferGeometry,
   type Vec2,
 } from './model'
@@ -142,10 +145,12 @@ export function loopChamferSolids(
       }
     const mask = withinMask(op, sweep, levels, bevel, ctx.triangulate)
     if (mask.isErr()) return Err(mask.unwrapErr())
+    const tabs = tabMasks(op, levels, bevel, ctx.triangulate)
+    if (tabs.isErr()) return Err(tabs.unwrapErr())
     return Ok(
       localSolids(op.id, table, {
         removal: meshes.unwrap().map((mesh): LocalMesh => ({ mesh, at })),
-        cut: mask.unwrap().map((mesh): LocalMesh => ({ mesh, at })),
+        cut: [...mask.unwrap(), ...tabs.unwrap()].map((mesh): LocalMesh => ({ mesh, at })),
       }),
     )
   })
@@ -292,6 +297,46 @@ function withinMask(
     label,
     triangulate,
   ).map((mesh) => [mesh])
+}
+
+/** Sides of a tab mask's polygon (E4b). */
+const TAB_MASK_SIDES = 48
+
+/**
+ * A bottom chamfer's tab masks (E4b, `edge.tabs`): per tab a vertical prism round its centre on
+ * the edge, through the removal's height, subtracted from the removal, so the tab stays whole.
+ * Its radius is the toolpath's gap for a pointed bit less half the width: the bevel ends square
+ * half-way along the taper the cone leaves where the tool lifts (edge-chamfers.md E4b).
+ */
+function tabMasks(
+  op: LoopChamferGeometry,
+  levels: readonly LoftLevel[],
+  label: number,
+  triangulate: Triangulate,
+): AppResult<LabelledMesh[]> {
+  const out: LabelledMesh[] = []
+  const c = op.edge.shape.center
+  const z0 = levels[0]!.z - 1
+  const z1 = levels.at(-1)!.z + 1
+  for (const t of op.edge.tabs ?? []) {
+    const r = loopChamferTabGap(t, op.width) - op.width / 2
+    const ring: Vec2[] = Array.from({ length: TAB_MASK_SIDES }, (_, k) => {
+      const a = (2 * Math.PI * k) / TAB_MASK_SIDES
+      return [t.at[0] - c[0] + r * Math.cos(a), t.at[1] - c[1] + r * Math.sin(a)]
+    })
+    const m = loftMesh(
+      [[ring], [ring]],
+      [
+        { z: z0, rho: 0 },
+        { z: z1, rho: 0 },
+      ],
+      label,
+      triangulate,
+    )
+    if (m.isErr()) return Err(m.unwrapErr())
+    out.push(m.unwrap())
+  }
+  return Ok(out)
 }
 
 /** Which construction `loopChamferSolids` takes for `op` (tests, perf): `loft` or `fallback`. */

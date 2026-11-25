@@ -30,6 +30,7 @@ import {
   chamferDepth,
   isLoopChamfer,
   loopChamferDepth,
+  loopChamferTabGap,
   type CircleChamferGeometry,
   type LoopChamferGeometry,
   CHORD_TOLERANCE,
@@ -689,6 +690,7 @@ function chamfer(
         { suggestion: atMost(limit.width) },
       ),
     )
+  if (loop) out.push(...chamferTabFindings(op, own))
   if (loop && port !== undefined) out.push(...loopChamferFindings(op, port, own))
   if (!lib.empty && candidates(op, lib).length === 0 && loop)
     out.push(
@@ -718,6 +720,37 @@ function chamfer(
         },
       ),
     )
+  return out
+}
+
+/**
+ * `dfm.chamferTabs` (info, E4b): a bottom chamfer lifts over its through profile's tabs, which
+ * hold the part; the stretches across them stay sharp.
+ */
+function chamferTabFindings(op: LoopChamferGeometry, own: OperationTool | undefined): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const tip = own?.tool.type === 'chamferMill' ? (own.tool.tipDiameter ?? 0) : 0
+  const tabs = op.edge.tabs ?? []
+  if (tabs.length > 0) {
+    const gap = 2 * loopChamferTabGap(tabs[0]!, op.width, tip)
+    out.push(
+      warning(
+        'dfm.chamferTabs',
+        op,
+        'edgeOf',
+        `the bevel stops ${mm(gap)} short across each of ${op.edgeOf}'s ${tabs.length} tabs: ` +
+          'finish those stretches by hand when the tabs are removed',
+        {
+          count: tabs.length,
+          gap,
+          edgeOf: op.edgeOf,
+          at: tabs[0]!.at,
+          points: tabs.flatMap((t) => [t.at[0], t.at[1]]),
+        },
+        { severity: 'info' },
+      ),
+    )
+  }
   return out
 }
 

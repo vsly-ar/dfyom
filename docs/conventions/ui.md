@@ -907,6 +907,8 @@ A dimensioned-looking **section** of the feature, drawn from the entered values 
 
 **Loops and Corner lift** (E4a, provisional): for a general edge, a **Corner lift** `Switch` in the Chamfer group after the size fields (`Field kind="toggle"`, note "Lift the V-bit into sharp inside corners for a crisp mitre."; `cornerLift`), and when the edge has more than one loop a **Loops** group after it: one `Checkbox` per loop in the order of `loops` (per piece "Rim", "Opening" or "Outline", numbered from the second piece, then "Island 1" …; `edgeLoopLabels`, from the placed shape through the 2D port), all checked by default, note "The loops this chamfer bevels; at least one." The last checked box is disabled; checking every box sends `loops: null`, otherwise the sorted indices. A circular edge shows neither.
 
+**Side** (E4b, provisional, [edge-chamfers.md § Implementation (E4b)](../modes/edge-chamfers.md#implementation-e4b)): when the edge is a through, non-circular outside or inside profile, a **Side** `SegmentedControl` in the Edge group under Edge (`Field kind="toggle"`): "Top edge" (the profile's face) / "Bottom edge" (the opposite stock face, cut from a flipped setup), sending `on`; note "The bottom edge is cut from a flipped setup; the bevel stops at the tabs." Any other edge shows no Side. `dfm.chamferTabs` shows at the Edge field.
+
 #### Chamfer mill in the Library window
 
 U4, in the [Library window](ui-library-window.md) and the quick "New tool…" dialogs (which reuse its form, L4):

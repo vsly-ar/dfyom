@@ -356,6 +356,31 @@ describe('loop chamfer solids (E2, outside edges)', () => {
     expect(Math.abs(half - expected)).toBeLessThan(band(part, 1.5) / 2)
   })
 
+  it('E4b tabs: the bevel is masked round each tab centre (a disc of the gap less w/2)', () => {
+    const part = numberRegion({
+      pieces: [{ outer: roundedRectLoop(10, 10, 110, 70, 0), holes: [] }],
+    })
+    const profile = outsideOf(part)
+    const w = 1.5
+    const full = removed(profile, outsideChamfer(profile, w), [], STOCK, 2)
+    const tabs = [
+      { at: [60, 10] as const, width: 6 },
+      { at: [110, 40] as const, width: 6 },
+      { at: [60, 70] as const, width: 6 },
+      { at: [10, 40] as const, width: 6 },
+    ]
+    const masked = removed(profile, outsideChamfer(profile, w, { tabs }), [], STOCK, 2)
+    // per tab the bevel (depth w − d at d into the part, 45°) within the disc of radius r
+    const r = 3 + w / 2 + 1
+    const n = 200
+    let lost = 0
+    for (let k = 0; k < n; k++) {
+      const d = ((k + 0.5) * w) / n
+      lost += (w - d) * 2 * Math.sqrt(r * r - d * d) * (w / n)
+    }
+    expect(Math.abs(full - masked - 4 * lost)).toBeLessThan(band(part, w) / 2)
+  })
+
   it('the enclosure outline, 1.5 × 45° (DF77, E2 exit): the oracle within the band, one loft', () => {
     const proc = (
       globalThis as unknown as {

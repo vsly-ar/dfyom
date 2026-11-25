@@ -27,6 +27,7 @@ import {
   Icon,
   IconButton,
   QuantityInput,
+  SegmentedControl,
   Select,
   Switch,
   type FieldMessage,
@@ -38,6 +39,7 @@ import {
 } from '../../viewport/chamfer-section'
 import { SketchView } from '../../viewport/SketchView'
 import {
+  bottomEdgeFaceDto,
   chamferDepthValue,
   chamferDiameter,
   chamferSectionValues,
@@ -117,6 +119,7 @@ export function ChamferInspector({
     <>
       <Group title={t.groups.edge} level={level}>
         {target('edgeOf', <EdgeField ctx={ctx} op={op} />)}
+        <SideField ctx={ctx} />
       </Group>
       <Group title={t.groups.chamfer} level={level}>
         {sketch !== undefined ? (
@@ -266,6 +269,37 @@ function EdgeField({
         />
       ) : null}
     </div>
+  )
+}
+
+/**
+ * E4b: the side of a through profile's edge, the top (its own face) or the bottom (the opposite
+ * stock face, a flipped setup); `on`. None for any other edge.
+ */
+function SideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'chamfer') return null
+  const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
+  const bottom = bottomEdgeFaceDto(edge)
+  if (edge === undefined || bottom === undefined) return null
+  const top = edge.on ?? 'stock.top'
+  const value = op.on === bottom ? 'bottom' : 'top'
+  const messages: FieldMessage[] = [
+    ...ctx.errors
+      .filter((e) => e.path === 'on')
+      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+    { id: 'note', severity: 'note', text: t.sideNote },
+  ]
+  return (
+    <Field label={t.side} kind="toggle" messages={messages} readOnly={ctx.readOnly}>
+      <SegmentedControl<'top' | 'bottom'>
+        label={t.side}
+        options={(['top', 'bottom'] as const).map((v) => ({ value: v, label: t.sides[v] }))}
+        value={value}
+        disabled={ctx.readOnly}
+        onValueChange={(v) => v !== value && ctx.send({ on: v === 'bottom' ? bottom : top }, 'on')}
+      />
+    </Field>
   )
 }
 

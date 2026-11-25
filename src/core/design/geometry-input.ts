@@ -8,17 +8,23 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type {
   Contour,
   OperationGeometry,
+  LoopChamferTab,
   PartGeometryInput,
   Shape as ShapeGeometry,
   SurfaceReference,
 } from '../geometry/model'
-import type { Direction } from '../geometry/face'
+import { faceToFace, localStock, stockFaceDirection, type Direction } from '../geometry/face'
+import { orientPath, orientRegion } from '../geometry/2d/place'
+import { chainLength, chainPointAt } from '../geometry/2d/measure'
+import { profileChain } from '../geometry/outline'
+import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
   chamferDiameter,
   chamferEdgeKind,
   circularEdgeDiameter,
+  isBottomChamfer,
   isGeneralShape,
   type Operation,
   type Part,
@@ -87,7 +93,10 @@ export function toGeometryInput(
   const operations: OperationGeometry[] = []
   const references: SurfaceReference[] = []
   for (const [i, op] of part.operations.entries()) {
-    const g = operationGeometry(op, i, table, part.shapes, port, part.operations)
+    const g = operationGeometry(op, i, table, part.shapes, port, part.operations, {
+      built: operations,
+      stock,
+    })
     if (g.isErr()) return Err(g.unwrapErr())
     operations.push(g.unwrap())
     const refs = operationReferences(op)
@@ -144,6 +153,7 @@ function operationGeometry(
   shapes: Part['shapes'],
   port: Region2dPort | undefined,
   ops: readonly Operation[],
+  ctx: { readonly built: readonly OperationGeometry[]; readonly stock: Stock },
 ): AppResult<OperationGeometry> {
   const entry = table.get(op.on)
   if (entry.isNone() || entry.unwrap().owner >= index)
@@ -212,14 +222,20 @@ function operationGeometry(
         (edgeOp?.kind === 'pocket' || edgeOp?.kind === 'profile')
       ) {
         const source = op.sourceEdge.isSome() ? op.sourceEdge.unwrap() : undefined
-        return shapeGeometry(source?.shape ?? edgeOp.shape, shapes, port).map((shape) => ({
+        // E4b: a through profile's bottom edge, read in the opposite face's frame (mirrored)
+        const flip = isBottomChamfer(op, edgeOp)
+          ? flipOf(edgeOp.on, on.direction, ctx.stock)
+          : undefined
+        const tabs =
+          flip === undefined ? [] : bottomTabs(ctx.built, edgeOp.id, edgeOp.on, flip, ctx.stock)
+        return shapeGeometry(source?.shape ?? edgeOp.shape, shapes, port).map((s) => ({
           kind: 'chamfer',
           id: op.id,
           ...direction,
           onZ: materialTopZ(op.on, on, ops.slice(0, index), table),
           edgeOf: op.edgeOf,
           edge: {
-            shape,
+            shape: flip === undefined ? s : flipShape(s, flip),
             side: edgeOp.kind === 'profile' && edgeOp.side === 'outside' ? 'outside' : 'inside',
             ...(edgeOp.kind === 'pocket'
               ? { depth: edgeOp.depth.canonical }
@@ -231,6 +247,7 @@ function operationGeometry(
               : { within: { min: vec2(source.within.min), max: vec2(source.within.max) } }),
             // E4a: chosen loops; absent = every loop
             ...(op.loops.isSome() ? { loops: op.loops.unwrap() } : {}),
+            ...(tabs.length > 0 ? { tabs } : {}),
           },
           width: op.width.canonical,
           angle: op.angle.canonical,
@@ -258,6 +275,66 @@ function operationGeometry(
       })
     }
   }
+}
+
+/** The 2D map from a stock face's frame to the opposite face's (E4b). */
+type Flip = ReturnType<typeof faceToFace>
+
+function flipOf(edgeOn: string, to: Direction, stock: Stock): Flip | undefined {
+  const from = stockFaceDirection(edgeOn)
+  return from === undefined ? undefined : faceToFace(from, to, stockSize(stock))
+}
+
+const stockSize = (stock: Stock) => ({
+  length: stock.length.canonical,
+  width: stock.width.canonical,
+  thickness: stock.thickness.canonical,
+})
+
+const flipPoint = (f: Flip, p: readonly [number, number]): [number, number] => [
+  f.m[0][0] * p[0] + f.m[0][1] * p[1] + f.t[0] + 0,
+  f.m[1][0] * p[0] + f.m[1][1] * p[1] + f.t[1] + 0,
+]
+
+/**
+ * A shape read in the opposite face's frame (E4b): its centre moved, its loops mirrored about it
+ * (reversed, so outer loops stay counter-clockwise). Opposite faces mirror one axis: a rectangle
+ * or a circle keeps its contour.
+ */
+function flipShape(s: ShapeGeometry, f: Flip): ShapeGeometry {
+  const center = flipPoint(f, s.center)
+  // [u, v] ↦ [u, −v]: mirror then a half turn; [u, v] ↦ [−u, v]: the mirror alone
+  const o = { mirror: true, rotation: f.m[1][1] < 0 ? 180 : 0 }
+  const c = s.contour
+  if (c.kind === 'region')
+    return { center, contour: { kind: 'region', region: orientRegion(c.region, o) } }
+  if (c.kind === 'path') return { center, contour: { kind: 'path', path: orientPath(c.path, o) } }
+  return { center, contour: c }
+}
+
+/**
+ * The tabs of the through profile `edgeId` (its geometry among `built`) a bottom chamfer stops
+ * short of (E4b): each resolved tab centre as a point on the profile's loop, in the chamfer's
+ * face frame, with the tab's width. Empty when the profile builds no tabs.
+ */
+function bottomTabs(
+  built: readonly OperationGeometry[],
+  edgeId: string,
+  edgeOn: string,
+  f: Flip,
+  stock: Stock,
+): LoopChamferTab[] {
+  const g = built.find((o) => o.id === edgeId)
+  const d = stockFaceDirection(edgeOn)
+  if (g?.kind !== 'profile' || d === undefined || g.tabs.count === 0) return []
+  const { chain } = profileChain(g)
+  const length = chainLength(chain)
+  if (!(length > 0)) return []
+  const local = localStock(d, stockSize(stock))
+  return resolveProfileTabs(g, local).centres.flatMap((c) => {
+    const p = chainPointAt(chain, ((c % length) + length) % length, true)
+    return p.isOk() ? [{ at: flipPoint(f, p.unwrap().point), width: g.tabs.width }] : []
+  })
 }
 
 /**

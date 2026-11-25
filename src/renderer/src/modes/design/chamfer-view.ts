@@ -47,6 +47,25 @@ export const isLoopEdge = (op: OperationDTO): boolean =>
   edgeDiameterDto(op) === undefined &&
   (op.kind === 'pocket' || (op.kind === 'profile' && op.side !== 'on'))
 
+/** Stock face ids opposite each other (a flip, edge-chamfers.md E4b). */
+const OPPOSITE: Readonly<Record<string, string>> = {
+  'stock.top': 'stock.bottom',
+  'stock.bottom': 'stock.top',
+  'stock.side[0]': 'stock.side[2]',
+  'stock.side[2]': 'stock.side[0]',
+  'stock.side[1]': 'stock.side[3]',
+  'stock.side[3]': 'stock.side[1]',
+}
+
+/**
+ * The face a bottom chamfer of `op` sits on (E4b, the core's `bottomEdgeFace`): the stock face
+ * opposite a through, non-round outside/inside profile's; undefined for any other edge.
+ */
+export function bottomEdgeFaceDto(op: OperationDTO | undefined): string | undefined {
+  if (op?.kind !== 'profile' || op.depth !== undefined || !isLoopEdge(op)) return undefined
+  return OPPOSITE[op.on ?? 'stock.top']
+}
+
 /**
  * Which edge a general edge is, for its Edge option (E3): a pocket's rim, an inside profile's
  * opening, an outside profile's outline.

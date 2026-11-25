@@ -44,6 +44,8 @@ import {
   generalToleranceToDTO,
   ID_PREFIX,
   KIND_LABEL,
+  bottomEdgeFace,
+  isBottomChamfer,
   operationToDTO,
   isGeneralShape,
   recordOf,
@@ -195,6 +197,9 @@ const profileParams = {
 
 const chamferParams = {
   edgeOf: OperationIdSchema.describe('Earlier drilling, pocket or outside/inside profile'),
+  on: SurfaceIdSchema.describe(
+    "Default the edge's face; the opposite stock face: a through profile's bottom edge (flip)",
+  ),
   width: Src.describe('At the face (1.5 × 45°: 1.5); default 0.5 mm'),
   depth: Src.describe('Instead of width'),
   angle: Src.describe('Default 90°'),
@@ -821,7 +826,7 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       id,
       name,
       generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-      on: edge?.on ?? prev?.on ?? STOCK_TOP,
+      on: chamferOnOf(a.on, edge, prev, ops),
       edgeOf,
       width: width(),
       angle,
@@ -838,6 +843,28 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       cornerLift: a.cornerLift ?? prev?.cornerLift ?? false,
     }
   },
+}
+
+/**
+ * A chamfer's `on`: the given face (a through profile's opposite stock face for its bottom edge,
+ * edge-chamfers.md E4b; anything else is refused by rule `chamferOn`), else the edge's face, or
+ * its bottom face when the chamfer was a bottom chamfer before the edit (a new edge keeps the side).
+ */
+function chamferOnOf(
+  on: string | undefined,
+  edge: Operation | undefined,
+  prev: Extract<Operation, { kind: 'chamfer' }> | undefined,
+  ops: readonly Operation[],
+): string {
+  if (on !== undefined) return on
+  if (edge === undefined) return prev?.on ?? STOCK_TOP
+  const wasBottom =
+    prev !== undefined &&
+    isBottomChamfer(
+      prev,
+      ops.find((o) => o.id === prev.edgeOf),
+    )
+  return (wasBottom ? bottomEdgeFace(edge) : undefined) ?? edge.on
 }
 
 /** Micrometres per mm: a width from a depth is kept to 1 µm (tan is irrational but at 90°). */
@@ -1624,6 +1651,9 @@ export const OPERATION_UPDATE_ARGS = {
   ),
   angle: chamferParams.angle.optional(),
   width: chamferParams.width.optional(),
+  // E4b: a plan copy's chamfer takes its chosen loops and corner lift too (E4a gap)
+  loops: chamferParams.loops.optional(),
+  cornerLift: chamferParams.cornerLift.optional(),
 } as unknown as {
   name: z.ZodOptional<typeof NameArg>
   generalTolerance: z.ZodOptional<typeof ToleranceArg>
