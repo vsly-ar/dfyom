@@ -250,6 +250,8 @@ A dev-only **gallery** screen renders every `ui/` component in every variant and
 
 ### Field
 
+Step sets per field, (i) info tips and the title-row click (DF104, DF105, DF111) are specified in [inspector-layout.md](inspector-layout.md); where it differs from this section, it wins.
+
 The `Field` component (3.3, quantity behaviour in 3.4) is a grid: label column (illustration + label), a lock column, the input, and a support area under the input.
 
 - **Illustration** (`--icon-xl` 28 px, viewBox 20, 1 px grey drawing): draws the feature and makes the measured part itself one amber line (1.4 px, butt caps, on the same centreline as the drawing; 1.6 px while focused). No dimension arrows. Length runs end to end along the slot, width across its middle, depth the wall, the stock's length, width and thickness an edge of an oblique block ([DF11](#stock-dialog-df11df13)), stepdown the riser, corner radius the arc, chamfer the face, feed the travel line. The icon keeps full colour (`--text-muted` drawing, `--accent-icon` line) and saturation whether the field is focused or not (decided by the user 2026-11-21, was 35 % at rest); focus only thickens the amber line. Read-only and disabled fields stay fully desaturated at reduced opacity. The drawing meets the APCA icon target on `--bg-app` and `--bg-chrome` (`tokens.test.ts`).
@@ -319,6 +321,8 @@ As built (3.3b):
 - Agents never switch the user's mode or steal focus; their edits appear in place ([undo](#undo-and-redo)).
 
 ### Panels and inspectors
+
+Group headers, accordions, tabs, field order and the per-inspector target layouts (DF110): [inspector-layout.md](inspector-layout.md#inspector-structure-df110).
 
 - **Inspector header** (D45): the item's name only, as the panel title ("Chamfer 1", never "Chamfer 1 chamfer1"). The id stays available to agents and assistive tech without being shown: it is the heading's tooltip ("Id: chamfer1") and its `data-item-id`; `PanelHeader`'s `itemId` prop does both. A count or position ("3 operations", "2 of 3") may still be the header's meta.
 - The inspector edits exactly one item: the selection. No selection → part (Design), plan (Plan), connection (Run) summary. Without its input the inspector says in one line what comes first: "No project open." (Design, Plan; Run keeps its DRO and controls, DF80); Plan without a plan "Create the plan in the view to start."; Run without a plan names what will show there (never a task number or other internal id; a plan operation's header carries its design operations' ids as its tooltip, as the design inspector does with its item's id).
