@@ -241,6 +241,12 @@ export function chamferSection(v: ChamferSectionValues, units: UnitSystem): Sket
   }
 }
 
+/**
+ * The wall section's width ÷ height: the inspector's section box (SketchView's 120 px high, about
+ * 20 rem wide, less its padding), so the drawing fills it (U9 P2).
+ */
+const WALL_SECTION_ASPECT = 2.3
+
 /** The values of a chamfer along a general edge's wall (edge chamfers E3): no diameter. */
 export interface WallChamferSectionValues {
   /** The bevel's width at the face, mm. */
@@ -259,9 +265,10 @@ export interface WallChamferSectionValues {
 /**
  * The section of a chamfer along a general edge (edge chamfers E3): one straight wall with its
  * bevel, the same at every point of the loop, at true proportions, air on the left and the
- * material on the right. As `chamferSection`: a bevel that reaches the floor is cut there, a deep
- * wall fades out below about three bevel depths, a blind one shows its floor with the stock fading
- * out below. Parts: `width` (the face from the edge to the bevel's top), `depth`, `angle` (the
+ * material on the right, fitted to the section box (`WALL_SECTION_ASPECT`). As `chamferSection`: a
+ * bevel that reaches the floor is cut there, a deep wall fades out about one bevel size below the
+ * bevel, a blind one shows its floor with the stock fading out below; the material fades out to
+ * the right. Parts: `width` (the face from the edge to the bevel's top), `depth`, `angle` (the
  * bevel), `edgeOf` (the wall); no `diameter`.
  */
 export function wallChamferSection(v: WallChamferSectionValues, units: UnitSystem): Sketch {
@@ -270,17 +277,24 @@ export function wallChamferSection(v: WallChamferSectionValues, units: UnitSyste
   const tanHalf = Math.tan(((v.angle / 2) * Math.PI) / 180)
   const c = Math.max(w / tanHalf, 0)
   const h = Number.isFinite(v.edgeDepth) && v.edgeDepth > 0 ? v.edgeDepth : Infinity
-  // material to the right of the bevel, a strip of air to the left of the wall
-  const S = w + Math.max(1.5 * w, 1.5)
-  const A = Math.max(0.8 * w, 1)
-  const cap = Math.max(3 * c, 2 * w)
   const cut = c > h // the bevel reaches the floor (or the far face)
   const rc = cut ? Math.max(w - h * tanHalf, 0) : 0
   const yc = cut ? h : c
+  // fitted to the box (U9 P2): the bevel is the subject, at about a fifth of the drawing's width;
+  // the wall runs on about one bevel size below it and fades out, the material fades out to the
+  // right, so a small chamfer on a deep wall is not a hatch block in a mostly empty box
+  const D = Math.max(w, c)
+  const cap = c + 1.1 * D
   const shape: 'through' | 'floor' | 'cutShort' =
     v.through && h <= 1.5 * cap ? 'through' : !v.through && h <= cap ? 'floor' : 'cutShort'
   const wallEnd = shape === 'cutShort' ? cap : h
-  const bottom = shape === 'floor' ? h + Math.max(0.35 * S, c, 0.5) : wallEnd
+  const bottom = shape === 'floor' ? h + 0.6 * D : wallEnd
+  const minY = -0.35 * D
+  const maxY = bottom + 0.05 * D
+  const across = WALL_SECTION_ASPECT * (maxY - minY)
+  // a strip of air left of the wall (room for the wall's chip), the material to the right
+  const A = 0.28 * across
+  const S = Math.max(across - A, w + D)
 
   const contour: SketchPoint[] = [[w, 0], [rc, yc], ...(cut ? [] : [[0, wallEnd] as const])]
   const primitives: SketchPrimitive[] = [
@@ -326,7 +340,6 @@ export function wallChamferSection(v: WallChamferSectionValues, units: UnitSyste
         [S, h],
       ],
     })
-  const maxY = bottom + 0.1 * S
   if (shape !== 'through')
     primitives.push({
       kind: 'fade',
@@ -335,6 +348,7 @@ export function wallChamferSection(v: WallChamferSectionValues, units: UnitSyste
       from: shape === 'floor' ? h + 0.15 * (bottom - h) : yc + 0.35 * (bottom - yc),
       to: bottom,
     })
+  primitives.push({ kind: 'fadeX', y0: minY, y1: maxY, from: w + 0.4 * (S - w), to: S })
 
   const bad = (part: ChamferPart) => (v.invalid?.has(part) === true ? { invalid: true } : {})
   primitives.push(
@@ -399,7 +413,7 @@ export function wallChamferSection(v: WallChamferSectionValues, units: UnitSyste
   )
 
   return {
-    bounds: { minX: -A, minY: -0.2 * S, maxX: S, maxY },
+    bounds: { minX: -A, minY, maxX: S, maxY },
     primitives,
     label: chamferMessages.wallSectionLabel({
       width: L(v.width),

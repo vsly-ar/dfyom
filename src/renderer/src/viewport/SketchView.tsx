@@ -102,13 +102,13 @@ export function SketchView({
           >
             <line x1="0" y1="0" x2="0" y2="5" className={styles['hatchLine']} />
           </pattern>
-          {(['down', 'up'] as const).map((dir) => (
+          {(['down', 'up', 'right', 'left'] as const).map((dir) => (
             <linearGradient
               key={dir}
               id={`${fade}-${dir}`}
-              x1="0"
-              y1={dir === 'down' ? '0' : '1'}
-              x2="0"
+              x1={dir === 'left' ? '1' : '0'}
+              y1={dir === 'up' ? '1' : '0'}
+              x2={dir === 'right' ? '1' : '0'}
               y2={dir === 'down' ? '1' : '0'}
             >
               <stop offset="0" stopOpacity="0" className={styles['fadeStop']} />
@@ -140,6 +140,24 @@ export function SketchView({
                   ),
                 )}
                 fill={`url(#${fade}-${p.to >= p.from ? 'down' : 'up'})`}
+                className={styles['fade']}
+                data-fade
+              />
+            ) : p.kind === 'fadeX' ? (
+              <path
+                key={`f${i}`}
+                {...pathProps(
+                  d(
+                    [
+                      [p.from, p.y0],
+                      [p.to, p.y0],
+                      [p.to, p.y1],
+                      [p.from, p.y1],
+                    ],
+                    true,
+                  ),
+                )}
+                fill={`url(#${fade}-${p.to >= p.from ? 'right' : 'left'})`}
                 className={styles['fade']}
                 data-fade
               />

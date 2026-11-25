@@ -29,6 +29,17 @@ export type SketchPrimitive =
       readonly from: number
       readonly to: number
     }
+  /**
+   * As `fade`, across: everything drawn before it in the band y0…y1 fades from fully visible at
+   * x `from` to the background at x `to` (the wall section's material running on to the right).
+   */
+  | {
+      readonly kind: 'fadeX'
+      readonly y0: number
+      readonly y1: number
+      readonly from: number
+      readonly to: number
+    }
   /** A polyline (closed when `closed`). */
   | {
       readonly kind: 'line'
