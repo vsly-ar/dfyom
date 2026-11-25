@@ -68,6 +68,9 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   // ── P2: the Grille preset (Ø 3, hex, gap 1.5) packs many more cells ────────────────────────
   const large = Number((await readout.textContent())?.split(' ')[0])
   await inspector.getByRole('button', { name: 'Presets' }).click()
+  // U9 P5: every preset carries a thumbnail of a few cells
+  for (const item of await page.getByRole('menuitem').all())
+    await expect(item.locator('svg path').first()).toBeAttached()
   await page.getByRole('menuitem', { name: 'Grille' }).click()
   await expect(readout).not.toHaveText(`${large} cells`)
   expect(Number((await readout.textContent())?.split(' ')[0])).toBeGreaterThan(large * 3)
