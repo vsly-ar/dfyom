@@ -1,0 +1,117 @@
+# Edge chamfers: chamfers along any operation's edge
+
+Status: draft (2026-11-25; hardening [DF77](../plans/hardening.md#intake-user-feedback-goes-here), user TG #257 and TG #325 "can't wait for chamfers on all operations"; awaits answers to [Q117–Q121](#questions-for-the-user)) · Spike: [S7](../research/2026-11-25-spike-s7-edge-chamfers.md) · Extends: [design-v0.4.md § Chamfer operation](design-v0.4.md#chamfer-operation-v04-circular-edges) (circular edges, H-E), [plan-v0.4.md § Chamfer toolpath](plan-v0.4.md#chamfer-toolpath) · Also: [tearout research G8](../research/2026-11-24-hardwood-tearout.md) (contour deburr) · Base: [design-v0.3.md](design-v0.3.md) (shapes), [geometry.md § 2.5D evaluation](../architecture/geometry.md#25d-evaluation-v01), [shapes.md](../architecture/shapes.md) · Terms: [glossary.md](../glossary.md)
+
+v0.4 chamfers only the **circular mouth** of a drilling, a circle pocket or an inside circle profile. This doc extends the same chamfer operation to the top edge of **any pocket or profile**: the outline of a part, the rim of a cavity or cutout, the mouth of a pocket of any shape, the islands in it. The chamfer is cut by a V-bit or chamfer mill that follows the edge. It is also the "contour deburr" pass that removes frayed top edges in wood (G8). Everything not said here stays as v0.4 has it: width as the size (D45), angle, the depth as an alternative input, the chamfer mill tool type, feeds by the effective diameter.
+
+## Decisions (proposed)
+
+| Id   | Decision                                                                                                                                                                                                                               | Q    | Section                                                     |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------- |
+| EC-A | **One chamfer operation kind**, as in v0.4: `edgeOf` widens from circular edges to any earlier pocket or `inside` / `outside` profile. No new kind, no new fields; a chamfer is added from the edge operation's row menu               | Q117 | [Model](#model), [UI](#ui)                                  |
+| EC-B | The chamfered edge is the **top edge** of the edge operation's walls, on its `on` face: every loop of its shape (outer loops and islands)                                                                                              | Q118 | [Which edges](#which-edges)                                 |
+| EC-C | The edge is the **nominal** loop, the one the evaluation uses for the walls; the solid is what the V-bit actually leaves there (a cone in a sharp inside corner)                                                                       | Q121 | [Removal solid](#removal-solid)                             |
+| EC-D | **Toolpath = the edge offset into the air by half the tip diameter**, at tip Z = face − width / tan(angle / 2), one pass; the removal solid is the swept volume of that same path (offset-loft, sweep union as the fallback, spike S7) | –    | [Toolpath](#toolpath-plan), [Removal solid](#removal-solid) |
+| EC-E | **One ring**: the tool's cutting edge must cover the bevel ((DC − dt) / 2 ≥ width, the v0.4 fit rule); wider bevels need a larger chamfer mill                                                                                         | Q120 | [Tool](#tool)                                               |
+| EC-F | Top edges only; bottom edges (from a flipped setup) later                                                                                                                                                                              | Q119 | [Which edges](#which-edges)                                 |
+| EC-G | **Circles keep the v0.4 implementation** (exact cone, plunge or contour, grouping P-B); the general path handles every other shape                                                                                                     | –    | [Model](#model)                                             |
+
+## Model
+
+The chamfer operation of [design-v0.4.md](design-v0.4.md#chamfer-operation-v04-circular-edges), with one rule changed:
+
+| Parameter | Change                                                                                                                                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `edgeOf`  | Id of an earlier **drilling, pocket (any shape) or profile with side `outside` or `inside`** (through, blind or a step, DF53), on the same face. Refused: facings (no edge), `on` profiles (a groove has two edges; later), other chamfers |
+| `width`   | Unchanged: the bevel's width at the face, measured from the edge into the material, default 0.5 mm (inch 1/64″). For a non-circular edge, no diameter is derived (none exists); the inspector shows the depth                              |
+| `angle`   | Unchanged (60°–120°)                                                                                                                                                                                                                       |
+
+- **Rules:** `chamferEdge` lists the new kinds; `chamferOn` and the reference behaviour (removing the edge fails with `design.referenced`; moving it takes the chamfer along) are unchanged. A `stepdown` (stepped chamfer, F7) stays circular-only: rule `chamferStepped` refuses it on another edge.
+- **Circles stay as they are** (EC-G). A drilling, a circle pocket or an inside circle profile keeps v0.4's exact cone, plunge entry and grouping of equal chamfers. A rectangle pocket, a region or a rotated rectangle takes the general path. A circle drawn as a region of two arcs takes the general path too (same result, no plunge).
+- **No stored change.** The operation's stored shape is the same, and `edgeOf` just accepts more kinds: no `schemaVersion` bump, nothing to migrate.
+
+### Which edges
+
+- **Top edges only** (EC-F). The edge sits where the operation's walls meet its `on` face: a pocket's rim, a cutout's mouth, a part's outline. Bottom edges of through cuts face the spoilboard and can only be reached from a flipped setup (Q119). Floor edges inside a pocket cannot be reached by a V-bit from above.
+- **All loops** of the operation's shape (EC-B, Q118): a pocket's outer loop and its islands, every piece of a multi-piece region, the outline of an outside profile, the opening of an inside profile. A loop is all or nothing; choosing loops (or stretches of a loop) is later if asked.
+- **Steps and blind profiles** (DF53, rabbets): the edge at the face, the same as a through profile. The step's inner floor edge is a bottom edge (out of scope).
+- **Pockets on a floor** (`on` = another pocket's floor): the chamfer bevels the mouth on that floor, at the floor's Z. That is the v0.4 rule for drillings.
+
+### Removal solid
+
+Spike S7 ([§ The idea](../research/2026-11-25-spike-s7-edge-chamfers.md#the-idea)): the V-bit whose axis follows the toolpath region P has swept P ⊕ ρ(z) at height z. The solid is that sweep, so it is what the tool cuts:
+
+- **Offset-loft** (the normal path): P offset by ρ(z) at a few levels, built from the analytic offset of P's elements (parallels, joint arcs, trims; an arc whose radius reaches 0 collapses into its neighbours' trim). It runs on vertically from the face to the overshoot, as the circular cone does, and 0.04 mm past the edge into the air below (no film, the C2 rule). An inside edge is one loft. An outside edge is the V-groove between the grown and the shrunk loft (one annular mesh), so the offcut beyond the slot stays.
+- **Fallback (topology change):** each level is checked against the 2D port's offset (loop count, area within the chord band). Where the offset changes structure between dt/2 and dt/2 + width (a tooth narrower than 2 × width, a notch shorter than the width, air narrower than the tip), the solid is the union of per-element swept pieces built as labelled meshes, **unioned in the kernel** (a float32 round trip of a unioned mesh is not valid: [S7 failure 1](../research/2026-11-25-spike-s7-edge-chamfers.md#failure-modes-found)).
+- **Surfaces:** one display-only surface `chamfer1.bevel` (not a face target and not an expression name, like `chamfer1.cone`).
+- **Inside corners:** at a sharp concave material corner (a pocket corner of radius 0) the V-bit leaves a cone of uncut material, (4 − π)/12 · h · w² per 90° corner with a pointed bit. The solid shows it (EC-C). A corner radius ≥ dt/2, which a milled pocket always has, gives the exact constant-width bevel. Convex corners come out as sharp mitres.
+- **Budget:** S7 measured 3–45 ms added to the evaluation for edges up to ≈ 250 elements (enclosure cavity + 14 ms; enclosure outline + 42 ms, ≈ + 20 ms expected with the annular mesh). The fallback costs ≈ 0.6 ms per element, more above ≈ 200 elements. The operation cache keeps an unchanged chamfer's solid.
+- **Code:** `src/core/geometry/chamfer-solids.ts` (loft and fallback, next to `shape-solids.ts`), sharing the toolpath region with the generator through `outline.ts`.
+
+## Toolpath (Plan)
+
+A new generator `generateEdgeChamfer` (`src/core/toolpath/edge-chamfer.ts`), request kind `edgeChamfer`. Circles keep `generateChamfer`.
+
+- **Path:** the edge loops offset into the air by dt/2 through the 2D port: a pocket's region shrunk, an outside profile's shape grown. The same region feeds the solid. Tip Z = face − width / tan(α / 2), so the cone reaches `width` into the material at the face, as the circular contour ring does (r = (d − dt) / 2).
+- **Corners:** at a convex material corner the path rounds by dt/2 (a pointed bit turns in place), which leaves a sharp mitre. At a concave corner the path keeps the edge's radius minus dt/2. A sharp inside corner keeps its cone; the V-carving corner move is later (Q121).
+- **Moves:** per loop, rapid to the start point at clearance and retract, feed down at `plungeRate` to the tip Z **in the air** (the path lies dt/2 off the wall, and the edge's operation cut that air earlier), one full loop at `feedRate`, rapid out. Each loop starts at the middle of its longest line, else its longest arc: the pocket finishing pass's rule ([plan-v0.3.md § Implementation (T1)](plan-v0.3.md#implementation-t1-region-level-generator)), which keeps the plunge off corners. Climb: clockwise round an outside edge, counter-clockwise inside a pocket or opening, the same as profiles. Loops in nearest-neighbour order. One pass of kind `finish`. Arcs are written as `G2`/`G3` ([plan-v0.3.md T-B](plan-v0.3.md#decisions)).
+- **Strategy:** `direction` (climb / conventional), as profiles; no `entry` (only the loop entry exists; an explicit `plunge` is refused, `strategy.entry`). A lead-in arc is later.
+- **Order:** after the edge's operation (the existing reference rule, `plan.order` blocks the reverse). An outline's chamfer therefore runs after the through profile, while the part hangs on its tabs: the V-bit's cut is light and the tabs take it. Several chamfers with the same tool form one tool block.
+- **Feeds:** [F10](../architecture/feeds-speeds.md#chamfer-mills-v04): effective diameter De = dt + 2 × width, engagement `chamfer { depth }`.
+- **Checks:** angle (0.5°), reach to the tip Z, the slant ([Tool](#tool)). The tip check becomes a DFM finding for non-circular edges (`dfm.chamferIncomplete`), because a tip too wide for a narrow neck still cuts the rest of the edge.
+
+## Tool
+
+The `chamferMill` type (V-bits included) as in v0.4. Fit (`chamferFit`): angle within 0.5° and a cutting edge covering the bevel, (DC − dt) / 2 ≥ width (rule `slant`; the v0.4 rule with D − d = 2 × width). The tip rule (`tip` < edge diameter) applies to circles only. Auto choice: library tools by the usual ranking, else a generalized chamfer mill of the chamfer's angle (`CHAMFER_MILL_STANDARD`). A bevel wider than every tool's cutting edge gets `dfm.chamferNoTool` (rule `slant`) and needs a larger chamfer mill. Several passes are later (Q120).
+
+## DFM findings
+
+| Code                    | When                                                                                                                                                                                                                                                   | Message (example)                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `dfm.chamferTooDeep`    | (Existing, generalized.) The tip goes below the edge operation's bottom: a blind pocket, groove or step shallower than the chamfer depth (plus the 0.04 mm run)                                                                                        | "Chamfer 1 is 1.5 mm deep but Pocket 2 is 1 mm deep: the V-bit would cut its floor. Use at most 1 mm."           |
+| `dfm.chamferNoTool`     | (Existing.) No library tool fits (angle, slant)                                                                                                                                                                                                        | as v0.4                                                                                                          |
+| `dfm.chamferMeets`      | New. Material between two chamfered edges is narrower than 2 × width: the bevels meet and the wall or tooth loses its flat top. Found by the 2D port: the material region shrunk by `width` loses an element or a piece. Marker at the narrowest place | "Chamfer 1 meets itself at the 2 mm wall near (40, 32): the wall's top becomes a ridge. Use a width below 1 mm." |
+| `dfm.chamferIncomplete` | New. The air beside the edge is narrower than the tool's tip (the toolpath loses length against the edge): part of the edge stays sharp. Marker where the path is missing                                                                              | "The 0.6 mm tip of V-bit 90° does not fit the 0.4 mm neck of Pocket 1: 8 mm of its edge is not chamfered."       |
+
+A pocket narrower than 2 × (width + dt) has the V-bit's air side reach the opposite wall. That is what the tool does, and the solid shows it. When that wall is chamfered too it is the `chamferMeets` case. Sharp inside corners are not a new finding: the edge operation already reports `dfm.cornerSharp`.
+
+## UI
+
+- **Row menu** ([ui.md § Features (v0.4)](../conventions/ui.md#features-v04), row menu): **Chamfer** on every pocket row and every `outside` / `inside` profile row, owned rows included (a hole's counterbore, as the owned drilling today). It sends `design.chamfer.add` with that operation as its edge and the defaults, then selects the chamfer. `on` profiles and facings do not offer it.
+- **Chamfer inspector:** **Edge** `Select` lists every eligible operation ("Pocket 2 · cavity", "Profile 1 · outline"). Pick mode highlights the edge loops in the 3D view as amber lines on the face. Then Width, Depth (alternative input) and Angle as today. The section illustration draws a straight wall with its bevel for a non-circular edge (no diameter), and the hole section for circles.
+- **Edge operation's inspector:** a read-only line "Chamfered by Chamfer 1 · 0.5 × 45°" that selects the chamfer, so the edge break is visible where the edge is edited.
+- **Features:** a hole feature's owned pocket or drilling row offers Chamfer as above. Chamfer on the source operation of a Clones adds the chamfer to the Clones' source in the same command (one undo step), so every instance is chamfered; instances stay read-only.
+- **Plan:** the chamfer is a plan operation like any other (navigator row, tool, feeds, preview). The plan inspector shows the tip Z, the loops and the finding markers.
+
+## Agent API
+
+No new tool. `design.chamfer.add { partId, edgeOf, width?, depth?, angle?, name? }` and `design.chamfer.update` keep their arguments. `edgeOf`'s description widens to "Earlier drilling, pocket or outside/inside profile". The `chamferEdge` refusal names the accepted kinds and, for an `on` profile or a facing, says why. `design.operation.list` and `plan.operation.list` already show chamfers. `tools/list` measured **107.4 K** (107,440 chars, 139 tools; `design_chamfer_add` 563 chars, `design_chamfer_update` 648) on 2026-11-25; the change adds ≈ 0.05 K, well inside the 120 K cap.
+
+## Slices
+
+| Slice | Content                                                                                                                                                                                                                                                        | Exit                                                                                                                                                                    | Size          |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| E1    | **Inside edges:** `edgeOf` any pocket and `inside` profile; the toolpath region; inside offset-loft with the sweep-union fallback; `generateEdgeChamfer`; order, feeds, checks; `chamferTooDeep` generalized; row menu and Edge `Select`; `edgeOf` description | The enclosure cavity rim chamfered 1 × 45° headless and in the UI: removed volume = 2D oracle within the chord band, one piece; the program runs on the virtual machine | M: ≈ 3 days   |
+| E2    | **Outside edges:** `outside` profiles (through, blind, steps): the annular V-groove mesh, climb direction, the order after the profile; Clones source rule                                                                                                     | The enclosure outline chamfered 1.5 × 45° (the DF77 request); X1-style headless run and hidden e2e; the user's real cut                                                 | S: ≈ 2 days   |
+| E3    | **Findings and polish:** `dfm.chamferMeets`, `dfm.chamferIncomplete` with markers; the wall section illustration; pick mode on edge loops; "Chamfered by" in the edge's inspector                                                                              | The comb and dumbbell cases of S7 give their findings; L-review of the inspector                                                                                        | S: ≈ 1–2 days |
+| E4    | Later, each on its own question: event-split loft (replaces most fallbacks), bottom edges from a flipped setup (Q119), several passes for wide bevels (Q120), V-carving corner move (Q121), choosing loops (Q118)                                              | –                                                                                                                                                                       | later         |
+
+Sizes are agent working days including docs, tests and review. E1 and E2 together close DF77.
+
+## Decided here (not questions)
+
+- **Default width** stays 0.5 mm: the G8 deburr size, and the v0.4 default.
+- **Order:** after the edge's own operation, never before. No separate "chamfer last" rule: a chamfer is a finishing cut on an edge that already exists.
+- **One pass, `finish`** kind: one ring covers the bevel (EC-E). Several rings would be clearing a wedge, as v0.4 concluded.
+- **No automatic chamfers.** Wood parts get no edge break unless the user adds one. A plan hint for wood ("add a 0.5 mm chamfer against fuzz") can come later with the tearout work.
+- **Circles unchanged** (EC-G): the general path would give the same cut, but v0.4's plunge entry and grouping of equal chamfers are better for holes.
+
+## Questions for the user
+
+Numbering continues after [split-parts.md](split-parts.md#questions-for-the-user)'s Q116. "Q117 ok" takes the recommendation.
+
+1. **Q117 – How you add a chamfer to an edge.** (1) A chamfer operation of its own, added from the pocket's or profile's row menu (right-click → Chamfer), as holes get one today; it has its own row, tool and place in the plan. (2) A "Chamfer top edge" width field in the pocket's and profile's own inspector, no separate row. (3) Both: the field creates and edits the operation of (1). _Recommendation: (1)._ It is how v0.4 already works for holes. A chamfer needs its own tool, order and feeds in the plan anyway, and the edge's inspector shows "Chamfered by Chamfer 1" so the link is visible.
+2. **Q118 – Pockets with islands and shapes with several loops.** (1) The chamfer runs round every loop of the operation (rim and islands). (2) You choose loops in the chamfer's inspector. (3) The outer loop only. _Recommendation: (1) now, (2) later if you miss it._ Deburring usually wants every edge, and choosing loops needs a loop picker that the first slices can do without.
+3. **Q119 – Bottom edges.** The underside edges of a through outline or cutout can only be chamfered from a flipped setup. (1) Later, as its own slice when you ask. (2) In the first slices, as a chamfer on the opposite face. (3) Never: sand them by hand. _Recommendation: (1)._ Most parts need only the visible top edge. A bottom chamfer depends on the flip alignment (DF78) being accurate to well under the chamfer width.
+4. **Q120 – Bevels wider than one V-bit pass** (a large decorative bevel round the enclosure, wider than the bit's cutting edge). (1) One pass only for now: a wider bevel asks for a larger chamfer mill (finding), and several passes come in a later slice. (2) Several stepped passes in the first version. _Recommendation: (1)._ Edge breaks and deburring (0.3–2 mm) are the common case and fit one pass of a 90° Ø12 bit (up to ≈ 6 mm). Several passes are a clearing strategy for the wedge, with their own toolpath and finish questions.
+5. **Q121 – Sharp inside corners.** A V-bit following an edge cannot reach into a sharp inside corner (a pocket corner drawn with radius 0). It leaves a small cone, about 0.07 mm³ per 90° corner at 1 × 45°. (1) Leave it; the 3D view shows it, and real pocket corners are rounded by the end mill anyway. (2) Optionally lift the V-bit along the corner's bisector (the V-carving corner move) for a crisp mitre. (3) Always do (2). _Recommendation: (1) now, (2) as a later option._ Milled pockets have corner radii ≥ the end mill's radius, where the chamfer comes out exact, and sharp corners already get `dfm.cornerSharp`.
