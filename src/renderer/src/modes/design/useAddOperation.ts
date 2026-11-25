@@ -23,6 +23,8 @@ export interface AddOperation {
   readonly face: SelectedFace | undefined
   add(kind: OperationKind): Promise<void>
   addHole(): Promise<void>
+  /** A pattern with the core defaults on the selected face (patterns P1). */
+  addPattern(): Promise<void>
 }
 
 export function useAddOperation(part: DesignPart): AddOperation {
@@ -61,5 +63,13 @@ export function useAddOperation(part: DesignPart): AddOperation {
     })
     if (r.ok) select((r.value as { featureId: string }).featureId)
   }
-  return { face, add, addHole }
+  // a pattern with the patterns.md defaults over the selected face (else the top); selected
+  const addPattern = async () => {
+    const r = await call('design.pattern.add', {
+      partId: part.dto.id,
+      ...(face !== undefined ? { on: face.id } : {}),
+    })
+    if (r.ok) select((r.value as { featureId: string }).featureId)
+  }
+  return { face, add, addHole, addPattern }
 }

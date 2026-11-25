@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { ItemIdSchema, NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
 import { FeatureDtoSchema, FeatureIdSchema, FeatureRoleSchema } from './feature.dto'
-import { ShapeDtoSchema, ShapeIdSchema } from './shape.dto'
+import { ShapeDtoSchema, StoredShapeIdSchema } from './shape.dto'
 
 const length = () => quantityDto('length')
 
@@ -69,7 +69,7 @@ export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('named'),
-    shapeId: ShapeIdSchema,
+    shapeId: StoredShapeIdSchema,
     center: PointDtoSchema,
     anchor: AnchorDtoSchema.optional(),
     rotation: quantityDto('angle').optional(),

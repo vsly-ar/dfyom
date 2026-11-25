@@ -10,7 +10,7 @@
  * inputs.ts); v0.1 rectangle/circle pockets keep `generatePocket` (plan-v0.3.md#wiring-t1-t2).
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
-import { regionLoops, type Region } from '../geometry/2d/model'
+import { chainBounds, regionLoops, type Bounds2, type Region } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
@@ -285,19 +285,22 @@ export function generateRegionPocket(
     }
   }
 
+  // the node nearest the tool, ties to the earlier one; nodes whose box is farther than the best
+  // distance found are not measured (patterns P1: hundreds of cells, S8 finding 6)
+  const boxes = new Map<RingNode, Bounds2 | undefined>()
+  const boxOf = (n: RingNode) => {
+    if (!boxes.has(n)) boxes.set(n, chainBounds(n.region.pieces.flatMap((p) => p.outer.elements)))
+    return boxes.get(n)
+  }
   const nearestFirst = (nodes: readonly RingNode[]): RingNode | undefined => {
     const here = xy()
     if (here === undefined) return nodes[0]
-    let best: RingNode | undefined
-    let bd = Infinity
-    for (const n of nodes) {
-      const d = regionDistance(port, n.region, here)
-      if (d < bd) {
-        bd = d
-        best = n
-      }
-    }
-    return best
+    const i = nearestIndex(
+      nodes.length,
+      (k) => boxDistance(boxOf(nodes[k]!), here),
+      (k) => regionDistance(port, nodes[k]!.region, here),
+    )
+    return i < 0 ? undefined : nodes[i]
   }
 
   /** Post-order: children nearest-first (each from its innermost ring out), then the node. */
@@ -321,7 +324,13 @@ export function generateRegionPocket(
     if (s.isErr()) return Err(s.unwrapErr())
     b.pass('rough')
     const left = [...tree]
+    let visited = 0
     while (left.length > 0) {
+      // an abort point per group of pieces within a level (patterns P1: a level of 2 000 cells)
+      if (++visited % PIECES_PER_STEP === 0) {
+        const g = steps.step()
+        if (g.isErr()) return Err(g.unwrapErr())
+      }
       const r = nearestFirst(left)!
       left.splice(left.indexOf(r), 1)
       visit(r, z, top)
@@ -339,17 +348,27 @@ export function generateRegionPocket(
     const loops = regionLoops(finishRegion)
       .map((l) => loopRing(l, cw))
       .filter((r) => r.length > 0)
+    const ringBoxes = new Map<readonly Seg[], Bounds2>()
+    const ringBoxOf = (r: readonly Seg[]) => {
+      let bx = ringBoxes.get(r)
+      if (bx === undefined) ringBoxes.set(r, (bx = segsBox(r)))
+      return bx
+    }
+    let finished = 0
     while (loops.length > 0) {
+      if (++finished % PIECES_PER_STEP === 0) {
+        const g = steps.step()
+        if (g.isErr()) return Err(g.unwrapErr())
+      }
       const here = xy()!
-      let bi = 0
-      let bd = Infinity
-      loops.forEach((r, i) => {
-        const d = ringClosest(r, here)!.distance
-        if (d < bd) {
-          bd = d
-          bi = i
-        }
-      })
+      const bi = Math.max(
+        0,
+        nearestIndex(
+          loops.length,
+          (i) => boxDistance(ringBoxOf(loops[i]!), here),
+          (i) => ringClosest(loops[i]!, here)!.distance,
+        ),
+      )
       const ring0 = loops.splice(bi, 1)[0]!
       const lead = finishLead(port, ring0, wall, roots, R, a, cw)
       goTo(lead.start)
@@ -369,6 +388,79 @@ export function generateRegionPocket(
   const end = b.position!
   b.rapid([end[0], end[1], heights.clearanceHeight])
   return Ok(toolpath(input, b.build()))
+}
+
+/** Pieces (ring tree roots, finishing loops) cut between two abort points within a level. */
+const PIECES_PER_STEP = 64
+/** Slack of the box lower bounds (mm): float noise only. */
+const BOX_SLACK = 1e-9
+
+/** Distance from `p` to a box (0 inside; 0 without a box: no bound). */
+function boxDistance(b: Bounds2 | undefined, p: Vec2): number {
+  if (b === undefined) return 0
+  const dx = Math.max(b.min[0] - p[0], 0, p[0] - b.max[0])
+  const dy = Math.max(b.min[1] - p[1], 0, p[1] - b.max[1])
+  return Math.hypot(dx, dy)
+}
+
+/** A box holding every piece of a ring (an arc's whole circle: a bound, not exact). */
+function segsBox(ring: readonly Seg[]): Bounds2 {
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const s of ring) {
+    const pts: Vec2[] =
+      s.kind === 'line'
+        ? [s.from, s.to]
+        : [
+            [s.center[0] - s.radius, s.center[1] - s.radius],
+            [s.center[0] + s.radius, s.center[1] + s.radius],
+          ]
+    for (const p of pts) {
+      x0 = Math.min(x0, p[0])
+      y0 = Math.min(y0, p[1])
+      x1 = Math.max(x1, p[0])
+      y1 = Math.max(y1, p[1])
+    }
+  }
+  return { min: [x0, y0], max: [x1, y1] }
+}
+
+/**
+ * The index of the smallest `exact(i)` among `n` candidates, ties to the smallest index (as a
+ * scan with a strict `<`), measuring only candidates whose lower bound `bound(i)` ≤ `exact(i)`
+ * does not rule them out: the one with the smallest bound first, then the others in order.
+ * −1 when every distance is infinite.
+ */
+export function nearestIndex(
+  n: number,
+  bound: (i: number) => number,
+  exact: (i: number) => number,
+): number {
+  if (n === 0) return -1
+  const lb = new Float64Array(n)
+  let seed = 0
+  for (let i = 0; i < n; i++) {
+    lb[i] = bound(i)
+    if (lb[i]! < lb[seed]!) seed = i
+  }
+  let best = -1
+  let bd = Infinity
+  const d0 = exact(seed)
+  if (d0 < Infinity) {
+    best = seed
+    bd = d0
+  }
+  for (let i = 0; i < n; i++) {
+    if (i === seed || lb[i]! > bd + BOX_SLACK) continue
+    const d = exact(i)
+    if (d < bd || (d === bd && d < Infinity && i < best)) {
+      bd = d
+      best = i
+    }
+  }
+  return best
 }
 
 interface Lead {

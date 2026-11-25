@@ -35,6 +35,7 @@ import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from 
 import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesInspector'
 import { parseInstanceId } from './clones-view'
 import { HoleInspector } from './HoleInspector'
+import { PatternInspector } from './PatternInspector'
 import { FaceInspector } from './FaceInspector'
 import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
@@ -146,6 +147,8 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
     return <HoleInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature?.kind === 'clones')
     return <ClonesInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
+  if (feature?.kind === 'pattern')
+    return <PatternInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature !== undefined)
     return <FeatureInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   const instance = parseInstanceId(part, selected)

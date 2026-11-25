@@ -127,7 +127,11 @@ export function ShapePicker({
 }): React.JSX.Element | null {
   const port = useRegion2d()
   const op = ctx.op
-  const shapes = useMemo(() => ctx.part.dto.shapes ?? [], [ctx.part])
+  // a feature's owned shapes (patterns P1) are not offered
+  const shapes = useMemo(
+    () => (ctx.part.dto.shapes ?? []).filter((s) => s.owner === undefined),
+    [ctx.part],
+  )
   const outlines = useMemo(
     () => new Map(shapes.map((s) => [s.id, shapeLoops(port, s)])),
     [shapes, port],

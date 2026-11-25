@@ -308,6 +308,11 @@ export const DEFAULTS = {
   // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): width (D45)
   chamferAngle: { mm: '90°', inch: '90°' },
   chamferWidth: { mm: '0.5 mm', inch: '1/64"' },
+  // patterns P1 (docs/modes/patterns.md#model)
+  patternCell: { mm: '8 mm', inch: '5/16"' },
+  patternGap: { mm: '2 mm', inch: '1/16"' },
+  patternMargin: { mm: '5 mm', inch: '3/16"' },
+  patternDepth: { mm: '1 mm', inch: '1/32"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -818,7 +823,39 @@ function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShap
     results.push(s)
     if (s.isOk()) out.set(id, s.unwrap())
   })
+  results.push(patternCells(out, dto))
   return collect(results).map(() => out)
+}
+
+/**
+ * The named shapes the loaded owned pattern shapes take as their cell (patterns P1), added to
+ * `out`; a cell that does not exist is `input.malformed` (`unknownShape`).
+ */
+function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>): AppResult<void> {
+  for (const s of [...out.values()]) {
+    const cell = s.pattern?.cell
+    if (cell === undefined || !('shapeId' in cell) || out.has(cell.shapeId)) continue
+    const k = dto.shapes?.findIndex((x) => x.id === cell.shapeId) ?? -1
+    if (k < 0)
+      return fail(
+        'input.malformed',
+        `${s.id} takes shape ${cell.shapeId} as its cell, which the part does not have`,
+        {
+          issues: [
+            {
+              path: ['shapes', s.id, 'pattern', 'cell', 'shapeId'],
+              rule: 'unknownShape',
+              message: 'no such shape in the part',
+            },
+          ],
+          data: { shapeId: cell.shapeId },
+        },
+      )
+    const c = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+    if (c.isErr()) return c
+    out.set(cell.shapeId, c.unwrap())
+  }
+  return Ok(undefined)
 }
 
 /**
@@ -851,5 +888,5 @@ export function shapesOf(
     if (s.isErr()) return s
     out.set(id, s.unwrap())
   }
-  return Ok(out)
+  return patternCells(out, dto).map(() => out)
 }

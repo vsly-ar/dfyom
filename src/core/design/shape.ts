@@ -28,7 +28,9 @@ import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { memoByRecord } from './frozen-memo'
 import { AREA_EPSILON, itemChain } from './shape-items'
+import { resolvePattern, type PatternDefinition } from './pattern/layout'
 import type {
+  PatternRecord,
   ShapeDTO,
   ShapeItem,
   ShapeItemDTO,
@@ -43,6 +45,9 @@ export interface NamedShape {
   readonly name: string
   readonly items: readonly ShapeItem<Quantity>[]
   readonly source?: ShapeSource | undefined
+  /** The feature owning it (patterns P1): no items, its geometry in `pattern`. */
+  readonly owner?: string | undefined
+  readonly pattern?: PatternRecord | undefined
 }
 
 /** Default name of `shape<n>`: "Shape n" (design-v0.3.md § What a shape is). */
@@ -160,6 +165,8 @@ function parseShape(dto: ShapeDTO): AppResult<NamedShape> {
     name: dto.name,
     items,
     ...(dto.source === undefined ? {} : { source: dto.source }),
+    ...(dto.owner === undefined ? {} : { owner: dto.owner }),
+    ...(dto.pattern === undefined ? {} : { pattern: dto.pattern }),
   }))
 }
 
@@ -173,21 +180,37 @@ export function shapeToDTO(s: NamedShape): ShapeDTO {
     name: s.name,
     items: s.items.map(itemToDTO),
     ...(s.source === undefined ? {} : { source: { ...s.source } }),
+    ...(s.owner === undefined ? {} : { owner: s.owner }),
+    ...(s.pattern === undefined ? {} : { pattern: s.pattern }),
   }
 }
 
 /** The resolver's numbers: lengths in mm, angles in degrees, `sides` as a number. */
 export type ShapeDefinition = readonly ShapeItem<number>[]
+/** A shape's items, or a pattern (patterns P1): its one `pattern` item, the cell as items. */
+export type AnyShapeDefinition = ShapeDefinition | readonly [PatternDefinition]
 
 export const definitionOf = (items: readonly ShapeItem<Quantity>[]): ShapeDefinition =>
   items.map((item) => mapItem(item, (q) => q.canonical))
 
 // ── resolving ───────────────────────────────────────────────────────────────────────────────
 
-/** A resolved shape in its shape frame: a region (closed items) or one open path. */
+/**
+ * A resolved shape in its shape frame: a region (closed items) or one open path. A pattern's
+ * region (patterns P1) also carries its cell count and the `frame` placement anchors by (the
+ * boundary rectangle, so cells keep their face-frame coordinates; placement.ts).
+ */
 export type ResolvedShape =
-  | { readonly kind: 'region'; readonly region: Region }
+  | {
+      readonly kind: 'region'
+      readonly region: Region
+      readonly frame?: Bounds2 | undefined
+      readonly cells?: number | undefined
+    }
   | { readonly kind: 'path'; readonly path: Path }
+
+const isPattern = (def: AnyShapeDefinition): def is readonly [PatternDefinition] =>
+  def.length === 1 && def[0]!.kind === 'pattern'
 
 const WHERE = 'resolveShape'
 
@@ -199,7 +222,7 @@ function invalid(issues: Issue[]): AppResult<never> {
 }
 
 /** Item structure: the first item adds, an open path is the only item. */
-function structureIssues(def: ShapeDefinition): Issue[] {
+function structureIssues(def: readonly ShapeItem<number>[]): Issue[] {
   const out: Issue[] = []
   if (def.length === 0)
     out.push({ path: ['items'], rule: 'empty', message: 'needs at least one item' })
@@ -224,8 +247,22 @@ function structureIssues(def: ShapeDefinition): Issue[] {
  */
 export function resolveDefinition(
   port: Region2dPort,
-  def: ShapeDefinition,
+  shape: AnyShapeDefinition,
 ): AppResult<ResolvedShape> {
+  if (isPattern(shape))
+    return resolvePattern(port, shape[0], (cell) => resolveShape(port, cell))
+      .map((p): ResolvedShape => ({
+        kind: 'region',
+        region: p.region,
+        frame: p.frame,
+        cells: p.cells,
+      }))
+      .mapErr((e) => e.withContext(WHERE))
+  const def = shape as readonly ShapeItem<number>[]
+  if (def.some((item) => (item.kind as string) === 'pattern'))
+    return invalid([
+      { path: ['items'], rule: 'patternAlone', message: 'a pattern is the only item of its shape' },
+    ])
   const structure = structureIssues(def)
   if (structure.length > 0) return invalid(structure)
   const issues: Issue[] = []
@@ -296,7 +333,10 @@ const caches = new WeakMap<Region2dPort, ShapeCache>()
  * deterministic, so equal numbers give equal results; errors are cached too). Commands, queries
  * and later the geometry and toolpath mappers call it many times per edit.
  */
-export function resolveShape(port: Region2dPort, def: ShapeDefinition): AppResult<ResolvedShape> {
+export function resolveShape(
+  port: Region2dPort,
+  def: AnyShapeDefinition,
+): AppResult<ResolvedShape> {
   let cache = caches.get(port)
   if (cache === undefined) {
     cache = new ShapeCache()

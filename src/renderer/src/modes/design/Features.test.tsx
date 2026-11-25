@@ -91,7 +91,7 @@ describe('feature UI (U1)', () => {
         .map((i) => i.querySelector('span')?.textContent)
     expect(labels(ops)).toEqual(['Facing', 'Pocket', 'Profile', 'Drilling'])
     const features = within(menu).getByRole('group', { name: 'Features' })
-    expect(labels(features)).toEqual(['Bolt hole'])
+    expect(labels(features)).toEqual(['Bolt hole', 'Pattern'])
     expect(within(menu).queryByRole('menuitem', { name: /Chamfer|Make Clones/ })).toBeNull()
     // DF18: the focused item's one-line description as a tooltip
     const facing = within(ops).getByRole('menuitem', { name: 'Facing' })

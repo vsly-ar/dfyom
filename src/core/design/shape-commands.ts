@@ -204,7 +204,9 @@ function findShape(shapes: readonly ShapeDTO[], shapeId: string, where: string):
 
 function nextShapeNumber(shapes: readonly ShapeDTO[]): number {
   let max = 0
-  for (const s of shapes) max = Math.max(max, Number(s.id.slice('shape'.length)))
+  // owned shapes (patterns P1, `<featureId>_cells`) are not numbered
+  for (const s of shapes)
+    if (s.owner === undefined) max = Math.max(max, Number(s.id.slice('shape'.length)))
   return max + 1
 }
 
@@ -440,7 +442,7 @@ const shapeRemove = defineCommand({
             ...features.map((id) => ({
               path: ['features', id, 'rows'],
               rule: 'referenced',
-              message: `clones along ${args.shapeId}`,
+              message: `follows ${args.shapeId} (Clones along, pattern cell)`,
               params: { featureId: id, shapeId: args.shapeId },
             })),
           ],
@@ -879,16 +881,19 @@ const shapeList = defineQuery({
     if (c.isErr()) return c
     const { loaded, port, shapes } = c.unwrap()
     return Ok({
-      shapes: shapes.map((s) => {
-        const r = resolved(port, s).resolved
-        return {
-          id: s.id,
-          name: s.name,
-          items: s.items.length,
-          usedBy: operationsUsingShape(loaded.dto, s.id),
-          ...(r === undefined ? {} : { kind: r.kind, area: r.area, bounds: r.bounds }),
-        }
-      }),
+      // a feature's owned shapes (patterns P1) are the feature's, not listed
+      shapes: shapes
+        .filter((s) => s.owner === undefined)
+        .map((s) => {
+          const r = resolved(port, s).resolved
+          return {
+            id: s.id,
+            name: s.name,
+            items: s.items.length,
+            usedBy: operationsUsingShape(loaded.dto, s.id),
+            ...(r === undefined ? {} : { kind: r.kind, area: r.area, bounds: r.bounds }),
+          }
+        }),
     })
   },
 })

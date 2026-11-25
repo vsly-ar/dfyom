@@ -355,8 +355,21 @@ function clippedShape(
   b: PieceBuild,
   extra: readonly PathItem[] = [],
 ): AppResult<OperationShapeDTO | undefined> {
-  const def = shapeDefinition(op.shape, c.loaded.part.shapes)
-  if (def.isErr()) return def
+  const any = shapeDefinition(op.shape, c.loaded.part.shapes)
+  if (any.isErr()) return any
+  if (any.unwrap()[0]?.kind === 'pattern')
+    // patterns P1: a pattern's owned shape is not mapped into pieces yet (known issue)
+    return fail('model.invariant', `${op.id}: a pattern cannot be split yet`, {
+      issues: [
+        {
+          path: ['operations', op.id],
+          rule: 'patternSplit',
+          message: 'a pattern feature cannot cross a split line yet; split before adding it',
+        },
+      ],
+      where: 'clippedShape',
+    })
+  const def = any as AppResult<ShapeDefinition>
   const o = shapeOrientation(op.shape)
   const oriented = orientedShape(c.port, def.unwrap(), o)
   if (oriented.isErr()) return oriented
@@ -1005,7 +1018,9 @@ export function planPieces(
       : (geometry[outlineAt] as Extract<OperationGeometry, { kind: 'profile' }>)
   const shapeMax = Math.max(
     0,
-    ...(loaded.dto.shapes ?? []).map((s) => Number(s.id.slice('shape'.length))),
+    ...(loaded.dto.shapes ?? [])
+      .filter((s) => s.owner === undefined)
+      .map((s) => Number(s.id.slice('shape'.length))),
   )
   // keys on the lines (4b-2)
   const { keys, outlineTool } = keysOf(loaded, geometry, L, split, c.toolDiameter)

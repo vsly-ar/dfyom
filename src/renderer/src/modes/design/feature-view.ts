@@ -298,6 +298,9 @@ const HOLE_TYPES: Readonly<Record<string, string>> = {
  */
 export function featureReadout(feature: FeatureDTO, instances?: number): string {
   if (feature.kind === 'clones') return instances === undefined ? '' : `×${instances}`
+  // patterns P1: lattice and cell ("hex · polygon"); the cell count is the inspector's read-out
+  if (feature.kind === 'pattern')
+    return `${String(feature['lattice'])} · ${String((feature['cell'] as { kind?: unknown }).kind)}`
   if (feature.kind === 'hole') {
     const type = HOLE_TYPES[String(feature['type'])] ?? String(feature['type'])
     const fastener = typeof feature['fastener'] === 'string' ? feature['fastener'] : undefined

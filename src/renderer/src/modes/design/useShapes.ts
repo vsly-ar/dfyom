@@ -64,7 +64,7 @@ function useRevisionTag(): string {
 /** The part's shapes (`design.shape.list`): rows of the navigator's Shapes group. */
 export function useShapeList(part: DesignPart | undefined): readonly ShapeRow[] {
   const tag = useRevisionTag()
-  const hasShapes = (part?.dto.shapes?.length ?? 0) > 0
+  const hasShapes = part?.dto.shapes?.some((s) => s.owner === undefined) ?? false
   const r = useQuery<{ shapes: ShapeRow[] }>(
     'design.shape.list',
     part === undefined || !hasShapes ? undefined : { partId: part.dto.id },

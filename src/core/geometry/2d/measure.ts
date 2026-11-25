@@ -10,7 +10,9 @@ import {
   arcSweep,
   elementLength,
   onSweep,
+  chainBounds,
   POSITION_EPSILON,
+  type Bounds2,
   type Element,
   type Loop,
   type Region,
@@ -161,17 +163,66 @@ export interface Closest {
   readonly element: number
 }
 
-/** Closest point on any of `chains`; undefined when they have no elements. */
+// ── bounding-box prefilters (patterns P1, S8 finding 3) ─────────────────────────────────────
+
+/**
+ * Exact bounds of each loop, cached per loop object (loops are immutable values): the
+ * containment and closest-point queries skip a loop whose box is out of reach, which keeps them
+ * linear in the loops near the point on regions of many pieces (a pattern's cells). Skipping
+ * changes no result: a point outside a loop's box (by more than `BOX_MARGIN`) is neither on
+ * nor in it, and a loop whose box is farther than the best distance found cannot be closer.
+ */
+const loopBoxes = new WeakMap<Loop, Bounds2 | null>()
+
+function loopBox(l: Loop): Bounds2 | undefined {
+  let b = loopBoxes.get(l)
+  if (b === undefined) {
+    b = chainBounds(l.elements) ?? null
+    loopBoxes.set(l, b)
+  }
+  return b ?? undefined
+}
+
+/** Slack of the box tests (mm): `POSITION_EPSILON` (on-loop tolerance) plus float noise. */
+const BOX_MARGIN = POSITION_EPSILON + 1e-6
+
+/** Distance from `p` to the box (0 inside). */
+function boxDistance(b: Bounds2, p: Vec2): number {
+  const dx = Math.max(b.min[0] - p[0], 0, p[0] - b.max[0])
+  const dy = Math.max(b.min[1] - p[1], 0, p[1] - b.max[1])
+  return Math.hypot(dx, dy)
+}
+
+/** Whether `p` lies farther than `BOX_MARGIN` outside the loop's box (then not on or in it). */
+function outsideLoopBox(l: Loop, p: Vec2): boolean {
+  const b = loopBox(l)
+  return (
+    b !== undefined &&
+    (p[0] < b.min[0] - BOX_MARGIN ||
+      p[0] > b.max[0] + BOX_MARGIN ||
+      p[1] < b.min[1] - BOX_MARGIN ||
+      p[1] > b.max[1] + BOX_MARGIN)
+  )
+}
+
+/**
+ * Closest point on any of `chains`; undefined when they have no elements. Chains whose box lies
+ * farther than the best distance so far are skipped (same result, ties included).
+ */
 export function closestOnChains(chains: readonly Loop[], p: Vec2): Closest | undefined {
   let best: Closest | undefined
-  chains.forEach((c, ci) =>
+  chains.forEach((c, ci) => {
+    if (best !== undefined) {
+      const b = loopBox(c)
+      if (b !== undefined && boxDistance(b, p) > best.distance + BOX_MARGIN) return
+    }
     c.elements.forEach((e, ei) => {
       const q = elementClosest(e, p)
       const d = Math.hypot(p[0] - q[0], p[1] - q[1])
       if (best === undefined || d < best.distance)
         best = { distance: d, point: q, chain: ci, element: ei }
-    }),
-  )
+    })
+  })
   return best
 }
 
@@ -224,10 +275,13 @@ export function onLoop(l: Loop, p: Vec2, eps = POSITION_EPSILON): boolean {
 /** Whether `p` lies in the region; points on its boundary (within `POSITION_EPSILON`) count. */
 export function regionContains(r: Region, p: Vec2): boolean {
   for (const piece of r.pieces) {
+    // pieces and holes whose box is out of reach: neither on nor around `p` (patterns P1)
+    if (outsideLoopBox(piece.outer, p)) continue
     if (onLoop(piece.outer, p)) return true
     if (windingNumber(piece.outer, p) === 0) continue
     let inHole = false
     for (const h of piece.holes) {
+      if (outsideLoopBox(h, p)) continue
       if (onLoop(h, p)) return true
       if (windingNumber(h, p) !== 0) inHole = true
     }

@@ -205,7 +205,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       : undefined
 
   // Add puts operations on the selected face, if any (DF22; useAddOperation; DF4 facing depth inside)
-  const { add, addHole } = useAddOperation(part)
+  const { add, addHole, addPattern } = useAddOperation(part)
   const addItems: MenuEntry[] = [
     {
       group: f.groups.operations,
@@ -227,6 +227,12 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           description: m.describe.hole,
           icon: <Icon name="hole-counterbore" />,
           onSelect: () => void addHole(),
+        },
+        {
+          label: f.addPattern,
+          description: m.describe.pattern,
+          icon: <Icon name="pattern" />,
+          onSelect: () => void addPattern(),
         },
       ],
     },
