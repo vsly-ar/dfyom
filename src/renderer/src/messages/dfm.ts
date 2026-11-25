@@ -175,6 +175,12 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['cells'] === undefined
       ? `The pattern's outlines have ${num(p['chords'])} segments: the part updates more slowly.`
       : `${num(p['cells'])} cells: the part updates more slowly.`,
+  'dfm.patternThinWeb': (p, L) =>
+    p['island'] === true
+      ? `An island is only ${L(p['web'])} wide (under ${L(p['limit'])}): it may break off. Make the cell larger.`
+      : `The web between cells is only ${L(p['web'])} (under ${L(p['limit'])}): it may break. ${
+          p['gap'] === undefined ? 'Widen the pitch.' : `Use a gap of at least ${L(p['gap'])}.`
+        }`,
   // v0.4 chamfer (design-v0.4.md § Chamfer operation)
   'dfm.chamferTooDeep': (p, L, name) => {
     const edge = name.item(String(p['edgeOf']))

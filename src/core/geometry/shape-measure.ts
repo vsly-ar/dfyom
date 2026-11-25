@@ -19,6 +19,7 @@ import {
   type Region,
 } from './2d/model'
 import type { Region2dPort } from './2d/port'
+import { translateRegion } from './2d/place'
 import { findRestMaterial, type RestPiece } from './2d/rest-material'
 import type { OperationGeometry, StockGeometry, Vec2 } from './model'
 import { ON_EDGE, openReach, openRegion, opensStock } from './open-sides'
@@ -251,10 +252,94 @@ function measureOf(
   return m
 }
 
+/**
+ * Regions of at least this many pieces are measured one piece per distinct geometry (patterns
+ * P2: a pattern's cells are copies of one cell), see `grouped`.
+ */
+export const GROUP_PIECES_MIN = 8
+
+interface PieceGroup {
+  /** The piece moved to its box corner at the origin. */
+  readonly region: Region
+  /** The box corners of the pieces with this geometry. */
+  readonly at: Vec2[]
+}
+
+/**
+ * The region's pieces grouped by geometry up to translation (each moved to its box corner, the
+ * key its coordinates rounded to 10⁻⁶ mm); undefined when no two pieces share one.
+ */
+function groupPieces(region: Region): PieceGroup[] | undefined {
+  const groups = new Map<string, PieceGroup>()
+  for (const piece of region.pieces) {
+    const b = chainBounds(piece.outer.elements)!
+    const moved = translateRegion({ pieces: [piece] }, [-b.min[0], -b.min[1]])
+    const key = JSON.stringify(moved, (_k, v: unknown) =>
+      typeof v === 'number' ? Math.round(v * 1e6) : v,
+    )
+    const g = groups.get(key)
+    if (g === undefined) groups.set(key, { region: moved, at: [b.min] })
+    else g.at.push(b.min)
+  }
+  return groups.size < region.pieces.length ? [...groups.values()] : undefined
+}
+
+/**
+ * The measures of a region of many repeated pieces from one piece per geometry (patterns P2,
+ * S8's tool-fit cost near 2 000 cells): erosion and opening act on disjoint pieces one by one, so
+ * a tool fits the region where it fits a piece, the narrowest width is the widest piece's, and the
+ * rest material is each piece's moved to every copy (largest first, as `findRestMaterial`).
+ * Corners and bounds are the whole region's.
+ */
+function grouped(
+  port: Region2dPort,
+  side: CutSide,
+  groups: readonly PieceGroup[],
+  loops: readonly Loop[],
+  bounds: Bounds2,
+): ShapeMeasure | undefined {
+  const measures: { m: ShapeMeasure; at: Vec2[] }[] = []
+  for (const g of groups) {
+    const m = build(port, side, g.region)
+    if (m === undefined) return undefined
+    measures.push({ m, at: g.at })
+  }
+  const corners = insideCorners(loops, side === 'outside' ? -1 : 1)
+  const restMemo = new Map<number, readonly RestPiece[]>()
+  let narrow: number | undefined
+  return {
+    side,
+    corners,
+    smallestCornerRadius: corners.reduce((m, c) => Math.min(m, c.radius), Infinity),
+    bounds,
+    fits: (r) => measures.some(({ m }) => m.fits(r)),
+    narrowest: () => (narrow ??= Math.max(...measures.map(({ m }) => m.narrowest()))),
+    rest(r) {
+      const known = restMemo.get(r)
+      if (known !== undefined) return known
+      const pieces = measures
+        .flatMap(({ m, at }) =>
+          m
+            .rest(r)
+            .flatMap((p) =>
+              at.map((o): RestPiece => ({ area: p.area, at: [p.at[0] + o[0], p.at[1] + o[1]] })),
+            ),
+        )
+        .sort((x, y) => y.area - x.area)
+      restMemo.set(r, pieces)
+      return pieces
+    },
+  }
+}
+
 function build(port: Region2dPort, side: CutSide, region: Region): ShapeMeasure | undefined {
   const loops = regionLoops(region)
   const bounds = chainBounds(loops.flatMap((l) => l.elements))
   if (bounds === undefined) return undefined
+  if (side === 'pocket' && region.pieces.length >= GROUP_PIECES_MIN) {
+    const groups = groupPieces(region)
+    if (groups !== undefined) return grouped(port, side, groups, loops, bounds)
+  }
   const corners = insideCorners(loops, side === 'outside' ? -1 : 1)
   const smallestCornerRadius = corners.reduce((m, c) => Math.min(m, c.radius), Infinity)
   const insets = new Map<number, AppResult<Region>>()

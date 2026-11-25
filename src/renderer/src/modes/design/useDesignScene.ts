@@ -11,14 +11,14 @@
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
+import { patternFacts } from '../../../../core/design/pattern/pattern'
 import { placedBox } from '../../../../core/design/reference'
 import { faceFrame, toPartFrame } from '../../../../core/geometry/face'
 import { unapplyPlacement } from '../../../../core/geometry/model'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import { referenceMessages } from '../../messages/reference'
-import type { ViewportProps } from '../../viewport'
-import type { Vec3 } from '../../viewport/mesh'
+import type { OutlineLoop, ViewportProps } from '../../viewport'
 import { failingOperation, surfaceLabel } from './model'
 import {
   anchorPoint,
@@ -26,6 +26,7 @@ import {
   markerPoint,
   operationFace,
   operationOutline,
+  patternAreaLoops,
   surfaceAxes,
 } from './outline'
 import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
@@ -167,7 +168,11 @@ export function useDesignScene(): SceneProps {
   }, [part])
 
   const ops = part?.loaded?.part.operations
-  const selectedOp = ops?.find((o) => o.id === selected)
+  // a selected pattern shows its pocket's outline (the cells) and its area dashed (patterns P2)
+  const pattern = part?.dto.features?.find((f) => f.id === selected && f.kind === 'pattern')
+  const selectedOp = ops?.find(
+    (o) => o.id === selected || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
+  )
   const overlays = useMemo(() => {
     if (selectedOp === undefined || part?.loaded === undefined || part.table === undefined)
       return null
@@ -183,19 +188,24 @@ export function useDesignScene(): SceneProps {
       part.loaded.part.operations,
     )
     // the placed shape's bounding box in the face frame (what the anchor refers to, task U2)
-    let guide: Vec3[] | null = null
-    if (rotationGuide === selectedOp.id && outline.length > 0) {
+    let guide: readonly OutlineLoop[] | null = null
+    if (pattern !== undefined && port !== undefined) {
+      const facts = patternFacts(pattern.id, part.dto.shapes ?? [], port)
+      if (facts !== undefined) guide = patternAreaLoops(selectedOp, s, table, facts.area)
+    } else if (rotationGuide === selectedOp.id && outline.length > 0) {
       const top = outline[0]!.map((p) => unapplyPlacement(face.frame, p))
       const us = top.map((p) => p[0])
       const vs = top.map((p) => p[1])
       const w = top[0]![2]
       const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)]
       guide = [
-        [u0, v0],
-        [u1, v0],
-        [u1, v1],
-        [u0, v1],
-      ].map(([u, v]) => toPartFrame(face.frame, [u!, v!, w]))
+        [
+          [u0, v0],
+          [u1, v0],
+          [u1, v1],
+          [u0, v1],
+        ].map(([u, v]) => toPartFrame(face.frame, [u!, v!, w])),
+      ]
     }
     return {
       outline,
@@ -211,7 +221,7 @@ export function useDesignScene(): SceneProps {
             : undefined,
       }),
     }
-  }, [selectedOp, part, port, rotationGuide])
+  }, [selectedOp, part, port, rotationGuide, pattern])
   // a selected face (DF22): its face frame axes, its name in the summary
   const face = selectedFace(part, selected)
   const faceId = face?.id
@@ -257,7 +267,7 @@ export function useDesignScene(): SceneProps {
     anchor: overlays?.anchor ?? null,
     tabs,
     split: splitScene.split,
-    guide: overlays?.guide ? [overlays.guide] : clones.guide,
+    guide: overlays?.guide ?? clones.guide,
     clonePath: clones.clonePath,
     selectedAlso: clones.selectedAlso,
     announcement,

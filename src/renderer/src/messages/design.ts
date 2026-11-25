@@ -61,18 +61,57 @@ export const designMessages = {
       acrossValues: { corners: 'Corners', flats: 'Flats' } as Record<string, string>,
       rotation: 'Rotation',
       lattice: 'Lattice',
-      lattices: { square: 'Square', staggered: 'Staggered', hex: 'Hex' } as Record<string, string>,
+      lattices: {
+        square: 'Square',
+        staggered: 'Staggered',
+        hex: 'Hex',
+        polar: 'Polar',
+      } as Record<string, string>,
       spacing: 'Spacing',
       spacings: { gap: 'Gap', pitch: 'Pitch' } as Record<string, string>,
       gap: 'Gap',
-      pitch: (i: number) => (i === 0 ? 'Pitch along rows' : 'Pitch between rows'),
+      pitch: (i: number, polar = false) =>
+        polar
+          ? i === 0
+            ? 'Pitch along rings'
+            : 'Pitch between rings'
+          : i === 0
+            ? 'Pitch along rows'
+            : 'Pitch between rows',
       angle: 'Angle',
+      origin: (i: number) => (i === 0 ? 'Origin U' : 'Origin V'),
+      originCentre: 'Centre of the area',
       on: 'On',
-      boundaryFace: 'Boundary: the whole face',
+      boundary: 'Boundary',
+      boundaryFace: 'Whole face',
+      boundaryCenter: (i: number) => (i === 0 ? 'Boundary centre U' : 'Boundary centre V'),
+      boundaryRotation: 'Boundary rotation',
       margin: 'Margin',
+      fit: 'Boundary cells',
+      fits: { whole: 'Whole', clip: 'Clip' } as Record<string, string>,
+      fitDescription: 'Clip cuts the cells crossing the boundary; slivers under 1 mm are dropped.',
+      invert: 'Invert (cells as islands)',
+      presets: 'Presets',
+      presetNames: {
+        staggeredHoles: 'Staggered holes',
+        honeycomb: 'Honeycomb',
+        roundedSquares: 'Rounded squares',
+        diamonds: 'Diamonds',
+        slots: 'Slots',
+        grille: 'Grille',
+      } as Record<string, string>,
       depth: 'Depth',
       tool: 'Tool',
       readout: (cells: number) => (cells === 1 ? '1 cell' : `${cells} cells`),
+      /** "84 cells · web 1.2 mm · 6 slivers dropped" (the inspector's read-out, P2). */
+      readoutFull: (cells: number, web: string | undefined, dropped: number) =>
+        [
+          cells === 1 ? '1 cell' : `${cells} cells`,
+          ...(web === undefined ? [] : [`web ${web}`]),
+          ...(dropped === 0
+            ? []
+            : [dropped === 1 ? '1 sliver dropped' : `${dropped} slivers dropped`]),
+        ].join(' · '),
       noShapes: 'No closed shapes in the part yet',
     },
     /** The row menu's actions (dogfood DF16). */

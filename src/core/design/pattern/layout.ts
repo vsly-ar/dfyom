@@ -1,26 +1,38 @@
 /**
- * A pattern's cells (patterns P1): the lattice laid over the boundary less the margin, the cell
- * placed at every node whose cell lies wholly inside (`whole` fit), emitted as region pieces with
- * no boolean (cells are disjoint: the overlap check below), so 2 000 cells resolve in
- * milliseconds (S8 finding 2).
- * Doc: docs/modes/patterns.md#owned-shape-and-operations, docs/modes/patterns.md#implementation-p1
+ * A pattern's cells (patterns P1, P2): the lattice laid over the area (the boundary less the
+ * margin), the cell placed at every node whose cell lies wholly inside (`whole`) or cut to the
+ * area (`clip`, slivers dropped), emitted as region pieces with no boolean (cells are disjoint:
+ * the overlap check below), so 2 000 cells resolve in milliseconds (S8 finding 2). `invert` makes
+ * the cells holes of the area; a split piece's `clip` rectangle cuts the result last.
+ * Doc: docs/modes/patterns.md#owned-shape-and-operations, docs/modes/patterns.md#implementation-p1,
+ * docs/modes/patterns.md#implementation-p2
  *
- * Pure numbers (mm, degrees) and the 2D port; the cell's own resolution is passed in (shape.ts
- * resolves named shapes and primitives), so this module has no shape-layer import.
+ * Pure numbers (mm, degrees) and the 2D port; the cell's and the boundary's own resolution is
+ * passed in (shape.ts resolves named shapes and primitives), so this module has no shape-layer
+ * import.
  */
 import type { Issue } from '../../../shared/errors/app-error'
 import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import type { Vec2 } from '../../geometry/model'
+import { regionContains } from '../../geometry/2d/measure'
 import {
+  arcRadius,
+  arcSweep,
   chainBounds,
+  line,
+  onSweep,
   regionArea,
+  reverseLoop,
   type Bounds2,
+  type Element,
+  type Loop,
   type Region,
   type RegionPiece,
 } from '../../geometry/2d/model'
 import { orientRegion, translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { PatternRecord, ShapeItem } from '../shape.dto'
+import { patternWeb, type PatternWeb } from './web'
 
 /** Most cells of one pattern (`patternTooMany`; S8: 2 000 with the P1 changes). */
 export const PATTERN_CELLS_MAX = 2000
@@ -31,25 +43,49 @@ export const PATTERN_CELLS_MAX = 2000
 export const PATTERN_HEAVY_CHORDS = 5000
 /** Cells closer than this (mm) count as touching, i.e. overlapping (`patternOverlap`). */
 export const PATTERN_MIN_WEB = 0.001
+/**
+ * A clipped fragment narrower than this (mm) is dropped (`fit: 'clip'`, P2); the fragments kept,
+ * and an inverted pattern's pocket, are opened by half of it, so the sharp corners where a cell
+ * meets the boundary become R 0.5 mm and a Ø 1 mm end mill fits them.
+ */
+export const PATTERN_SLIVER = 1
 /** Neighbour offsets the overlap check measures at most; more means the pitch is far too small. */
 const OVERLAP_CHECKS_MAX = 64
 const SLACK = 1e-9
+/** A cell whose area inside the area differs from its own by less than this share is inside. */
+const AREA_SHARE = 1e-9
 
-/** A pattern as the resolver reads it: the record with the cell's definition resolved. */
-export interface PatternDefinition extends Omit<PatternRecord, 'cell'> {
+type ItemsDef = readonly ShapeItem<number>[]
+
+/** A pattern as the resolver reads it: the record with the cell's (and boundary's) items. */
+export interface PatternDefinition extends Omit<PatternRecord, 'cell' | 'area'> {
   readonly kind: 'pattern'
   readonly op: 'add'
   /** The cell's shape definition (a primitive item centred on the origin, or a named shape's). */
-  readonly cell: readonly ShapeItem<number>[]
+  readonly cell: ItemsDef
+  /** A named boundary shape's items, placed (P2); absent = the face rectangle. */
+  readonly area?:
+    { readonly items: ItemsDef; readonly center: Vec2; readonly rotation: number } | undefined
+}
+
+/** What the layout found besides the region (the read-out, DFM and the viewport). */
+export interface PatternFacts {
+  /** Cells laid out (inverted: islands). */
+  readonly cells: number
+  /** Clipped fragments dropped as slivers (`fit: 'clip'`). */
+  readonly dropped: number
+  /** The boundary less the margin, face frame (the viewport's dashed outline). */
+  readonly area: Region
+  /** The narrowest web (or island) when under the limit (`dfm.patternThinWeb`). */
+  readonly web?: PatternWeb | undefined
 }
 
 /** The resolved cells: one region of disjoint pieces, in face-frame coordinates. */
-export interface PatternCells {
+export interface PatternCells extends PatternFacts {
   readonly region: Region
-  readonly cells: number
   /** The boundary rectangle: placement anchors by it, not by the cells (placement.ts). */
   readonly frame: Bounds2
-  /** Pitch along the rows and between rows (mm). */
+  /** Pitch along the rows and between rows (mm; polar: along a ring and between rings). */
   readonly pitch: Vec2
 }
 
@@ -76,19 +112,54 @@ const cosSin = (deg: number): Vec2 => {
 }
 const rot = ([c, s]: Vec2, p: Vec2): Vec2 => [c * p[0] - s * p[1], s * p[0] + c * p[1]]
 
-const boundsOf = (r: Region): Bounds2 | undefined =>
-  chainBounds(r.pieces.flatMap((p) => [...p.outer.elements, ...p.holes.flatMap((h) => h.elements)]))
+const regionElements = (r: Region): Element[] =>
+  r.pieces.flatMap((p) => [...p.outer.elements, ...p.holes.flatMap((h) => h.elements)])
+const boundsOf = (r: Region): Bounds2 | undefined => chainBounds(regionElements(r))
+
+const rectLoop = (lo: Vec2, hi: Vec2): Loop => {
+  const c: Vec2[] = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]]
+  return { elements: c.map((p, i) => line(p, c[(i + 1) % 4]!)) }
+}
+const rectRegion = (lo: Vec2, hi: Vec2): Region => ({
+  pieces: [{ outer: rectLoop(lo, hi), holes: [] }],
+})
+
+const inside = (b: Bounds2, lo: Vec2, hi: Vec2): boolean =>
+  b.min[0] >= lo[0] - SLACK &&
+  b.max[0] <= hi[0] + SLACK &&
+  b.min[1] >= lo[1] - SLACK &&
+  b.max[1] <= hi[1] + SLACK
+const disjoint = (b: Bounds2, lo: Vec2, hi: Vec2): boolean =>
+  b.max[0] < lo[0] - SLACK ||
+  b.min[0] > hi[0] + SLACK ||
+  b.max[1] < lo[1] - SLACK ||
+  b.min[1] > hi[1] + SLACK
+
+/** The farthest distance from the origin of any point of the region (its circumscribed radius). */
+export function circumRadius(r: Region): number {
+  let m = 0
+  for (const e of regionElements(r)) {
+    m = Math.max(m, Math.hypot(e.a[0], e.a[1]), Math.hypot(e.b[0], e.b[1]))
+    if (e.kind === 'arc') {
+      const c = Math.hypot(e.centre[0], e.centre[1])
+      const start = Math.atan2(e.a[1] - e.centre[1], e.a[0] - e.centre[0])
+      const far = c === 0 ? start : Math.atan2(e.centre[1], e.centre[0])
+      if (onSweep(start, arcSweep(e), far)) m = Math.max(m, c + arcRadius(e))
+    }
+  }
+  return m
+}
 
 /**
  * The pattern's cells. Issues (`model.invariant`) at the feature's field names: `cell`
- * (`patternCellOpen`: an open path), `spacing` (`positive`, `patternOverlap`: neighbouring cells
- * overlap or touch), `spacing` (`patternTooMany`: more than `PATTERN_CELLS_MAX` cells). No cell
- * fitting is no error (`dfm.patternEmpty`).
+ * (`patternCellOpen`: an open path), `boundary` (`patternBoundaryOpen`), `spacing` (`positive`,
+ * `patternOverlap`: neighbouring cells overlap or touch), `spacing` (`patternTooMany`: more than
+ * `PATTERN_CELLS_MAX` cells). No cell fitting is no error (`dfm.patternEmpty`).
  */
 export function resolvePattern(
   port: Region2dPort,
   p: PatternDefinition,
-  resolveCell: (def: readonly ShapeItem<number>[]) => CellResult,
+  resolveCell: (def: ItemsDef) => CellResult,
 ): AppResult<PatternCells> {
   const resolved = resolveCell(p.cell)
   if (resolved.isErr()) return Err(resolved.unwrapErr().prefixIssues('cell'))
@@ -104,6 +175,10 @@ export function resolvePattern(
   ])
   const ex = tb.max[0] - tb.min[0]
   const ey = tb.max[1] - tb.min[1]
+  const polar = p.lattice === 'polar'
+  // polar: cells keep their orientation, so any two closer than the circumscribed diameter may
+  // touch (P2)
+  const diameter = 2 * circumRadius(centred)
   // pitch along the rows (a) and between rows (b); hex rows 60° apart
   let a: number
   let b: number
@@ -113,8 +188,11 @@ export function resolvePattern(
       return invalid([
         issue(['spacing', 'gap'], 'positive', 'must be greater than 0', { actual: g }),
       ])
-    a = ex + g
-    b = p.lattice === 'hex' ? (a * Math.sqrt(3)) / 2 : ey + g
+    if (polar) a = b = diameter + g
+    else {
+      a = ex + g
+      b = p.lattice === 'hex' ? (a * Math.sqrt(3)) / 2 : ey + g
+    }
   } else {
     ;[a, b] = p.spacing.pitch
     if (!(a > 0 && b > 0))
@@ -124,31 +202,208 @@ export function resolvePattern(
         }),
       ])
   }
-  const shifted = p.lattice !== 'square'
-  const overlap = cellsOverlap(port, centred, ex, ey, a, b, shifted)
+  const overlap = polar
+    ? Ok(Math.min(a, b) < diameter + PATTERN_MIN_WEB)
+    : cellsOverlap(port, centred, ex, ey, a, b, p.lattice !== 'square')
   if (overlap.isErr()) return overlap
   if (overlap.unwrap())
     return invalid([
       issue(
         ['spacing'],
         'patternOverlap',
-        `neighbouring cells overlap or touch (pitch ${round(a)} × ${round(b)} mm for a ${round(ex)} × ${round(ey)} mm cell): widen the spacing`,
-        { pitch: [round(a), round(b)], extent: [round(ex), round(ey)] },
+        polar
+          ? `neighbouring cells may overlap (pitch ${round(a)} × ${round(b)} mm for a cell ${round(diameter)} mm across its corners): widen the spacing`
+          : `neighbouring cells overlap or touch (pitch ${round(a)} × ${round(b)} mm for a ${round(ex)} × ${round(ey)} mm cell): widen the spacing`,
+        { pitch: [round(a), round(b)], extent: polar ? [round(diameter)] : [round(ex), round(ey)] },
       ),
     ])
 
-  // the boundary less the margin
-  const lo: Vec2 = [p.boundary.min[0] + p.margin, p.boundary.min[1] + p.margin]
-  const hi: Vec2 = [p.boundary.max[0] - p.margin, p.boundary.max[1] - p.margin]
+  // the area: the boundary less the margin
   const frame: Bounds2 = { min: [...p.boundary.min], max: [...p.boundary.max] }
-  const none: PatternCells = { region: { pieces: [] }, cells: 0, frame, pitch: [a, b] }
-  if (!(hi[0] > lo[0] && hi[1] > lo[1])) return Ok(none)
+  const empty: Region = { pieces: [] }
+  const none: PatternCells = {
+    region: empty,
+    cells: 0,
+    dropped: 0,
+    area: empty,
+    frame,
+    pitch: [a, b],
+  }
+  const area = areaOf(port, p, resolveCell)
+  if (area.isErr()) return area
+  const { region: areaRegion, rect } = area.unwrap()
+  const ab = boundsOf(areaRegion)
+  if (ab === undefined) return Ok(none)
+  const lo = ab.min
+  const hi = ab.max
   const origin: Vec2 = p.origin ?? [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]
-  const cs = cosSin(p.angle)
-  const cell = p.angle === 0 ? centred : orientRegion(centred, { rotation: p.angle, mirror: false })
+  const cell =
+    polar || p.angle === 0 ? centred : orientRegion(centred, { rotation: p.angle, mirror: false })
   const cb = boundsOf(cell)!
+  const cellArea = regionArea(cell)
 
-  // nodes covering the boundary: its corners in the lattice frame, one pitch beyond
+  const tooMany = () =>
+    invalid([
+      issue(
+        ['spacing'],
+        'patternTooMany',
+        `more than ${PATTERN_CELLS_MAX} cells: widen the spacing, enlarge the cell or the margin`,
+        { max: PATTERN_CELLS_MAX },
+      ),
+    ])
+  const clip = p.fit === 'clip'
+  const index = rect ? undefined : new EdgeIndex(regionElements(areaRegion))
+  const whole: Vec2[] = []
+  const fragments: RegionPiece[] = []
+  let crossing = 0
+  let dropped = 0
+  /** Sorts one node: kept whole, cut (clip), or left out. */
+  const place = (n: Vec2): AppResult<void> => {
+    const box: Bounds2 = {
+      min: [n[0] + cb.min[0], n[1] + cb.min[1]],
+      max: [n[0] + cb.max[0], n[1] + cb.max[1]],
+    }
+    if (disjoint(box, lo, hi)) return Ok(undefined)
+    let cut: Region | undefined
+    if (rect) {
+      if (inside(box, lo, hi)) {
+        whole.push(n)
+        return Ok(undefined)
+      }
+      if (!clip) return Ok(undefined)
+    } else if (!index!.touches(box)) {
+      if (regionContains(areaRegion, n)) whole.push(n)
+      return Ok(undefined)
+    } else {
+      const x = port.intersect(translateRegion(cell, n), areaRegion)
+      if (x.isErr()) return Err(x.unwrapErr())
+      const share = regionArea(x.unwrap())
+      if (share >= cellArea * (1 - AREA_SHARE)) {
+        whole.push(n)
+        return Ok(undefined)
+      }
+      if (!clip || share <= cellArea * AREA_SHARE) return Ok(undefined)
+      cut = x.unwrap()
+    }
+    if (cut === undefined) {
+      const x = port.intersect(translateRegion(cell, n), areaRegion)
+      if (x.isErr()) return Err(x.unwrapErr())
+      cut = x.unwrap()
+    }
+    let kept = false
+    for (const piece of cut.pieces) {
+      const opened = opening(port, { pieces: [piece] })
+      if (opened.isErr()) return opened
+      if (opened.unwrap().pieces.length === 0) dropped++
+      else {
+        // inverted, the raw fragment is subtracted and the pocket opened as a whole
+        fragments.push(...(p.invert === true ? [piece] : opened.unwrap().pieces))
+        kept = true
+      }
+    }
+    if (kept) crossing++
+    return Ok(undefined)
+  }
+
+  // nodes covering the area
+  const nodes = polar
+    ? polarNodes(origin, lo, hi, a, b, p.angle)
+    : rowNodes(origin, lo, hi, a, b, p)
+  for (const n of nodes) {
+    const done = place(n)
+    if (done.isErr()) return done
+    if (whole.length + crossing > PATTERN_CELLS_MAX) return tooMany()
+  }
+
+  let pieces: RegionPiece[] = []
+  if (p.invert === true) {
+    // our own sharp corners (the margin's rectangle, cells meeting the boundary) are rounded
+    const round = fragments.length > 0 || (rect && p.margin > 0)
+    const holes = invertCells(port, areaRegion, cell, whole, fragments, round)
+    if (holes.isErr()) return holes
+    pieces = holes.unwrap()
+  } else {
+    for (const n of whole) pieces.push(...translateRegion(cell, [n[0] + 0, n[1] + 0]).pieces)
+    pieces.push(...fragments)
+  }
+  let region: Region = { pieces }
+  if (p.clip !== undefined) {
+    const c = clipToRect(port, region, p.clip.min, p.clip.max)
+    if (c.isErr()) return c
+    region = c.unwrap()
+  }
+  const web = patternWeb(port, {
+    cell,
+    diameter,
+    nodes: whole,
+    invert: p.invert === true,
+    lattice: polar ? undefined : { a, b, shifted: p.lattice !== 'square', angle: p.angle },
+    centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2],
+  })
+  return Ok({
+    region,
+    cells: whole.length + crossing,
+    dropped,
+    area: areaRegion,
+    frame,
+    pitch: [a, b],
+    ...(web === undefined ? {} : { web }),
+  })
+}
+
+const round = (x: number) => Math.round(x * 1000) / 1000
+
+/** The region opened by `PATTERN_SLIVER / 2`: sharp convex corners rounded, thin parts gone. */
+function opening(port: Region2dPort, r: Region): AppResult<Region> {
+  return port
+    .offset(r, PATTERN_SLIVER / 2)
+    .andThen((s) => (s.pieces.length === 0 ? Ok(s) : port.offset(s, -PATTERN_SLIVER / 2)))
+}
+
+/**
+ * The area (the boundary less the margin) in the face frame: the face rectangle shrunk by the
+ * margin (`rect`: P1's box tests apply), or the named boundary placed and offset by the margin.
+ */
+function areaOf(
+  port: Region2dPort,
+  p: PatternDefinition,
+  resolveCell: (def: ItemsDef) => CellResult,
+): AppResult<{ region: Region; rect: boolean }> {
+  const m = p.margin
+  if (p.area === undefined) {
+    const lo: Vec2 = [p.boundary.min[0] + m, p.boundary.min[1] + m]
+    const hi: Vec2 = [p.boundary.max[0] - m, p.boundary.max[1] - m]
+    if (!(hi[0] > lo[0] && hi[1] > lo[1])) return Ok({ region: { pieces: [] }, rect: true })
+    return Ok({ region: rectRegion(lo, hi), rect: true })
+  }
+  const r = resolveCell(p.area.items)
+  if (r.isErr()) return Err(r.unwrapErr().prefixIssues('boundary'))
+  const s = r.unwrap()
+  if (s.kind !== 'region')
+    return invalid([
+      issue(['boundary'], 'patternBoundaryOpen', 'the boundary must be a closed shape'),
+    ])
+  const turned = orientRegion(s.region, { rotation: p.area.rotation, mirror: false })
+  const tb = boundsOf(turned)!
+  const placed = translateRegion(turned, [
+    p.area.center[0] - (tb.min[0] + tb.max[0]) / 2,
+    p.area.center[1] - (tb.min[1] + tb.max[1]) / 2,
+  ])
+  if (!(m > 0)) return Ok({ region: placed, rect: false })
+  return port.offset(placed, m).map((region) => ({ region, rect: false }))
+}
+
+/** Row lattices (square, staggered, hex): nodes over the area's box, one pitch beyond. */
+function rowNodes(
+  origin: Vec2,
+  lo: Vec2,
+  hi: Vec2,
+  a: number,
+  b: number,
+  p: PatternDefinition,
+): Vec2[] {
+  const shifted = p.lattice !== 'square'
+  const cs = cosSin(p.angle)
   const inv: Vec2 = [cs[0], -cs[1]]
   const corners = [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]].map((c) =>
     rot(inv, [c[0] - origin[0], c[1] - origin[1]]),
@@ -166,31 +421,178 @@ export function resolvePattern(
     const i1 = Math.ceil((qx1 - s) / a) + 1
     for (let i = i0; i <= i1; i++) {
       const q = rot(cs, [i * a + s, j * b])
-      const n: Vec2 = [origin[0] + q[0], origin[1] + q[1]]
-      const inside =
-        n[0] + cb.min[0] >= lo[0] - SLACK &&
-        n[0] + cb.max[0] <= hi[0] + SLACK &&
-        n[1] + cb.min[1] >= lo[1] - SLACK &&
-        n[1] + cb.max[1] <= hi[1] + SLACK
-      if (!inside) continue
-      nodes.push(n)
-      if (nodes.length > PATTERN_CELLS_MAX)
-        return invalid([
-          issue(
-            ['spacing'],
-            'patternTooMany',
-            `more than ${PATTERN_CELLS_MAX} cells: widen the spacing, enlarge the cell or the margin`,
-            { max: PATTERN_CELLS_MAX },
-          ),
-        ])
+      nodes.push([origin[0] + q[0], origin[1] + q[1]])
     }
   }
-  const pieces: RegionPiece[] = []
-  for (const n of nodes) pieces.push(...translateRegion(cell, [n[0] + 0, n[1] + 0]).pieces)
-  return Ok({ region: { pieces }, cells: nodes.length, frame, pitch: [a, b] })
+  return nodes
 }
 
-const round = (x: number) => Math.round(x * 1000) / 1000
+/**
+ * Polar nodes (P2): ring 0 is the origin, ring k at radius k·b holds ⌊π / asin(a / 2r)⌋ cells
+ * (neighbours a chord of at least `a` apart), each ring starting at `angle`; rings out to the
+ * area's farthest corner.
+ */
+function polarNodes(origin: Vec2, lo: Vec2, hi: Vec2, a: number, b: number, angle: number): Vec2[] {
+  const reach = Math.max(
+    ...[lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]].map((c) =>
+      Math.hypot(c[0] - origin[0], c[1] - origin[1]),
+    ),
+  )
+  const nodes: Vec2[] = [[origin[0], origin[1]]]
+  const start = (angle * Math.PI) / 180
+  // more rings than cells could fit is a pitch far too small: patternTooMany stops it
+  const rings = Math.min(Math.ceil(reach / b) + 1, PATTERN_CELLS_MAX * 4)
+  for (let k = 1; k <= rings; k++) {
+    const r = k * b
+    const n = a >= 2 * r ? 1 : Math.max(1, Math.floor(Math.PI / Math.asin(a / (2 * r)) + 1e-9))
+    for (let i = 0; i < n; i++) {
+      const t = start + (2 * Math.PI * i) / n
+      nodes.push([origin[0] + r * Math.cos(t), origin[1] + r * Math.sin(t)])
+    }
+    if (nodes.length > PATTERN_CELLS_MAX * 8) break
+  }
+  return nodes
+}
+
+/**
+ * A bucket grid of the area's boundary elements by their boxes: a cell box that meets none of
+ * them lies wholly inside or outside the area (one point test decides).
+ */
+class EdgeIndex {
+  private readonly boxes: Bounds2[]
+  private readonly grid = new Map<string, number[]>()
+  private readonly size: number
+  constructor(elements: readonly Element[]) {
+    this.boxes = elements.map((e) => chainBounds([e])!)
+    const all = chainBounds([...elements])!
+    const span = Math.max(all.max[0] - all.min[0], all.max[1] - all.min[1], 1)
+    this.size = span / Math.max(1, Math.ceil(Math.sqrt(elements.length)))
+    this.boxes.forEach((bx, i) => {
+      for (const k of this.keys(bx)) {
+        const list = this.grid.get(k)
+        if (list === undefined) this.grid.set(k, [i])
+        else list.push(i)
+      }
+    })
+  }
+  private *keys(b: Bounds2): Generator<string> {
+    const s = this.size
+    for (let x = Math.floor(b.min[0] / s); x <= Math.floor(b.max[0] / s); x++)
+      for (let y = Math.floor(b.min[1] / s); y <= Math.floor(b.max[1] / s); y++) yield `${x},${y}`
+  }
+  touches(b: Bounds2): boolean {
+    const eps = 1e-6
+    for (const k of this.keys(b))
+      for (const i of this.grid.get(k) ?? []) {
+        const e = this.boxes[i]!
+        if (
+          e.min[0] <= b.max[0] + eps &&
+          e.max[0] >= b.min[0] - eps &&
+          e.min[1] <= b.max[1] + eps &&
+          e.max[1] >= b.min[1] - eps
+        )
+          return true
+      }
+    return false
+  }
+}
+
+/** The piece of `pieces` whose outer loop holds `p` (holes ignored); -1 for none. */
+function holder(pieces: readonly RegionPiece[], p: Vec2): number {
+  for (let i = 0; i < pieces.length; i++) {
+    const o = pieces[i]!.outer
+    if (regionContains({ pieces: [{ outer: o, holes: [] }] }, p)) return i
+  }
+  return -1
+}
+
+/**
+ * Inverted (P2): the area minus the cells. The clipped fragments are subtracted (few booleans)
+ * and, with `round`, the result opened (`opening`); then each whole cell's outer loop goes in as
+ * a hole of the piece holding it (no fold), and the cell's own holes become pieces.
+ */
+function invertCells(
+  port: Region2dPort,
+  area: Region,
+  cell: Region,
+  whole: readonly Vec2[],
+  fragments: readonly RegionPiece[],
+  round: boolean,
+): AppResult<RegionPiece[]> {
+  let base = area
+  if (fragments.length > 0) {
+    const d = port.difference(area, { pieces: fragments })
+    if (d.isErr()) return Err(d.unwrapErr())
+    base = d.unwrap()
+  }
+  if (round) {
+    const o = opening(port, base)
+    if (o.isErr()) return Err(o.unwrapErr())
+    base = o.unwrap()
+  }
+  const out = base.pieces.map((p) => ({ outer: p.outer, holes: [...p.holes] }))
+  const extra: RegionPiece[] = []
+  const boxes = out.map((p) => chainBounds(p.outer.elements)!)
+  for (const n of whole) {
+    for (const piece of translateRegion(cell, [n[0] + 0, n[1] + 0]).pieces) {
+      const at = piece.outer.elements[0]!.a
+      const near = out.map((_, i) => i).filter((i) => !disjoint(boxes[i]!, at, at))
+      const k = holder(
+        near.map((i) => out[i]!),
+        at,
+      )
+      if (k < 0) continue
+      out[near[k]!]!.holes.push(reverseLoop(piece.outer))
+      for (const h of piece.holes) extra.push({ outer: reverseLoop(h), holes: [] })
+    }
+  }
+  return Ok([...out, ...extra])
+}
+
+/**
+ * The region cut by the rectangle `lo`–`hi` (a split piece's cell, P2): pieces inside are kept,
+ * pieces outside dropped; a crossing piece's outer loop is intersected, its holes inside the
+ * rectangle go back in as holes, crossing holes are subtracted.
+ */
+export function clipToRect(
+  port: Region2dPort,
+  region: Region,
+  lo: Vec2,
+  hi: Vec2,
+): AppResult<Region> {
+  const rect = rectRegion(lo, hi)
+  const out: RegionPiece[] = []
+  for (const piece of region.pieces) {
+    const pb = chainBounds(piece.outer.elements)!
+    if (inside(pb, lo, hi)) {
+      out.push(piece)
+      continue
+    }
+    if (disjoint(pb, lo, hi)) continue
+    const cut = port.intersect({ pieces: [{ outer: piece.outer, holes: [] }] }, rect)
+    if (cut.isErr()) return Err(cut.unwrapErr())
+    let pieces = cut.unwrap().pieces
+    const inner: Loop[] = []
+    const crossing: RegionPiece[] = []
+    for (const h of piece.holes) {
+      const hb = chainBounds(h.elements)!
+      if (inside(hb, lo, hi)) inner.push(h)
+      else if (!disjoint(hb, lo, hi)) crossing.push({ outer: reverseLoop(h), holes: [] })
+    }
+    if (crossing.length > 0) {
+      const d = port.difference({ pieces }, { pieces: crossing })
+      if (d.isErr()) return Err(d.unwrapErr())
+      pieces = d.unwrap().pieces
+    }
+    const mutable = pieces.map((p) => ({ outer: p.outer, holes: [...p.holes] }))
+    for (const h of inner) {
+      const k = holder(mutable, h.elements[0]!.a)
+      if (k >= 0) mutable[k]!.holes.push(h)
+    }
+    out.push(...mutable)
+  }
+  return Ok({ pieces: out })
+}
 
 /**
  * Whether the cell overlaps (or comes within `PATTERN_MIN_WEB` of) a neighbour: every lattice

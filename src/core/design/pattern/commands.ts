@@ -1,16 +1,25 @@
 /**
- * `design.pattern.add` / `.update` (patterns P1): the pattern kind's arguments and how they build
- * a pattern. Kept terse for `tools/list` (llm-api.md § Implementation).
- * Doc: docs/modes/patterns.md#agent-api, docs/modes/patterns.md#implementation-p1
+ * `design.pattern.add` / `.update` (patterns P1, P2): the pattern kind's arguments and how they
+ * build a pattern. Kept terse for `tools/list` (llm-api.md § Implementation): `update` lists its
+ * geometry args as sketches ("As add").
+ * Doc: docs/modes/patterns.md#agent-api, docs/modes/patterns.md#implementation-p1,
+ * docs/modes/patterns.md#implementation-p2
  */
 import { z } from 'zod'
 import { None, Some, type Option } from '../../../shared/result'
 import type { Quantity } from '../../quantity/quantity'
+import { listedAs } from '../../commands/json-schema'
 import { PointArg, Src } from '../commands'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import { DEFAULTS } from '../operation'
 import { PATTERN_LATTICES, POLYGON_ACROSS, ShapeIdSchema } from '../shape.dto'
-import { patternSpec, type Pattern, type PatternCell, type PatternSpacing } from './pattern'
+import {
+  patternSpec,
+  type Pattern,
+  type PatternBoundary,
+  type PatternCell,
+  type PatternSpacing,
+} from './pattern'
 
 /** Each cell kind's required sizes (one flat schema keeps `tools/list` small, like workholding). */
 const CELL_NEEDS = {
@@ -45,15 +54,23 @@ const params = {
   cell: CellArg,
   lattice: z
     .enum(PATTERN_LATTICES)
-    .describe('staggered: odd rows shifted half a pitch; hex: rows 60° apart. Default staggered'),
+    .describe(
+      'staggered: odd rows shifted half a pitch; hex: rows 60° apart; polar: rings. Default staggered',
+    ),
   spacing: z
     .union([z.object({ gap: Src }), z.object({ pitch: PointArg })])
     .describe(
-      'gap: web between cell boxes (pitch = extent + gap; default 2 mm / 1/16"), or pitch [along rows, between rows]',
+      'gap: web between cell boxes (polar: between circumcircles; default 2 mm / 1/16"), or pitch [along rows, between rows]',
     ),
   angle: Src.describe('Turns the whole lattice about origin; default 0°'),
-  origin: PointArg.nullable().describe('A node; null = centre of the face less the margin'),
-  margin: Src.describe('Uncut border inside the face; default 5 mm / 3/16"'),
+  origin: PointArg.nullable().describe('A node; null = centre of the area'),
+  boundary: z
+    .object({ shapeId: z.string(), center: PointArg, rotation: Src.optional() })
+    .nullable()
+    .describe('Closed shape (keep-outs: its subtract items), box centre at center; null = face'),
+  margin: Src.describe('Uncut border inside the boundary; default 5 mm / 3/16"'),
+  fit: z.enum(['whole', 'clip']).describe('clip: cut cells at the border (slivers dropped)'),
+  invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
 }
 
@@ -64,8 +81,12 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
   ...patternSpec,
   params,
   required: [],
+  // listed as sketches: the full args are add's (tools/list budget, P2)
   updateParams: {
-    cell: z.object({ kind: z.string() }).passthrough().describe('As design.pattern.add cell'),
+    cell: listedAs('object', 'design.pattern.add cell'),
+    spacing: listedAs('object', 'design.pattern.add spacing'),
+    origin: z.unknown().describe('As design.pattern.add origin'),
+    boundary: z.unknown().describe('As design.pattern.add boundary'),
   },
   /** Fields not given keep their previous value (add: the patterns.md defaults). */
   build(a: Args, prev, { f, id, name, on }): Pattern {
@@ -138,6 +159,19 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
               f.q('origin.0', 'length', a.origin[0]),
               f.q('origin.1', 'length', a.origin[1]),
             ] as const)
+    const boundary = (): Option<PatternBoundary> => {
+      const b = a.boundary
+      if (b === undefined) return prev?.boundary ?? None
+      if (b === null) return None
+      return Some({
+        shapeId: b.shapeId,
+        center: [
+          f.q('boundary.center.0', 'length', b.center[0]),
+          f.q('boundary.center.1', 'length', b.center[1]),
+        ] as const,
+        rotation: f.q('boundary.rotation', 'angle', b.rotation ?? '0'),
+      })
+    }
     const len = (
       key: 'margin' | 'depth',
       old: Quantity | undefined,
@@ -156,7 +190,10 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
           : (prev?.angle ?? f.q('angle', 'angle', '0')),
       origin,
       spacing: spacing(),
+      boundary: boundary(),
       margin: len('margin', prev?.margin, 'patternMargin'),
+      fit: a.fit ?? prev?.fit ?? 'whole',
+      invert: a.invert ?? prev?.invert ?? false,
       depth: len('depth', prev?.depth, 'patternDepth'),
     }
   },

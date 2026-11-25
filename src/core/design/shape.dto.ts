@@ -196,8 +196,8 @@ export const ShapeSourceDtoSchema = z.object({
 
 // ── pattern (owned shape of a pattern feature, patterns P1) ─────────────────────────────────
 
-/** Lattices of a pattern (docs/modes/patterns.md#model); `polar` comes with P2. */
-export const PATTERN_LATTICES = ['square', 'staggered', 'hex'] as const
+/** Lattices of a pattern (docs/modes/patterns.md#model; `polar` since P2). */
+export const PATTERN_LATTICES = ['square', 'staggered', 'hex', 'polar'] as const
 export type PatternLattice = (typeof PATTERN_LATTICES)[number]
 
 /** Cell primitives of a pattern: the shape items without a centre (it sits on the node). */
@@ -209,7 +209,10 @@ export type PatternPrimitive = (typeof PATTERN_PRIMITIVES)[number]
  * degrees) by its expansion, so the 2D layer resolves it like any shape (shape.ts). The cell is
  * a primitive item centred on the origin, or a named shape of the part by id (resolved from the
  * part's shapes when placed, so it follows edits of that shape). `boundary` is the face rectangle
- * in the face frame; cells keep face-frame coordinates.
+ * in the face frame (the frame placement anchors by); cells keep face-frame coordinates. P2
+ * (docs/modes/patterns.md#implementation-p2): `area` a named boundary shape placed in the face
+ * frame, `fit`, `invert`, and `clip` (a split piece's cell rectangle). Absent optional fields keep
+ * a P1 record unchanged.
  */
 export interface PatternRecord {
   cell: { item: ShapeItem<number> } | { shapeId: string }
@@ -222,7 +225,14 @@ export interface PatternRecord {
   origin?: [number, number] | undefined
   spacing: { gap: number } | { pitch: [number, number] }
   boundary: { min: [number, number]; max: [number, number] }
+  /** A named shape as the boundary: its box centre at `center` (face frame), turned by `rotation`. */
+  area?: { shapeId: string; center: [number, number]; rotation: number } | undefined
   margin: number
+  /** Absent = `whole`. */
+  fit?: 'clip' | undefined
+  invert?: true | undefined
+  /** A split piece's cell rectangle (face frame): the cells are cut by it (split/pieces.ts). */
+  clip?: { min: [number, number]; max: [number, number] } | undefined
 }
 
 const num = z.number().refine(Number.isFinite)
@@ -238,7 +248,11 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
   origin: pair.optional(),
   spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),
   boundary: z.object({ min: pair, max: pair }),
+  area: z.object({ shapeId: ShapeIdSchema, center: pair, rotation: num }).optional(),
   margin: num,
+  fit: z.literal('clip').optional(),
+  invert: z.literal(true).optional(),
+  clip: z.object({ min: pair, max: pair }).optional(),
 }) as unknown as z.ZodType<PatternRecord>
 
 /**

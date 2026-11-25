@@ -357,16 +357,9 @@ function clippedShape(
 ): AppResult<OperationShapeDTO | undefined> {
   const any = shapeDefinition(op.shape, c.loaded.part.shapes)
   if (any.isErr()) return any
+  // a pattern's owned shape is clipped by its record (`patternClip`)
   if (any.unwrap()[0]?.kind === 'pattern')
-    // patterns P1: a pattern's owned shape is not mapped into pieces yet (known issue)
-    return fail('model.invariant', `${op.id}: a pattern cannot be split yet`, {
-      issues: [
-        {
-          path: ['operations', op.id],
-          rule: 'patternSplit',
-          message: 'a pattern feature cannot cross a split line yet; split before adding it',
-        },
-      ],
+    return fail('internal.unexpected', `${op.id}: a pattern is clipped by patternClip`, {
       where: 'clippedShape',
     })
   const def = any as AppResult<ShapeDefinition>
@@ -554,6 +547,42 @@ function shiftedShape(
   }
 }
 
+/** Whether `op` places a pattern's owned shape (patterns P2). */
+function placesPattern(c: Ctx, op: Extract<Operation, { kind: 'pocket' | 'profile' }>): boolean {
+  return (
+    op.shape.kind === 'named' && c.loaded.part.shapes?.get(op.shape.shapeId)?.pattern !== undefined
+  )
+}
+
+/**
+ * A pattern pocket crossing the cell (patterns P2, lifting P1's `patternSplit`): the piece's copy
+ * of the owned shape record gets `clip`, the cell rectangle grown by `grow` in the face frame (the
+ * owned shape's frame: no rotation, no mirror), so the cells are laid out as in the source and cut
+ * there; the pocket keeps its placement, shifted.
+ * Doc: docs/modes/patterns.md#implementation-p2
+ */
+function patternClip(
+  c: Ctx,
+  op: Extract<Operation, { kind: 'pocket' | 'profile' }>,
+  dir: Dir,
+  rect: Rect,
+  grow: number,
+  b: PieceBuild,
+): AppResult<void> {
+  const id = op.shape.kind === 'named' ? op.shape.shapeId : ''
+  const copy = b.shapes.find((s) => s.id === id)
+  if (copy?.pattern === undefined)
+    return fail('internal.unexpected', `${op.id}: the piece has no copy of ${id}`, {
+      where: 'patternClip',
+    })
+  const u0 = rect.x0 - grow
+  const u1 = rect.x1 + grow
+  const v0 = dir === '+z' ? rect.y0 - grow : c.W - rect.y1 - grow
+  const v1 = dir === '+z' ? rect.y1 + grow : c.W - rect.y0 + grow
+  copy.pattern = { ...copy.pattern, clip: { min: [u0, v0], max: [u1, v1] } }
+  return Ok(undefined)
+}
+
 /** Piece outline: the cell region as a through outside profile on the piece's top. */
 function outlineOperation(
   c: Ctx,
@@ -719,10 +748,16 @@ function mapOperation(
           c.finding(op, `open:${op.id}`, `${op.name} is an open path crossed by a split line`)
           return Ok(undefined)
         }
-        const clipped = clippedShape(c, opS, gs, dir, cell.rect, c.toolDiameter(op), delta, b)
-        if (clipped.isErr()) return clipped
-        if (clipped.unwrap() === undefined) return Ok(undefined)
-        shape = clipped.unwrap()!
+        if (placesPattern(c, opS)) {
+          const clip = patternClip(c, opS, dir, cell.rect, c.toolDiameter(op), b)
+          if (clip.isErr()) return clip
+          shape = shiftedShape(base.shape, delta, c.units)
+        } else {
+          const clipped = clippedShape(c, opS, gs, dir, cell.rect, c.toolDiameter(op), delta, b)
+          if (clipped.isErr()) return clipped
+          if (clipped.unwrap() === undefined) return Ok(undefined)
+          shape = clipped.unwrap()!
+        }
         b.clipped.set(op.id, shiftedShape(base.shape, delta, c.units))
       }
       if (base.kind === 'pocket' && z.capped) {
@@ -1067,6 +1102,16 @@ export function planPieces(
       if (o.isErr()) return Err(o.unwrapErr())
       b.ops.push(o.unwrap())
     }
+    // owned shapes (patterns P2) only where the piece places them: a piece has no features
+    const placed = new Set(
+      b.ops.flatMap((o) =>
+        (o.kind === 'pocket' || o.kind === 'profile') && o.shape.kind === 'named'
+          ? [o.shape.shapeId]
+          : [],
+      ),
+    )
+    for (let k = b.shapes.length - 1; k >= 0; k--)
+      if (b.shapes[k]!.owner !== undefined && !placed.has(b.shapes[k]!.id)) b.shapes.splice(k, 1)
     // dowel holes (4b): drilled before the piece is cut free
     const dowels = dowelOperations(
       port,

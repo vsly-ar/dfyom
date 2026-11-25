@@ -28,7 +28,7 @@ import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { memoByRecord } from './frozen-memo'
 import { AREA_EPSILON, itemChain } from './shape-items'
-import { resolvePattern, type PatternDefinition } from './pattern/layout'
+import { resolvePattern, type PatternDefinition, type PatternFacts } from './pattern/layout'
 import type {
   PatternRecord,
   ShapeDTO,
@@ -197,15 +197,16 @@ export const definitionOf = (items: readonly ShapeItem<Quantity>[]): ShapeDefini
 
 /**
  * A resolved shape in its shape frame: a region (closed items) or one open path. A pattern's
- * region (patterns P1) also carries its cell count and the `frame` placement anchors by (the
- * boundary rectangle, so cells keep their face-frame coordinates; placement.ts).
+ * region (patterns P1) also carries what its layout found (cells, dropped slivers, the area, the
+ * thin web; P2) and the `frame` placement anchors by (the boundary rectangle, so cells keep their
+ * face-frame coordinates; placement.ts).
  */
 export type ResolvedShape =
   | {
       readonly kind: 'region'
       readonly region: Region
       readonly frame?: Bounds2 | undefined
-      readonly cells?: number | undefined
+      readonly pattern?: PatternFacts | undefined
     }
   | { readonly kind: 'path'; readonly path: Path }
 
@@ -251,11 +252,11 @@ export function resolveDefinition(
 ): AppResult<ResolvedShape> {
   if (isPattern(shape))
     return resolvePattern(port, shape[0], (cell) => resolveShape(port, cell))
-      .map((p): ResolvedShape => ({
+      .map(({ region, frame, pitch: _, ...pattern }): ResolvedShape => ({
         kind: 'region',
-        region: p.region,
-        frame: p.frame,
-        cells: p.cells,
+        region,
+        frame,
+        pattern,
       }))
       .mapErr((e) => e.withContext(WHERE))
   const def = shape as readonly ShapeItem<number>[]

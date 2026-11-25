@@ -54,8 +54,17 @@ export function shapeDefinition(s: Shape, shapes: Part['shapes']): AppResult<Any
         if (c === undefined) return missing(p.cell.shapeId)
         cell = definitionOf(c.items)
       }
-      const { cell: _, ...rest } = p
-      return Ok([{ kind: 'pattern', op: 'add', ...rest, cell }])
+      // a boundary shape (patterns P2) is carried by its items too, so its edits restale
+      let area: { items: ShapeDefinition; center: [number, number]; rotation: number } | undefined
+      if (p.area !== undefined) {
+        const a = shapes?.get(p.area.shapeId)
+        if (a === undefined) return missing(p.area.shapeId)
+        area = { items: definitionOf(a.items), center: p.area.center, rotation: p.area.rotation }
+      }
+      const { cell: _, area: _a, ...rest } = p
+      return Ok([
+        { kind: 'pattern', op: 'add', ...rest, cell, ...(area === undefined ? {} : { area }) },
+      ])
     }
     case 'rectangle':
       return Ok([
@@ -95,7 +104,7 @@ function orient(r: ResolvedShape, o: Orientation): OrientedShape {
       ? {
           kind: 'region',
           region: numberRegion(orientRegion(r.region, o)),
-          ...(r.cells === undefined ? {} : { cells: r.cells }),
+          ...(r.pattern === undefined ? {} : { pattern: r.pattern }),
         }
       : { kind: 'path', path: orientPath(r.path, o) }
   if (r.kind === 'region' && r.frame !== undefined) {
