@@ -32,7 +32,7 @@ import {
 import { orientRegion, translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { PatternRecord, ShapeItem } from '../shape.dto'
-import { patternWeb, type PatternWeb } from './web'
+import { patternWeb, type PatternWeb, type WebInput } from './web'
 
 /** Most cells of one pattern (`patternTooMany`; S8: 2 000 with the P1 changes). */
 export const PATTERN_CELLS_MAX = 2000
@@ -78,6 +78,8 @@ export interface PatternFacts {
   readonly area: Region
   /** The narrowest web (or island) when under the limit (`dfm.patternThinWeb`). */
   readonly web?: PatternWeb | undefined
+  /** What the web is measured on (P3: again at twice a chamfer's width, `dfm.chamferMeets`). */
+  readonly webInput?: WebInput | undefined
 }
 
 /** The resolved cells: one region of disjoint pieces, in face-frame coordinates. */
@@ -332,14 +334,15 @@ export function resolvePattern(
     if (c.isErr()) return c
     region = c.unwrap()
   }
-  const web = patternWeb(port, {
+  const webInput: WebInput = {
     cell,
     diameter,
     nodes: whole,
     invert: p.invert === true,
     lattice: polar ? undefined : { a, b, shifted: p.lattice !== 'square', angle: p.angle },
     centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2],
-  })
+  }
+  const web = patternWeb(port, webInput)
   return Ok({
     region,
     cells: whole.length + crossing,
@@ -347,6 +350,7 @@ export function resolvePattern(
     area: areaRegion,
     frame,
     pitch: [a, b],
+    webInput,
     ...(web === undefined ? {} : { web }),
   })
 }

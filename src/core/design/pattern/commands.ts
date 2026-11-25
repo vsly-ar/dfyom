@@ -1,9 +1,9 @@
 /**
- * `design.pattern.add` / `.update` (patterns P1, P2): the pattern kind's arguments and how they
+ * `design.pattern.add` / `.update` (patterns P1, P2, P3: `chamfer`): the pattern kind's arguments and how they
  * build a pattern. Kept terse for `tools/list` (llm-api.md § Implementation): `update` lists its
  * geometry args as sketches ("As add").
  * Doc: docs/modes/patterns.md#agent-api, docs/modes/patterns.md#implementation-p1,
- * docs/modes/patterns.md#implementation-p2
+ * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p3
  */
 import { z } from 'zod'
 import { None, Some, type Option } from '../../../shared/result'
@@ -17,6 +17,7 @@ import {
   patternSpec,
   type Pattern,
   type PatternBoundary,
+  type PatternChamfer,
   type PatternCell,
   type PatternSpacing,
 } from './pattern'
@@ -72,6 +73,10 @@ const params = {
   fit: z.enum(['whole', 'clip']).describe('clip: cut cells at the border (slivers dropped)'),
   invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
+  chamfer: z
+    .object({ width: Src.optional(), angle: Src.optional() })
+    .nullable()
+    .describe('Edge chamfer round every cell; default 0.5 mm, 90°; null = none'),
 }
 
 type Args = Partial<z.output<z.ZodObject<typeof params>>>
@@ -172,6 +177,16 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
         rotation: f.q('boundary.rotation', 'angle', b.rotation ?? '0'),
       })
     }
+    const chamfer = (): Option<PatternChamfer> => {
+      const c = a.chamfer
+      if (c === undefined) return prev?.chamfer ?? None
+      if (c === null) return None
+      const old = prev?.chamfer.isSome() === true ? prev.chamfer.unwrap() : undefined
+      return Some({
+        width: f.pick('chamfer.width', 'length', c.width, old?.width, 'chamferWidth'),
+        angle: f.pick('chamfer.angle', 'angle', c.angle, old?.angle, 'chamferAngle'),
+      })
+    }
     const len = (
       key: 'margin' | 'depth',
       old: Quantity | undefined,
@@ -195,6 +210,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       fit: a.fit ?? prev?.fit ?? 'whole',
       invert: a.invert ?? prev?.invert ?? false,
       depth: len('depth', prev?.depth, 'patternDepth'),
+      chamfer: chamfer(),
     }
   },
 }

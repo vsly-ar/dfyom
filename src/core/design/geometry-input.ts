@@ -248,6 +248,13 @@ function operationGeometry(
             // E4a: chosen loops; absent = every loop
             ...(op.loops.isSome() ? { loops: op.loops.unwrap() } : {}),
             ...(tabs.length > 0 ? { tabs } : {}),
+            // patterns P3: the cells' bevels meeting is the pattern's finding (its own chamfer;
+            // a separate chamfer on the cells keeps the region-wide check)
+            ...(op.owner.isSome() &&
+            op.owner.unwrap().role === 'chamfer' &&
+            isPatternShape(source?.shape ?? edgeOp.shape, shapes)
+              ? { pattern: true }
+              : {}),
           },
           width: op.width.canonical,
           angle: op.angle.canonical,
@@ -276,6 +283,10 @@ function operationGeometry(
     }
   }
 }
+
+/** A named shape that is a pattern's owned cells (patterns P3). */
+const isPatternShape = (shape: Shape, shapes: Part['shapes']): boolean =>
+  shape.kind === 'named' && shapes?.get(shape.shapeId)?.pattern !== undefined
 
 /** The 2D map from a stock face's frame to the opposite face's (E4b). */
 type Flip = ReturnType<typeof faceToFace>

@@ -1,6 +1,7 @@
 // The design navigator's row menu (dogfood DF16): the actions on a row's item – Chamfer on a
 // drilling, circle pocket or inside circle profile (its edge), Make Clones… on anything that can be
-// a Clones source, Remove on top-level rows. The same entries open by right-click, Shift+F10 / the
+// a Clones source, Remove on top-level rows. On a pattern's pocket Chamfer turns the pattern's
+// chamfer on (patterns P3). The same entries open by right-click, Shift+F10 / the
 // Menu key and the row's actions (…) button; only applicable items are listed.
 // Doc: docs/conventions/ui.md#feature-rows-and-add (Row menu), #clones
 import { useCallback } from 'react'
@@ -43,10 +44,32 @@ export function useRowActions(part: DesignPart): RowActions {
     [call, partId, select],
   )
 
+  // patterns P3: on a pattern's pocket, Chamfer turns the pattern's own chamfer on (the owned
+  // chamfer round every cell), then selects the pattern
+  const patternChamfer = useCallback(
+    async (featureId: string, on: boolean) => {
+      const r = on
+        ? { ok: true }
+        : await call('design.pattern.update', { partId, featureId, chamfer: {} })
+      if (r.ok) select('design', featureId)
+    },
+    [call, partId, select],
+  )
+
   return (id, remove) => {
     const items: MenuItem[] = []
     const op = part.dto.operations.find((o) => o.id === id)
-    if (op !== undefined && isChamferEdge(op))
+    const pattern =
+      op?.featureRole === 'pocket'
+        ? part.dto.features?.find((x) => x.id === op.featureId && x.kind === 'pattern')
+        : undefined
+    if (op !== undefined && pattern !== undefined)
+      items.push({
+        label: f.chamfer,
+        icon: <Icon name="chamfer" />,
+        onSelect: () => void patternChamfer(pattern.id, pattern['chamfer'] !== undefined),
+      })
+    else if (op !== undefined && isChamferEdge(op))
       items.push({
         label: f.chamfer,
         icon: <Icon name="chamfer" />,

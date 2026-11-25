@@ -4,10 +4,15 @@
 // depth × 0.01 mm). The offset-loft and the swept-chords fallback. E2: outside edges (the annular
 // V-groove against M − M⊖ρ), a split piece's `within` mask and the enclosure outline.
 // Doc: docs/modes/edge-chamfers.md#implementation-e1, docs/modes/edge-chamfers.md#implementation-e2,
-// docs/research/2026-11-25-spike-s7-edge-chamfers.md
+// docs/research/2026-11-25-spike-s7-edge-chamfers.md. Patterns P3: an edge of several pieces is lofted
+// and checked piece by piece (docs/modes/patterns.md#implementation-p3).
 import { beforeAll, describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
-import { loopChamferConstruction, type ChamferSolidsContext } from './chamfer-solids'
+import {
+  loopChamferConstruction,
+  loopChamferPieces,
+  type ChamferSolidsContext,
+} from './chamfer-solids'
 import { evaluatePart, type PartEvaluation } from './evaluate'
 import { loadManifold } from './manifold'
 import {
@@ -401,5 +406,48 @@ describe('loop chamfer solids (E2, outside edges)', () => {
     expect(
       Math.abs(removed(profile, c, [], OUTLINE_STOCK, 2) - outsideOracle(part, 1.5)),
     ).toBeLessThan(band(part, 1.5))
+  })
+})
+
+describe('loop chamfer solids piece by piece (patterns P3)', () => {
+  const cells = (xs: readonly number[], size = 10): Region =>
+    numberRegion({
+      pieces: xs.map((x) => ({ outer: roundedRectLoop(x, 20, x + size, 20 + size, 2), holes: [] })),
+    })
+
+  it('cells apart: one loft and one mesh for every copy, the oracle', () => {
+    const region = cells([10, 25, 40, 55])
+    const pocket = regionPocket('pocket1', region, 3)
+    const c = chamferOf(pocket, 1)
+    expect(loopChamferPieces(c, ctx)).toEqual({ lofted: 4, fallback: 0, meshes: 1, groups: 1 })
+    expect(loopChamferConstruction(c, ctx)).toBe('loft')
+    expect(Math.abs(removed(pocket, c) - oracle(region, 1))).toBeLessThan(band(region, 1) / 2)
+  })
+
+  it('bevels meeting on a 1 mm web: neighbours in different meshes, still lofted, the oracle', () => {
+    // webs of 1 mm under 2 × 1.5: every neighbour pair meets; alternate cells share a mesh
+    const region = cells([10, 21, 32, 43])
+    const pocket = regionPocket('pocket1', region, 3)
+    const c = chamferOf(pocket, 1.5)
+    expect(loopChamferPieces(c, ctx)).toEqual({ lofted: 4, fallback: 0, meshes: 2, groups: 1 })
+    expect(Math.abs(removed(pocket, c) - oracle(region, 1.5))).toBeLessThan(band(region, 1.5) / 2)
+  })
+
+  it('one piece whose own offset changes structure is swept alone; the others keep the loft', () => {
+    // a piece with a 1 mm tooth (a hole narrower than 2 × width) next to two plain cells
+    const tooth = roundedRectLoop(80, 29.5, 95, 30.5, 0, false)
+    const region = numberRegion({
+      pieces: [
+        { outer: roundedRectLoop(10, 20, 20, 30, 2), holes: [] },
+        { outer: roundedRectLoop(25, 20, 35, 30, 2), holes: [] },
+        { outer: roundedRectLoop(70, 15, 105, 45, 3), holes: [tooth] },
+      ],
+    })
+    const pocket = regionPocket('pocket1', region, 3)
+    const c = chamferOf(pocket, 1)
+    const stats = loopChamferPieces(c, ctx)!
+    expect(stats).toMatchObject({ lofted: 2, fallback: 1, groups: 2 })
+    expect(loopChamferConstruction(c, ctx)).toBe('fallback')
+    expect(Math.abs(removed(pocket, c) - oracle(region, 1))).toBeLessThan(band(region, 1) / 2)
   })
 })

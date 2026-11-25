@@ -14,6 +14,7 @@ import {
   edgeChamferPasses,
   edgeChamferTipZ,
   generateEdgeChamfer,
+  NearestStarts,
   type EdgeChamferInput,
   type EdgeChamferOperation,
 } from './edge-chamfer'
@@ -491,5 +492,31 @@ describe('generateEdgeChamfer (E4b)', () => {
     const ps = plunges(tp)
     expect(ps).toHaveLength(2)
     for (const m of ps) expect(Math.abs(Math.abs(m.to[0] - 30) - gap)).toBeLessThan(1e-6)
+  })
+})
+
+describe('NearestStarts (patterns P3)', () => {
+  it('takes the same nearest-neighbour order as a linear scan', () => {
+    // a jittered lattice, from a tool far outside it; ties to the lower index
+    let seed = 7
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+    const points: Vec2[] = []
+    for (let i = 0; i < 30; i++)
+      for (let j = 0; j < 20; j++) points.push([i * 4 + rnd() * 0.5, j * 3.5 + rnd() * 0.5])
+    points.push([8, 7], [8, 7])
+    const index = new NearestStarts(points)
+    const left = points.map((_, i) => i)
+    const d = (k: number, p: Vec2) => Math.hypot(points[k]![0] - p[0], points[k]![1] - p[1])
+    let here: Vec2 = [-50, 200]
+    for (let n = 0; n < points.length; n++) {
+      let best = 0
+      left.forEach((k, i) => {
+        if (d(k, here) < d(left[best]!, here)) best = i
+      })
+      const want = left.splice(best, 1)[0]!
+      expect(index.take(here)).toBe(want)
+      here = points[want]!
+    }
+    expect(index.take(here)).toBe(-1)
   })
 })

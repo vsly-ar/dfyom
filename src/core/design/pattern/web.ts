@@ -48,10 +48,17 @@ export interface WebInput {
 const dist = (p: Vec2, q: Vec2) => Math.hypot(p[0] - q[0], p[1] - q[1])
 const key = (p: Vec2) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`
 
-/** The thin web or island of the pattern; undefined when none is under the limit. */
-export function patternWeb(port: Region2dPort, w: WebInput): PatternWeb | undefined {
+/**
+ * The thin web or island of the pattern; undefined when none is under `limit` (mm; P3: twice a
+ * chamfer's width, where the bevels of two cells, or of an island's sides, meet).
+ */
+export function patternWeb(
+  port: Region2dPort,
+  w: WebInput,
+  limit = PATTERN_WEB_LIMIT,
+): PatternWeb | undefined {
   if (w.nodes.length === 0) return undefined
-  return w.invert ? island(port, w) : web(port, w)
+  return w.invert ? island(port, w, limit) : web(port, w, limit)
 }
 
 function nearestNode(w: WebInput, ok: (n: Vec2) => boolean = () => true): Vec2 | undefined {
@@ -61,12 +68,12 @@ function nearestNode(w: WebInput, ok: (n: Vec2) => boolean = () => true): Vec2 |
   return best
 }
 
-function island(port: Region2dPort, w: WebInput): PatternWeb | undefined {
+function island(port: Region2dPort, w: WebInput, limit: number): PatternWeb | undefined {
   const rest = (r: number) => findRestMaterial(port, w.cell, r).unwrapOr([])
-  const first = rest(PATTERN_WEB_LIMIT / 2 - PRECISION / 2)
+  const first = rest(limit / 2 - PRECISION / 2)
   if (first.length === 0) return undefined
   let lo = 0
-  let hi = PATTERN_WEB_LIMIT / 2
+  let hi = limit / 2
   while (hi - lo > PRECISION / 4) {
     const mid = (lo + hi) / 2
     if (rest(mid).length === 0) lo = mid
@@ -78,8 +85,8 @@ function island(port: Region2dPort, w: WebInput): PatternWeb | undefined {
 }
 
 /** Offsets to measure: lattice offsets in one half plane, or the real neighbour pairs (polar). */
-function candidates(w: WebInput): Vec2[] {
-  const reach = w.diameter + PATTERN_WEB_LIMIT
+function candidates(w: WebInput, limit: number): Vec2[] {
+  const reach = w.diameter + limit
   const out: Vec2[] = []
   const l = w.lattice
   if (l !== undefined) {
@@ -123,8 +130,8 @@ function candidates(w: WebInput): Vec2[] {
     .slice(0, CANDIDATES_MAX)
 }
 
-function web(port: Region2dPort, w: WebInput): PatternWeb | undefined {
-  const offsets = candidates(w)
+function web(port: Region2dPort, w: WebInput, limit: number): PatternWeb | undefined {
+  const offsets = candidates(w, limit)
   if (offsets.length === 0) return undefined
   const grown = new Map<number, Region | undefined>()
   const grow = (d: number): Region | undefined => {
@@ -143,11 +150,11 @@ function web(port: Region2dPort, w: WebInput): PatternWeb | undefined {
   // only offsets a real pair of cells has
   const nodes = new Set(w.nodes.map(key))
   const real = (off: Vec2) => nearestNode(w, (n) => nodes.has(key([n[0] + off[0], n[1] + off[1]])))
-  let hits = offsets.filter((o) => meets(PATTERN_WEB_LIMIT - PRECISION / 2, o))
+  let hits = offsets.filter((o) => meets(limit - PRECISION / 2, o))
   hits = hits.filter((o) => real(o) !== undefined)
   if (hits.length === 0) return undefined
   let lo = 0
-  let hi = PATTERN_WEB_LIMIT - PRECISION / 2
+  let hi = limit - PRECISION / 2
   let narrowest = hits[0]!
   while (hi - lo > PRECISION / 2) {
     const mid = (lo + hi) / 2

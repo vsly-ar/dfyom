@@ -271,17 +271,27 @@ export function generateEdgeChamfer(
   const total = groups.reduce((s, g) => s + g.length, 0)
   const single = levels.length === 1 && levels[0]!.length === 1
   let done = 0
-  for (const left of groups) {
-    while (left.length > 0) {
+  for (const group of groups) {
+    // patterns P3: hundreds of cells take a grid of the start points (no golden has that many)
+    const index =
+      group.length > NEAREST_GRID_MIN
+        ? new NearestStarts(group.map((r) => itemsStart(r.items)))
+        : undefined
+    const left = index === undefined ? group : []
+    for (let n = 0, count = group.length; n < count; n++) {
       const step = steps.step({ done, total, label: `loop ${done + 1}/${total}` })
       if (step.isErr()) return Err(step.unwrapErr())
       // loops in nearest-neighbour order of their start points
-      let best = 0
-      left.forEach((r, i) => {
-        if (dist(itemsStart(r.items), here) < dist(itemsStart(left[best]!.items), here) - 1e-12)
-          best = i
-      })
-      const ring = left.splice(best, 1)[0]!
+      let ring: Group
+      if (index !== undefined) ring = group[index.take(here)]!
+      else {
+        let best = 0
+        left.forEach((r, i) => {
+          if (dist(itemsStart(r.items), here) < dist(itemsStart(left[best]!.items), here) - 1e-12)
+            best = i
+        })
+        ring = left.splice(best, 1)[0]!
+      }
       // one `finish` pass for the one-ring chamfer (E1); rough and finish rings by kind (E4a)
       const k = single ? 'finish' : ring.kind
       if (k !== kind) b.pass((kind = k))
@@ -316,6 +326,83 @@ export function generateEdgeChamfer(
 }
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a[0] - b[0], a[1] - b[1])
+
+/** Loops of one ring level above this many are ordered through `NearestStarts` (patterns P3). */
+const NEAREST_GRID_MIN = 64
+
+/**
+ * Nearest-neighbour order over many start points (patterns P3: a chamfer round hundreds of
+ * cells): a bucket grid of the points, searched ring by ring outwards from the tool until no
+ * nearer point can be left. `take` returns the nearest point not taken yet (ties: the lower
+ * index) and takes it.
+ */
+export class NearestStarts {
+  private readonly size: number
+  private readonly lo: Vec2
+  private readonly hi: Vec2
+  private readonly cells = new Map<string, number[]>()
+  private readonly taken: Uint8Array
+
+  constructor(private readonly points: readonly Vec2[]) {
+    this.taken = new Uint8Array(points.length)
+    let lo: Vec2 = [Infinity, Infinity]
+    let hi: Vec2 = [-Infinity, -Infinity]
+    for (const p of points) {
+      lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]
+      hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]
+    }
+    this.lo = lo
+    this.hi = hi
+    const area = Math.max(hi[0] - lo[0], 1e-6) * Math.max(hi[1] - lo[1], 1e-6)
+    this.size = Math.max(Math.sqrt(area / Math.max(points.length, 1)), 1e-3)
+    points.forEach((p, i) => {
+      const k = this.key(this.cell(p[0]), this.cell(p[1]))
+      const list = this.cells.get(k)
+      if (list === undefined) this.cells.set(k, [i])
+      else list.push(i)
+    })
+  }
+
+  private cell(x: number): number {
+    return Math.floor(x / this.size)
+  }
+
+  private key(i: number, j: number): string {
+    return `${i},${j}`
+  }
+
+  take(from: Vec2): number {
+    const ci = this.cell(from[0])
+    const cj = this.cell(from[1])
+    // the farthest ring that can hold a point: the grid's corners from the tool's cell
+    const reach = Math.max(
+      Math.abs(this.cell(this.lo[0]) - ci),
+      Math.abs(this.cell(this.hi[0]) - ci),
+      Math.abs(this.cell(this.lo[1]) - cj),
+      Math.abs(this.cell(this.hi[1]) - cj),
+    )
+    let best = -1
+    let bd = Infinity
+    for (let k = 0; k <= reach; k++) {
+      // every point in ring k is at least (k − 1) cells away
+      if (best >= 0 && (k - 1) * this.size > bd) break
+      for (let i = ci - k; i <= ci + k; i++)
+        for (let j = cj - k; j <= cj + k; j++) {
+          if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) !== k) continue
+          for (const n of this.cells.get(this.key(i, j)) ?? []) {
+            if (this.taken[n] === 1) continue
+            const d = dist(this.points[n]!, from)
+            if (d < bd || (d === bd && n < best)) {
+              bd = d
+              best = n
+            }
+          }
+        }
+    }
+    if (best >= 0) this.taken[best] = 1
+    return best
+  }
+}
 const along = (p: Vec2, d: Vec2, k: number): Vec2 => [p[0] + d[0] * k, p[1] + d[1] * k]
 
 /** The first point of a ring's items (a lift never comes first). */

@@ -46,7 +46,7 @@ import { SurfaceTable } from '../surfaces'
 import { shapeDefinition } from '../placement'
 import { resolveShape, shapeFromDTO, type NamedShape } from '../shape'
 import { PATTERN_HEAVY_CHORDS, type PatternFacts } from './layout'
-import { PATTERN_WEB_LIMIT } from './web'
+import { PATTERN_WEB_LIMIT, patternWeb, type PatternWeb, type WebInput } from './web'
 
 /** The cell: a primitive centred on its node, or a named closed shape of the part (its box centre). */
 export type PatternCell = { readonly rotation: Quantity } & (
@@ -81,6 +81,12 @@ export interface PatternBoundary {
 
 export type PatternFit = 'whole' | 'clip'
 
+/** The optional chamfer (P3): the owned edge chamfer round every cell, one width for all. */
+export interface PatternChamfer {
+  readonly width: Quantity
+  readonly angle: Quantity
+}
+
 export interface Pattern extends FeatureBase {
   readonly kind: 'pattern'
   readonly cell: PatternCell
@@ -100,6 +106,8 @@ export interface Pattern extends FeatureBase {
   readonly invert: boolean
   /** The pocket's depth below `on`. */
   readonly depth: Quantity
+  /** P3: Some = the owned chamfer `<id>_chamfer` on the pocket's edge (off by default). */
+  readonly chamfer: Option<PatternChamfer>
 }
 
 export const ownedShapeId = (featureId: string): string => `${featureId}_cells`
@@ -153,6 +161,7 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   fit: z.enum(['whole', 'clip']).optional(),
   invert: z.boolean().optional(),
   depth: length(),
+  chamfer: z.object({ width: length(), angle: angle() }).optional(),
 })
 
 function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
@@ -183,6 +192,9 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
   const originQs =
     d.origin === undefined ? [] : [q(d.origin[0], 'origin', 0), q(d.origin[1], 'origin', 1)]
   const rest = [q(d.angle, 'angle'), q(d.margin, 'margin'), q(d.depth, 'depth')]
+  const ch = d.chamfer
+  const chamferQs =
+    ch === undefined ? [] : [q(ch.width, 'chamfer', 'width'), q(ch.angle, 'chamfer', 'angle')]
   const bd = d.boundary
   const boundaryQs =
     bd === undefined
@@ -198,8 +210,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
     collect(originQs),
     collect(rest),
     collect(boundaryQs),
+    collect(chamferQs),
   ]).map((all) => {
-    const [cq, s, o, rest3, bq] = all as [
+    const [cq, s, o, rest3, bq, chq] = all as [
+      Quantity[],
       Quantity[],
       Quantity[],
       Quantity[],
@@ -246,6 +260,7 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       fit: d.fit ?? 'whole',
       invert: d.invert ?? false,
       depth: depth!,
+      chamfer: chq.length === 0 ? None : Some({ width: chq[0]!, angle: chq[1]! }),
     }
   })
 }
@@ -313,6 +328,14 @@ function patternToDTO(p: Pattern): FeatureDTO {
     ...(p.fit === 'clip' ? { fit: 'clip' } : {}),
     ...(p.invert ? { invert: true } : {}),
     depth: p.depth.toDTO(),
+    ...(p.chamfer.isSome()
+      ? {
+          chamfer: {
+            width: p.chamfer.unwrap().width.toDTO(),
+            angle: p.chamfer.unwrap().angle.toDTO(),
+          },
+        }
+      : {}),
   }
 }
 
@@ -332,6 +355,8 @@ function patternInvariants(p: Pattern): Issue[] {
   const positive = (q: Quantity, ...path: (string | number)[]) =>
     check(q.exact.compare(ZERO) > 0, path, 'positive', 'must be greater than 0')
   positive(p.depth, 'depth')
+  // the angle's range is the owned chamfer's rule (validate.ts), reported at chamfer.angle
+  if (p.chamfer.isSome()) positive(p.chamfer.unwrap().width, 'chamfer', 'width')
   check(p.margin.exact.compare(ZERO) >= 0, ['margin'], 'nonNegative', 'must be 0 or more')
   if (p.spacing.kind === 'gap') positive(p.spacing.gap, 'spacing', 'gap')
   else {
@@ -370,10 +395,11 @@ const MIN_ANCHOR: Anchor = Object.freeze({ u: 'min', v: 'min' })
 /**
  * One owned pocket placing the owned shape: anchored at its frame's corner [0, 0] (the face
  * frame's origin), so the cells keep face-frame coordinates (placement.ts anchors a pattern by
- * its frame, the face rectangle).
+ * its frame, the face rectangle). P3: with a chamfer, the owned edge chamfer on that pocket,
+ * round every loop (EC-B).
  */
 function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly ExpandedOperation[]> {
-  return derivedLength(ZERO, ctx.units).map((zero) => [
+  return derivedLength(ZERO, ctx.units).map((zero): ExpandedOperation[] => [
     {
       role: 'pocket',
       operation: {
@@ -391,6 +417,24 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
         floorRadius: zero,
       },
     },
+    ...(p.chamfer.isNone()
+      ? []
+      : [
+          {
+            role: 'chamfer',
+            operation: {
+              kind: 'chamfer' as const,
+              on: p.on,
+              edgeOf: ctx.ownedId('pocket'),
+              width: p.chamfer.unwrap().width,
+              angle: p.chamfer.unwrap().angle,
+              stepdown: None,
+              sourceEdge: None,
+              loops: None,
+              cornerLift: false,
+            },
+          },
+        ]),
   ])
 }
 
@@ -516,8 +560,13 @@ function patternShapes(p: Pattern, ctx: ExpansionContext): AppResult<readonly Sh
 
 // ── checks ─────────────────────────────────────────────────────────────────────────────────
 
-/** Owned pocket parameter → pattern field. */
+/** Owned pocket (and chamfer, P3) parameter → pattern field. */
 function patternFieldOf(role: string, path: IssuePath): IssuePath | undefined {
+  if (role === 'chamfer') {
+    const head = String(path[0])
+    if (head === 'width' || head === 'angle') return ['chamfer', head]
+    return head === 'edgeOf' || head === 'depth' ? ['chamfer', 'width'] : undefined
+  }
   if (role !== 'pocket') return undefined
   const head = String(path[0])
   if (head === 'depth' || head === 'on') return [head, ...path.slice(1)]
@@ -530,7 +579,8 @@ function patternFieldOf(role: string, path: IssuePath): IssuePath | undefined {
  * `dfm.patternEmpty` (no cell fits the boundary less the margin), `dfm.patternHeavy` (info: the
  * cells' region passes `PATTERN_HEAVY_CHORDS`), from the owned pocket's placed region in the
  * part's geometry input, and `dfm.patternThinWeb` (P2: a web or, inverted, an island under
- * `PATTERN_WEB_LIMIT`, from the layout's facts); `operation` = the feature id.
+ * `PATTERN_WEB_LIMIT`, from the layout's facts); `operation` = the feature id. P3: the owned
+ * chamfer's `dfm.chamferMeets` (`chamferMeetsOf`).
  */
 function patternWarnings(
   p: Pattern,
@@ -587,6 +637,8 @@ function patternWarnings(
       },
     })
   }
+  const meets = chamferMeetsOf(p, facts, geometry.region2d)
+  if (meets !== undefined) out.push(meets)
   const chords = regionLoops(contour.region).reduce(
     (s, l) => s + flattenLoop(l, 'shrink').points.length,
     0,
@@ -603,6 +655,42 @@ function patternWarnings(
     params: { feature: p.id, chords, ...(cells === undefined ? {} : { cells }) },
   })
   return out
+}
+
+/** `patternWeb` at a limit, cached per resolved layout (its facts are cached with it). */
+const websAt = new WeakMap<WebInput, Map<number, PatternWeb | undefined>>()
+
+/**
+ * P3: `dfm.chamferMeets` of the owned chamfer when the bevels of two cells meet: the narrowest web
+ * (inverted: island) under twice the chamfer's width, measured as `dfm.patternThinWeb` (exact for
+ * the lattice, a few 2D operations); the suggestion is half that web. It stands in for the edge
+ * chamfer's region-wide check (`edge.pattern`), which takes minutes on hundreds of cells.
+ */
+function chamferMeetsOf(
+  p: Pattern,
+  facts: PatternFacts | undefined,
+  port: Region2dPort | undefined,
+): DfmWarning | undefined {
+  const input = facts?.webInput
+  if (p.chamfer.isNone() || input === undefined || port === undefined) return undefined
+  const width = p.chamfer.unwrap().width.canonical
+  const limit = 2 * width
+  let byLimit = websAt.get(input)
+  if (byLimit === undefined) websAt.set(input, (byLimit = new Map()))
+  if (!byLimit.has(limit)) byLimit.set(limit, patternWeb(port, input, limit))
+  const web = byLimit.get(limit)
+  if (web === undefined) return undefined
+  const id = `${p.id}_chamfer`
+  const where = web.island ? 'an island' : 'the web between cells'
+  return {
+    code: 'dfm.chamferMeets',
+    severity: 'warning',
+    message: `${id}: the bevels meet on ${where}, ${web.width} mm wide: its top becomes a ridge`,
+    operation: id,
+    parameter: 'width',
+    params: { at: web.at, wall: web.width, width, feature: p.id },
+    suggestion: { relation: 'atMost', value: Math.floor((web.width / 2) * 100) / 100 },
+  }
 }
 
 /**

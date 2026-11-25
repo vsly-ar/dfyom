@@ -156,6 +156,7 @@ export const LoopChamferGeometrySchema = z.object({
       .array(z.object({ at: Vec2Schema, width: z.number() }))
       .readonly()
       .exactOptional(),
+    pattern: z.literal(true).exactOptional(),
   }),
   width: z.number(),
   angle: z.number(),
