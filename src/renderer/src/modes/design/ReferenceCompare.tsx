@@ -8,7 +8,7 @@ import { useState } from 'react'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
 import { referenceMessages } from '../../messages/reference'
 import { useUi } from '../../shell/ShellContext'
-import { Button, ErrorMessage, QuantityInput, Switch } from '../../ui'
+import { Button, ErrorMessage, InspectorGroup, QuantityInput, Switch } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, type DesignPart } from './model'
 import {
@@ -57,8 +57,7 @@ export function ReferenceCompare({
   }
 
   return (
-    <section className={styles['group']} aria-label={c.title} aria-busy={on && state.busy}>
-      <h3 className={styles['groupTitle']}>{c.title}</h3>
+    <InspectorGroup title={c.title} aria-busy={on && state.busy}>
       <Switch
         label={c.show}
         checked={on}
@@ -145,7 +144,7 @@ export function ReferenceCompare({
           ) : null}
         </>
       )}
-    </section>
+    </InspectorGroup>
   )
 }
 

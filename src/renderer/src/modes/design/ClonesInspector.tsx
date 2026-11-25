@@ -29,6 +29,7 @@ import {
   PanelHeader,
   ReadOnlyReason,
   WarningList,
+  InspectorGroup,
 } from '../../ui'
 import type { ClonePathData } from '../../viewport/clone-path'
 import { CloneRowList, type AxisNames } from './CloneRowList'
@@ -246,8 +247,7 @@ export function ClonesDraft({
       <PanelHeader title={c.draftTitle} meta={c.draftMeta} />
       <div className={`${styles['fields']} ${styles['draftBody']}`}>
         {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
-        <section className={styles['group']} aria-label={c.source}>
-          <h3 className={styles['groupTitle']}>{c.source}</h3>
+        <InspectorGroup title={c.source}>
           <ul className={styles['cloneSources']}>
             {draft.options.map((o) =>
               o.fixed ? (
@@ -278,9 +278,8 @@ export function ClonesDraft({
                 {e.text}
               </p>
             ))}
-        </section>
-        <section className={styles['group']} aria-label={c.rows}>
-          <h3 className={styles['groupTitle']}>{c.rows}</h3>
+        </InspectorGroup>
+        <InspectorGroup title={c.rows}>
           <ReadoutLine readout={readout} />
           <CloneRowList
             owner="draft"
@@ -300,7 +299,7 @@ export function ClonesDraft({
               data !== undefined && patch({ rows: toggleSkip(draft.rows, data, n) })
             }
           />
-        </section>
+        </InspectorGroup>
       </div>
       {/* the draft's outcome, as a dialog footer: Cancel, then the primary at the end (DF47) */}
       <div role="group" aria-label={c.actions} className={styles['draftFooter']}>
@@ -431,8 +430,7 @@ export function ClonesInspector({
           name={feature.name}
           onCommit={(n) => void update({ name: n }, 'name')}
         />
-        <section className={styles['group']} aria-label={c.source}>
-          <h3 className={styles['groupTitle']}>{c.source}</h3>
+        <InspectorGroup title={c.source}>
           <ul className={styles['cloneSources']} aria-label={c.sourceList}>
             {nested.map((n) => {
               const label = n.kind === 'operation' ? n.op.name : n.feature.name
@@ -484,9 +482,8 @@ export function ClonesInspector({
                 {e.text}
               </p>
             ))}
-        </section>
-        <section className={styles['group']} aria-label={c.rows} data-feature-field="rows">
-          <h3 className={styles['groupTitle']}>{c.rows}</h3>
+        </InspectorGroup>
+        <InspectorGroup title={c.rows} data-feature-field="rows">
           <ReadoutLine readout={readout} />
           {own.length > 0 ? (
             <WarningList
@@ -516,15 +513,14 @@ export function ClonesInspector({
             onCancelGesture={cancelGesture}
             onRestore={(n) => toggle(feature, n)}
           />
-        </section>
+        </InspectorGroup>
         {findings.length > 0 ? (
-          <section className={styles['group']} aria-label={f.findings}>
-            <h3 className={styles['groupTitle']}>{f.findings}</h3>
+          <InspectorGroup title={f.findings}>
             <WarningList
               labels={warningLabels}
               items={findings.map((w) => warningView(w, part, undefined, select))}
             />
-          </section>
+          </InspectorGroup>
         ) : null}
       </div>
     </div>
@@ -612,8 +608,12 @@ export function CloneInstanceInspector({
             {sourceOps.map((src) => {
               const op = instanceOp(src)
               return (
-                <details key={src.id} className={styles['instanceGroup']}>
-                  <summary>{c.instanceGroup(src.name, n)}</summary>
+                <InspectorGroup
+                  key={src.id}
+                  title={c.instanceGroup(src.name, n)}
+                  collapsible
+                  rememberKey="clone.sourceOperation"
+                >
                   <p className={styles['ownedNoteText']}>
                     {c.cloneOf}{' '}
                     <button
@@ -641,7 +641,7 @@ export function CloneInstanceInspector({
                       }}
                     />
                   ) : null}
-                </details>
+                </InspectorGroup>
               )
             })}
           </ReadOnlyReason>

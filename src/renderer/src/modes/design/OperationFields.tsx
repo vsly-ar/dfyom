@@ -22,6 +22,7 @@ import {
   Field,
   FieldIcon,
   IconButton,
+  InspectorGroup,
   QuantityInput,
   SegmentedControl,
   Select,
@@ -158,9 +159,9 @@ export function OperationFields({
 }): React.JSX.Element | null {
   const op = ctx.op
   const g = (title: string, children: React.ReactNode) => (
-    <Group title={title} level={level}>
+    <InspectorGroup title={title} level={level}>
       {children}
-    </Group>
+    </InspectorGroup>
   )
   const toolGroup = tool === undefined ? null : g(t.groups.tool, tool)
   switch (op.kind) {
@@ -410,24 +411,6 @@ export function OperationFields({
   }
 }
 
-export function Group({
-  title,
-  level,
-  children,
-}: {
-  title: string
-  level: 3 | 4
-  children: React.ReactNode
-}): React.JSX.Element {
-  const Heading = level === 3 ? 'h3' : 'h4'
-  return (
-    <section className={styles['group']} aria-label={title}>
-      <Heading className={styles['groupTitle']}>{title}</Heading>
-      {children}
-    </section>
-  )
-}
-
 function ShapeGroup({
   ctx,
   level,
@@ -442,7 +425,7 @@ function ShapeGroup({
   const shape = op.shape
   const names = axes(ctx)
   return (
-    <Group title={t.groups.shape} level={level}>
+    <InspectorGroup title={t.groups.shape} level={level}>
       <ShapePicker ctx={ctx} actions={ctx.shapeActions} />
       {children}
       <AnchorField ctx={ctx} />
@@ -517,7 +500,7 @@ function ShapeGroup({
           />
         </Field>
       ) : null}
-    </Group>
+    </InspectorGroup>
   )
 }
 

@@ -275,12 +275,6 @@
   padding: var(--space-3);
 }
 
-.group {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-2);
-}
-
 /* the plan operation's findings, first in its inspector (DF67); a click on a row's error or warning
    count focuses it with a short accent wash, so the eye lands there */
 .checks {
@@ -312,25 +306,12 @@
   color: var(--text-muted);
 }
 
-.groupHeader {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
 /* Part (plan copy), task E3b */
 .revert {
   justify-self: start;
 }
 
 .planCopyOperation {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.warnings {
   display: grid;
   gap: var(--space-2);
 }
@@ -763,11 +744,6 @@
 }
 
 /* DF78: the setup's work zero and alignment points (AlignmentFields), docs/modes/alignment.md#plan-ui */
-.alignGroup {
-  display: grid;
-  gap: var(--space-2);
-}
-
 .alignActions {
   display: flex;
   flex-wrap: wrap;

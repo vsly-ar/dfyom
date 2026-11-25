@@ -1,0 +1,270 @@
+/* InspectorGroup: group header style, separators, accordion and More row (DF110).
+   Doc: docs/conventions/inspector-layout.md#group-header-style. The container stacks groups with
+   a --space-3 gap and --space-3 padding (inspector `.fields`); --inspector-bleed is how far the
+   rule reaches into that padding (0 in containers without one). */
+.group {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* --space-5 above a group that follows fields or another group (gap + margin), so its title never
+   reads as one more label; a rule above every group but the first, --space-3 below it */
+.group:not(:first-child) {
+  margin-top: var(--space-2);
+}
+
+.group ~ .group {
+  padding-top: var(--space-3);
+}
+
+.group ~ .group::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--inspector-bleed, var(--space-3)));
+  left: calc(-1 * var(--inspector-bleed, var(--space-3)));
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
+
+/* nested (h4) groups: the rule stays within the parent's content, the title steps back a level */
+.group[data-level='4'] {
+  --inspector-bleed: 0px;
+}
+
+.group[data-level='4'] > .header > .title {
+  color: var(--text-muted);
+}
+
+/* the last group ends with --space-4 (container padding + this) */
+.group[data-level='3']:last-child {
+  margin-bottom: var(--space-1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--lh-xs);
+  /* --space-3 to the first field with the group's --space-2 gap */
+  margin-bottom: var(--space-1);
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.meta {
+  flex: none;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  flex: none;
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/* the accordion's header: the whole title line is the disclosure button */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  margin: calc(-1 * var(--space-1)) 0;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.toggle:focus-visible,
+.moreToggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.titleText {
+  flex: none;
+}
+
+.chevron {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  color: var(--text-muted);
+  transition: color var(--motion-fast);
+}
+
+.chevron > svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.chevron[data-open] > svg {
+  transform: none;
+}
+
+.toggle:hover,
+.toggle:hover .chevron,
+.moreToggle:hover .chevron {
+  color: var(--text);
+}
+
+.severity {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.severity[data-severity='error'] {
+  color: var(--danger);
+}
+
+.severity[data-severity='warning'] {
+  color: var(--warning);
+}
+
+/* closed: the values that matter, muted, in sentence case on one line */
+.separator {
+  flex: none;
+  white-space: pre;
+  font-weight: var(--weight-regular);
+  color: var(--text-muted);
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-regular);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--text-sm);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.info {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -6px;
+  color: var(--text-muted);
+  cursor: help;
+  transition: color var(--motion-fast);
+}
+
+.info:hover {
+  color: var(--text);
+}
+
+.info svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.tip {
+  display: block;
+  max-width: 32ch;
+}
+
+/* the folding body: height and opacity with --motion-base (0 under reduced motion: instant) */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  interpolate-size: allow-keywords;
+}
+
+.body[data-anim] {
+  overflow: clip;
+}
+
+.body[data-anim='opening'] {
+  animation: unfold var(--motion-base) var(--ease-standard);
+}
+
+.body[data-anim='closing'] {
+  animation: fold var(--motion-base) var(--ease-exit) forwards;
+}
+
+@keyframes unfold {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: auto;
+    opacity: 1;
+  }
+}
+
+@keyframes fold {
+  from {
+    height: auto;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* the More row: a quiet text button, then its fields in place */
+.more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.moreToggle {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.moreToggle:hover {
+  color: var(--text);
+}

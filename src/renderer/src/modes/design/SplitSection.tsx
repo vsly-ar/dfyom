@@ -35,6 +35,7 @@ import {
   type WarningListLabels,
   type WarningView,
   type MenuEntry,
+  InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
 import { NameField } from './NameField'
@@ -213,8 +214,7 @@ export function SplitSection({
   )
   if (split === undefined || stock === undefined)
     return (
-      <section aria-label={t.title} className={styles['splitSection']}>
-        <h3 className={styles['groupTitle']}>{t.title}</h3>
+      <InspectorGroup title={t.title} className={styles['splitSection']}>
         {/* full width, as Split to fit… under it and the editor's actions (design review U9) */}
         <div className={styles['addRow']}>
           <Button
@@ -232,7 +232,7 @@ export function SplitSection({
         )}
         {error ? <ErrorMessage error={error} /> : null}
         {confirmDialog}
-      </section>
+      </InspectorGroup>
     )
   const args = splitArgs(split)
   const L = stock.length.canonical
@@ -287,10 +287,11 @@ export function SplitSection({
     ).length
   }
   return (
-    <section aria-label={t.title} className={styles['splitSection']}>
-      <h3 className={styles['groupTitle']}>
-        {t.title} · {t.pieces(pieces.length)}
-      </h3>
+    <InspectorGroup
+      title={t.title}
+      heading={`${t.title} · ${t.pieces(pieces.length)}`}
+      className={styles['splitSection']}
+    >
       <p className={styles['muted']}>{t.intro}</p>
       <SplitPreview
         part={part}
@@ -529,7 +530,7 @@ export function SplitSection({
       </div>
       {error ? <ErrorMessage error={error} /> : null}
       {confirmDialog}
-    </section>
+    </InspectorGroup>
   )
 }
 
@@ -656,8 +657,8 @@ function KeyFields({
 /**
  * A joint's settings (U9 Q131): a disclosure under the joint control, its summary a one-line
  * read-out ("Key settings · clearance 0.15 mm · 2 keys"); open when the joint was chosen in
- * this inspector, collapsed otherwise (the joint is set), so a set split stays short. Opens and
- * closes over `--motion-base` (the height, cut under reduced motion).
+ * this inspector, collapsed otherwise (the joint is set), so a set split stays short. The shared
+ * accordion (DF110): opens and closes over `--motion-base`, instant under reduced motion.
  */
 function JointSettings({
   title,
@@ -678,18 +679,16 @@ function JointSettings({
     if (opened) setOpen(true)
   }
   return (
-    <details
-      className={styles['splitSettings']}
+    <InspectorGroup
+      title={title}
+      level={4}
+      collapsible
       open={open}
-      onToggle={(e) => setOpen(e.currentTarget.open)}
+      onOpenChange={setOpen}
+      summary={summary}
     >
-      <summary>
-        <Icon name="chevron-down" />
-        <span className={styles['splitSettingsTitle']}>{title}</span>
-        <span className={styles['splitSettingsSummary']}>{summary}</span>
-      </summary>
-      <div className={styles['splitGroup']}>{children}</div>
-    </details>
+      {children}
+    </InspectorGroup>
   )
 }
 
@@ -929,8 +928,13 @@ function DowelFields({
             value={quantityOf(dowels.depth)}
             onCommit={(q, gesture) => send({ ...args, dowels: { ...d, depth: q.source } }, gesture)}
           />
-          <details className={styles['splitDowels']}>
-            <summary>{t.positions(holes.length)}</summary>
+          <InspectorGroup
+            title={t.positions(holes.length)}
+            level={4}
+            collapsible
+            rememberKey="split.dowelPositions"
+            className={styles['splitDowels']}
+          >
             <ul>
               {dowels.holes.map((h, i) => (
                 <li key={i} aria-label={t.dowelLevel(i + 1, split.levels[h.level]?.source ?? '')}>
@@ -964,7 +968,7 @@ function DowelFields({
                 </li>
               ))}
             </ul>
-          </details>
+          </InspectorGroup>
           <div className={styles['addRow']}>
             <Button
               size="sm"
@@ -1292,15 +1296,14 @@ export function PieceInspector({
           </Button>
         </div>
         {error ? <ErrorMessage error={error} /> : null}
-        <section aria-label={dfmMessages.listTitle} className={styles['warnings']}>
-          <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
+        <InspectorGroup title={dfmMessages.listTitle}>
           <WarningList
             labels={labels}
             items={warnings.warnings.map(warningItems)}
             empty={dfmMessages.none}
             {...(warnings.evaluation === 'pending' ? { note: dfmMessages.checksPending } : {})}
           />
-        </section>
+        </InspectorGroup>
       </div>
     </div>
   )

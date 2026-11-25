@@ -29,6 +29,7 @@ import {
   StopControl,
   AnchorPicker,
   type AnchorValue,
+  InspectorGroup,
   Menu,
   ModeSwitcher,
   Panel,
@@ -376,10 +377,34 @@ function ShellParts(): React.JSX.Element {
           label="Pocket sections"
           items={[
             { value: 'shape', label: 'Shape', content: <p className={styles['muted']}>Shape</p> },
-            { value: 'depth', label: 'Depth', content: <p className={styles['muted']}>Depth</p> },
+            {
+              value: 'depth',
+              label: 'Depth',
+              severity: 'warning',
+              content: <p className={styles['muted']}>Depth</p>,
+            },
             { value: 'tabs', label: 'Tabs', content: null, disabled: true },
           ]}
         />
+      </Row>
+      <Row label="Inspector groups · group, accordion (closed: summary, problem icon), More row (DF110)">
+        <div className={styles['inspectorDemo']}>
+          <InspectorGroup title="Shape">
+            <p className={styles['muted']}>Shape, X, Y, Length, Width</p>
+            <InspectorGroup.More fields={['Anchor', 'Rotation']}>
+              <p className={styles['muted']}>Anchor, Rotation</p>
+            </InspectorGroup.More>
+          </InspectorGroup>
+          <InspectorGroup title="Depth" meta="1 face">
+            <p className={styles['muted']}>On, Depth</p>
+          </InspectorGroup>
+          <InspectorGroup title="Corners" collapsible defaultOpen>
+            <p className={styles['muted']}>Corner radius</p>
+          </InspectorGroup>
+          <InspectorGroup title="Slot" collapsible summary="auto" severity="warning">
+            <p className={styles['muted']}>Slot width</p>
+          </InspectorGroup>
+        </div>
       </Row>
       <Row label="Term · dotted underline, definition on hover and focus">
         <p className={styles['muted']}>

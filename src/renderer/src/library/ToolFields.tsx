@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
-import { Field, FieldInput, Select, type StepKind } from '../ui'
+import { Field, FieldInput, InspectorGroup, Select, type StepKind } from '../ui'
 import {
   followDraft,
   quantityText,
@@ -15,7 +15,14 @@ import {
   withToolType,
   type ToolDraft,
 } from './form'
-import { Focusable, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
+import {
+  Focusable,
+  NameField,
+  NotesField,
+  QuantityField,
+  WithAside,
+  type FormProps,
+} from './fields'
 import { PresetTable } from './PresetTable'
 import { ToolDrawing, type ToolDimension } from './ToolDrawing'
 import styles from './LibraryForm.module.css'
@@ -219,13 +226,12 @@ export function ToolFields({
   return (
     <>
       {name}
-      <Group
-        title={libraryMessages.window.groups.geometry}
-        aside={<ToolDrawing type={values.type} focused={focused} />}
-      >
-        {geometry}
-      </Group>
-      <Group title={libraryMessages.window.groups.presets}>
+      <InspectorGroup title={libraryMessages.window.groups.geometry}>
+        <WithAside aside={<ToolDrawing type={values.type} focused={focused} />}>
+          {geometry}
+        </WithAside>
+      </InspectorGroup>
+      <InspectorGroup title={libraryMessages.window.groups.presets}>
         <PresetTable
           presets={values.presets}
           tool={values}
@@ -233,15 +239,15 @@ export function ToolFields({
           messages={messages}
           onChange={(presets) => set({ presets })}
         />
-      </Group>
-      <Group
+      </InspectorGroup>
+      <InspectorGroup
         title={libraryMessages.window.groups.details}
-        collapsible={{
-          // a field inside with an issue opens it: Save focuses the first invalid field
-          open: detailsOpen || detailsInvalid,
-          onOpenChange: (open) => setDetailsOpen(open),
-          summary: detailsSummary,
-        }}
+        collapsible
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        // a field inside with an issue opens it: Save focuses the first invalid field
+        forceOpen={detailsInvalid}
+        summary={detailsSummary}
       >
         {quantity('overallLength', 'length', 'overallLength', { info: m.overallLengthNote })}
         {material}
@@ -263,7 +269,7 @@ export function ToolFields({
           messages={messages('notes')}
           onChange={(notes) => set({ notes })}
         />
-      </Group>
+      </InspectorGroup>
     </>
   )
 }

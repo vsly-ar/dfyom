@@ -222,6 +222,8 @@ describe('AppShell', () => {
         jogKeys: 'game',
         skipHomeConfirm: [],
         jogFeed: {},
+        inspectorGroups: {},
+        inspectorTabs: {},
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

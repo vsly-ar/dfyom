@@ -10,7 +10,7 @@ import { designMessages } from '../../messages/design'
 import { libraryMessages } from '../../messages/library'
 import { planMessages, type FeedSource } from '../../messages/plan'
 import { useReplica, useShell } from '../../shell/ShellContext'
-import { Button } from '../../ui'
+import { Button, InspectorGroup } from '../../ui'
 import styles from './Plan.module.css'
 
 const t = planMessages.inspector
@@ -172,8 +172,7 @@ function Explanation({
   return (
     <>
       {i !== null ? (
-        <section aria-label={c.inputs} className={styles['group']}>
-          <h4 className={styles['groupTitle']}>{c.inputs}</h4>
+        <InspectorGroup title={c.inputs} level={4}>
           <dl className={styles['calcList']}>
             <Row term={c.material} value={classes[i.materialClass] ?? i.materialClass} />
             <Row
@@ -194,11 +193,10 @@ function Explanation({
               value={i.spindlePower === null ? c.noPower : `${calcNumber(i.spindlePower)} W`}
             />
           </dl>
-        </section>
+        </InspectorGroup>
       ) : null}
 
-      <section aria-label={c.fields} className={styles['group']}>
-        <h4 className={styles['groupTitle']}>{c.fields}</h4>
+      <InspectorGroup title={c.fields} level={4}>
         {fields.map((f) => {
           const v = e.fields[f]
           const label = t.feeds[f]
@@ -230,10 +228,9 @@ function Explanation({
             </div>
           )
         })}
-      </section>
+      </InspectorGroup>
 
-      <section aria-label={c.used} className={styles['group']}>
-        <h4 className={styles['groupTitle']}>{c.used}</h4>
+      <InspectorGroup title={c.used} level={4}>
         {u === null ? (
           typeof e.auto === 'object' ? (
             <p className={styles['muted']}>{c.noData(e.auto.unavailable)}</p>
@@ -257,11 +254,10 @@ function Explanation({
             ) : null}
           </dl>
         )}
-      </section>
+      </InspectorGroup>
 
       {e.finish != null ? (
-        <section aria-label={c.finish} className={styles['group']}>
-          <h4 className={styles['groupTitle']}>{c.finish}</h4>
+        <InspectorGroup title={c.finish} level={4}>
           <dl className={styles['calcList']}>
             <Row term={c.finishAllowance} value={`${calcNumber(e.finish.allowance)} mm`} />
             <Row
@@ -271,7 +267,7 @@ function Explanation({
             <Row term={c.finishChipLoad} value={`${calcNumber(e.finish.fz)} mm`} />
             <Row term={c.finishChipThinning} value={`×${calcNumber(e.finish.chipThinning)}`} />
           </dl>
-        </section>
+        </InspectorGroup>
       ) : null}
     </>
   )

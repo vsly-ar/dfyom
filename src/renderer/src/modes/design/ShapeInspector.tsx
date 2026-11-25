@@ -39,6 +39,7 @@ import {
   type FieldIconName,
   type FieldMessage,
   type StepKind,
+  InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
@@ -193,13 +194,14 @@ export function ShapeInspector({
             void call('design.shape.update', { partId: part.dto.id, shapeId: shape.id, name })
           }
         />
-        <section className={styles['group']} aria-label={t.items}>
-          <div className={styles['groupHead']}>
-            <h3 className={styles['groupTitle']}>{t.items}</h3>
+        <InspectorGroup
+          title={t.items}
+          actions={
             <Menu label={t.addItem} items={addShapeEntries(addItem)}>
               <IconButton label={t.addItem} icon={<Icon name="add" />} />
             </Menu>
-          </div>
+          }
+        >
           <ShapeItemList
             shape={shape}
             selected={index}
@@ -209,11 +211,10 @@ export function ShapeInspector({
             onMove={move}
             onRemove={remove}
           />
-        </section>
-        <section className={styles['group']} aria-label={t.fields}>
-          <h3 className={styles['groupTitle']}>{t.itemLabel(dto.kind, index + 1)}</h3>
+        </InspectorGroup>
+        <InspectorGroup title={t.fields} heading={t.itemLabel(dto.kind, index + 1)}>
           <ItemFields ctx={ctx} />
-        </section>
+        </InspectorGroup>
         {dto.kind === 'path' ? (
           <SegmentTable
             ctx={ctx}
@@ -221,8 +222,7 @@ export function ShapeInspector({
             onSelect={(k) => selectItem(index, k)}
           />
         ) : null}
-        <section className={styles['group']} aria-label={t.summary}>
-          <h3 className={styles['groupTitle']}>{t.summary}</h3>
+        <InspectorGroup title={t.summary}>
           {info?.issues !== undefined && info.issues.length > 0 ? (
             <p className={styles['shapeInvalid']} role="status">
               {t.invalid}
@@ -264,7 +264,7 @@ export function ShapeInspector({
               ) : null}
             </dl>
           ) : null}
-        </section>
+        </InspectorGroup>
       </div>
       {svg.dialog}
     </div>

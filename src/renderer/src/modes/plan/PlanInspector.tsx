@@ -41,6 +41,7 @@ import {
   type WarningListLabels,
   type WarningTier,
   type WarningView,
+  InspectorGroup,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { blankText } from '../design/split-view'
@@ -257,15 +258,14 @@ function PlanSummary({
           </p>
         )}
         <p className={styles['muted']}>{t.noSelection}</p>
-        <section aria-label={m.warnings.title} className={styles['warnings']}>
-          <h3 className={styles['groupTitle']}>{m.warnings.title}</h3>
+        <InspectorGroup title={m.warnings.title}>
           <WarningList
             labels={planWarningLabels}
             items={warnings.map((w, i) => planWarningView(w, plan, select, i, units))}
             empty={m.warnings.none}
             outdated={outdated ? applyMessages.checksOutdated : undefined}
           />
-        </section>
+        </InspectorGroup>
       </div>
     </div>
   )
@@ -500,15 +500,14 @@ function OperationInspector({
         {failed ? <ErrorMessage error={failed} message={t.commandFailed} /> : null}
 
         {checks.length > 0 ? (
-          <section
+          <InspectorGroup
             ref={checksRef}
             tabIndex={-1}
-            className={`${styles['group']} ${styles['checks']}`}
-            aria-label={t.checks}
+            className={styles['checks']}
+            title={t.checks}
           >
-            <h3 className={styles['groupTitle']}>{t.checks}</h3>
             <WarningList labels={planWarningLabels} items={checks} />
-          </section>
+          </InspectorGroup>
         ) : null}
 
         {op.aid === undefined ? null : (
@@ -523,8 +522,7 @@ function OperationInspector({
           />
         )}
 
-        <section className={styles['group']} aria-label={t.groups.tool}>
-          <h3 className={styles['groupTitle']}>{t.groups.tool}</h3>
+        <InspectorGroup title={t.groups.tool}>
           <Field label={t.tool} messages={toolMessages} readOnly={readOnly}>
             <Select
               placeholder={t.toolPlaceholder}
@@ -635,7 +633,7 @@ function OperationInspector({
             readOnly={readOnly}
             findings={findings}
           />
-        </section>
+        </InspectorGroup>
 
         {op.aid === undefined ? <PlanCopyGroup doc={doc} plan={plan} op={op} /> : null}
 
@@ -654,8 +652,7 @@ function OperationInspector({
         ) : null}
 
         {current !== null && view !== undefined ? (
-          <section className={styles['group']} aria-label={t.groups.feeds}>
-            <h3 className={styles['groupTitle']}>{t.groups.feeds}</h3>
+          <InspectorGroup title={t.groups.feeds}>
             {fields.map((f) => (
               <FeedField
                 key={f}
@@ -679,7 +676,7 @@ function OperationInspector({
               fields={fields}
               presetName={view.presetName}
             />
-          </section>
+          </InspectorGroup>
         ) : null}
       </div>
     </div>

@@ -23,6 +23,7 @@ import { useRegion2d } from '../../shell/ShellContext'
 import {
   ErrorMessage,
   Field,
+  InspectorGroup,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -293,7 +294,7 @@ export function PatternInspector({
           />
         </div>
 
-        <Group title={p.groups.cell}>
+        <InspectorGroup title={p.groups.cell}>
           <div data-feature-field="cell">
             <Field label={p.cell} messages={messagesAt('cell')}>
               <Select
@@ -352,9 +353,9 @@ export function PatternInspector({
             (source) => ({ cell: cellArgs(cell, { rotation: source }) }),
             '0°',
           )}
-        </Group>
+        </InspectorGroup>
 
-        <Group title={p.groups.layout}>
+        <InspectorGroup title={p.groups.layout}>
           <div data-feature-field="lattice">
             <Field label={p.lattice} kind="toggle" messages={messagesAt('lattice')}>
               <SegmentedControl<Lattice>
@@ -448,9 +449,9 @@ export function PatternInspector({
               />
             </Field>
           </div>
-        </Group>
+        </InspectorGroup>
 
-        <Group title={p.groups.area}>
+        <InspectorGroup title={p.groups.area}>
           <div data-feature-field="on">
             <Field label={p.on} messages={messagesAt('on')}>
               <Select
@@ -547,9 +548,9 @@ export function PatternInspector({
               />
             </Field>
           </div>
-        </Group>
+        </InspectorGroup>
 
-        <Group title={p.groups.cut}>
+        <InspectorGroup title={p.groups.cut}>
           <div data-feature-field="through">
             <Field
               label={p.through}
@@ -607,9 +608,9 @@ export function PatternInspector({
               />
             </div>
           )}
-        </Group>
+        </InspectorGroup>
 
-        <Group title={p.groups.chamfer}>
+        <InspectorGroup title={p.groups.chamfer}>
           <div data-feature-field="chamfer">
             <Field
               label={p.chamfer}
@@ -681,16 +682,15 @@ export function PatternInspector({
               />
             </div>
           )}
-        </Group>
+        </InspectorGroup>
 
         {unplaced.length > 0 ? (
-          <section className={styles['group']} aria-label={m.features.findings}>
-            <h3 className={styles['groupTitle']}>{m.features.findings}</h3>
+          <InspectorGroup title={m.features.findings}>
             <WarningList
               labels={warningLabels}
               items={unplaced.map((w) => warningView(w, part, undefined, select))}
             />
-          </section>
+          </InspectorGroup>
         ) : null}
       </div>
     </div>
@@ -741,19 +741,4 @@ const CELL_LOOPS: Record<Exclude<CellKind, 'shape'>, Loop[]> = {
     poly([...arcPoints([3.5, 0], 2.5, -90, 90, 8), ...arcPoints([-3.5, 0], 2.5, 90, 270, 8)]),
   ],
   polygon: [poly(arcPoints([0, 0], 4, 30, 330, 6))],
-}
-
-function Group({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section className={styles['group']} aria-label={title}>
-      <h3 className={styles['groupTitle']}>{title}</h3>
-      {children}
-    </section>
-  )
 }

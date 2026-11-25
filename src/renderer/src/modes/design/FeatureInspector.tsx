@@ -16,7 +16,14 @@ import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import { useShell, useUi } from '../../shell/ShellContext'
-import { ErrorMessage, Icon, PanelHeader, ReadOnlyReason, WarningList } from '../../ui'
+import {
+  ErrorMessage,
+  Icon,
+  InspectorGroup,
+  PanelHeader,
+  ReadOnlyReason,
+  WarningList,
+} from '../../ui'
 import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import {
@@ -252,8 +259,7 @@ export function FeatureInspector({
           name={feature.name}
           onCommit={(name) => void update({ name })}
         />
-        <section className={styles['group']} aria-label={f.kindLabel(feature.kind)}>
-          <h3 className={styles['groupTitle']}>{f.kindLabel(feature.kind)}</h3>
+        <InspectorGroup title={f.kindLabel(feature.kind)}>
           <p className={styles['muted']}>{f.placeholder}</p>
           <dl ref={factsRef} className={styles['featureFacts']}>
             {facts.map(([field, label, value]) => (
@@ -268,10 +274,9 @@ export function FeatureInspector({
               </div>
             ))}
           </dl>
-        </section>
+        </InspectorGroup>
         {nested.length > 0 ? (
-          <section className={styles['group']} aria-label={f.source}>
-            <h3 className={styles['groupTitle']}>{f.source}</h3>
+          <InspectorGroup title={f.source}>
             <ul className={styles['featureLinks']}>
               {nested.map((n) => (
                 <li key={n.id}>
@@ -285,11 +290,10 @@ export function FeatureInspector({
                 </li>
               ))}
             </ul>
-          </section>
+          </InspectorGroup>
         ) : null}
         {feature.kind !== 'clones' && owned.length > 0 ? (
-          <section className={styles['group']} aria-label={f.ownedGroup}>
-            <h3 className={styles['groupTitle']}>{f.ownedGroup}</h3>
+          <InspectorGroup title={f.ownedGroup}>
             <ul className={styles['featureLinks']}>
               {owned.map((o) => (
                 <li key={o.id}>
@@ -304,10 +308,9 @@ export function FeatureInspector({
                 </li>
               ))}
             </ul>
-          </section>
+          </InspectorGroup>
         ) : null}
-        <section className={styles['group']} aria-label={f.findings}>
-          <h3 className={styles['groupTitle']}>{f.findings}</h3>
+        <InspectorGroup title={f.findings}>
           <WarningList
             labels={warningLabels}
             items={findings.map((w) => {
@@ -317,7 +320,7 @@ export function FeatureInspector({
             })}
             empty={dfmMessages.none}
           />
-        </section>
+        </InspectorGroup>
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ import { shapeMessages } from '../../messages/shape'
 import { useShell } from '../../shell/ShellContext'
 import {
   Icon,
+  InspectorGroup,
   Button,
   Checkbox,
   ContextMenu,
@@ -252,13 +253,14 @@ export function SegmentTable({
   }
 
   return (
-    <section className={styles['group']} aria-label={t.title}>
-      <div className={styles['groupHead']}>
-        <h3 className={styles['groupTitle']}>{t.title}</h3>
+    <InspectorGroup
+      title={t.title}
+      actions={
         <Button size="sm" variant="ghost" icon={<Icon name="add" />} onClick={addRow}>
           {t.add}
         </Button>
-      </div>
+      }
+    >
       <div className={styles['segScroll']}>
         <table
           role="grid"
@@ -457,7 +459,7 @@ export function SegmentTable({
       <p id={`${dto.kind}-${ctx.index}-keys`} className={styles['srOnly']}>
         {t.keys}
       </p>
-    </section>
+    </InspectorGroup>
   )
 }
 

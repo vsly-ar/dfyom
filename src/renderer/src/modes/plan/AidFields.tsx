@@ -17,7 +17,7 @@ import { Quantity } from '../../../../core/quantity/quantity'
 import { lengthSource } from '../../messages/dfm'
 import { findingText, planMessages } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
-import { Button, FieldIcon, Icon, QuantityInput, type FieldMessage } from '../../ui'
+import { Button, FieldIcon, Icon, InspectorGroup, QuantityInput, type FieldMessage } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import styles from './Plan.module.css'
 import { NameField } from './PlanInspector'
@@ -130,8 +130,7 @@ export function AidFields({
   }
   const setup = plan.setups.find((s) => s.operations.some((o) => o.id === op.id))
   return (
-    <section className={styles['group']} aria-label={m.title}>
-      <h3 className={styles['groupTitle']}>{m.title}</h3>
+    <InspectorGroup title={m.title}>
       <p className={styles['muted']}>{m.hint(m.kind[aid.kind] ?? aid.kind, setup?.name ?? '')}</p>
       <NameField
         label={m.name}
@@ -173,6 +172,6 @@ export function AidFields({
           </Button>
         </div>
       )}
-    </section>
+    </InspectorGroup>
   )
 }

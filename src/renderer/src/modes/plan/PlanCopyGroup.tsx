@@ -11,7 +11,7 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
-import { Icon, Button, ErrorMessage, StatusChip } from '../../ui'
+import { Icon, Button, ErrorMessage, InspectorGroup, StatusChip } from '../../ui'
 import {
   OperationFields,
   placeErrors,
@@ -59,11 +59,10 @@ export function PlanCopyGroup({
   }
 
   return (
-    <section className={styles['group']} aria-label={t.title}>
-      <div className={styles['groupHeader']}>
-        <h3 className={styles['groupTitle']}>{t.title}</h3>
-        {edited ? <StatusChip icon={<Icon name="edit" />}>{t.edited}</StatusChip> : null}
-      </div>
+    <InspectorGroup
+      title={t.title}
+      meta={edited ? <StatusChip icon={<Icon name="edit" />}>{t.edited}</StatusChip> : undefined}
+    >
       {plan.status === 'draft' ? (
         <p className={styles['muted']}>{t.draftHint}</p>
       ) : canEdit ? (
@@ -105,6 +104,6 @@ export function PlanCopyGroup({
           </div>
         )
       })}
-    </section>
+    </InspectorGroup>
   )
 }

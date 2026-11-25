@@ -21,6 +21,7 @@ import {
   type FieldIconName,
   type FieldMessage,
   type StepKind,
+  InspectorGroup,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { fieldMessages } from './fieldMessages'
@@ -119,8 +120,7 @@ export function StrategyGroup({
   )?.type
 
   return (
-    <section className={styles['group']} aria-label={t.groups.strategy}>
-      <h3 className={styles['groupTitle']}>{t.groups.strategy}</h3>
+    <InspectorGroup title={t.groups.strategy}>
       {keys.map((key) => {
         const resolved = view.strategy[key]
         const label = s.labels[key]
@@ -186,7 +186,7 @@ export function StrategyGroup({
           />,
         ]
       })}
-    </section>
+    </InspectorGroup>
   )
 }
 

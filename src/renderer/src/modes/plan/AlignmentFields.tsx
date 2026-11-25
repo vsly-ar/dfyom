@@ -23,6 +23,7 @@ import {
   FieldIcon,
   Icon,
   IconButton,
+  InspectorGroup,
   Menu,
   QuantityInput,
   SegmentedControl,
@@ -188,10 +189,7 @@ export function AlignmentFields({
 
   return (
     <>
-      <section aria-labelledby={`zero-${setup.id}`} className={styles['alignGroup']}>
-        <h3 id={`zero-${setup.id}`} className={styles['groupTitle']}>
-          {m.zeroTitle}
-        </h3>
+      <InspectorGroup title={m.zeroTitle}>
         {failed ? (
           <ErrorMessage error={failed} message={planMessages.inspector.commandFailed} />
         ) : null}
@@ -232,11 +230,8 @@ export function AlignmentFields({
             {m.zeroReset}
           </Button>
         </div>
-      </section>
-      <section aria-labelledby={`points-${setup.id}`} className={styles['alignGroup']}>
-        <h3 id={`points-${setup.id}`} className={styles['groupTitle']}>
-          {m.pointsTitle}
-        </h3>
+      </InspectorGroup>
+      <InspectorGroup title={m.pointsTitle}>
         {points.length === 0 ? <p className={styles['muted']}>{m.pointsEmpty}</p> : null}
         {points.length > 0 ? (
           <ol className={styles['alignList']} aria-label={m.pointsList}>
@@ -370,12 +365,9 @@ export function AlignmentFields({
             {m.pickHint}
           </p>
         ) : null}
-      </section>
+      </InspectorGroup>
       {readOnly ? null : (
-        <section aria-labelledby={`aids-${setup.id}`} className={styles['alignGroup']}>
-          <h3 id={`aids-${setup.id}`} className={styles['groupTitle']}>
-            {m.aidsTitle}
-          </h3>
+        <InspectorGroup title={m.aidsTitle}>
           <p className={styles['muted']}>
             {next === undefined ? m.aidsNone : m.aidsHint(next.name)}
           </p>
@@ -445,7 +437,7 @@ export function AlignmentFields({
               </Button>
             </div>
           )}
-        </section>
+        </InspectorGroup>
       )}
     </>
   )

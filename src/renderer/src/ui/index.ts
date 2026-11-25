@@ -117,6 +117,20 @@ export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/
 export { StopControl, type StopControlProps } from './StopControl/StopControl'
 export { Switch, type SwitchProps } from './Switch/Switch'
 export { Tabs, type TabItem, type TabsProps } from './Tabs/Tabs'
+export {
+  InspectorGroup,
+  type GroupSeverity,
+  type InspectorGroupProps,
+  type InspectorMoreProps,
+} from './InspectorGroup/InspectorGroup'
+export {
+  InspectorMemoryProvider,
+  inspectorMemory,
+  resetInspectorMemory,
+  revealInInspector,
+  SESSION_INSPECTOR_MEMORY,
+  type InspectorMemory,
+} from './InspectorGroup/memory'
 export { Term, type TermProps } from './Term/Term'
 export { Toast, ToastAnchor, ToastRegion, TOAST_DURATION_MS, type ToastProps } from './Toast/Toast'
 export { Toolbar, ToolbarButton, ToolbarSeparator, type ToolbarProps } from './Toolbar/Toolbar'
