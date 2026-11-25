@@ -16,9 +16,12 @@ import { usePending, useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
   ConfirmDialog,
+  ContextMenu,
   EmptyState,
   IconButton,
+  isContextMenuKey,
   Menu,
+  openContextMenu,
   PanelHeader,
   Toast,
   ToastRegion,
@@ -34,6 +37,7 @@ import { OperationList } from './OperationList'
 import { operationUnits } from './feature-view'
 import { stockReadout } from './PartSetupDialogs'
 import { partMenuOrder, piecesOf } from './split-view'
+import { useSplitEntry } from './SplitSection'
 import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
@@ -123,6 +127,7 @@ function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
   const plans = Object.values(part.doc.plans).filter((p) => gone.has(p.design.partId))
   const piece = part.dto.derivedFrom !== undefined
   const inUse = plans.find((p) => p.status === 'inUse')
+  const splitEntry = useSplitEntry(part)
   const remove = async () => {
     const r = await call('design.part.remove', {
       partId: part.dto.id,
@@ -146,6 +151,8 @@ function PartMenu({ part }: { part: DesignPart }): React.JSX.Element {
     },
     'separator',
     { label: pm.newPart, icon: <Icon name="add" />, onSelect: () => openDialog('newPart') },
+    // Split part… / Edit the split (split parts 4a polish; also the part row's context menu)
+    splitEntry,
     {
       label: pm.remove(part.dto.name),
       icon: <Icon name="delete" />,
@@ -234,20 +241,30 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   // the list's rows: plain operations and features (a hole's or a Clones' operations nest)
   const rows = operationUnits(part).length
   const openDialog = useUi((st) => st.setDesignDialog)
+  const splitEntry = useSplitEntry(part)
 
   return (
     <div className={styles['navigator']}>
       {/* the part row heads the sidebar, above Operations: it is not an operation (DF15) */}
       <section className={styles['partLine']} aria-label={m.inspector.part}>
-        <button
-          type="button"
-          className={styles['partName']}
-          aria-pressed={selected === null}
-          title={part.dto.name}
-          onClick={() => select(null)}
-        >
-          {part.dto.name}
-        </button>
+        {/* right-click / Shift+F10: Split part… or Edit the split (split parts 4a polish) */}
+        <ContextMenu label={m.parts.rowMenu(part.dto.name)} items={[splitEntry]}>
+          <button
+            type="button"
+            className={styles['partName']}
+            aria-pressed={selected === null}
+            aria-keyshortcuts="Shift+F10"
+            title={part.dto.name}
+            onClick={() => select(null)}
+            onKeyDown={(e) => {
+              if (!isContextMenuKey(e)) return
+              e.preventDefault()
+              openContextMenu(e.currentTarget)
+            }}
+          >
+            {part.dto.name}
+          </button>
+        </ContextMenu>
         <PartMenu part={part} />
         {readout !== undefined ? (
           <button

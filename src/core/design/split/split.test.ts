@@ -235,6 +235,34 @@ describe('design.split.set (4a)', () => {
     expect(split).toContain('featureNear')
   })
 
+  it('design.warning.list follows source edits (the geometric pass cached per record)', async () => {
+    const s = await enclosure()
+    await s.run('design.split.set', {
+      partId: s.partId,
+      split: { levels: [ENCLOSURE_LEVEL], lines: [{ axis: 'x', at: '125' }] },
+    })
+    const list = () =>
+      (
+        expectOk(s.d.query('design.warning.list', { partId: s.partId }, uiSource())).value as {
+          warnings: { code: string; params: { rule?: string; operationId?: string } }[]
+        }
+      ).warnings.filter((w) => w.code === 'design.split')
+    const first = list()
+    // an unchanged source: the same findings (from the cache)
+    expect(list()).toEqual(first)
+    expect(first.some((w) => w.params.rule === 'cutsFeature')).toBe(false)
+    // a source edit (no design.split.set): a hole on the line is a new finding at once
+    await s.run('design.drilling.add', {
+      partId: s.partId,
+      on: 'facing2.floor',
+      center: ['125', '15'],
+      diameter: '5',
+      bottom: 'flat',
+      depth: '10',
+    })
+    expect(list().some((w) => w.params.rule === 'cutsFeature')).toBe(true)
+  })
+
   it('Apply settles: tools chosen once, nothing pending after it (pieces with plans)', async () => {
     const s = await enclosure()
     await s.run('library.tool.add', {

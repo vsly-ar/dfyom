@@ -42,6 +42,7 @@ import { ReferenceOverlay, type ReferenceOverlayView } from './ReferenceOverlay'
 import { DeviationLayer, useFadeIn } from './DeviationLayer'
 import { deviationColours, type DeviationView } from './deviation'
 import { RunLayer, type RunScene } from './RunLayer'
+import { SplitLayer, type SplitOverlay } from './SplitLayer'
 
 export interface SceneProps {
   mesh: ViewportMesh | null
@@ -78,6 +79,8 @@ export interface SceneProps {
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
   run?: RunScene | null
+  /** The exploded split preview, drawn in place of the part (split parts 4a polish). */
+  split?: SplitOverlay | null
   onHover: (target: SurfaceTarget | undefined) => void
   onClick: (target: SurfaceTarget, event: ThreeEvent<MouseEvent>) => void
 }
@@ -107,8 +110,19 @@ export function Scene(props: SceneProps): React.JSX.Element {
       />
       <FrameOnce bounds={bounds} />
       <Lights bounds={bounds} />
-      {mesh && triangleCount(mesh) > 0 ? <PartMesh {...props} mesh={mesh} /> : null}
-      {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
+      {props.split ? (
+        <SplitLayer
+          split={props.split}
+          mesh={mesh}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : (
+        <>
+          {mesh && triangleCount(mesh) > 0 ? <PartMesh {...props} mesh={mesh} /> : null}
+          {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
+        </>
+      )}
       {props.ghosts?.map((g) => (
         <ReferenceGhost
           key={g.id}

@@ -108,6 +108,11 @@ export interface SetupHeader {
 export interface MachiningProgram {
   /** Plan name (header comment). */
   readonly name: string
+  /**
+   * A split piece's line after the plan name ("Piece 3 of 8 of Enclosure 1", split parts 4a,
+   * docs/modes/split-parts.md#plan-export-and-run-per-piece); absent for a plain part.
+   */
+  readonly piece?: string
   readonly setupName: string
   /** The setup instructions of the header; absent = only the setup name. */
   readonly setup?: SetupHeader

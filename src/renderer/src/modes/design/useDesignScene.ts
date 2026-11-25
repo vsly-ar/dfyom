@@ -6,7 +6,8 @@
 // marker (task F2), and the visible references as ghosts (task R3); named and rotated shapes'
 // outlines through the renderer's 2D port (task U1); while the Reference panel is open, Fit mode's
 // preview placement and "See through stock" (dogfood DF2, DF5); a selected face (DF22): a stock
-// face click or Alt+click on a floor selects it, drawn selected with its face-frame axes.
+// face click or Alt+click on a floor selects it, drawn selected with its face-frame axes; a split
+// source's exploded preview while its part inspector shows (split parts 4a polish).
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
@@ -35,6 +36,7 @@ import { useReferenceCompare } from './useReferenceCompare'
 import { deviationView, worstRegion } from './reference-compare-state'
 import { lengthSource } from './reference-view'
 import { useClonesScene } from './useClonesScene'
+import { useSplitScene } from './useSplitScene'
 import { instanceId, instanceOfOperation } from './clones-view'
 import {
   useDesignEvaluation,
@@ -223,6 +225,13 @@ export function useDesignScene(): SceneProps {
   const selectedDto = part?.dto.operations.find((o) => o.id === selected)
   const tabs = useTabMarkers(part, selectedDto)
   const clones = useClonesScene(part, selected, warnings)
+  // the exploded split preview while the part inspector (its Split section) shows (4a polish)
+  const clonesDraft = useUi((s) => s.clonesDraft)
+  const splitScene = useSplitScene(
+    part,
+    selected === null && !panel && pick === null && compare === null && clonesDraft === null,
+    warnings,
+  )
   const announcement = useUi((s) => s.announcement)
 
   const marker = useMemo(() => {
@@ -247,6 +256,7 @@ export function useDesignScene(): SceneProps {
     stockFaces: true,
     anchor: overlays?.anchor ?? null,
     tabs,
+    split: splitScene.split,
     guide: overlays?.guide ? [overlays.guide] : clones.guide,
     clonePath: clones.clonePath,
     selectedAlso: clones.selectedAlso,
@@ -270,6 +280,7 @@ export function useDesignScene(): SceneProps {
             overlays?.describe,
             face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,
+            splitScene.summary,
             ...referenceSummary,
             overlaySummary,
             compareSummary,

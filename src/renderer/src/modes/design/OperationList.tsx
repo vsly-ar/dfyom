@@ -121,6 +121,11 @@ interface ListContext {
   rowMenu(id: string): MenuEntry[]
   /** The id of the list's row menu hint ("Right-click or Shift+F10 for actions."; DF70). */
   readonly hintId: string
+  /**
+   * A split piece (split parts 4a): rows select only; no grip, row menu, Delete, Alt+↑/↓ or Skip
+   * (the core refuses them with `derivedPart`; the source is edited).
+   */
+  readonly readOnly: boolean
 }
 
 export function OperationList({
@@ -148,6 +153,7 @@ export function OperationList({
   const units = operationUnits(part)
   const partId = part.dto.id
   const hintId = useId()
+  const readOnly = part.dto.derivedFrom !== undefined
 
   // a selected owned or nested operation (viewport click, breadcrumb, undo) shows inside its open
   // feature(s)
@@ -237,6 +243,11 @@ export function OperationList({
     const row = visible.find((v) => v.id === rowId)
     const unit = units.find((u) => u.id === row?.unit)
     if (row === undefined || unit === undefined) return
+    // a piece's rows only select and walk (split parts 4a)
+    if (readOnly && (e.altKey || e.key === 'Delete' || e.key === 'Backspace')) {
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) e.preventDefault()
+      return
+    }
     // Shift+F10 / the Menu key: the row's menu, at the row (DF16)
     if (isContextMenuKey(e)) {
       const el = e.currentTarget.closest('[data-row-menu]')
@@ -293,26 +304,31 @@ export function OperationList({
       else rows.current.delete(id)
     },
     toggleSkip,
-    rowMenu: (id) => rowActions(id),
+    rowMenu: (id) => (readOnly ? [] : rowActions(id)),
     hintId,
+    readOnly,
   }
 
   return (
     <>
       <ol
         ref={attachList}
-        className={`${styles['ops']} ${styles['opsGrip']} ${reorder.listClass}`}
+        className={
+          readOnly ? styles['ops'] : `${styles['ops']} ${styles['opsGrip']} ${reorder.listClass}`
+        }
         aria-label={m.navigator.listLabel}
-        {...reorder.listProps}
+        {...(readOnly ? {} : reorder.listProps)}
       >
         {units.map((unit, i) => {
           const name = unitName(unit)
           const blocked = unit.kind === 'feature' ? featureRemoveBlocked(part, unit.id) : undefined
-          const actions: RowActions = {
-            item: reorder.itemProps(i),
-            grip: units.length > 1 ? reorder.gripProps(i) : undefined,
-            menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
-          }
+          const actions: RowActions = readOnly
+            ? { item: undefined, grip: undefined, menu: [] }
+            : {
+                item: reorder.itemProps(i),
+                grip: units.length > 1 ? reorder.gripProps(i) : undefined,
+                menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
+              }
           return unit.kind === 'operation' ? (
             <OperationRow key={unit.id} ctx={ctx} op={unit.op} actions={actions} />
           ) : (
@@ -320,9 +336,11 @@ export function OperationList({
           )
         })}
       </ol>
-      <p id={hintId} className={styles['srOnly']}>
-        {m.navigator.rowMenuHint}
-      </p>
+      {readOnly ? null : (
+        <p id={hintId} className={styles['srOnly']}>
+          {m.navigator.rowMenuHint}
+        </p>
+      )}
       <ReorderStatus refusal={reorder.refusal ?? refusal} announcement={announcement} />
     </>
   )
@@ -330,7 +348,7 @@ export function OperationList({
 
 interface RowActions {
   /** The row's reorder props (its `<li>`) and its grip's. */
-  readonly item: ReturnType<Reorder['itemProps']>
+  readonly item: ReturnType<Reorder['itemProps']> | undefined
   readonly grip: ReturnType<Reorder['gripProps']> | undefined
   /** The row menu (DF16): right-click, Shift+F10 / the Menu key; Remove last. */
   readonly menu: readonly MenuEntry[]
@@ -347,7 +365,8 @@ function rowKeys(
   top: boolean,
   reasonId?: string,
 ): { 'aria-keyshortcuts': string; 'aria-describedby'?: string } {
-  const all = [keys, menu.length > 0 ? 'Shift+F10' : '', top ? 'Delete' : '']
+  const moves = ctx.readOnly ? keys.replace(/Alt\+\S+ ?/g, '').trim() : keys
+  const all = [moves, menu.length > 0 ? 'Shift+F10' : '', top && !ctx.readOnly ? 'Delete' : '']
   const described = [menu.length > 0 ? ctx.hintId : '', reasonId ?? ''].filter((x) => x !== '')
   return {
     'aria-keyshortcuts': all.filter((x) => x !== '').join(' '),
@@ -727,7 +746,7 @@ function ClonesChildren({
                         : f.duplicate}
                   </span>
                 </button>
-                {x.kind !== 'duplicate' ? (
+                {x.kind !== 'duplicate' && !ctx.readOnly ? (
                   <span className={styles['instanceActions']}>
                     <Button
                       size="sm"

@@ -250,7 +250,7 @@ function PartInspector({
         <EvaluationLine status={evaluation?.status} />
         {/* how operations get onto a face (DF22) */}
         <p className={styles['muted']}>{m.face.emptyHint}</p>
-        <SplitSection part={part} />
+        <SplitSection part={part} warnings={warnings.warnings} />
         <section aria-label={dfmMessages.listTitle} className={styles['warnings']}>
           <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
           <WarningList

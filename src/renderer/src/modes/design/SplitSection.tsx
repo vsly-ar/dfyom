@@ -22,12 +22,14 @@ import {
   WarningList,
   type WarningListLabels,
   type WarningView,
+  type MenuEntry,
 } from '../../ui'
 import styles from './Design.module.css'
 import { NameField } from './NameField'
 import { defaultUnit, quantityOf, type DesignPart, dfmNames } from './model'
 import {
   blankText,
+  cutFindings,
   cutSource,
   firstSplit,
   nextCut,
@@ -68,9 +70,48 @@ function useSplitSet(part: DesignPart) {
   return { send, error, confirm, setConfirm }
 }
 
+/**
+ * The part menu's and the part row's context menu entry (split parts 4a polish): "Split part…" on
+ * a part without a split (the same first split as the inspector's button), else "Edit the split";
+ * both show the part inspector, where the Split section is (on a piece: its source's).
+ */
+export function useSplitEntry(part: DesignPart): MenuEntry {
+  const { send } = useSplitSet(part)
+  const setPart = useUi((st) => st.setDesignPart)
+  const showInspector = useUi((st) => st.showInspector)
+  const [, select] = useDesignSelection()
+  const from = part.dto.derivedFrom
+  const stock = part.loaded?.stock
+  const show = () => {
+    if (from !== undefined) setPart(from.partId)
+    select(null)
+    showInspector()
+  }
+  if (from !== undefined || part.dto.split !== undefined)
+    return { label: t.editSplit, icon: <Icon name="split" />, onSelect: show }
+  return {
+    label: t.action,
+    description: t.actionDescription,
+    icon: <Icon name="split" />,
+    ...(stock === undefined ? { disabledReason: m.split.noStock } : {}),
+    onSelect: () => {
+      show()
+      void send(firstSplit(stock?.thickness.canonical ?? 0, part.units))
+    },
+  }
+}
+
 /** The split section of a source part's inspector. */
-export function SplitSection({ part }: { part: DesignPart }): React.JSX.Element {
+export function SplitSection({
+  part,
+  warnings = [],
+}: {
+  part: DesignPart
+  /** The part's warnings: each line's and level's split findings show under its field. */
+  warnings?: readonly DfmWarning[]
+}): React.JSX.Element {
   const { send, error, confirm, setConfirm } = useSplitSet(part)
+  const setFocus = useUi((st) => st.setSplitFocus)
   const split = part.dto.split
   const stock = part.loaded?.stock
   const units = part.units
@@ -141,7 +182,17 @@ export function SplitSection({ part }: { part: DesignPart }): React.JSX.Element 
           <p className={styles['muted']}>{t.noCuts}</p>
         ) : null}
         {split.lines.map((line, i) => (
-          <div key={`line-${i}`} className={styles['splitRow']}>
+          <CutRow
+            key={`line-${i}`}
+            onFocus={() => setFocus({ kind: 'line', index: i })}
+            onBlur={() => setFocus(null)}
+            findings={cutFindings(warnings, {
+              kind: 'line',
+              index: i,
+              axis: line.axis,
+              at: mmOf(line.at),
+            })}
+          >
             <QuantityInput
               label={t.lineAt(line.axis)}
               kind="length"
@@ -160,10 +211,20 @@ export function SplitSection({ part }: { part: DesignPart }): React.JSX.Element 
               icon={<Icon name="delete" />}
               onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
             />
-          </div>
+          </CutRow>
         ))}
         {split.levels.map((level, i) => (
-          <div key={`level-${i}`} className={styles['splitRow']}>
+          <CutRow
+            key={`level-${i}`}
+            onFocus={() => setFocus({ kind: 'level', index: i })}
+            onBlur={() => setFocus(null)}
+            findings={cutFindings(warnings, {
+              kind: 'level',
+              index: i,
+              axis: 'z',
+              at: mmOf(level),
+            })}
+          >
             <QuantityInput
               label={t.levelAt}
               kind="length"
@@ -182,7 +243,7 @@ export function SplitSection({ part }: { part: DesignPart }): React.JSX.Element 
               icon={<Icon name="delete" />}
               onClick={() => void send(withLevels(args.levels.filter((_, k) => k !== i)))}
             />
-          </div>
+          </CutRow>
         ))}
         <div className={styles['addRow']}>
           <Button size="sm" icon={<Icon name="add" />} onClick={() => addLine('x')}>
@@ -219,6 +280,56 @@ export function SplitSection({ part }: { part: DesignPart }): React.JSX.Element 
     </section>
   )
 }
+
+/**
+ * A line's or level's field row: focus within it highlights the cut in the viewport's exploded
+ * preview (ui-store `splitFocus`); the split findings on that cut (a thin glue face, a feature
+ * near it) list under it, following every source edit.
+ */
+function CutRow({
+  children,
+  findings,
+  onFocus,
+  onBlur,
+}: {
+  children: React.ReactNode
+  findings: readonly DfmWarning[]
+  onFocus: () => void
+  onBlur: () => void
+}): React.JSX.Element {
+  // the cut's own glue face first, then the features near it; the rest in Warnings
+  const sorted = [...findings].sort(
+    (a, b) => Number(a.params['rule'] !== 'thinJoint') - Number(b.params['rule'] !== 'thinJoint'),
+  )
+  const shown = sorted.slice(0, CUT_FINDINGS_MAX)
+  return (
+    <div
+      className={styles['splitCut']}
+      onFocus={onFocus}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur()
+      }}
+    >
+      <div className={styles['splitRow']}>{children}</div>
+      {shown.length > 0 ? (
+        <ul className={styles['splitFindings']}>
+          {shown.map((f, k) => (
+            <li key={k}>
+              <Icon name="warning" />
+              <span>{f.message}</span>
+            </li>
+          ))}
+          {sorted.length > shown.length ? (
+            <li className={styles['splitMore']}>{t.moreFindings(sorted.length - shown.length)}</li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
+/** Findings listed under a cut's field at most; the rest are in the warning list. */
+const CUT_FINDINGS_MAX = 3
 
 /**
  * Top (X–Y) and Front (X–Z) of the pieces' blanks, pulled apart from the part's centre once shown

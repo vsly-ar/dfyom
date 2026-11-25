@@ -84,6 +84,7 @@ import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
 import type { ReferenceOverlayView } from './ReferenceOverlay'
 import type { RunScene } from './RunLayer'
+import type { SplitOverlay } from './SplitLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds, placeBox } from './toolpath-lines'
 import { classifyWheel, type WheelHistory } from './wheel'
@@ -122,6 +123,8 @@ export interface ViewportProps {
   anchor?: AnchorOverlay | null
   /** Tab markers and the start point of the selected profile, draggable (task U2). */
   tabs?: TabOverlay | null
+  /** The exploded split preview with draggable lines and levels (split parts 4a polish). */
+  split?: SplitOverlay | null
   /** Thin dashed guide loops (part frame): the rotated bounding box while rotation has focus (U2). */
   guide?: readonly OutlineLoop[] | null
   /**
@@ -262,6 +265,7 @@ export function Viewport({
   frame = null,
   anchor = null,
   tabs = null,
+  split = null,
   guide = null,
   ghosts = null,
   referenceOverlay = null,
@@ -747,6 +751,7 @@ export function Viewport({
           frame={frame}
           anchor={anchor}
           tabs={pick ? null : tabs}
+          split={pick ? null : split}
           clonePath={pick ? null : clonePath}
           guide={guide}
           ghosts={ghosts}

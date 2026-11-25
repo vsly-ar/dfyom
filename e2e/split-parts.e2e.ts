@@ -4,14 +4,39 @@
 // pieces under it, a piece is read-only and "Edit the split" leads back, the editor adds a line
 // at X and one at Y (8 pieces), and the Plan start card plans a piece with toolpaths. Then every
 // piece of both splits is planned, exported and run on the virtual machine at Max through the
-// bridge (DF91 exit). Selectors are roles and accessible names.
+// bridge (DF91 exit). The 4a polish: the viewport's exploded preview, a level dragged in it (one
+// undo step, snapped to whole mm, the field follows) and its keyboard path (the field, which
+// highlights the level), "Split part…" in the part row's context menu, and the piece name in the
+// exported header. Selectors are roles and accessible names (the viewport handles by their
+// `data-split-cut` anchors).
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/conventions/ui.md#split-part-split-parts-4a
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { ENCLOSURE_STOCK, enclosureCommands } from '../src/core/design/split/split.fixture'
 import { expect, test } from './app.fixture'
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/** Light and dark renders of the window as it is (DFYOM_RENDERS=1). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  for (const theme of ['light', 'dark'] as const) {
+    // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+    await page.evaluate((t) => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', t)
+    }, theme)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${rendersDir}/df91-${name}-${theme}.png` })
+  }
+}
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -60,6 +85,8 @@ async function planAndRun(page: Page, dir: string, partId: string, machine: stri
     const target = join(dir, `${label}-${partId}-${n + 1}.nc`)
     await call('plan.export', { planId, setupId: setup.id, target })
     const gcode = readFileSync(target, 'utf8')
+    // the header names the piece (4a polish)
+    expect(gcode).toMatch(/^\(Program: .*\)\n\(Piece \d of \d of Enclosure\)\n/)
     const stock = /\(Stock X ([\d.]+) Y ([\d.]+) Z/.exec(gcode)!
     const floorZero = new Map(
       [...gcode.matchAll(/\(Z0 for tool (\d+): .*?, ([\d.]+) below the stock top\)/g)].map((x) => [
@@ -108,6 +135,8 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   test.setTimeout(300_000)
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
+  // wide: the inspector docks beside the viewport (the drag below needs the viewport clear)
+  await page.setViewportSize({ width: 1280, height: 800 })
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   await call('library.tool.add', { values: tool('Flat 6 long', '6', '45', '90') })
   await call('library.tool.add', { values: tool('Flat 4', '4', '25', '60') })
@@ -142,14 +171,59 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await expect(partRow.getByRole('button', { name: 'Enclosure' })).toBeVisible()
   await partRow.getByRole('button', { name: 'Enclosure' }).click()
 
-  // ── Split part…: the mid-height level, two pieces in the preview ─────────────────────────
-  await split.getByRole('button', { name: 'Split part…' }).click()
+  // ── Split part… from the part row's context menu: the mid-height level, two pieces ────────
+  await partRow.getByRole('button', { name: 'Enclosure' }).click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for Enclosure' })
+    .getByRole('menuitem', { name: /^Split part…/ })
+    .click()
   await expect(split.getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
   await expect(split.getByRole('img', { name: 'Split preview: Front' })).toBeVisible()
-  await expect(split.getByRole('listitem')).toHaveText([
+  await expect(split.getByRole('list', { name: '2 pieces' }).getByRole('listitem')).toHaveText([
     '1 · 259.5 × 187 × 40 mm · own blank',
     '2 · 259.5 × 187 × 40 mm · own blank',
   ])
+
+  // ── the viewport's exploded preview: drag the level; one undo step; the field follows ────
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  const level = viewport.locator('[data-split-cut="level-0"]')
+  await expect(level).toHaveCount(1)
+  const levelField = split.getByRole('combobox', { name: 'Level at Z' })
+  await expect(levelField).toHaveValue('-40 mm')
+  await page.waitForTimeout(500) // the pieces part (--motion-slow)
+  await render(page, 'split-exploded')
+  const grab = (await level.boundingBox())!
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  for (let i = 1; i <= 4; i++) {
+    await page.mouse.move(grab.x, grab.y - i * 4)
+    await page.waitForTimeout(40)
+  }
+  await expect(level).toContainText(/Level at Z -\d+ mm/)
+  await render(page, 'split-drag')
+  await page.mouse.up()
+  await page.mouse.move(grab.x, 10) // off the plane: no hover highlight
+  // snapped to a whole millimetre, above where it was; still two pieces
+  await expect(levelField).not.toHaveValue('-40 mm')
+  const dragged = Number(/^(-\d+) mm$/.exec(await levelField.inputValue())![1])
+  expect(dragged).toBeGreaterThan(-40)
+  expect(dragged).toBeLessThan(-10)
+  await expect(split.getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
+  // the whole drag is one undo step
+  await call('history.undo')
+  await expect(levelField).toHaveValue('-40 mm')
+  // the keyboard path: the field (its focus highlights the level in the viewport)
+  await levelField.fill('-35 mm')
+  await levelField.press('Enter')
+  await expect(level).toContainText('Level at Z -35 mm')
+  await levelField.fill('-40 mm')
+  await levelField.press('Enter')
+  await expect(level).toContainText('Level at Z -40 mm')
+  await levelField.press('Tab') // to its Remove button: still the level's row
+  await expect(level).toContainText('Level at Z -40 mm')
+  await page.keyboard.press('Tab') // out of the row: no highlight
+  await expect(levelField).toHaveValue('-40 mm')
+  await expect(level).toHaveText('')
 
   // ── the part menu lists the pieces under the source; a piece is read-only ────────────────
   let menu = await openParts()
@@ -169,6 +243,8 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await expect(split.getByRole('heading', { name: 'Split · 4 pieces' })).toBeVisible()
   await split.getByRole('button', { name: 'Add line at Y' }).click()
   await expect(split.getByRole('heading', { name: 'Split · 8 pieces' })).toBeVisible()
+  await expect(viewport.locator('[data-split-cut]')).toHaveCount(3)
+  await render(page, 'split-exploded-8')
   menu = await openParts()
   await expect(menu.getByRole('menuitemradio')).toHaveCount(9)
   await menu.getByRole('menuitemradio', { name: 'Enclosure · 1' }).click()

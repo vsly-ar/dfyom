@@ -13,6 +13,7 @@ import {
   ENCLOSURE_STOCK,
   enclosureCommands,
 } from '../../core/design/split/split.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 import { agentSession, type Call, type RunJobStatus } from './exit-criteria.fixture'
 
 interface SplitResult {
@@ -20,7 +21,13 @@ interface SplitResult {
   findings: { severity: string; params: { rule: string } }[]
 }
 interface PlanGet {
-  plan: { setups: { id: string; name: string; direction: string }[] }
+  plan: { name: string; setups: { id: string; name: string; direction: string }[] }
+}
+
+/** The program's header comments (up to the Generator line, its app version dropped). */
+const programHeader = (gcode: string): string => {
+  const lines = withoutAppVersion(gcode).split('\n')
+  return lines.slice(0, lines.findIndex((l) => l.startsWith('(Generator:')) + 1).join('\n') + '\n'
 }
 interface RunStatus {
   state: string
@@ -76,6 +83,9 @@ export async function exitCriteriaSplitFlow(
   for (const [label, split] of splits) {
     const r = (await ok<SplitResult>('design.split.set', { partId, split, confirm: true })).value
     expect(r.pieces).toHaveLength(label === 'level' ? 2 : 8)
+    // a renamed piece keeps its number in the header and adds its name (split parts 4a polish)
+    if (label === 'level')
+      await ok('design.part.update', { partId: r.pieces[1]!.partId, name: 'Ring' })
     for (const piece of r.pieces) {
       const { planId } = (
         await ok<{ planId: string }>('plan.create', {
@@ -104,6 +114,16 @@ export async function exitCriteriaSplitFlow(
         const [bl, bw, bt] = piece.blank.map((v) => +v.toFixed(3))
         const gcode = readFileSync(target, 'utf8')
         expect(gcode).toContain(`(Stock X ${bl} Y ${bw} Z ${bt} mm`)
+        // the header names the piece after the plan (split parts 4a polish; golden for the first)
+        // (a non-default name stays with the number through the second split)
+        const renamed = piece.index === 2 ? ': Ring' : ''
+        expect(gcode).toContain(
+          `(Program: ${plan.name})\n(Piece ${piece.index} of ${r.pieces.length} of Enclosure${renamed})\n`,
+        )
+        if (label === 'level' && piece.index === 1 && n === 0)
+          await expect(programHeader(gcode)).toMatchFileSnapshot(
+            '__golden__/exit-criteria-split-piece-header.nc',
+          )
         // tools zeroed on a floor (the rim holes on the top facing's floor): touch off there
         const floorZero = new Map(
           [...gcode.matchAll(/\(Z0 for tool (\d+): .*?, ([\d.]+) below the stock top\)/g)].map(
