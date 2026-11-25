@@ -410,11 +410,22 @@ export function rebuildPlan(
   const heights = setups[0]!
   for (const p of placed) {
     const d = direction.get(p.id) ?? '+z'
+    // after the setups holding its dependencies (E4b: a bottom chamfer after its through
+    // profile's setup of another direction)
+    const deps = new Set(
+      p.designOperationIds.flatMap((id) => {
+        const o = byId.get(id)
+        return o === undefined
+          ? []
+          : [...onDependencies(o), ...edgeDependencies(o)].flatMap((x) => owner.get(x) ?? [])
+      }),
+    )
+    const after = setups.findLastIndex((s) => s.operations.some((q) => deps.has(q.id)))
     // the last setup of its direction, else a new setup at its default position
-    let target = setups.findLast((s) => setupDirection(s) === d)
+    let target = setups.findLast((s, i) => setupDirection(s) === d && i >= after)
     if (target === undefined) {
       target = newSetup(c.ids.next('setup'), d, heights, setups)
-      setups.splice(defaultSetupIndex(setups, d), 0, target)
+      setups.splice(Math.max(defaultSetupIndex(setups, d), after + 1), 0, target)
     }
     for (const id of p.designOperationIds) owner.set(id, p.id)
     // after the last operation of an earlier or equal group, and after its `on` dependencies

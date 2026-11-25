@@ -56,6 +56,10 @@ export const chamferMessages = {
   /** E4a: the corner lift switch. */
   cornerLift: 'Corner lift',
   cornerLiftNote: 'Lift the V-bit into sharp inside corners for a crisp mitre.',
+  /** E4b: which edge of a through profile, the top or the bottom (from a flipped setup). */
+  side: 'Side',
+  sides: { top: 'Top edge', bottom: 'Bottom edge' },
+  sideNote: 'The bottom edge is cut from a flipped setup; the bevel stops at the tabs.',
   edgeThrough: 'through',
   edgeDeep: (depth: string) => `${depth} deep`,
 } as const

@@ -319,6 +319,30 @@ describe('chamfer UI (U4)', () => {
     await expectNoAxeViolations()
   })
 
+  it('E4b: Side on a through outline chamfers its bottom edge; none on a pocket', async () => {
+    const { user, chamfer } = await renderDesign(async (d) => {
+      for (const [name, args] of [
+        [
+          'design.profile.add',
+          {
+            partId: partId(d),
+            shape: { kind: 'rectangle', center: ['50', '30'], length: '80', width: '40' },
+          },
+        ],
+        ['design.chamfer.add', { partId: partId(d), edgeOf: 'profile1' }],
+      ] as const)
+        (await d.dispatch(name, args, ui)).unwrap()
+    })
+    const row = await within(navigator()).findByRole('button', { name: /^Chamfer 1/ })
+    await user.click(row)
+    const side = await within(inspector()).findByRole('radiogroup', { name: 'Side' })
+    const top = within(side).getByRole('radio', { name: 'Top edge' })
+    expect(top).toHaveAttribute('data-state', 'on')
+    await user.click(within(side).getByRole('radio', { name: 'Bottom edge' }))
+    await waitFor(() => expect(chamfer().on).toBe('stock.bottom'))
+    await expectNoAxeViolations()
+  })
+
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {
     const { user, chamfer } = await renderDesign(async (d) => {
       await addEdges(d)

@@ -1,5 +1,5 @@
 toolpath op-chamfer1 tool cm4 S16000
-stats cut 770.9291 rapid 105 s 68.1067
+stats cut 773.9291 rapid 102 s 68.2957
 pass rough
   rapid 30 8 10
   rapid 30 8 2
@@ -11,9 +11,9 @@ pass rough
   line 30 8 -1 F800
   rapid 30 8 10
 pass finish
-  rapid 30 6 10
-  rapid 30 6 2
-  line 30 6 -1 F200
+  rapid 30 8 2
+  line 30 8 -1 F200
+  line 30 6 -1 F800
   line 50 6 -1 F800
   arc 51.4142 6.5858 -1 c 50 8 ccw F800
   line 52 6 -1 F800
@@ -55,9 +55,9 @@ pass rough
   line 30 8 -2 F800
   rapid 30 8 10
 pass finish
-  rapid 30 7 10
-  rapid 30 7 2
-  line 30 7 -2 F200
+  rapid 30 8 2
+  line 30 8 -2 F200
+  line 30 7 -2 F800
   line 50 7 -2 F800
   arc 50.7071 7.2929 -2 c 50 8 ccw F800
   line 51 7 -2 F800

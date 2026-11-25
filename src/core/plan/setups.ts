@@ -11,7 +11,13 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { Stock } from '../library/stock'
 import type { PlanWarning } from './checks'
 import { ALIGNMENT_POINTS_MAX } from './alignment.dto'
-import { defaultOrder, operationDirections, orderFindings } from './order'
+import {
+  defaultOrder,
+  edgeDependencies,
+  onDependencies,
+  operationDirections,
+  orderFindings,
+} from './order'
 import type { PlanDTO, PlanOperationDTO, SetupDTO, SetupRotation } from './plan.dto'
 
 /** Default setup order (decision 3), defined with the face model (design reads it too, DF50). */
@@ -69,17 +75,59 @@ export function deriveSetups(
   port?: Region2dPort,
 ): SetupDTO[] {
   const dir = operationDirections(planOps, part)
+  const cross = crossSetupDependencies(planOps, part, dir)
   const setups: SetupDTO[] = []
   for (const d of SETUP_ORDER) {
-    const ops = planOps.filter((p) => dir.get(p.id) === d)
+    const ops = planOps.filter((p) => dir.get(p.id) === d && !cross.has(p.id))
     if (ops.length === 0) continue
     const s = make(d, setups)
     // DF65: start with the tool still in the spindle when that costs no tool run
     s.operations = defaultOrder(ops, part, port, setups.at(-1)?.operations.at(-1)?.tool)
     setups.push(s)
   }
+  // E4b: an operation that needs one of another direction (a bottom chamfer's through profile)
+  // goes to a setup of its direction after it: "Bottom 2" after the top when the bottom was
+  // faced first, the flip back to the bottom
+  for (const d of SETUP_ORDER) {
+    const ops = planOps.filter((p) => dir.get(p.id) === d && cross.has(p.id))
+    if (ops.length === 0) continue
+    const deps = new Set(ops.flatMap((p) => cross.get(p.id) ?? []))
+    const after = setups.findLastIndex((s) => s.operations.some((q) => deps.has(q.id)))
+    const s = make(d, setups)
+    const tool = setups[after]?.operations.at(-1)?.tool
+    s.operations = defaultOrder(ops, part, port, tool)
+    setups.splice(after + 1, 0, s)
+  }
   if (setups.length === 0) setups.push(make('+z', setups))
   return setups
+}
+
+/**
+ * Plan operations that depend on a plan operation of another face direction (E4b: a bottom
+ * chamfer on a through profile cut from the top), with those plan operations' ids.
+ */
+export function crossSetupDependencies(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  dir: ReadonlyMap<string, Direction> = operationDirections(planOps, part),
+): Map<string, string[]> {
+  const owner = new Map<string, string>()
+  for (const p of planOps) for (const d of p.designOperationIds) owner.set(d, p.id)
+  const byId = new Map(part.operations.map((o) => [o.id, o]))
+  const out = new Map<string, string[]>()
+  for (const p of planOps) {
+    const deps = p.designOperationIds.flatMap((id) => {
+      const o = byId.get(id)
+      return o === undefined ? [] : [...onDependencies(o), ...edgeDependencies(o)]
+    })
+    const other = [
+      ...new Set(
+        deps.flatMap((d) => owner.get(d) ?? []).filter((q) => dir.get(q) !== dir.get(p.id)),
+      ),
+    ]
+    if (other.length > 0) out.set(p.id, other)
+  }
+  return out
 }
 
 /** Every plan operation in machining order: the setups in order, each in its order. */

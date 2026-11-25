@@ -26,6 +26,7 @@ import { shapeFromDTO as namedShapeFromDTO, type NamedShape } from './shape'
 import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
 import { deepEqual } from '../library/snapshot'
 import { baseOf, isFrozenRecord } from './frozen-memo'
+import { oppositeDirection, STOCK_FACE, stockFaceDirection } from '../geometry/face'
 
 export type Point = readonly [Quantity, Quantity]
 
@@ -216,6 +217,22 @@ export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | 
   if (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side !== 'on')) return 'loop'
   return undefined
 }
+
+/**
+ * The stock face a bottom chamfer (edge-chamfers.md E4b) sits on: the face opposite a **through**
+ * `outside` / `inside` profile's own (non-circular: a `loop` edge) stock face; undefined for any
+ * other edge (circles, pockets, blind profiles, drillings keep the top edge only).
+ */
+export function bottomEdgeFace(edge: Operation | undefined): string | undefined {
+  if (edge?.kind !== 'profile' || edge.depth.isSome() || chamferEdgeKind(edge) !== 'loop')
+    return undefined
+  const d = stockFaceDirection(edge.on)
+  return d === undefined ? undefined : STOCK_FACE[oppositeDirection(d)]
+}
+
+/** A chamfer of the bottom edge of its through profile, from the opposite face (E4b). */
+export const isBottomChamfer = (op: Chamfer, edge: Operation | undefined): boolean =>
+  edge !== undefined && op.on !== edge.on && op.on === bottomEdgeFace(edge)
 
 /** A chamfer along a general edge (edge-chamfers.md E1): its `edgeOf` among `ops` is a `loop` edge. */
 export const isLoopChamferOp = (op: Chamfer, ops: readonly Operation[]): boolean =>

@@ -18,7 +18,7 @@ import { orientedShape, shapeDefinition, shapeOrientation } from '../placement'
 import type { ShapeDefinition } from '../shape'
 import type { ShapeDTO, ShapeItemDTO } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
-import { STOCK_FACE } from '../../geometry/face'
+import { oppositeDirection, STOCK_FACE, stockFaceDirection } from '../../geometry/face'
 import { operationTools } from '../tool-choice'
 import type { UnitSystem } from '../../project/document'
 import type { QuantityDTO } from '../../quantity/quantity.dto'
@@ -769,11 +769,16 @@ function mapOperation(
       const edgeOf = base.edgeOf === c.outlineId ? `${c.split.id}_outline` : base.edgeOf
       const edge = b.ops.find((o) => o.id === edgeOf)
       // at the piece's own stock face (its top piece): kept with its edge there (E2)
+      // E4b: a bottom chamfer of a through profile cut from the opposite face
+      const bottom =
+        edge?.kind === 'profile' &&
+        edge.depth === undefined &&
+        stockFaceDirection(edge.on ?? 'stock.top') === oppositeDirection(dir)
       const atFace =
         z.fromFace &&
         (r.dir === '+z' ? r.zhi <= cell.band.zt + EPS : r.zlo >= cell.band.zb - EPS) &&
         edge !== undefined &&
-        (edge.on ?? STOCK_FACE[dir]) === STOCK_FACE[dir]
+        ((edge.on ?? STOCK_FACE[dir]) === STOCK_FACE[dir] || bottom)
       if (!atFace && (z.fromFace || !b.sameOn.has(edgeOf))) return Ok(undefined)
       // a loop chamfer's bevel lies on the faced top (E3: its real range, not its `on` face's)
       const rb = g.kind === 'chamfer' && isLoopChamfer(g) ? (zRange(c, op, g, true) ?? r) : r

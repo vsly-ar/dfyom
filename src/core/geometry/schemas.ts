@@ -152,6 +152,10 @@ export const LoopChamferGeometrySchema = z.object({
     depth: z.number().exactOptional(),
     within: z.object({ min: Vec2Schema, max: Vec2Schema }).exactOptional(),
     loops: z.array(z.number().int().nonnegative()).readonly().exactOptional(),
+    tabs: z
+      .array(z.object({ at: Vec2Schema, width: z.number() }))
+      .readonly()
+      .exactOptional(),
   }),
   width: z.number(),
   angle: z.number(),

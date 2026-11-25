@@ -439,3 +439,57 @@ describe('generateEdgeChamfer (E4a)', () => {
     )
   })
 })
+
+// ── E4b: bottom edges, the step-in (docs/modes/edge-chamfers.md#implementation-e4b) ───────────
+
+describe('generateEdgeChamfer (E4b)', () => {
+  /** Plunges: feed moves straight down from a rapid. */
+  const plunges = (tp: Toolpath) =>
+    tp.passes.flatMap((p) =>
+      p.moves.flatMap((m, k) => {
+        const prev = p.moves[k - 1]
+        if (m.kind !== 'line' || prev?.kind !== 'rapid') return []
+        return m.to[0] === prev.to[0] && m.to[1] === prev.to[1] ? [m] : []
+      }),
+    )
+
+  it('levels: every ring is entered by a plunge in the air, then a step in at depth', () => {
+    for (const i of [
+      input(chamferMill(4, 90, 0), { width: 3 }),
+      input(chamferMill(3, 90, 0.4), { ...sharp(), width: 2, cornerLift: true }),
+    ]) {
+      const tp = generateEdgeChamfer(i, port).unwrap()
+      const air = (i.operation.edge.shape.contour as { region: Region }).region
+      const r0 = (i.tool.tipDiameter ?? 0) / 2
+      const ps = plunges(tp)
+      expect(ps.length).toBeGreaterThan(2)
+      for (const m of ps) {
+        const p: Vec2 = [m.to[0], m.to[1]]
+        expect(port.contains(air, p), p.join(',')).toBe(true)
+        expect(port.distance(regionLoops(air), p)!.distance).toBeGreaterThan(r0 - 1e-6)
+      }
+    }
+  })
+
+  it('tabs: the rings lift over each tab, open runs plunged beside it', () => {
+    const tabs = [
+      { at: [30, 10] as const, width: 6 },
+      { at: [30, 30] as const, width: 6 },
+    ]
+    const i = input(chamferMill(6, 90, 0.2), { ...outside({ tabs }), width: 1 })
+    const tp = generateEdgeChamfer(i, port).unwrap()
+    const gap = 3 + 1 + 0.1 + 1
+    const cuts = tp.passes.flatMap((p) =>
+      p.moves.filter((m) => m.kind === 'line' || m.kind === 'arc').map((m) => m.to),
+    )
+    // along the front and back walls nothing within the gap of a tab centre
+    for (const p of cuts.filter((q) => q[2] < -1e-9 && q[0] > 17 && q[0] < 43))
+      for (const t of tabs)
+        if (Math.abs(p[1] - t.at[1]) < 1)
+          expect(Math.abs(p[0] - t.at[0]), p.join(',')).toBeGreaterThan(gap - 1e-6)
+    // two runs, the right half and the left half, each plunged beside a tab
+    const ps = plunges(tp)
+    expect(ps).toHaveLength(2)
+    for (const m of ps) expect(Math.abs(Math.abs(m.to[0] - 30) - gap)).toBeLessThan(1e-6)
+  })
+})

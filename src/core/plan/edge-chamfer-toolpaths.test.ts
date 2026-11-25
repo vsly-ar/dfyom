@@ -7,6 +7,7 @@
 // piece whose chamfer follows only the source's outline, never the split line.
 import { describe, expect, it } from 'vitest'
 import { ENCLOSURE_STOCK, enclosureCommands } from '../design/split/split.fixture'
+import { testStock } from '../design/design.fixture'
 import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers } from '../commands/jobs'
@@ -300,5 +301,178 @@ describe('edge chamfers in a plan (E2, outside edges)', () => {
     // the bevel runs −9.738 … −11.238: a level at −1 misses it (the `on` face's range said cut)
     expect(await cone('-1')).toEqual([])
     expect((await cone('-10.5')).map((f) => f.params['operationId'])).toEqual(['chamfer1'])
+  })
+})
+
+// ── E4b: bottom edges from a flipped setup (docs/modes/edge-chamfers.md#implementation-e4b) ──
+
+/** A 100 × 60 × 12 board outlined 80 × 40 (sharp corners, 4 tabs), chamfered 1 × 45° top and bottom. */
+async function boardPlan() {
+  const svc = services()
+  const s = await planSetup({ part: false, services: svc, stock: testStock('12') })
+  await s.run('library.tool.add', { values: libraryInput(chamferMill('6')) })
+  await s.run('design.profile.add', {
+    partId: s.partId,
+    shape: {
+      kind: 'rectangle',
+      center: ['50', '30'],
+      length: '80',
+      width: '40',
+      cornerRadius: '0',
+    },
+    tabs: { count: '4', width: '6', thickness: '2' },
+  })
+  await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'profile1', width: '1' })
+  const bottom = (await s.run('design.chamfer.add', {
+    partId: s.partId,
+    edgeOf: 'profile1',
+    width: '1',
+    on: 'stock.bottom',
+  })) as { warnings: { code: string }[] }
+  await s.run('project.apply', {})
+  return { s, svc, bottom }
+}
+
+const toolpathOf = (s: Setup, planId: string, design: string): Toolpath => {
+  const op = s
+    .plan(planId)
+    .setups.flatMap((x) => x.operations)
+    .find((o) => o.designOperationIds.includes(design))!
+  return (
+    s.query('plan.toolpath.get', { planId, planOperationId: op.id }) as { toolpath: Toolpath }
+  ).toolpath
+}
+
+describe('edge chamfers in a plan (E4b, bottom edges)', () => {
+  it('E4b exit: a board chamfered top and bottom: two setups, planned, exported, run', async () => {
+    const { s, svc, bottom } = await boardPlan()
+    expect(s.op('chamfer2')).toMatchObject({ on: 'stock.bottom', edgeOf: 'profile1' })
+    expect(bottom.warnings.map((w) => w.code)).toContain('dfm.chamferTabs')
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    // the flip comes after the top setup's through profile (the part held by its tabs)
+    const setups = s.plan(planId).setups
+    expect(setups.map((x) => [x.name, x.direction ?? '+z'])).toEqual([
+      ['Top', '+z'],
+      ['Bottom', '-z'],
+    ])
+    expect(setups[1]!.operations.flatMap((o) => o.designOperationIds)).toEqual(['chamfer2'])
+    const warnings = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] })
+      .warnings
+    expect(warnings.filter((w) => w.severity === 'error')).toEqual([])
+    expect(warnings.map((w) => w.code)).toContain('plan.cutoutBeforeSetup')
+    await generateAll(s, planId)
+    const tp = toolpathOf(s, planId, 'chamfer2')
+    const cuts = tp.passes.flatMap((p) =>
+      p.moves.filter((m) => m.kind === 'line' || m.kind === 'arc').map((m) => m.to),
+    )
+    // tip Z −1 below the bottom face (the setup's Z0); in the bottom's frame v = 60 − y
+    expect(Math.min(...cuts.map((p) => p[2]))).toBeCloseTo(-1, 9)
+    // the tool lifts over the 4 tabs (front, right, back, left middles): no cut within the gap
+    const tabs = [
+      [50, 50],
+      [90, 30],
+      [50, 10],
+      [10, 30],
+    ]
+    for (const p of cuts.filter((q) => q[2] < -1e-9))
+      for (const t of tabs) expect(Math.hypot(p[0] - t[0]!, p[1] - t[1]!)).toBeGreaterThan(4.999)
+    // four open runs, each entered by a plunge in the slot's air
+    const plunges = tp.passes.flatMap((p) =>
+      p.moves.filter((m, k) => m.kind === 'line' && p.moves[k - 1]?.kind === 'rapid'),
+    )
+    expect(plunges).toHaveLength(4)
+    const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+    for (const setup of setups) {
+      const e = expectOk(await exportPlan(s.d.doc, planId, svc, { setupId: setup.id }))
+      expect(e.regenerated).toEqual([])
+      const run = await streamProgram(e.lines, machine)
+      expect(run.lines).toBe(e.lines.length)
+      if (setup.direction === '-z') expect(e.lines.some((l) => /Z-1(\.0+)?\b/.test(l))).toBe(true)
+    }
+  })
+
+  it('a rebuild puts a new bottom chamfer in a setup after the profile', async () => {
+    const { s, outline } = await enclosurePlan()
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    expect(s.plan(planId).setups.map((x) => x.name)).toEqual(['Bottom', 'Top'])
+    await s.run('design.chamfer.add', {
+      partId: s.partId,
+      edgeOf: outline,
+      width: '1',
+      on: 'stock.bottom',
+    })
+    await s.run('project.apply', {})
+    await s.run('plan.rebuild', { planId })
+    const setups = s.plan(planId).setups
+    expect(setups.map((x) => x.name)).toEqual(['Bottom', 'Top', 'Bottom 2'])
+    expect(setups[2]!.operations.flatMap((o) => o.designOperationIds)).toEqual(['chamfer2'])
+    // a fresh plan derives the same: the bottom facing first, the flip back for the chamfer
+    const fresh = await s.create({ machineLibraryItemId: s.machineId })
+    expect(s.plan(fresh).setups.map((x) => x.name)).toEqual(['Bottom', 'Top', 'Bottom 2'])
+    const errors = (
+      s.query('plan.warning.list', { planId: fresh }) as { warnings: PlanWarning[] }
+    ).warnings.filter((w) => w.severity === 'error')
+    expect(errors).toEqual([])
+    // the bevel sits on the faced bottom (−9.738 in the bottom's frame)
+    await generateAll(s, fresh)
+    const zs = toolpathOf(s, fresh, 'chamfer2').passes.flatMap((p) =>
+      p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])),
+    )
+    expect(Math.min(...zs)).toBeCloseTo(-9.738 - 1, 6)
+  })
+
+  it('plan.design.operation.update takes loops and cornerLift (E4a gap)', async () => {
+    const t = await edgePlan()
+    await t.s.toStatus(t.planId, 'settledDesign')
+    await t.s.run('plan.design.operation.update', {
+      planId: t.planId,
+      operationId: 'chamfer1',
+      loops: [0],
+      cornerLift: true,
+    })
+    const ops = t.s.plan(t.planId).design.part.operations
+    expect(ops.find((o) => o.id === 'chamfer1')).toMatchObject({ loops: [0], cornerLift: true })
+  })
+
+  it('a split piece keeps the bottom chamfer on its own bottom, along the source outline only', async () => {
+    const { s, outline } = await enclosurePlan()
+    await s.run('design.chamfer.add', {
+      partId: s.partId,
+      edgeOf: outline,
+      width: '1',
+      on: 'stock.bottom',
+    })
+    await s.run('design.split.set', {
+      partId: s.partId,
+      split: { lines: [{ axis: 'x', at: '125' }] },
+    })
+    const pieces = Object.values(s.d.doc.parts)
+      .filter((p) => p.derivedFrom?.partId === s.partId)
+      .sort((a, b) => a.derivedFrom!.index - b.derivedFrom!.index)
+    expect(pieces).toHaveLength(2)
+    for (const p of pieces)
+      expect(
+        p.operations.find((o) => o.id === 'chamfer2'),
+        p.name,
+      ).toMatchObject({
+        edgeOf: 'split1_outline',
+        on: 'stock.bottom',
+        sourceEdge: { shape: { kind: 'rectangle' } },
+      })
+    const piece = pieces[0]!
+    const dx = mmOf(piece.offset![0]!)
+    const planId = (
+      (await s.run('plan.create', { partId: piece.id, machineLibraryItemId: s.machineId })) as {
+        planId: string
+      }
+    ).planId
+    expect(s.plan(planId).setups.at(-1)!.direction).toBe('-z')
+    await generateAll(s, planId)
+    const cuts = toolpathOf(s, planId, 'chamfer2').passes.flatMap((p) =>
+      p.moves.filter((m) => m.kind === 'line' || m.kind === 'arc').map((m) => m.to),
+    )
+    expect(cuts.length).toBeGreaterThan(0)
+    // in the bottom's frame u = x: the piece (x < 125) is chamfered left of the split line only
+    expect(Math.max(...cuts.map((p) => p[0]))).toBeLessThan(125 + dx + 1 + 0.1)
   })
 })

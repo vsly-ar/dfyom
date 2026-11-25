@@ -12,7 +12,7 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import { chamferEdgeKind, type Operation, type Part, type Shape } from './operation'
+import { bottomEdgeFace, chamferEdgeKind, type Operation, type Part, type Shape } from './operation'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -391,12 +391,23 @@ export function operationIssues(
             { max: count - 1, actual: Math.max(...loops) },
           )
       }
-      if (edge !== undefined)
-        c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.name}`, {
-          allowed: [edge.on],
-          actual: op.on,
-          edgeOf: edge.id,
-        })
+      if (edge !== undefined) {
+        // E4b: a through profile's bottom edge from the opposite stock face (a flipped setup)
+        const bottom = bottomEdgeFace(edge)
+        c.check(
+          edge.on === op.on || op.on === bottom,
+          'on',
+          'chamferOn',
+          bottom === undefined
+            ? `must be the face of ${edge.name}`
+            : `must be the face of ${edge.name} or, for its bottom edge, ${bottom}`,
+          {
+            allowed: bottom === undefined ? [edge.on] : [edge.on, bottom],
+            actual: op.on,
+            edgeOf: edge.id,
+          },
+        )
+      }
       c.positive(op.width, 'width')
       c.check(
         op.angle.exact.compare(MIN_CHAMFER_ANGLE) >= 0 &&

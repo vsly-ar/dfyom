@@ -288,7 +288,31 @@ export interface LoopChamferEdge {
    * loop, then its islands); absent = every loop.
    */
   readonly loops?: readonly number[]
+  /**
+   * E4b, a bottom chamfer only: the through profile's tabs, each as its centre on the edge (face
+   * frame of the chamfer) and its width along the edge. The bevel stops short of every tab (the
+   * tool lifts over it, `loopChamferTabGap`), so the tabs that hold the part stay whole.
+   * Doc: docs/modes/edge-chamfers.md#implementation-e4b
+   */
+  readonly tabs?: readonly LoopChamferTab[]
 }
+
+/** A tab a bottom chamfer stops short of (E4b): its centre on the edge and width along it. */
+export interface LoopChamferTab {
+  readonly at: Vec2
+  readonly width: number
+}
+
+/** Clearance between a bottom chamfer's cone and a tab it stops short of (mm, E4b). */
+export const LOOP_CHAMFER_TAB_CLEARANCE = 1
+
+/**
+ * How far from a tab's centre (along the edge, as the edge point nearest the tool) a bottom
+ * chamfer leaves the edge sharp (E4b): half the tab, the bevel's width (the cone's reach at the
+ * face of a pointed bit), the tip radius and the clearance.
+ */
+export const loopChamferTabGap = (tab: LoopChamferTab, width: number, tipDiameter = 0): number =>
+  tab.width / 2 + width + tipDiameter / 2 + LOOP_CHAMFER_TAB_CLEARANCE
 
 export type ChamferGeometry = Extract<OperationGeometry, { kind: 'chamfer' }>
 export type CircleChamferGeometry = FacePlacement & CircleChamferFields
@@ -413,6 +437,8 @@ export const DFM_WARNING_CODES = [
   // edge chamfers (E3): docs/modes/edge-chamfers.md#dfm-findings
   'dfm.chamferMeets',
   'dfm.chamferIncomplete',
+  // E4b: docs/modes/edge-chamfers.md#implementation-e4b
+  'dfm.chamferTabs',
   // Clones features (v0.4 F5; `operation` = the feature id): docs/modes/features.md#checks-and-dfm
   'dfm.cloneOutsideStock',
   'dfm.cloneDuplicate',

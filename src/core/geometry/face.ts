@@ -196,3 +196,47 @@ export function faceFrame(
 export function toPartFrame(frame: FaceFrame, p: Vec3): Vec3 {
   return applyPlacement(frame, p)
 }
+
+/** The direction of the opposite stock face (a flip): `+z` ↔ `−z`, `+x` ↔ `−x`, `+y` ↔ `−y`. */
+export function oppositeDirection(direction: Direction): Direction {
+  const n = DIRECTION[direction].n
+  return directionOf([-n[0] || 0, -n[1] || 0, -n[2] || 0])
+}
+
+/** The direction of a stock face id (`stock.top` → `+z`); undefined for any other surface. */
+export function stockFaceDirection(id: string): Direction | undefined {
+  return DIRECTIONS.find((d) => STOCK_FACE[d] === id)
+}
+
+/**
+ * Face-frame coordinates `[u, v]` of the face of `from` read in the face frame of `to` (both
+ * stock faces, the points on the same line along the normal), as a linear part and a
+ * translation: `p ↦ m · p + t`. For opposite faces `m` is a mirror (det −1), e.g. top → bottom
+ * `[u, v] ↦ [u, W − v]` (edge-chamfers.md § Implementation (E4b)).
+ */
+export function faceToFace(
+  from: Direction,
+  to: Direction,
+  stock: StockSize,
+): { readonly m: readonly [Vec2Like, Vec2Like]; readonly t: Vec2Like } {
+  const f = faceFrame(from, stock, 0)
+  const g = faceFrame(to, stock, 0)
+  const read = (p: Vec3): Vec2Like => {
+    const d = [p[0] - g.origin[0], p[1] - g.origin[1], p[2] - g.origin[2]] as const
+    const dot = (a: Vec3) => a[0] * d[0] + a[1] * d[1] + a[2] * d[2] + 0
+    return [dot(g.u), dot(g.v)]
+  }
+  const at = (a: number, b: number) => applyPlacement(f, [a, b, 0])
+  const t = read(at(0, 0))
+  const eu = read(at(1, 0))
+  const ev = read(at(0, 1))
+  return {
+    m: [
+      [eu[0] - t[0] + 0, ev[0] - t[0] + 0],
+      [eu[1] - t[1] + 0, ev[1] - t[1] + 0],
+    ],
+    t,
+  }
+}
+
+type Vec2Like = readonly [number, number]
