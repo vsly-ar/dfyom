@@ -21,6 +21,7 @@ import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import { setupZReferences, zRefText } from '../plan/z-reference'
 import type { ProjectDoc } from '../project/document'
+import type { PartDTO } from '../design/part.dto'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
@@ -324,6 +325,7 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
+      ...pieceLine(doc, plan.dto.design.part),
       setup: {
         name: setup.name,
         id: setup.id,
@@ -385,6 +387,24 @@ export async function exportPlan(
  * The header's clamp line (DF64, safe-links.md#clamps): only when links fly over the clamps,
  * i.e. with `minimum` and a clamp height whose margin stays below the clearance height.
  */
+/**
+ * A split piece's header line (split parts 4a): "Piece 3 of 8 of Enclosure 1", its name after a
+ * colon when renamed (the default "<source> · <n>" is not repeated); the count and the source name
+ * from the document, the piece itself from the plan's part copy. Docs:
+ * docs/modes/split-parts.md#plan-export-and-run-per-piece, docs/architecture/grbl.md
+ */
+function pieceLine(doc: ProjectDoc, part: PartDTO): { piece?: string } {
+  const from = part.derivedFrom
+  if (from === undefined) return {}
+  const source = Object.hasOwn(doc.parts, from.partId) ? doc.parts[from.partId] : undefined
+  const count = Object.values(doc.parts).filter((p) => p.derivedFrom?.partId === from.partId).length
+  const sourceName = source?.name ?? part.name
+  const renamed = part.name !== `${sourceName} · ${from.index}`
+  return {
+    piece: `Piece ${from.index} of ${Math.max(count, from.index)} of ${sourceName}${renamed ? `: ${part.name}` : ''}`,
+  }
+}
+
 function clampLine(s: LinkSettings): Pick<SetupHeader, 'clamp'> {
   const h = s.clampHeight
   if (s.retraction === 'full' || h === undefined || h + s.margin >= s.clearance - 1e-9) return {}

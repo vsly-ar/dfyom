@@ -36,6 +36,8 @@ export interface ExportOperation {
 export interface ExportInput {
   /** Plan name. */
   readonly name: string
+  /** A split piece's header line (`MachiningProgram.piece`); absent for a plain part. */
+  readonly piece?: string
   readonly setup: {
     readonly name: string
     readonly clearanceHeight: number
@@ -240,6 +242,7 @@ export function toMachiningProgram(
   }
   return Ok({
     name: input.name,
+    ...(input.piece === undefined ? {} : { piece: input.piece }),
     setupName: input.setup.name,
     ...(input.setup.header === undefined ? {} : { setup: input.setup.header }),
     units,

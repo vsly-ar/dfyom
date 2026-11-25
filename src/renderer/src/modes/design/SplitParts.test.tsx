@@ -60,7 +60,7 @@ async function renderSplit() {
   // test windows are narrow: the inspector is an overlay, opened by its toggle
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   await screen.findByRole('region', { name: 'Split' })
-  return { ...r, s, shell, nav, partRow, split, openMenu, callsOf, pieces }
+  return { ...r, s, shell, bridge, nav, partRow, split, openMenu, callsOf, pieces }
 }
 
 describe('split part (split parts 4a)', () => {
@@ -110,10 +110,45 @@ describe('split part (split parts 4a)', () => {
     // no Add menu on a piece; the navigator says why
     expect(within(t.nav()).queryByRole('button', { name: 'Add operation' })).toBeNull()
     expect(within(t.nav()).getByText('Read-only: this piece follows Bracket.')).toBeVisible()
+    // its rows select only: no grip, no row menu, no Delete or Alt+↑/↓ (the core would refuse)
+    const list = within(t.nav()).getByRole('list', { name: 'Operations in design order' })
+    expect(within(list).queryAllByTitle('Drag to reorder (Alt+↑/↓)')).toHaveLength(0)
+    const rows = within(list).getAllByRole('button')
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.getAttribute('aria-keyshortcuts') ?? '').not.toMatch(/Alt|Delete|Shift\+F10/)
+      expect(row.closest('[data-row-menu]')).toBeNull()
+    }
+    const before = t.bridge.calls.length
+    rows[0]!.focus()
+    await t.user.keyboard('{Delete}{Alt>}{ArrowDown}{/Alt}{Shift>}{F10}{/Shift}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(t.bridge.calls.slice(before).filter((c) => /remove|move/.test(c.name))).toEqual([])
     await expectNoAxeViolations()
     await t.user.click(screen.getByRole('button', { name: 'Edit the split' }))
     await waitFor(() => expect(t.shell.ui.getState().designPart).toBe(t.s.partId))
     expect(within(t.split()).getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
+  })
+
+  it('Split part… is in the part menu; the part row’s context menu then offers Edit the split', async () => {
+    const t = await renderSplit()
+    const menu = await t.openMenu()
+    await t.user.click(within(menu).getByRole('menuitem', { name: /^Split part…/ }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    expect(t.callsOf('design.split.set')).toHaveLength(1)
+    expect(within(t.split()).getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
+    // the part row: Shift+F10 opens its menu with Edit the split
+    within(t.partRow()).getByRole('button', { name: 'Bracket' }).focus()
+    await t.user.keyboard('{Shift>}{F10}{/Shift}')
+    const rowMenu = await screen.findByRole('menu', { name: 'Actions for Bracket' })
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Edit the split' })).toBeVisible()
+    await expectNoAxeViolations()
+    await t.user.keyboard('{Escape}')
+    // on a piece the entry leads to its source
+    await t.user.click(within(await t.openMenu()).getAllByRole('menuitemradio')[2]!)
+    await screen.findByText('Piece 2 of 2 of Bracket')
+    await t.user.click(within(await t.openMenu()).getByRole('menuitem', { name: 'Edit the split' }))
+    await waitFor(() => expect(t.shell.ui.getState().designPart).toBe(t.s.partId))
   })
 
   it('Remove split removes the pieces in one command', async () => {

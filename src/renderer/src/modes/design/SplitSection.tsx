@@ -22,6 +22,7 @@ import {
   WarningList,
   type WarningListLabels,
   type WarningView,
+  type MenuEntry,
 } from '../../ui'
 import styles from './Design.module.css'
 import { NameField } from './NameField'
@@ -66,6 +67,37 @@ function useSplitSet(part: DesignPart) {
     setError(r.error)
   }
   return { send, error, confirm, setConfirm }
+}
+
+/**
+ * The part menu's and the part row's context menu entry (split parts 4a polish): "Split part…" on
+ * a part without a split (the same first split as the inspector's button), else "Edit the split";
+ * both show the part inspector, where the Split section is (on a piece: its source's).
+ */
+export function useSplitEntry(part: DesignPart): MenuEntry {
+  const { send } = useSplitSet(part)
+  const setPart = useUi((st) => st.setDesignPart)
+  const showInspector = useUi((st) => st.showInspector)
+  const [, select] = useDesignSelection()
+  const from = part.dto.derivedFrom
+  const stock = part.loaded?.stock
+  const show = () => {
+    if (from !== undefined) setPart(from.partId)
+    select(null)
+    showInspector()
+  }
+  if (from !== undefined || part.dto.split !== undefined)
+    return { label: t.editSplit, icon: <Icon name="split" />, onSelect: show }
+  return {
+    label: t.action,
+    description: t.actionDescription,
+    icon: <Icon name="split" />,
+    ...(stock === undefined ? { disabledReason: m.split.noStock } : {}),
+    onSelect: () => {
+      show()
+      void send(firstSplit(stock?.thickness.canonical ?? 0, part.units))
+    },
+  }
 }
 
 /** The split section of a source part's inspector. */

@@ -18,6 +18,7 @@ import type { SplitDTO } from '../part.dto'
 import { toGeometryInput } from '../geometry-input'
 import { SurfaceTable } from '../surfaces'
 import { operationTools } from '../tool-choice'
+import { baseOf, isFrozenRecord } from '../frozen-memo'
 import { EPS, regionBounds, shapeRegion, splitNumbers } from './layout'
 import { planPieces, splitFinding, type PiecesResult } from './pieces'
 
@@ -284,11 +285,33 @@ export function splitDfm(
   port: Region2dPort,
   library: Library | undefined,
 ): DfmWarning[] {
+  const g = geometricDfm(loaded, split, planned, port)
+  return g === undefined ? [] : [...g.findings, ...stockDfm(doc, split, planned, g, library)]
+}
+
+/** What the library rules need from the geometric pass. */
+interface GeometricDfm {
+  readonly findings: readonly DfmWarning[]
+  readonly fb: ReturnType<typeof regionBounds>
+  readonly partHeight: number
+}
+
+/**
+ * The rules from the part alone (`noOutline`, `cutsFeature`, `featureNear`, `thinJoint`, `sliver`):
+ * a pure function of the part record and its snapshots, so `splitWarnings` caches it per frozen
+ * record; undefined when the part has no geometry input.
+ */
+function geometricDfm(
+  loaded: LoadedPart,
+  split: SplitDTO,
+  planned: PiecesResult,
+  port: Region2dPort,
+): GeometricDfm | undefined {
   const id = split.id
   const nums = splitNumbers(split)
   const out: DfmWarning[] = []
   const input = toGeometryInput(loaded.part, loaded.stock, port)
-  if (input.isErr()) return out
+  if (input.isErr()) return undefined
   const geometry = input.unwrap().operations
   const { layout, pieces } = planned
   const W = loaded.stock.width.canonical
@@ -492,6 +515,23 @@ export function splitDfm(
         ),
       )
   }
+  return { findings: out, fb, partHeight }
+}
+
+/** `noStock`, `outsideTravel`, `fitsWhole`: the library and the project's machines (cheap). */
+function stockDfm(
+  doc: ProjectDoc,
+  split: SplitDTO,
+  planned: PiecesResult,
+  g: GeometricDfm,
+  library: Library | undefined,
+): DfmWarning[] {
+  const id = split.id
+  const nums = splitNumbers(split)
+  const anyCut = nums.xs.length + nums.ys.length + nums.levels.length > 0
+  const { pieces } = planned
+  const { fb, partHeight } = g
+  const out: DfmWarning[] = []
   // ── noStock, outsideTravel, fitsWhole ────────────────────────────────────────────────────
   const stocks = libraryStocks(library)
   const ms = machines(doc, library)
@@ -561,10 +601,48 @@ export function splitWarnings(
   const split = loaded.dto.split
   const port = services.region2d
   if (split === undefined || port === undefined) return []
-  const planned = planPieces(loaded, split, port)
-  if (planned.isErr()) return []
+  const geo = geometricOf(loaded, split, port)
+  if (geo === undefined) return []
+  const { planned, g } = geo
   return [
-    ...planned.unwrap().findings,
-    ...splitDfm(doc, loaded, split, planned.unwrap(), port, services.library),
+    ...planned.findings,
+    ...(g === undefined
+      ? []
+      : [...g.findings, ...stockDfm(doc, split, planned, g, services.library)]),
   ]
+}
+
+interface Geometric {
+  readonly planned: PiecesResult
+  readonly g: GeometricDfm | undefined
+}
+
+/**
+ * The pieces and the geometric rules, cached per frozen part record and snapshot map (frozen-memo):
+ * `design.warning.list` runs after every revision and evaluation step, and the geometric pass
+ * (glue faces sampled on a grid) is the costly part (≈ 100 ms for the 8-piece enclosure); an
+ * unchanged source reuses it. The library rules are cheap and run each time (the library is a
+ * service, not a record). Doc: docs/modes/split-parts.md#implementation-4a
+ */
+const geometricCache = new WeakMap<
+  object,
+  { readonly snapshots: unknown; readonly port: Region2dPort; readonly value: Geometric }
+>()
+
+function geometricOf(
+  loaded: LoadedPart,
+  split: SplitDTO,
+  port: Region2dPort,
+): Geometric | undefined {
+  const key = baseOf(loaded.dto)
+  const hit = isFrozenRecord(key) ? geometricCache.get(key) : undefined
+  if (hit !== undefined && hit.snapshots === loaded.snapshots && hit.port === port) return hit.value
+  const planned = planPieces(loaded, split, port)
+  if (planned.isErr()) return undefined
+  const value = {
+    planned: planned.unwrap(),
+    g: geometricDfm(loaded, split, planned.unwrap(), port),
+  }
+  if (isFrozenRecord(key)) geometricCache.set(key, { snapshots: loaded.snapshots, port, value })
+  return value
 }

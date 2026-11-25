@@ -105,6 +105,14 @@ export interface UiState {
   setReferencePreview(preview: ReferencePreview | null): void
   /** Bumped to ask the shell to show a collapsed inspector (the Reference panel opened). */
   readonly inspectorRequest: number
+  /** Asks the shell to show a collapsed inspector (the part menu's Split part…). */
+  showInspector(): void
+  /**
+   * The split line or level the Split section's field has focus on, or the viewport holds or
+   * hovers (split parts 4a polish): drawn in the accent in the exploded preview. View state only.
+   */
+  readonly splitFocus: SplitFocus | null
+  setSplitFocus(focus: SplitFocus | null): void
   /** Active pick mode, or null. */
   readonly pick: PickRequestState | null
   setPick(pick: PickRequestState | null): void
@@ -237,6 +245,12 @@ export interface ClonesRowFocus {
   readonly row: number
 }
 
+/** A split line (index into `split.lines`) or level (into `split.levels`). */
+export interface SplitFocus {
+  readonly kind: 'line' | 'level'
+  readonly index: number
+}
+
 /** Which feature field the feature inspector should focus (a dotted field path, `cbDiameter`). */
 export interface FeatureFocus {
   readonly featureId: string
@@ -317,6 +331,14 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     referencePreview: null,
     setReferencePreview: (referencePreview) => set({ referencePreview }),
     inspectorRequest: 0,
+    showInspector: () => set((s) => ({ inspectorRequest: s.inspectorRequest + 1 })),
+    splitFocus: null,
+    setSplitFocus: (splitFocus) =>
+      set((s) =>
+        s.splitFocus?.kind === splitFocus?.kind && s.splitFocus?.index === splitFocus?.index
+          ? {}
+          : { splitFocus },
+      ),
     pick: null,
     setPick: (pick) => set({ pick }),
     hiddenReferences: new Set(),

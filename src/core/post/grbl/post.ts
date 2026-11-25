@@ -188,6 +188,7 @@ class Writer {
   private header(): void {
     const p = this.p
     this.comment(`Program: ${p.name}`)
+    if (p.piece !== undefined) this.comment(p.piece)
     if (p.setup === undefined) this.comment(`Setup: ${p.setupName}`)
     else this.setupComments(p.setup)
     this.comment(`Units: ${p.units === 'in' ? 'inch' : 'mm'}`)

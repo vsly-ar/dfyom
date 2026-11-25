@@ -1,7 +1,7 @@
 {
   "name": "dfyom",
   "productName": "DFYOM",
-  "version": "0.4.63",
+  "version": "0.4.64",
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
