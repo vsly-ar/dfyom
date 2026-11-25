@@ -382,7 +382,10 @@ function geometricDfm(
             doweled && dowels !== undefined
               ? `The glue face at ${what} is about ${fmt(w)} mm wide at its narrowest (< ${fmt(limit)} mm): Ø${fmt(dowels.diameter)} dowels fit only where it is wider`
               : `The glue face at ${what} is about ${fmt(w)} mm wide at its narrowest (< ${THIN_JOINT_MM} mm): a weak butt joint`,
-            { ...params, width: w, limit },
+            // `dowel`: the Ø whose holes need the wider face (the renderer's wording)
+            doweled && dowels !== undefined
+              ? { ...params, width: w, limit, dowel: dowels.diameter }
+              : { ...params, width: w, limit },
           ),
         )
     }

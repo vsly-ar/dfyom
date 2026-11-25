@@ -205,12 +205,18 @@ export function PatternInspector({
       })),
   ]
 
+  /** A field's standing note, in its support area as the other inspectors' notes (design review U9). */
+  const note = (id: string, text: string | undefined): FieldMessage[] =>
+    text === undefined ? [] : [{ id: `note-${id}`, severity: 'note', text }]
+
   const quantityField = (
     path: string,
     label: string,
     kind: 'length' | 'angle' | 'scalar',
     dto: unknown,
     commit: (source: string) => Record<string, unknown>,
+    /** Shown while the value is unset (a cell's rotation: none means 0°). */
+    placeholder?: string,
   ) => (
     <div key={path} data-feature-field={path}>
       <QuantityInput
@@ -218,6 +224,7 @@ export function PatternInspector({
         kind={kind}
         defaultUnit={defaultUnit(kind, units)}
         value={dto === undefined ? undefined : quantityOf(dto as QuantityDTO)}
+        {...(placeholder === undefined ? {} : { placeholder })}
         onCommit={(q, gesture) => void update(commit(q.source), path, gesture)}
         onCancelGesture={cancelGesture}
         messages={messagesAt(path)}
@@ -330,9 +337,14 @@ export function PatternInspector({
               />
             </Field>
           ) : null}
-          {quantityField('cell.rotation', p.rotation, 'angle', cell['rotation'], (source) => ({
-            cell: cellArgs(cell, { rotation: source }),
-          }))}
+          {quantityField(
+            'cell.rotation',
+            p.rotation,
+            'angle',
+            cell['rotation'],
+            (source) => ({ cell: cellArgs(cell, { rotation: source }) }),
+            '0°',
+          )}
         </Group>
 
         <Group title={p.groups.layout}>
@@ -422,7 +434,13 @@ export function PatternInspector({
             </Field>
           </div>
           <div data-feature-field="boundary">
-            <Field label={p.boundary} messages={messagesAt('boundary')}>
+            <Field
+              label={p.boundary}
+              messages={[
+                ...messagesAt('boundary'),
+                ...note('stacked', stackedOn === undefined ? undefined : p.stackedNote(stackedOn)),
+              ]}
+            >
               <Select
                 options={[
                   {
@@ -445,11 +463,6 @@ export function PatternInspector({
                 }}
               />
             </Field>
-            {stackedOn === undefined ? null : (
-              <p className={styles['muted']} data-pattern-stacked>
-                {p.stackedNote(stackedOn)}
-              </p>
-            )}
           </div>
           {boundary === undefined
             ? null
@@ -488,7 +501,11 @@ export function PatternInspector({
             margin,
           }))}
           <div data-feature-field="fit">
-            <Field label={p.fit} kind="toggle" messages={messagesAt('fit')}>
+            <Field
+              label={p.fit}
+              kind="toggle"
+              messages={[...messagesAt('fit'), ...note('fit', p.fitDescription)]}
+            >
               <SegmentedControl<string>
                 label={p.fit}
                 options={['whole', 'clip'].map((v) => ({ value: v, label: p.fits[v] ?? v }))}
@@ -496,7 +513,6 @@ export function PatternInspector({
                 onValueChange={(fit) => void update({ fit }, 'fit')}
               />
             </Field>
-            <p className={styles['muted']}>{p.fitDescription}</p>
           </div>
           <div data-feature-field="invert">
             <Field label={p.invert} kind="toggle" messages={messagesAt('invert')}>
@@ -512,7 +528,14 @@ export function PatternInspector({
 
         <Group title={p.groups.cut}>
           <div data-feature-field="through">
-            <Field label={p.through} kind="toggle" messages={messagesAt('through')}>
+            <Field
+              label={p.through}
+              kind="toggle"
+              messages={[
+                ...messagesAt('through'),
+                ...note('through', through ? p.throughNote : undefined),
+              ]}
+            >
               <Switch
                 label={p.through}
                 hideLabel
@@ -520,7 +543,6 @@ export function PatternInspector({
                 onCheckedChange={(on) => void update({ through: on }, 'through')}
               />
             </Field>
-            {through ? <p className={styles['muted']}>{p.throughNote}</p> : null}
           </div>
           {through
             ? null
@@ -539,7 +561,11 @@ export function PatternInspector({
 
         <Group title={p.groups.chamfer}>
           <div data-feature-field="chamfer">
-            <Field label={p.chamfer} kind="toggle" messages={messagesAt('chamfer')}>
+            <Field
+              label={p.chamfer}
+              kind="toggle"
+              messages={[...messagesAt('chamfer'), ...note('chamfer', p.chamferNote)]}
+            >
               <Switch
                 label={p.chamfer}
                 hideLabel
@@ -547,7 +573,6 @@ export function PatternInspector({
                 onCheckedChange={(on) => void update({ chamfer: on ? {} : null }, 'chamfer')}
               />
             </Field>
-            <p className={styles['muted']}>{p.chamferNote}</p>
           </div>
           {chamfer === undefined
             ? null

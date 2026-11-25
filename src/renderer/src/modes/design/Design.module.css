@@ -1792,6 +1792,8 @@
 .splitView {
   margin: 0;
   display: grid;
+  /* the captions share one baseline under views of different heights (design review U9) */
+  grid-template-rows: 1fr auto;
   gap: var(--space-1);
 }
 
