@@ -26,6 +26,7 @@ import {
   PanelHeader,
   QuantityInput,
   SegmentedControl,
+  Select,
   Switch,
   WarningList,
   type WarningListLabels,
@@ -62,6 +63,7 @@ import {
   KEY_CLEARANCE_MAX,
   type KeyPlan,
 } from '../../../../core/design/split/keys'
+import type { Lap } from '../../../../core/design/split/laps'
 import { lengthDTO, splitKeys } from '../../../../core/design/split/pieces'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
@@ -240,7 +242,9 @@ export function SplitSection({
   const pieces = pieceViews(part.doc, part.dto.id)
   const findingText = (w: DfmWarning) => dfmMessages.text(w, units, dfmNames(part.dto))
   const holes = dowelHoles(split)
-  const knobs = (keys?.keys.keys ?? []).map((k) => keyPreviewPoints(k))
+  // the keys' and fingers' outlines, and each half lap's overlap (4d) as a closed outline
+  const laps = split.joint.kind === 'halfLap' ? (info?.laps ?? []) : []
+  const knobs = [...(keys?.keys.keys ?? []).map((k) => keyPreviewPoints(k)), ...laps.map(lapPoints)]
   const keysOn = (axis: 'x' | 'y', at: number) =>
     (keys?.keys.keys ?? []).filter((k) => k.axis === axis && Math.abs(k.at - at) < 1e-6).length
   return (
@@ -377,7 +381,13 @@ export function SplitSection({
         onCommit={(q, gesture) => void send({ ...args, margin: q.source }, false, gesture)}
       />
       {split.lines.length > 0 ? (
-        <KeyFields part={part} args={args} keys={keys} send={(a, g) => void send(a, false, g)} />
+        <KeyFields
+          part={part}
+          args={args}
+          keys={keys}
+          laps={laps}
+          send={(a, g) => void send(a, false, g)}
+        />
       ) : null}
       {split.levels.length > 0 ? (
         <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
@@ -412,19 +422,33 @@ export function SplitSection({
   )
 }
 
+/** A half lap's overlap in the top view: ℓ across the line, over the pieces' extent along it. */
+function lapPoints(l: Lap): (readonly [number, number])[] {
+  const h = l.length / 2
+  const p = (u: number, w: number) =>
+    l.axis === 'x' ? ([l.at + w, u] as const) : ([u, l.at + w] as const)
+  return [p(l.lo, -h), p(l.hi, -h), p(l.hi, h), p(l.lo, h), p(l.lo, -h)]
+}
+
+type LineJoint = 'butt' | 'puzzle' | 'dovetail' | 'finger' | 'halfLap'
+
 /**
- * The lines' joint (split parts 4b-2): Butt, Puzzle or Dovetail; with keys the clearance (socket
- * side only) and a read-out of the keys: how many, their neck and the largest tool that cuts them.
+ * The lines' joint (split parts 4b-2, 4d): Butt, Puzzle, Dovetail, Finger or Half lap, in a
+ * select (five do not fit a segmented control); with a joint the clearance (socket side only), a
+ * read-out (keys: count, neck, largest tool; fingers: count, width, T-bones; a lap: its length and
+ * the flip) and Test fit (not for a half lap).
  */
 function KeyFields({
   part,
   args,
   keys,
+  laps,
   send,
 }: {
   part: DesignPart
   args: SplitArgs
   keys: { readonly keys: KeyPlan; readonly outlineTool: number } | undefined
+  laps: readonly Lap[]
   send: (split: SplitArgs, gesture?: string) => void
 }): React.JSX.Element {
   const split = part.dto.split!
@@ -438,30 +462,47 @@ function KeyFields({
     split.joint.clearance?.source ?? lengthDTO(keyClearance(split), part.units).source
   return (
     <div className={styles['splitGroup']} role="group" aria-label={t.lineJoint}>
-      <Field label={t.lineJoint} kind="toggle">
-        <SegmentedControl
-          label={t.lineJoint}
+      <Field label={t.lineJoint}>
+        <Select<LineJoint>
           options={[
             { value: 'butt', label: t.jointButt },
             { value: 'puzzle', label: t.jointPuzzle },
             { value: 'dovetail', label: t.jointDovetail },
+            { value: 'finger', label: t.jointFinger, description: t.jointFingerDescription },
+            { value: 'halfLap', label: t.jointHalfLap, description: t.jointHalfLapDescription },
           ]}
           value={kind}
           onValueChange={(v) => {
             const { joint: _, clearance: _c, ...rest } = args
             setChosen(true)
-            send(v === 'puzzle' || v === 'dovetail' ? { ...rest, joint: v } : rest)
+            // a joint's clearance carries over to another joint (the stored one)
+            send(v === 'butt' ? rest : { ...rest, joint: v })
           }}
         />
       </Field>
       {kind === 'butt' ? null : (
         <JointSettings
-          title={t.keySettings}
-          summary={t.keySettingsSummary(clearance, keys === undefined ? undefined : placed.length)}
+          title={
+            kind === 'finger'
+              ? t.fingerSettings
+              : kind === 'halfLap'
+                ? t.lapSettings
+                : t.keySettings
+          }
+          summary={
+            kind === 'finger'
+              ? t.fingerSettingsSummary(clearance, keys === undefined ? undefined : placed.length)
+              : kind === 'halfLap'
+                ? t.lapSettingsSummary(
+                    clearance,
+                    laps[0] === undefined ? undefined : fmt(laps[0].length),
+                  )
+                : t.keySettingsSummary(clearance, keys === undefined ? undefined : placed.length)
+          }
           open={chosen}
         >
           <QuantityInput
-            label={t.clearance}
+            label={kind === 'puzzle' || kind === 'dovetail' ? t.clearance : t.jointClearance}
             kind="length"
             defaultUnit={unit}
             value={
@@ -470,18 +511,30 @@ function KeyFields({
             onCommit={(q, gesture) => send({ ...args, clearance: q.source }, gesture)}
             messages={[{ id: 'note', severity: 'note', text: t.clearanceHint }]}
           />
-          {keys === undefined ? null : (
+          {kind === 'halfLap' ? (
+            <p className={styles['muted']}>
+              {laps[0] === undefined ? t.noLaps : t.lapSummary(laps.length, fmt(laps[0].length))}
+            </p>
+          ) : keys === undefined ? null : (
             <p className={styles['muted']}>
               {placed.length === 0
-                ? t.noKeys
-                : t.keySummary(
-                    placed.length,
-                    fmt(Math.min(...placed.map((k) => k.size.neck))),
-                    fmt(Math.min(...placed.map((k) => k.size.maxTool))),
-                  )}
+                ? kind === 'finger'
+                  ? t.noFingers
+                  : t.noKeys
+                : kind === 'finger'
+                  ? t.fingerSummary(
+                      placed.length,
+                      fmt(Math.min(...placed.map((k) => k.size.neck))),
+                      fmt(keys.outlineTool),
+                    )
+                  : t.keySummary(
+                      placed.length,
+                      fmt(Math.min(...placed.map((k) => k.size.neck))),
+                      fmt(Math.min(...placed.map((k) => k.size.maxTool))),
+                    )}
             </p>
           )}
-          <TestFit part={part} />
+          {kind === 'halfLap' ? null : <TestFit part={part} />}
         </JointSettings>
       )}
     </div>
@@ -1087,6 +1140,18 @@ export function PieceInspector({
             }}
           >
             {t.editSplit}
+          </Button>
+          <Button
+            size="sm"
+            icon={<Icon name="edit" />}
+            title={t.detachDescription}
+            onClick={() =>
+              void call('design.part.update', { partId: part.dto.id, detach: true }).then((r) =>
+                setError(r.ok ? undefined : r.error),
+              )
+            }
+          >
+            {t.detach}
           </Button>
         </div>
         {error ? <ErrorMessage error={error} /> : null}

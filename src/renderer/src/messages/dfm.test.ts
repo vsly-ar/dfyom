@@ -253,4 +253,25 @@ describe('dfm messages', () => {
     for (const rule of ['keyFit', 'dowelFit', 'dowelNear'])
       expect(text({ rule })).not.toBe('A split finding on this part.')
   })
+
+  it('words the finger and half-lap findings (split parts 4d)', () => {
+    const split = (params: DfmWarning['params']): DfmWarning => {
+      const { suggestion: _, ...rest } = w({ code: 'design.split', operation: 'split1', params })
+      return rest
+    }
+    const text = (params: DfmWarning['params']) => dfmMessages.text(split(params), 'mm', names)
+    const base = { rule: 'keyFit', axis: 'x', at: 125, run: [0, 100], pieces: [1, 2], tool: 6 }
+    expect(text({ ...base, reason: 'near', joint: 'halfLap', lap: 18 })).toBe(
+      'No half lap on the line at X 125 mm between pieces 1 and 2: a feature or the part edge lies within the 18 mm lap or one tool Ø (6 mm) of it. A butt joint there; move the split or the feature.',
+    )
+    expect(text({ ...base, reason: 'near', joint: 'finger' })).toBe(
+      'No fingers on the line at X 125 mm between pieces 1 and 2 at Y 0 mm–100 mm: a feature or the part edge is within one tool Ø (6 mm) of a finger. A butt joint there; move the split or the feature.',
+    )
+    expect(text({ ...base, reason: 'short', joint: 'finger', run: [0, 12] })).toBe(
+      'The run of 12 mm on the line at X 125 mm between pieces 1 and 2 is too short for fingers: a butt joint there.',
+    )
+    expect(
+      text({ rule: 'thinJoint', axis: 'x', at: 125, width: 8, limit: 18, what: 'fingerWidth' }),
+    ).toMatch(/^The fingers on the line at X 125 mm are 8 mm wide, less than 18 mm/)
+  })
 })

@@ -10,13 +10,15 @@
 // exported header. 4b-1: Dowels on the level in the editor, the piece's dowel holes, and the
 // doweled two-piece split planned and run. 4b-2: Puzzle on the lines in the editor (the clearance
 // field and the keys' read-out; the enclosure's cavity leaves no room for a key, so back to Butt).
-// 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed). 4c:
+// 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed). 4d:
+// Finger from the joint select (no room either, so back to Butt). 4c:
 // "Split to fit…" a library board: every chip names it, and the eight pieces run on it. Edge
 // chamfers E2: Chamfer from the enclosure outline's row menu, planned, its toolpath generated.
 // Selectors are roles and accessible names (the viewport handles by their `data-split-cut`
 // anchors).
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
-// docs/modes/split-parts.md#implementation-4c, docs/modes/edge-chamfers.md#implementation-e2,
+// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4d,
+// docs/modes/edge-chamfers.md#implementation-e2,
 // docs/conventions/ui.md#split-part-split-parts-4a
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -283,8 +285,9 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await expect(split.getByRole('heading', { name: 'Split · 8 pieces' })).toBeVisible()
   await expect(viewport.locator('[data-split-cut]')).toHaveCount(3)
   // ── 4b-2: keys on the lines; the cavity walls leave no room, the findings say so ──────────
-  const lineJoint = split.getByRole('group', { name: 'Lines joined by' })
-  await lineJoint.getByRole('radio', { name: 'Puzzle' }).click()
+  // a select since 4d (five joints)
+  await split.getByRole('combobox', { name: 'Lines joined by' }).click()
+  await page.getByRole('listbox').getByRole('option', { name: 'Puzzle' }).click()
   await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveValue('0.15 mm')
   await expect(split.getByText('No key fits yet: see the findings under each line.')).toBeVisible()
   // ── 4b-3: Test fit adds a coupon part of the key (nominal here) and shows it ──────────────
@@ -302,8 +305,18 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     await call<{ parts: { id: string; name: string }[] }>('design.part.list')
   ).parts.find((p) => p.name === couponName)!
   await call('design.part.remove', { partId: coupon.id })
-  await lineJoint.getByRole('radio', { name: 'Butt' }).click()
-  await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveCount(0)
+  // ── 4d: fingers on the lines; the 7 mm walls leave no room for them either ─────────────────
+  const lineJoint = async (name: string) => {
+    await split.getByRole('combobox', { name: 'Lines joined by' }).click()
+    await page.getByRole('listbox').getByRole('option', { name, exact: true }).click()
+  }
+  await lineJoint('Finger')
+  await expect(split.getByRole('combobox', { name: 'Joint clearance' })).toHaveValue('0.15 mm')
+  await expect(
+    split.getByText('No fingers fit yet: see the findings under each line.'),
+  ).toBeVisible()
+  await lineJoint('Butt')
+  await expect(split.getByRole('combobox', { name: 'Joint clearance' })).toHaveCount(0)
   // ── 4c: Split to fit a library board; every chip names it (the pieces below run on it) ────
   await call('library.stock.add', {
     values: {

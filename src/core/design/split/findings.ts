@@ -23,6 +23,7 @@ import { EPS, regionBounds, splitNumbers } from './layout'
 import { materialAt, removals } from './removals'
 import { dowelFindings, dowelNumbers } from './dowels'
 import type { Key } from './keys'
+import { lapLength } from './laps'
 import { DOWEL_WALL_MIN } from '../dowel'
 import { planPieces, splitFinding, type PiecesResult } from './pieces'
 
@@ -425,7 +426,14 @@ function geometricDfm(
       ),
     )
   // ── keys (4b-2) ──────────────────────────────────────────────────────────────────────────
-  out.push(...keyFindings(planned, (n) => pieces.find((p) => p.n === n)?.name ?? `piece ${n}`, id))
+  out.push(
+    ...keyFindings(
+      planned,
+      (n) => pieces.find((p) => p.n === n)?.name ?? `piece ${n}`,
+      id,
+      split.joint.kind,
+    ),
+  )
   // ── a chamfered outline nicks a key (edge-chamfers.md E3) ────────────────────────────────
   if (outline !== undefined) {
     const outlineId = loaded.part.operations[outline]?.id
@@ -512,9 +520,16 @@ export function bevelNicksKey(
  * `keyFit` (a run with no key: too short, only for a smaller tool, or no place clear of features
  * and the edge) and `thinJoint` for a key's neck under max(10 mm, 3 × the outline's tool Ø).
  */
-function keyFindings(planned: PiecesResult, name: (n: number) => string, id: string): DfmWarning[] {
+function keyFindings(
+  planned: PiecesResult,
+  name: (n: number) => string,
+  id: string,
+  kind: SplitDTO['joint']['kind'],
+): DfmWarning[] {
   const out: DfmWarning[] = []
   const tool = planned.outlineTool
+  // fingers and half laps (4d) say so; keys keep their 4b-2 wording
+  const joint = kind === 'finger' || kind === 'halfLap' ? { joint: kind } : {}
   for (const k of planned.keys.issues) {
     const line = `${k.axis} = ${fmt(k.at)}`
     const pair = `${name(k.male.n)} and ${name(k.female.n)}`
@@ -526,17 +541,30 @@ function keyFindings(planned: PiecesResult, name: (n: number) => string, id: str
       run: [k.run[0], k.run[1]],
       pieces: [k.male.n, k.female.n],
       tool,
+      ...joint,
+      ...(kind === 'halfLap' ? { lap: lapLength(tool, k.height) } : {}),
     }
+    const text =
+      kind === 'halfLap'
+        ? `No half lap on ${line} between ${pair}: a feature lies within the ${fmt(lapLength(tool, k.height))} mm lap or one tool Ø (${fmt(tool)} mm) of it: a butt joint there`
+        : kind === 'finger'
+          ? k.reason === 'near'
+            ? `No finger joint on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${fmt(tool)} mm) of a finger: a butt joint there`
+            : k.reason === 'tool'
+              ? `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} holds fingers only for a tool of Ø${fmt(k.maxTool!)} or less (the outline's is Ø${fmt(tool)}): a butt joint there`
+              : `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} is too short for fingers: a butt joint there`
+          : undefined
     out.push(
       splitFinding(
         id,
         'keyFit',
         'warning',
-        k.reason === 'near'
-          ? `No key on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${fmt(tool)} mm) of every place`
-          : k.reason === 'tool'
-            ? `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} holds a key only for a tool of Ø${fmt(k.maxTool!)} or less (the outline's is Ø${fmt(tool)}): no key there`
-            : `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} is too short for a key: a butt joint there`,
+        text ??
+          (k.reason === 'near'
+            ? `No key on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${fmt(tool)} mm) of every place`
+            : k.reason === 'tool'
+              ? `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} holds a key only for a tool of Ø${fmt(k.maxTool!)} or less (the outline's is Ø${fmt(tool)}): no key there`
+              : `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} is too short for a key: a butt joint there`),
         k.maxTool === undefined ? params : { ...params, maxTool: k.maxTool },
       ),
     )
@@ -555,8 +583,16 @@ function keyFindings(planned: PiecesResult, name: (n: number) => string, id: str
           id,
           'thinJoint',
           'warning',
-          `The key neck on ${k.axis} = ${fmt(k.at)} is ${fmt(k.size.neck)} mm (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): a weak key`,
-          { axis: k.axis, at: k.at, width: k.size.neck, limit, what: 'keyNeck' },
+          kind === 'finger'
+            ? `The fingers on ${k.axis} = ${fmt(k.at)} are ${fmt(k.size.neck)} mm wide (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): weak fingers`
+            : `The key neck on ${k.axis} = ${fmt(k.at)} is ${fmt(k.size.neck)} mm (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): a weak key`,
+          {
+            axis: k.axis,
+            at: k.at,
+            width: k.size.neck,
+            limit,
+            what: kind === 'finger' ? 'fingerWidth' : 'keyNeck',
+          },
         ),
       )
   return out

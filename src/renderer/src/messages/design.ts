@@ -500,6 +500,28 @@ export const designMessages = {
     lineJoint: 'Lines joined by',
     jointPuzzle: 'Puzzle',
     jointDovetail: 'Dovetail',
+    /** Fingers and half laps (split parts 4d). */
+    jointFinger: 'Finger',
+    jointFingerDescription:
+      'Interlocking fingers along the whole line, T-boned for the outline tool',
+    jointHalfLap: 'Half lap',
+    jointHalfLapDescription:
+      'Each piece keeps half the thickness over an overlap; the upper piece is cut from its bottom',
+    jointClearance: 'Joint clearance',
+    fingerSettings: 'Finger settings',
+    fingerSettingsSummary: (clearance: string, fingers: number | undefined) =>
+      `clearance ${clearance}${fingers === undefined ? '' : ` · ${fingers === 1 ? '1 finger' : `${fingers} fingers`}`}`,
+    /** "10 fingers · 26.1 mm wide · T-bones for the Ø6 mm outline tool" */
+    fingerSummary: (n: number, width: string, tool: string) =>
+      `${n === 1 ? '1 finger' : `${n} fingers`} · ${width} mm wide · T-bones for the Ø${tool} mm outline tool`,
+    noFingers: 'No fingers fit yet: see the findings under each line.',
+    lapSettings: 'Lap settings',
+    lapSettingsSummary: (clearance: string, length: string | undefined) =>
+      `clearance ${clearance}${length === undefined ? '' : ` · lap ${length} mm`}`,
+    /** "1 half lap · 36 mm overlap · the upper piece is cut from its bottom (a flip)" */
+    lapSummary: (n: number, length: string) =>
+      `${n === 1 ? '1 half lap' : `${n} half laps`} · ${length} mm overlap · the upper piece is cut from its bottom (a flip)`,
+    noLaps: 'No half lap fits yet: see the findings under each line.',
     clearance: 'Key clearance',
     clearanceHint:
       'Goes on the socket only; the knob keeps its size. Try 0.1–0.3 mm on a scrap first.',
@@ -568,6 +590,10 @@ export const designMessages = {
     pieceTitle: 'Piece',
     pieceOf: (n: number, of: number, source: string) => `Piece ${n} of ${of} of ${source}`,
     editSplit: 'Edit the split',
+    /** Detach (split parts 4d). */
+    detach: 'Detach',
+    detachDescription:
+      'Make this piece a plain part you can edit; the split no longer makes or changes it. Undo brings it back.',
     readOnly: (source: string) => `Read-only: this piece follows ${source}.`,
     fromSource: (op: string, source: string) => `${op} comes from ${source}. Edit it there.`,
     generated: (op: string) => `${op} is made by the split. Edit the split to change it.`,
