@@ -145,6 +145,8 @@ export interface ViewportProps {
   tinted?: ReadonlySet<string> | null
   /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
   selectedAlso?: ReadonlySet<string> | null
+  /** Operations selected by their outline only, no tint (a pattern's cells, U9 P4). */
+  outlineOnly?: ReadonlySet<string> | null
   /** The clone path of the selected Clones feature or the open draft (v0.4 task U3). */
   clonePath?: ClonePathOverlay | null
   /** Polite announcement under the viewport ("Clone 4 skipped."; task U3). */
@@ -273,6 +275,7 @@ export function Viewport({
   focus = null,
   tinted = null,
   selectedAlso = null,
+  outlineOnly = null,
   clonePath = null,
   announcement = null,
   onSelect,
@@ -333,6 +336,7 @@ export function Viewport({
       pulse,
       tinted,
       selectedAlso,
+      outlineOnly,
     }),
     [
       selectedOperation,
@@ -344,6 +348,7 @@ export function Viewport({
       pulse,
       tinted,
       selectedAlso,
+      outlineOnly,
     ],
   )
   const runLines = run?.lines ?? null

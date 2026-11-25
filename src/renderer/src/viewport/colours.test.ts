@@ -149,6 +149,20 @@ describe('surface colours', () => {
 })
 
 describe('feature selection (v0.4 task U1)', () => {
+  it('a selected pattern’s cells: outlined, never filled, also while pulsing (U9 P4)', () => {
+    const state = {
+      selectedOperation: 'pattern1',
+      outlineOnly: new Set(['pattern1_pocket']),
+      pulse: 1,
+    }
+    expect(surfaceColour('pattern1_pocket.floor', state, palette)).toEqual(palette.part)
+    expect(isOutlined('pattern1_pocket.floor', state)).toBe(true)
+    // only the listed operations: another selection keeps its tint
+    expect(
+      surfaceColour('pocket1.floor', { ...state, selectedOperation: 'pocket1', pulse: 0 }, palette),
+    ).toEqual(mix(palette.part, palette.selected, MIX.selected))
+  })
+
   it('a selected feature selects every owned operation, not one with a similar id', () => {
     expect(isSelectedOwner('hole1_drill', 'hole1')).toBe(true)
     expect(isSelectedOwner('hole1_counterbore', 'hole1')).toBe(true)
