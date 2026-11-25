@@ -192,7 +192,7 @@ describe('through resolveDefinition', () => {
     const r = resolveDefinition(port, [def()]).unwrap()
     expect(r.kind).toBe('region')
     if (r.kind !== 'region') return
-    expect(r.cells).toBe(45)
+    expect(r.pattern?.cells).toBe(45)
     expect(r.frame).toEqual({ min: [0, 0], max: [100, 60] })
   })
 

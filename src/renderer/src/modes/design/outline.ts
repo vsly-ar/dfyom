@@ -17,7 +17,7 @@ import {
 } from '../../../../core/design/operation'
 import { chamferEdge } from '../../../../core/design/geometry-input'
 import { placeShape } from '../../../../core/design/placement'
-import type { Element, Loop } from '../../../../core/geometry/2d/model'
+import type { Element, Loop, Region } from '../../../../core/geometry/2d/model'
 import { chamferDepth } from '../../../../core/geometry/model'
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { SurfaceTable } from '../../../../core/design/surfaces'
@@ -178,6 +178,21 @@ export function surfaceFace(on: string, stock: Stock, table: SurfaceTable): Oper
     w: entry.mapOr(0, (e) => e.faceZ.toNumber()),
     local: { length: size[d.uSize], width: size[d.vSize], thickness: size[d.extent] },
   }
+}
+
+/**
+ * A pattern's area (the boundary less the margin, face frame) as closed loops on its face in the
+ * part frame: the dashed guide while the pattern is selected (patterns P2).
+ */
+export function patternAreaLoops(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  area: Region,
+): OutlineLoop[] {
+  const face = operationFace(op, stock, table)
+  const at = (u: number, v: number): Vec3 => toPartFrame(face.frame, [u, v, face.w])
+  return area.pieces.flatMap((p) => [p.outer, ...p.holes]).map((l) => chainPoints(l.elements, at))
 }
 
 const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>

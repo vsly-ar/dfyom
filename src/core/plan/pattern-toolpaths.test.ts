@@ -1,7 +1,8 @@
 // Patterns P1 exit, headless (docs/modes/patterns.md#implementation-p1): a honeycomb of rounded
 // hexagons on a walnut lid's top through the real commands, evaluated (removed volume = cells ×
 // cell area × depth), planned, generated, exported (GRBL, a golden) and streamed through the
-// virtual machine.
+// virtual machine. P2 (docs/modes/patterns.md#implementation-p2): a vent grille of hex circles
+// clipped to a rounded-rectangle boundary with a round logo keep-out, the same way.
 import { beforeAll, describe, expect, it } from 'vitest'
 import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
@@ -36,6 +37,30 @@ const LID = {
   width: '50',
   thickness: '12',
   material: { name: 'Walnut', class: 'hardwood' as const },
+}
+
+/** Plans the part, generates, exports and streams; returns the program and the pocket's path. */
+async function planExportRun(s: Awaited<ReturnType<typeof planSetup>>, svc: object) {
+  const planId = await s.create({ machineLibraryItemId: s.machineId })
+  const errors = (
+    s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }
+  ).warnings.filter((w) => w.severity === 'error')
+  expect(errors).toEqual([])
+  const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+    .value as { jobId: string }
+  const gen = expectOk(await s.d.job(jobId).unwrap().result) as {
+    operations: { status: string }[]
+  }
+  expect(gen.operations.every((o) => o.status === 'generated')).toBe(true)
+  const op = opsOf(s.plan(planId)).find((o) => o.designOperationIds.includes('pattern1_pocket'))!
+  const tp = (
+    s.query('plan.toolpath.get', { planId, planOperationId: op.id }) as { toolpath: Toolpath }
+  ).toolpath
+  const e = expectOk(await exportPlan(s.d.doc, planId, svc as never))
+  const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+  const run = await streamProgram(e.lines, machine)
+  expect(run.lines).toBe(e.lines.length)
+  return { lines: e.lines, toolpath: tp }
 }
 
 describe('patterns P1 exit', () => {
@@ -105,5 +130,66 @@ describe('patterns P1 exit', () => {
     const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
     const run = await streamProgram(e.lines, machine)
     expect(run.lines).toBe(e.lines.length)
+  })
+})
+
+describe('patterns P2 exit', () => {
+  it('a hex grille clipped to a rounded boundary with a logo keep-out: volume, plan, golden, machine', async () => {
+    const svc = {
+      region2d,
+      toolpaths: createToolpathCache(),
+      workers: createInProcessWorkers({ region2d: () => Ok(region2d) }),
+    }
+    const s = await planSetup({ part: false, services: svc, stock: { ...LID, name: 'Panel' } })
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      name: 'Vent',
+      items: [
+        { kind: 'rectangle', center: ['0', '0'], length: '70', width: '40', cornerRadius: '8' },
+        { kind: 'circle', op: 'subtract', center: ['0', '0'], diameter: '16' },
+      ],
+    })
+    const out = (await s.run('design.pattern.add', {
+      partId: s.partId,
+      name: 'Grille',
+      lattice: 'hex',
+      cell: { kind: 'circle', diameter: '4' },
+      spacing: { gap: '1.5' },
+      boundary: { shapeId: 'shape1', center: ['40', '25'] },
+      margin: '2',
+      fit: 'clip',
+      depth: '1.5',
+    })) as { cells: number; dropped?: number; warnings: { code: string; severity: string }[] }
+    expect(out.cells).toBeGreaterThan(50)
+    // clipped fragments are opened to R 0.5 where they meet the boundary: the tool chosen for
+    // the cells leaves its radius in those corners (an honest warning, not "no tool fits")
+    const codes = new Set(out.warnings.filter((w) => w.severity === 'warning').map((w) => w.code))
+    expect([...codes]).toEqual(['dfm.cornerTooSmall'])
+    await s.run('project.apply', {})
+
+    // removed volume = the cells' area (clipped) × depth; nothing in the grown keep-out
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const pocket = input.operations[0]!
+    if (pocket.kind !== 'pocket' || pocket.shape.contour.kind !== 'region')
+      throw new Error('no region')
+    const region = pocket.shape.contour.region
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    // within the chords' shortfall on Ø 4 cells and R 0.5 corners (0.01 mm chord tolerance)
+    const want = regionArea(region) * 1.5
+    expect(Math.abs(80 * 50 * 12 - solid.volume - want) / want).toBeLessThan(0.01)
+
+    const { lines, toolpath } = await planExportRun(s, svc)
+    const zs = toolpath.passes.flatMap((p) =>
+      p.moves.map((m) => (m.kind === 'drill' ? 0 : m.to[2])),
+    )
+    expect(Math.min(...zs)).toBeCloseTo(-1.5, 9)
+    // no cut inside the keep-out grown by the margin (Ø 20 about [40, 25]), below the top
+    for (const p of toolpath.passes)
+      for (const m of p.moves)
+        if (m.kind !== 'drill' && m.to[2] < 0)
+          expect(Math.hypot(m.to[0] - 40, m.to[1] - 25)).toBeGreaterThan(10)
+    await expect(lines.join('\n') + '\n').toMatchFileSnapshot(
+      '__golden__/pattern-grille-keepout.nc',
+    )
   })
 })

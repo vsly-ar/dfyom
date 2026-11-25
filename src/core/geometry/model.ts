@@ -450,6 +450,7 @@ export const DFM_WARNING_CODES = [
   // patterns P1 (`operation` = the feature id): docs/modes/patterns.md#checks-and-dfm
   'dfm.patternEmpty',
   'dfm.patternHeavy',
+  'dfm.patternThinWeb',
   // split parts 4a (`operation` = the split id, `params.rule` the rule): docs/modes/split-parts.md#dfm-near-a-split
   'design.split',
 ] as const

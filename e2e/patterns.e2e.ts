@@ -1,7 +1,8 @@
 // Patterns P1 in the built app: Add → Features → Pattern adds a pattern feature with the defaults
 // on the stock top, the minimal inspector shows the cell read-out, and its Lattice and Cell
-// fields update the pattern (one `design.pattern.update` each). Windows stay hidden
-// (app.fixture.ts). Docs: docs/modes/patterns.md#implementation-p1, docs/conventions/ui.md
+// fields update the pattern (one `design.pattern.update` each). P2: a preset, the Polar lattice,
+// Clip and Invert. Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, docs/conventions/ui.md
 import type { Locator } from '@playwright/test'
 import { expect, test } from './app.fixture'
 
@@ -61,4 +62,21 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await setField(inspector, 'Diameter', '12')
   await expect(readout).not.toHaveText(`${hex} cells`)
   expect(Number((await readout.textContent())?.split(' ')[0])).toBeLessThan(hex)
+
+  // ── P2: the Grille preset (Ø 3, hex, gap 1.5) packs many more cells ────────────────────────
+  const large = Number((await readout.textContent())?.split(' ')[0])
+  await inspector.getByRole('button', { name: 'Presets' }).click()
+  await page.getByRole('menuitem', { name: 'Grille' }).click()
+  await expect(readout).not.toHaveText(`${large} cells`)
+  expect(Number((await readout.textContent())?.split(' ')[0])).toBeGreaterThan(large * 3)
+
+  // ── Polar rings, cells clipped at the border, then inverted (islands) ──────────────────────
+  await inspector.getByRole('radio', { name: 'Polar' }).click()
+  await expect(navigator.getByRole('button', { name: /^Pattern 1, polar circle/ })).toBeVisible()
+  await inspector.getByRole('radio', { name: 'Clip' }).click()
+  await expect(inspector.getByRole('radio', { name: 'Clip' })).toBeChecked()
+  const invert = inspector.getByRole('switch', { name: 'Invert (cells as islands)' })
+  await invert.click()
+  await expect(invert).toBeChecked()
+  await expect(readout).toHaveText(/^\d+ cells/)
 })

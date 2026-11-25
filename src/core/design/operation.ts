@@ -833,27 +833,34 @@ function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShap
  */
 function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>): AppResult<void> {
   for (const s of [...out.values()]) {
-    const cell = s.pattern?.cell
-    if (cell === undefined || !('shapeId' in cell) || out.has(cell.shapeId)) continue
-    const k = dto.shapes?.findIndex((x) => x.id === cell.shapeId) ?? -1
-    if (k < 0)
-      return fail(
-        'input.malformed',
-        `${s.id} takes shape ${cell.shapeId} as its cell, which the part does not have`,
-        {
-          issues: [
-            {
-              path: ['shapes', s.id, 'pattern', 'cell', 'shapeId'],
-              rule: 'unknownShape',
-              message: 'no such shape in the part',
-            },
-          ],
-          data: { shapeId: cell.shapeId },
-        },
-      )
-    const c = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
-    if (c.isErr()) return c
-    out.set(cell.shapeId, c.unwrap())
+    const p = s.pattern
+    if (p === undefined) continue
+    // the cell and (patterns P2) the boundary shape
+    const refs: [string, string][] = []
+    if ('shapeId' in p.cell) refs.push(['cell', p.cell.shapeId])
+    if (p.area !== undefined) refs.push(['area', p.area.shapeId])
+    for (const [field, id] of refs) {
+      if (out.has(id)) continue
+      const k = dto.shapes?.findIndex((x) => x.id === id) ?? -1
+      if (k < 0)
+        return fail(
+          'input.malformed',
+          `${s.id} takes shape ${id} as its ${field === 'cell' ? 'cell' : 'boundary'}, which the part does not have`,
+          {
+            issues: [
+              {
+                path: ['shapes', s.id, 'pattern', field, 'shapeId'],
+                rule: 'unknownShape',
+                message: 'no such shape in the part',
+              },
+            ],
+            data: { shapeId: id },
+          },
+        )
+      const c = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+      if (c.isErr()) return c
+      out.set(id, c.unwrap())
+    }
   }
   return Ok(undefined)
 }

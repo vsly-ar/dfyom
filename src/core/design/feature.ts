@@ -513,7 +513,7 @@ const sameKey = (a: readonly unknown[], b: readonly unknown[]) =>
  * the expansions are cached per feature record.
  */
 export function checkFeatures(
-  dto: Pick<PartDTO, 'features' | 'shapes'>,
+  dto: Pick<PartDTO, 'features' | 'shapes'> & Partial<Pick<PartDTO, 'derivedFrom'>>,
   ops: readonly Operation[],
   stock: Stock,
   units: UnitSystem,
@@ -546,9 +546,10 @@ export function checkFeatures(
         },
       )
   }
-  // owned shapes (patterns P1): each names a feature that owns shapes, and such a feature has one
+  // owned shapes (patterns P1): each names a feature that owns shapes, and such a feature has one;
+  // a split piece keeps its source's owned shapes without the features (patterns P2)
   for (const [k, sh] of (dto.shapes ?? []).entries()) {
-    if (sh.owner === undefined) continue
+    if (sh.owner === undefined || dto.derivedFrom !== undefined) continue
     if (features.get(sh.owner)?.spec.ownedShapes === undefined)
       return malformed(
         `shape ${sh.id}: no feature ${sh.owner} owning shapes`,

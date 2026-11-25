@@ -1,26 +1,32 @@
-// The pattern inspector (patterns P1, minimal): name, then the groups Cell (kind, its sizes,
-// rotation; a named closed shape of the part), Layout (lattice, gap or pitch, angle), Area (On;
-// the boundary is the whole face less the margin), Cut (depth, the pocket's tool) and the cell
-// read-out. Every edit is one `design.pattern.update` (one undo step); errors and findings show
-// at their field, the rest under Findings. The L-review, presets and the viewport ghosts are P2.
+// The pattern inspector (patterns P1, P2): name, the read-out (cells · web · slivers dropped)
+// and Presets, then the groups Cell (kind with thumbnails, its sizes, rotation), Layout (lattice
+// incl. Polar, gap or pitch, angle, origin: empty = the area's centre), Area (On, the boundary:
+// Whole face or a closed shape with its centre and rotation, margin, Whole/Clip, Invert), Cut
+// (depth, the pocket's tool). Every edit is one `design.pattern.update` (one undo step); errors
+// and findings show at their field, the rest under Findings.
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
-import { patternCells } from '../../../../core/design/pattern/pattern'
+import { patternFacts } from '../../../../core/design/pattern/pattern'
+import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
+import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
-import { dfmMessages } from '../../messages/dfm'
+import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import { useRegion2d } from '../../shell/ShellContext'
 import {
+  Button,
   ErrorMessage,
   Field,
+  Menu,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
   Select,
+  Switch,
   WarningList,
   type FieldMessage,
 } from '../../ui'
@@ -29,6 +35,7 @@ import styles from './Design.module.css'
 import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
 import { placeErrors, type FieldError } from './OperationFields'
+import { MiniOutline, shapeLoops } from './ShapePicker'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -38,9 +45,11 @@ const t = m.inspector
 const p = m.features.pattern
 
 type CellKind = 'circle' | 'rectangle' | 'obround' | 'polygon' | 'shape'
-type Lattice = 'square' | 'staggered' | 'hex'
+type Lattice = 'square' | 'staggered' | 'hex' | 'polar'
 const CELL_KINDS: readonly CellKind[] = ['circle', 'rectangle', 'obround', 'polygon', 'shape']
-const LATTICES: readonly Lattice[] = ['square', 'staggered', 'hex']
+const LATTICES: readonly Lattice[] = ['square', 'staggered', 'hex', 'polar']
+/** The Boundary select's value for the whole face. */
+const FACE = 'face'
 /** The size fields of each primitive cell, in order. */
 const CELL_FIELDS: Record<CellKind, readonly string[]> = {
   circle: ['diameter'],
@@ -106,8 +115,35 @@ export function PatternInspector({
   const closedShapes = (part.dto.shapes ?? []).filter(
     (s) => s.owner === undefined && !s.items.some((i) => i.kind === 'path' && i.closed === false),
   )
-  const cells =
-    port === undefined ? undefined : patternCells(feature.id, part.dto.shapes ?? [], port)
+  const facts =
+    port === undefined ? undefined : patternFacts(feature.id, part.dto.shapes ?? [], port)
+  const shapesKey = JSON.stringify(closedShapes)
+  const outlines = useMemo(
+    () => new Map(closedShapes.map((s) => [s.id, shapeLoops(port, s)])),
+    // the shapes' records, not the filtered array (new every render)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [port, shapesKey],
+  )
+  const shapeOptions = closedShapes.map((s) => ({
+    value: s.id,
+    label: s.name,
+    icon: <MiniOutline loops={outlines.get(s.id) ?? []} />,
+  }))
+  const boundary = feature['boundary'] as
+    { shapeId: string; center: [QuantityDTO, QuantityDTO]; rotation: QuantityDTO } | undefined
+  const origin = feature['origin'] as [QuantityDTO, QuantityDTO] | undefined
+  /** The area's box centre (mm): what an empty origin means. */
+  const areaCentre = (): [number, number] => {
+    const b =
+      facts === undefined
+        ? undefined
+        : chainBounds(facts.area.pieces.flatMap((x) => x.outer.elements))
+    return b === undefined ? [0, 0] : [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2]
+  }
+  const boundaryCenter = (): string[] =>
+    boundary === undefined
+      ? []
+      : [sourceOf(boundary.center[0]) ?? '0', sourceOf(boundary.center[1]) ?? '0']
 
   const findings = warnings.warnings.filter((w) => ownedIds.has(w.operation))
   const fieldOf = (w: DfmWarning): string | undefined => {
@@ -115,7 +151,20 @@ export function PatternInspector({
     const op = part.dto.operations.find((o) => o.id === w.operation)
     return op === undefined ? w.parameter : warningFeatureField(feature, op, w)
   }
-  const shown = new Set(['cell', 'lattice', 'spacing', 'angle', 'on', 'margin', 'depth', 'tool'])
+  const shown = new Set([
+    'cell',
+    'lattice',
+    'spacing',
+    'angle',
+    'origin',
+    'on',
+    'boundary',
+    'margin',
+    'fit',
+    'invert',
+    'depth',
+    'tool',
+  ])
   const unplaced = findings.filter((w) => {
     const f = fieldOf(w)
     return f === undefined || !shown.has(f.split('.')[0]!)
@@ -194,16 +243,37 @@ export function PatternInspector({
           name={feature.name}
           onCommit={(name) => void update({ name }, 'name')}
         />
-        <p className={styles['muted']} data-pattern-readout>
-          {cells === undefined ? '' : p.readout(cells)}
-        </p>
+        <div className={styles['turnRow']}>
+          <p className={styles['muted']} data-pattern-readout>
+            {facts === undefined
+              ? ''
+              : p.readoutFull(
+                  facts.cells,
+                  facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
+                  facts.dropped,
+                )}
+          </p>
+          <Menu
+            label={p.presets}
+            items={PATTERN_PRESETS.map((preset) => ({
+              label: p.presetNames[preset.id] ?? preset.id,
+              onSelect: () => void update({ ...preset.args }, 'cell'),
+            }))}
+          >
+            <Button size="sm">{p.presets}</Button>
+          </Menu>
+        </div>
 
         <Group title={p.groups.cell}>
           <div data-feature-field="cell">
             <Field label={p.cell} messages={messagesAt('cell')}>
               <Select
                 options={CELL_KINDS.filter((k) => k !== 'shape' || closedShapes.length > 0).map(
-                  (k) => ({ value: k, label: p.cells[k] ?? k }),
+                  (k) => ({
+                    value: k,
+                    label: p.cells[k] ?? k,
+                    ...(k === 'shape' ? {} : { icon: <MiniOutline loops={CELL_LOOPS[k]} /> }),
+                  }),
                 )}
                 value={cell.kind}
                 onValueChange={(k) => chooseCell(k as CellKind)}
@@ -213,7 +283,7 @@ export function PatternInspector({
           {cell.kind === 'shape' ? (
             <Field label={p.shape}>
               <Select
-                options={closedShapes.map((s) => ({ value: s.id, label: s.name }))}
+                options={shapeOptions}
                 value={cell.shapeId ?? ''}
                 onValueChange={(shapeId) =>
                   void update({ cell: cellArgs(cell, { shapeId }) }, 'cell')
@@ -286,7 +356,7 @@ export function PatternInspector({
             : ([0, 1] as const).map((i) =>
                 quantityField(
                   `spacing.pitch.${i}`,
-                  p.pitch(i),
+                  p.pitch(i, lattice === 'polar'),
                   'length',
                   spacing.pitch?.[i],
                   (s) => {
@@ -300,6 +370,30 @@ export function PatternInspector({
                 ),
               )}
           {quantityField('angle', p.angle, 'angle', feature['angle'], (angle) => ({ angle }))}
+          {([0, 1] as const).map((i) => (
+            <div key={`origin.${i}`} data-feature-field={`origin.${i}`}>
+              <QuantityInput
+                label={p.origin(i)}
+                kind="length"
+                defaultUnit={defaultUnit('length', units)}
+                value={origin === undefined ? undefined : quantityOf(origin[i])}
+                placeholder={p.originCentre}
+                optional
+                onCommit={(q, gesture) => {
+                  if (q === undefined) return void update({ origin: null }, 'origin', gesture)
+                  const c = areaCentre()
+                  const next = [
+                    sourceOf(origin?.[0]) ?? lengthSource(c[0], units),
+                    sourceOf(origin?.[1]) ?? lengthSource(c[1], units),
+                  ]
+                  next[i] = q.source
+                  void update({ origin: next }, 'origin', gesture)
+                }}
+                onCancelGesture={cancelGesture}
+                messages={messagesAt(`origin.${i}`)}
+              />
+            </div>
+          ))}
         </Group>
 
         <Group title={p.groups.area}>
@@ -312,10 +406,82 @@ export function PatternInspector({
               />
             </Field>
           </div>
-          <p className={styles['muted']}>{p.boundaryFace}</p>
+          <div data-feature-field="boundary">
+            <Field label={p.boundary} messages={messagesAt('boundary')}>
+              <Select
+                options={[{ value: FACE, label: p.boundaryFace }, ...shapeOptions]}
+                value={boundary?.shapeId ?? FACE}
+                onValueChange={(shapeId) => {
+                  if (shapeId === (boundary?.shapeId ?? FACE)) return
+                  if (shapeId === FACE) return void update({ boundary: null }, 'boundary')
+                  // a new boundary starts centred on the area (a changed one keeps its place)
+                  const c = areaCentre()
+                  const center =
+                    boundary === undefined
+                      ? [lengthSource(c[0], units), lengthSource(c[1], units)]
+                      : boundaryCenter()
+                  void update({ boundary: { shapeId, center } }, 'boundary')
+                }}
+              />
+            </Field>
+          </div>
+          {boundary === undefined
+            ? null
+            : [
+                ...([0, 1] as const).map((i) =>
+                  quantityField(
+                    `boundary.center.${i}`,
+                    p.boundaryCenter(i),
+                    'length',
+                    boundary.center[i],
+                    (s) => {
+                      const center = boundaryCenter()
+                      center[i] = s
+                      const rotation = sourceOf(boundary.rotation)
+                      return {
+                        boundary: {
+                          shapeId: boundary.shapeId,
+                          center,
+                          ...(rotation === undefined ? {} : { rotation }),
+                        },
+                      }
+                    },
+                  ),
+                ),
+                quantityField(
+                  'boundary.rotation',
+                  p.boundaryRotation,
+                  'angle',
+                  boundary.rotation,
+                  (rotation) => ({
+                    boundary: { shapeId: boundary.shapeId, center: boundaryCenter(), rotation },
+                  }),
+                ),
+              ]}
           {quantityField('margin', p.margin, 'length', feature['margin'], (margin) => ({
             margin,
           }))}
+          <div data-feature-field="fit">
+            <Field label={p.fit} kind="toggle" messages={messagesAt('fit')}>
+              <SegmentedControl<string>
+                label={p.fit}
+                options={['whole', 'clip'].map((v) => ({ value: v, label: p.fits[v] ?? v }))}
+                value={(feature['fit'] as string | undefined) ?? 'whole'}
+                onValueChange={(fit) => void update({ fit }, 'fit')}
+              />
+            </Field>
+            <p className={styles['muted']}>{p.fitDescription}</p>
+          </div>
+          <div data-feature-field="invert">
+            <Field label={p.invert} kind="toggle" messages={messagesAt('invert')}>
+              <Switch
+                label={p.invert}
+                hideLabel
+                checked={feature['invert'] === true}
+                onCheckedChange={(invert) => void update({ invert }, 'invert')}
+              />
+            </Field>
+          </div>
         </Group>
 
         <Group title={p.groups.cut}>
@@ -344,6 +510,41 @@ export function PatternInspector({
       </div>
     </div>
   )
+}
+
+type Loop = { elements: { kind: 'line'; a: Vec; b: Vec }[]; closed: boolean }
+type Vec = [number, number]
+
+function arcPoints(c: Vec, r: number, from: number, to: number, n: number): Vec[] {
+  const out: Vec[] = []
+  for (let i = 0; i < n; i++) {
+    const a = ((from + ((to - from) * i) / (n - 1)) * Math.PI) / 180
+    out.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)])
+  }
+  return out
+}
+function poly(pts: Vec[]): Loop {
+  return {
+    closed: true,
+    elements: pts.map((a, i) => ({ kind: 'line' as const, a, b: pts[(i + 1) % pts.length]! })),
+  }
+}
+
+/** A primitive cell kind's mini outline (the Cell select's thumbnails; not to scale). */
+const CELL_LOOPS: Record<Exclude<CellKind, 'shape'>, Loop[]> = {
+  circle: [poly(arcPoints([0, 0], 4, 0, 345, 24))],
+  rectangle: [
+    poly([
+      [-5, -3],
+      [5, -3],
+      [5, 3],
+      [-5, 3],
+    ]),
+  ],
+  obround: [
+    poly([...arcPoints([3.5, 0], 2.5, -90, 90, 8), ...arcPoints([-3.5, 0], 2.5, 90, 270, 8)]),
+  ],
+  polygon: [poly(arcPoints([0, 0], 4, 30, 330, 6))],
 }
 
 function Group({
