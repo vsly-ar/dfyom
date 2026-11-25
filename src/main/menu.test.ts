@@ -140,4 +140,24 @@ describe('menu actions', () => {
     sendMenuAction('mode.plan', vi.fn(), () => target(true))
     expect(focus).toHaveBeenCalledOnce()
   })
+
+  it('Window → Shape Editor goes to the target window with Ctrl/Cmd+Shift+E', () => {
+    const send = vi.fn()
+    const win = { isDestroyed: () => false, isVisible: () => false, webContents: { send } }
+    const template = menuTemplate('darwin', false, {
+      noWindow: vi.fn(),
+      openLibrary: vi.fn(),
+      target: () => win as never,
+    })
+    const windowMenu = template.find((m) => m.role === 'windowMenu')
+    const items = windowMenu?.submenu as {
+      label?: string
+      accelerator?: string
+      click?: () => void
+    }[]
+    const item = items.find((i) => i.label === 'Shape Editor')
+    expect(item?.accelerator).toBe('CmdOrCtrl+Shift+E')
+    item?.click?.()
+    expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'window.shapeEditor')
+  })
 })

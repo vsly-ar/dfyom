@@ -1,0 +1,84 @@
+/* The Shape Editor window (DF94): toolbar across the top, then the shape list, the flat view and
+   the inspector side by side. Neutral chrome like the Library window; the flat view brings its own
+   look. Doc: docs/conventions/ui.md#shape-editor-window-df94 */
+.window {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  /* the inspector as wide as the project window's by default (20rem): there the fields put their
+     label above the input (Field's narrow container query), which the centre X/Y pairs need */
+  grid-template-columns: 14rem minmax(0, 1fr) 20rem;
+  grid-template-areas:
+    'toolbar toolbar toolbar'
+    'list view inspector';
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-chrome);
+  color: var(--text);
+}
+
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  min-height: calc(var(--control-md) + var(--space-2) * 2);
+}
+
+.part {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.machine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.machine:empty {
+  display: none;
+}
+
+.list,
+.inspector {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-app);
+}
+
+.list {
+  grid-area: list;
+  padding: var(--space-2);
+}
+
+.inspector {
+  grid-area: inspector;
+}
+
+.view {
+  grid-area: view;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-viewport);
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}

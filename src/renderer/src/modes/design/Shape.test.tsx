@@ -1,11 +1,14 @@
-// Shape Editor UI (task U1) against the fake bridge bound to a real dispatcher with the node 2D
-// port: the Shapes dialog (D45), the inspector (one `design.shape.item.update` per field
+// Shape Editor UI (task U1) against fake bridges bound to a real dispatcher with the node 2D
+// port: the project window and the Shape Editor window (DF94) rendered side by side, the project
+// window's open requests forwarded to the editor window as main does. The Shapes dialog (D45) in
+// the project window, the editor window's list and inspector (one `design.shape.item.update` per field
 // commit), handle drags in the flat view (one gesture per drag, a press within 4 px commits
 // nothing, Escape undoes the gesture, a formula locks its handle), the segment table's keyboard
 // grid, and accessibility. The 3D canvas is stubbed; jsdom boxes are empty, so the flat view is
 // 800 × 600 px at the origin and a handle's screen point is its `translate`.
-// Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
+// Doc: docs/conventions/ui.md#shape-editor, #shape-editor-window-df94, docs/modes/design-v0.3.md#shape-definition
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Dispatcher } from '../../../../core/commands/dispatcher'
@@ -40,8 +43,12 @@ const port = loadRegion2dSync(
   fs.readFileSync('vendor/cavalier-contours/cavalier_contours.wasm'),
 ).expect('the vendored 2D module loads')
 
+/** The Shape Editor window's root (DF94); set by `renderShapes`. */
+let editorWindow: HTMLElement
+
 async function renderShapes() {
-  const bridge: FakeBridge = createFakeBridge()
+  const project: FakeBridge = createFakeBridge()
+  const bridge: FakeBridge = createFakeBridge(undefined, 'shapes')
   const d: Dispatcher = await designDispatcher('Bracket', 'mm', { region2d: port })
   const src = { kind: 'ui', id: 'test' } as const
   const stock = await d.dispatch(
@@ -63,13 +70,28 @@ async function renderShapes() {
     { name: 'Bracket', stockLibraryItemId: (stock.unwrap().value as { id: string }).id },
     src,
   )
+  project.bind(d, 'p1', { file: '/p/bracket.dfyom' })
   bridge.bind(d, 'p1', { file: '/p/bracket.dfyom' })
-  const shell = createShell(bridge, { region2d: Promise.resolve(Ok(port)) })
+  // main: a project window's open request retargets its project's Shape Editor window
+  const open = project.shapeEditor.open
+  Object.assign(project.shapeEditor, {
+    open: async (t: { partId: string; shapeId: string | null }) => {
+      await open(t)
+      bridge.emitShapeEditorTarget(t)
+    },
+  })
+  const region2d = Promise.resolve(Ok(port))
   const r = renderUi(
-    <ShellProvider shell={shell}>
+    <ShellProvider shell={createShell(project, { region2d })}>
       <App />
     </ShellProvider>,
   )
+  const w = renderUi(
+    <ShellProvider shell={createShell(bridge, { region2d })}>
+      <App />
+    </ShellProvider>,
+  )
+  editorWindow = w.container
   const part = (): PartDTO => Object.values(d.doc.parts)[0]!
   const shape = (n = 0): ShapeDTO => part().shapes![n]!
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
@@ -82,7 +104,8 @@ async function renderShapes() {
     await r.user.click(await screen.findByRole('menuitem', { name: kind }))
     await within(inspector()).findByRole('region', { name: 'Items' })
   }
-  return { ...r, bridge, d, part, shape, addShape }
+  // `unmount` removes the project window (the editor window stays)
+  return { ...r, container: w.container, bridge, project, d, part, shape, addShape }
 }
 
 async function retype(
@@ -105,7 +128,9 @@ async function shapesGroup(): Promise<HTMLElement> {
   act(() => within(tools).getByRole('button', { name: 'Shapes' }).click())
   return screen.findByRole('dialog', { name: 'Shapes' })
 }
-const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
+const inspector = () => within(editorWindow).getByRole('complementary', { name: 'Inspector' })
+/** The Shape Editor window's shape list. */
+const shapesList = () => within(editorWindow).getByRole('navigation', { name: 'Shapes' })
 const editor = () => screen.getByRole('region', { name: 'Shape Editor' })
 const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
 const handle = (id: string) =>
@@ -132,22 +157,31 @@ const itemUpdates = (bridge: FakeBridge) =>
 
 describe('shape editor', () => {
   it('adds a shape from the Shapes group: row, inspector, flat view', async () => {
-    const { user, bridge, shape, addShape } = await renderShapes()
+    const { user, project, part, shape, addShape } = await renderShapes()
     expect(within(await shapesGroup()).getByText(/No shapes/)).toBeInTheDocument()
     await addShape('Rectangle')
     expect(screen.queryByRole('dialog', { name: 'Shapes' })).not.toBeInTheDocument()
-    expect(bridge.calls.filter((c) => c.name === 'design.shape.add')).toHaveLength(1)
+    // added from the project window's dialog, edited in the Shape Editor window (DF94)
+    expect(project.calls.filter((c) => c.name === 'design.shape.add')).toHaveLength(1)
+    expect(project.shapeEditorOpens).toEqual([{ partId: part().id, shapeId: shape().id }])
     expect(shape().items[0]).toMatchObject({ kind: 'rectangle', op: 'add' })
+    // the editor window lists the part's shapes, the edited one pressed
+    const listed = await within(shapesList()).findByRole('button', {
+      name: new RegExp(`^${shape().name}`),
+    })
+    expect(listed).toHaveAttribute('aria-pressed', 'true')
+    expect(listed).not.toHaveTextContent('Used by') // only a used shape says so
+    // choosing the dialog's row closes the dialog and opens the shape in the editor window again
     const row = await within(await shapesGroup()).findByRole('button', {
       name: new RegExp(`^${shape().name}`),
     })
-    expect(row).toHaveAttribute('aria-pressed', 'true')
-    expect(row).not.toHaveTextContent('Used by') // only a used shape says so
-    // choosing the row closes the dialog and keeps the shape selected
     await user.click(row)
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(project.shapeEditorOpens).toHaveLength(2)
     expect(field('Length')).toHaveValue('40')
-    // the flat view covers the 3D viewport with the outline and the item's handles
+    // the project window keeps its 3D viewport: no flat view, no shape in its inspector
+    expect(screen.getAllByRole('region', { name: 'Shape Editor' })).toHaveLength(1)
+    // the editor window's flat view has the outline and the item's handles
     await waitFor(() => expect(editor().querySelector('[data-handle="length"]')).not.toBeNull())
     expect(within(editor()).getByText('Shape · Shape frame')).toBeInTheDocument()
     // the summary from design.shape.get
@@ -352,8 +386,10 @@ describe('shape editor', () => {
   })
 
   it("opens a segment row's actions by right-click and Shift+F10, with no button in the row (DF70)", async () => {
-    const { user, shape, addShape } = await renderShapes()
+    const { user, shape, addShape, unmount } = await renderShapes()
     await addShape('Path')
+    // one window in the document for axe (two would repeat its landmarks)
+    unmount()
     const grid = await within(inspector()).findByRole('grid', { name: /Segments of Path 1/ })
     expect(within(grid).queryByRole('button', { name: /^Actions for segment/ })).toBeNull()
     expect(grid).toHaveAccessibleDescription(/Right-click a row, or press Shift\+F10 on a cell/)
@@ -391,9 +427,47 @@ describe('shape editor', () => {
     await waitFor(() => expect(cell).toHaveFocus())
   })
 
-  it('has no axe violations in the navigator, inspector and flat view', async () => {
-    const { container, addShape } = await renderShapes()
+  it('shares the undo history with the project window, both ways (DF94)', async () => {
+    const { user, shape, addShape } = await renderShapes()
+    await addShape('Rectangle')
+    await retype(user, field('Length'), '60{Enter}')
+    await waitFor(() => expect(shape().items[0]).toMatchObject({ length: { source: '60' } }))
+    // the project window's Undo names the editor window's step and reverts it
+    const projectWindow = screen.getByRole('banner', { name: 'Main toolbar' })
+    const undo = await within(projectWindow).findByRole('button', { name: /^Undo Edit shape item/ })
+    await user.click(undo)
+    await waitFor(() => expect(field('Length')).toHaveValue('40'))
+    // the editor window's Redo (its own toolbar) brings it back
+    const toolbar = within(editorWindow).getByRole('banner', { name: 'Shape Editor toolbar' })
+    await user.click(await within(toolbar).findByRole('button', { name: /^Redo / }))
+    await waitFor(() => expect(field('Length')).toHaveValue('60'))
+  })
+
+  it('without a shape, says how to choose one; Window → Shape Editor asks for the shown part (DF94)', async () => {
+    const { bridge, project, part } = await renderShapes()
+    project.emitMenu('window.shapeEditor')
+    await waitFor(() =>
+      expect(project.shapeEditorOpens).toEqual([{ partId: part().id, shapeId: null }]),
+    )
+    expect(await within(editorWindow).findByText('No shape chosen')).toBeInTheDocument()
+    expect(
+      within(editorWindow).getByText('Choose a shape from the list, or add one.'),
+    ).toBeInTheDocument()
+    expect(within(editorWindow).queryByRole('region', { name: 'Shape Editor' })).toBeNull()
+    // adding from the editor window's own list edits the new shape there, no open request
+    within(shapesList()).getByRole('button', { name: 'Add shape' }).focus()
+    await userEvent.keyboard('{Enter}')
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Circle' }))
+    await within(inspector()).findByRole('region', { name: 'Items' })
+    expect(project.shapeEditorOpens).toHaveLength(1)
+    expect(bridge.calls.filter((c) => c.name === 'design.shape.add')).toHaveLength(1)
+  })
+
+  it('has no axe violations in the Shape Editor window: list, inspector and flat view', async () => {
+    const { container, addShape, unmount } = await renderShapes()
     await addShape('Path')
+    // the project window leaves: two windows in one document would repeat their landmarks
+    unmount()
     await waitFor(() => expect(editor().querySelector('[data-handle]')).not.toBeNull())
     await expectNoAxeViolations(container)
   })

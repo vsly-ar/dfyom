@@ -96,8 +96,11 @@ export function windowStart(i: WindowStartInput): WindowStart {
 /** The Library window's default size, centred (docs/conventions/ui-library-window.md, L1). */
 export const LIBRARY_WINDOW_SIZE = { width: 1180, height: 760 } as const
 
+/** The Shape Editor window's default size, centred (docs/conventions/ui.md#shape-editor-window-df94). */
+export const SHAPE_EDITOR_WINDOW_SIZE = { width: 1180, height: 760 } as const
+
 /**
- * The Library window's start: its own remembered bounds made visible, restored as it was
+ * The Library (or Shape Editor) window's start: its own remembered bounds made visible, restored as it was
  * (maximized, full screen); without a record, the default size, centred.
  */
 export function libraryWindowStart(

@@ -129,12 +129,34 @@ export const IPC = {
   libraryCloseRequest: 'dfyom:library.closeRequest',
   /** Library window → main (invoke): close now, the draft was saved or discarded. */
   libraryClose: 'dfyom:library.close',
+  /**
+   * Project window → main (invoke): open (or focus) its project's Shape Editor window on a shape
+   * (`ShapeEditorTarget`; docs/conventions/ui.md#shape-editor-window-df94).
+   */
+  shapeEditorOpen: 'dfyom:shapeEditor.open',
+  /** Shape Editor window → main (invoke): the shape it shows (`ShapeEditorTarget`), or null. */
+  shapeEditorTarget: 'dfyom:shapeEditor.target',
+  /** Main → Shape Editor window: it was opened again on a shape (`ShapeEditorTarget`). */
+  shapeEditorTargetChanged: 'dfyom:shapeEditor.targetChanged',
 } as const
 
 /** Window argument (`webPreferences.additionalArguments`): which window this is. */
 export const WINDOW_KIND_ARG = '--dfyom-window'
-/** A project window (the app shell) or the one Library window. */
-export type WindowKind = 'project' | 'library'
+/**
+ * A project window (the app shell), the one Library window, or a project's Shape Editor window
+ * (docs/conventions/ui.md#shape-editor-window-df94).
+ */
+export type WindowKind = 'project' | 'library' | 'shapes'
+
+/**
+ * What the Shape Editor window shows: a part and, optionally, one of its shapes; `seq` grows with
+ * every open request, so opening the same shape again still refocuses it.
+ */
+export interface ShapeEditorTarget {
+  readonly partId: string
+  readonly shapeId: string | null
+  readonly seq: number
+}
 
 /** Which tab and item the Library window shows when it is opened. */
 export interface LibraryTarget {
@@ -285,6 +307,7 @@ export const MENU_ACTIONS = [
   'help.shortcuts',
   'help.connectAgent',
   'app.settings',
+  'window.shapeEditor',
 ] as const
 export type MenuAction = (typeof MENU_ACTIONS)[number]
 
@@ -497,6 +520,18 @@ export interface PreloadApi {
      * request's `quit`, so the app quits once it closed.
      */
     close(quit?: boolean): Promise<void>
+  }
+  /**
+   * The Shape Editor window (docs/conventions/ui.md#shape-editor-window-df94): window plumbing
+   * around the `design.shape.*` commands, which it calls with `call` like agents do.
+   */
+  readonly shapeEditor: {
+    /** Project window: opens or focuses its project's Shape Editor window on a part's shape. */
+    open(target: { readonly partId: string; readonly shapeId: string | null }): Promise<void>
+    /** Shape Editor window: what it shows, or null before main knows (never in practice). */
+    target(): Promise<ShapeEditorTarget | null>
+    /** Shape Editor window: opened again on a shape. */
+    onTarget(listener: (target: ShapeEditorTarget) => void): () => void
   }
   /** The native application menu's items for this window. */
   readonly menu: {

@@ -3,7 +3,7 @@
 // per choice), rotation and mirror, side On set with an open path's pick, the tab positions (Add
 // tab turns the count into positions, Space evenly clears them, typing ends a marker key run), and Import SVG from
 // the Shapes dialog, the shape picker (uses the first shape, one undo step) and the Shape Editor
-// (DF49; file dialog, options, `design.shape.import`, report). The 3D canvas is stubbed.
+// window (DF49, DF94; file dialog, options, `design.shape.import`, report). The 3D canvas is stubbed.
 // Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, #tab-markers, #import-report,
 // #import-svg-where-it-is-looked-for-df49
 import { act, screen, waitFor, within } from '@testing-library/react'
@@ -67,8 +67,9 @@ const files = memoryFiles(
 
 const src = { kind: 'ui', id: 'test' } as const
 
-async function renderOps() {
-  const bridge: FakeBridge = createFakeBridge()
+/** A project window, or (`shapes`) a Shape Editor window on the same project (DF94). */
+async function renderOps(kind: 'project' | 'shapes' = 'project') {
+  const bridge: FakeBridge = createFakeBridge(undefined, kind)
   const d: Dispatcher = await designDispatcher('Bracket', 'mm', {
     region2d: port,
     workers: createInProcessWorkers({ files }),
@@ -101,7 +102,7 @@ async function renderOps() {
     </ShellProvider>,
   )
   const part = (): PartDTO => Object.values(d.doc.parts)[0]!
-  await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
+  if (kind === 'project') await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   return { ...r, bridge, d, part, partId }
 }
 
@@ -197,7 +198,7 @@ describe('operation inspector for shapes', () => {
   })
 
   it('"New shape…" adds a shape, places it and opens it as one undo step (U4)', async () => {
-    const { user, d, part } = await renderOps()
+    const { user, d, part, bridge } = await renderOps()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
     await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
     const before = d.history.undoable.length
@@ -205,6 +206,12 @@ describe('operation inspector for shapes', () => {
     await waitFor(() =>
       expect(part().operations[0]).toMatchObject({ shape: { kind: 'named', shapeId: 'shape1' } }),
     )
+    // opened in the Shape Editor window (DF94); "Edit shape" opens it again
+    await waitFor(() =>
+      expect(bridge.shapeEditorOpens).toEqual([{ partId: part().id, shapeId: 'shape1' }]),
+    )
+    await user.click(within(inspector()).getByRole('button', { name: 'Edit shape' }))
+    expect(bridge.shapeEditorOpens).toHaveLength(2)
     expect(part().shapes).toHaveLength(1)
     expect(d.history.undoable).toHaveLength(before + 1)
     expect(d.history.undoable.at(-1)?.title).toBe('Add shape')
@@ -367,12 +374,11 @@ describe('operation inspector for shapes', () => {
     expect(shapes).toHaveAccessibleDescription(
       'Outlines that pockets and profiles can cut. Choose one to edit it.',
     )
+    // choosing a row closes the dialog and opens the Shape Editor window on it (DF94)
     await user.click(within(shapes).getByRole('button', { name: /^outline/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await screen.findByRole('region', { name: 'Shape Editor' })).toBeInTheDocument()
-    // later access: the shape inspector reopens the report
-    await user.click(within(inspector()).getByRole('button', { name: 'Import report' }))
-    expect(await screen.findByRole('dialog', { name: /^Imported/ })).toBeInTheDocument()
+    expect(bridge.shapeEditorOpens).toEqual([{ partId: part().id, shapeId: 'shape1' }])
+    expect(screen.queryByRole('region', { name: 'Shape Editor' })).toBeNull()
   })
 
   it('"Import SVG…" in a profile\'s shape picker uses the first shape, one undo step (DF49)', async () => {
@@ -403,17 +409,15 @@ describe('operation inspector for shapes', () => {
   })
 
   it('"Import SVG…" in the Shape Editor imports new shapes and opens the first (DF49)', async () => {
-    const { user, d, part, partId, bridge } = await renderOps()
+    // the Shape Editor window (DF94) on Shape 1
+    const { user, d, part, partId, bridge } = await renderOps('shapes')
     bridge.setFileChoice({ svg: SVG })
     await d.dispatch(
       'design.shape.add',
       { partId, items: [{ kind: 'circle', center: ['0', '0'], diameter: '20' }] },
       src,
     )
-    const tools = screen.getByRole('toolbar', { name: 'Part setup' })
-    act(() => within(tools).getByRole('button', { name: 'Shapes' }).click())
-    const shapes = await screen.findByRole('dialog', { name: 'Shapes' })
-    await user.click(within(shapes).getByRole('button', { name: /^Shape 1/ }))
+    act(() => bridge.emitShapeEditorTarget({ partId, shapeId: 'shape1' }))
     await within(inspector()).findByRole('heading', { name: 'Shape 1' })
     await user.click(within(inspector()).getByRole('button', { name: 'Import SVG…' }))
     const options = await screen.findByRole('dialog', { name: 'Import SVG' })
@@ -424,5 +428,8 @@ describe('operation inspector for shapes', () => {
     expect(part().shapes?.[0]?.items).toHaveLength(1)
     await user.click(within(report).getByRole('button', { name: 'Edit outline' }))
     expect(await within(inspector()).findByRole('heading', { name: 'outline' })).toBeVisible()
+    // later access: the inspector of the window that imported reopens the report
+    await user.click(within(inspector()).getByRole('button', { name: 'Import report' }))
+    expect(await screen.findByRole('dialog', { name: /^Imported/ })).toBeInTheDocument()
   })
 })

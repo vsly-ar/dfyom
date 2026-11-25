@@ -6,8 +6,8 @@
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
 // DFM warnings at the blamed parameter, with "Use …" for a suggestion. While the toolbar's
 // Reference toggle is pressed the Reference panel shows instead (ReferencePanel.tsx, dogfood DF3;
-// the R3 reference inspector until then), a selected shape the Shape Editor's
-// (ShapeInspector.tsx, task U1); a Clones feature, its instances and the Make Clones… draft their
+// the R3 reference inspector until then); shapes are edited in the Shape Editor window (DF94,
+// ShapeEditorWindow.tsx), never here; a Clones feature, its instances and the Make Clones… draft their
 // own (ClonesInspector.tsx, v0.4 task U3).
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
 // #selection-and-picking, #errors, #warnings-and-dfm; docs/modes/design.md#operations-v01
@@ -41,7 +41,7 @@ import { FaceInspector } from './FaceInspector'
 import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
 import { ReferencePanel } from './ReferencePanel'
-import { ShapeInspector } from './ShapeInspector'
+import { useOpenShape } from './useOpenShape'
 import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
 import { ToolField } from './ToolField'
 import {
@@ -145,8 +145,6 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
       </>
     )
   if (draft !== null && !stale) return <ClonesDraft part={part} draft={draft} />
-  const shape = part.dto.shapes?.find((s) => s.id === selected)
-  if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />
   const feature = part.dto.features?.find((f) => f.id === selected)
   if (feature?.kind === 'hole')
     return <HoleInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
@@ -313,7 +311,7 @@ function OperationInspector({
   const call = useCommand()
   const cancelGesture = useCancelGesture()
   const { ui, bridge } = useShell()
-  const [, select] = useDesignSelection()
+  const openShapeIn = useOpenShape()
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
@@ -338,10 +336,8 @@ function OperationInspector({
     setErrors(placed?.errors ?? [])
     setSummary(placed?.summary)
   }
-  const openShape = (shapeId: string) => {
-    ui.getState().selectShapeItem(shapeId, 0)
-    select(shapeId)
-  }
+  // the Shape Editor window on the shape (DF94)
+  const openShape = (shapeId: string) => openShapeIn(part.dto.id, shapeId)
   const failed = (r: { ok: boolean; error?: AppErrorData }) => {
     if (r.ok || r.error === undefined) return false
     const placed = placeErrors(r.error, 'shape')

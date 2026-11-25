@@ -1,6 +1,7 @@
 // The window's app commands from the native menu and the keyboard (task 3.6): New / Open / Save /
 // Save as (Ctrl/Cmd+N, O, S, Shift+S), undo/redo, modes, panel toggles, the shortcut list (`?`)
-// Apply (Ctrl/Cmd+Enter, task P3), Settings (Ctrl/Cmd+,), Help → Connect an agent… (A4) and files
+// Apply (Ctrl/Cmd+Enter, task P3), Settings (Ctrl/Cmd+,), Help → Connect an agent… (A4), Window →
+// Shape Editor (DF94: the project's Shape Editor window on the shown part) and files
 // handed over by main to open (U5). Menu items and keys run the same handlers as the buttons. A key the window handled is not
 // run again when the menu's accelerator reports it too (platforms differ in who sees it first).
 // Doc: docs/conventions/ui.md#app-shell, #keyboard-shortcuts
@@ -9,6 +10,7 @@ import type { AppMode } from '../../../core/modes'
 import type { MenuAction } from '../../../shared/preload-api'
 import { isKeyEcho, noteKeyAction } from './key-echo'
 import { modalDialogOpen } from '../ui'
+import { designPart } from '../modes/design/model'
 import { useShell } from './ShellContext'
 import { runStoreOf } from '../modes/run/run-store'
 import { IS_MAC, isEditableTarget } from './shortcuts'
@@ -24,7 +26,7 @@ export interface AppCommandHandlers {
 }
 
 export function useAppCommands(handlers: AppCommandHandlers): void {
-  const { bridge, files, ui } = useShell()
+  const { bridge, files, ui, replica } = useShell()
   const latest = useRef(handlers)
   useEffect(() => {
     latest.current = handlers
@@ -65,6 +67,15 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
           return ui.getState().setConnectAgentOpen(true)
         case 'app.settings':
           return ui.getState().setSettingsOpen(true)
+        case 'window.shapeEditor': {
+          // the shown part; main reopens the last shape of the project, if any (DF94)
+          const state = replica.getState()
+          if (state.status !== 'open') return
+          const part = designPart(state.doc, ui.getState().designPart)
+          if (part !== undefined)
+            void bridge.shapeEditor.open({ partId: part.dto.id, shapeId: null })
+          return
+        }
         case 'project.apply': {
           // inactive while a modal dialog is open (apply.md#keyboard)
           if (modalDialogOpen()) return
@@ -139,5 +150,5 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
       offRunFile()
       window.removeEventListener('keydown', onKey)
     }
-  }, [bridge, files, ui])
+  }, [bridge, files, ui, replica])
 }

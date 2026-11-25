@@ -1,13 +1,16 @@
 // v0.3 Shape Editor in the built app (task U1), through roles and labels: a shape added from the
-// Shapes dialog (D45) opens its flat view and inspector; a dimension edited by dragging its
-// handle (one undo step) and by its field (one undo step); undo restores each. Windows stay
+// Shapes dialog (D45) opens the project's Shape Editor window (DF94) with its flat view and
+// inspector, and choosing a row again focuses the same window; a dimension edited by dragging its
+// handle (one undo step) and by its field (one undo step); undo restores each, from either window
+// (one history); the window closes with its project. Windows stay
 // hidden (app.fixture.ts). A path's segment table opens a row's actions by right-click and
 // Shift+F10 (DF70), and so does a Shapes dialog row; with DFYOM_RENDERS=1 the light and dark
 // renders `df70-{segment,shape}-menu-*.png`.
-// Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor
+// Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor,
+// docs/conventions/ui.md#shape-editor-window-df94
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { expect, openPartSetup, test } from './app.fixture'
+import { expect, openPartSetup, shapeEditorWindow, shapeEditorWindows, test } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
@@ -81,64 +84,85 @@ test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ df
   const page = await dfyom.app.firstWindow()
   const { inspector } = await newPart(page)
 
-  // ── add a rectangle from the Shapes dialog (D45): it is selected, the dialog closes ──────
+  // ── add a rectangle from the Shapes dialog (D45): the Shape Editor window opens on it ────
   let shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Rectangle' }).click()
   await expect(shapes).toBeHidden()
-  await expect(inspector.getByRole('heading', { name: 'Shape 1' })).toBeVisible()
-  shapes = await openPartSetup(page, 'Shapes')
-  await expect(shapes.getByRole('button', { name: /^Shape 1/ })).toHaveAttribute(
+  const { page: win, inspector: shapeInspector, editor, list } = await shapeEditorWindow(dfyom.app)
+  await expect(win).toHaveTitle('Shapes · Shapes')
+  await expect(shapeInspector.getByRole('heading', { name: 'Shape 1' })).toBeVisible()
+  await expect(list.getByRole('button', { name: /^Shape 1/ })).toHaveAttribute(
     'aria-pressed',
     'true',
   )
-  // choosing the selected row keeps it selected and closes the dialog
+  // the project window keeps its 3D view and its own inspector
+  await expect(page.getByRole('region', { name: 'Shape Editor' })).toHaveCount(0)
+  await expect(inspector.getByRole('heading', { name: 'Shape 1' })).toHaveCount(0)
+  // choosing the row again closes the dialog and focuses the same window
+  shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: /^Shape 1/ }).click()
   await expect(shapes).toBeHidden()
-  const editor = page.getByRole('region', { name: 'Shape Editor' })
+  expect(await shapeEditorWindows(dfyom.app)).toHaveLength(1)
   await expect(editor).toBeVisible()
+  await expect(editor).toBeFocused()
   await expect(editor.getByText('Shape · Shape frame')).toBeVisible()
-  await expect(input(inspector, 'Length')).toHaveValue('40')
-  await expect(inspector.getByText('40.00 × 20.00 mm')).toBeVisible()
+  await expect(input(shapeInspector, 'Length')).toHaveValue('40')
+  await expect(shapeInspector.getByText('40.00 × 20.00 mm')).toBeVisible()
 
   // ── drag the length handle: one gesture, one undo step ───────────────────────────────────
   const handle = editor.locator('[data-handle="length"]')
   const box = (await handle.boundingBox())!
   const x = box.x + box.width / 2
   const y = box.y + box.height / 2
-  await page.mouse.move(x, y)
-  await page.mouse.down()
-  for (let i = 1; i <= 8; i++) await page.mouse.move(x + i * 10, y)
+  await win.mouse.move(x, y)
+  await win.mouse.down()
+  for (let i = 1; i <= 8; i++) await win.mouse.move(x + i * 10, y)
   await expect(editor.getByTestId('shape-value-chip')).toBeVisible()
-  await page.mouse.up()
-  await expect(input(inspector, 'Length')).not.toHaveValue('40')
-  const dragged = Number(await input(inspector, 'Length').inputValue())
+  await win.mouse.up()
+  await expect(input(shapeInspector, 'Length')).not.toHaveValue('40')
+  const dragged = Number(await input(shapeInspector, 'Length').inputValue())
   expect(dragged).toBeGreaterThan(40)
-  await page.keyboard.press('ControlOrMeta+z')
-  await expect(input(inspector, 'Length')).toHaveValue('40')
+  await win.keyboard.press('ControlOrMeta+z')
+  await expect(input(shapeInspector, 'Length')).toHaveValue('40')
 
-  // ── edit the same dimension by its field ─────────────────────────────────────────────────
-  await setField(inspector, 'Length', '60')
-  await expect(inspector.getByText('60.00 × 20.00 mm')).toBeVisible()
-  await page.keyboard.press('ControlOrMeta+z')
-  await expect(input(inspector, 'Length')).toHaveValue('40')
-  await expect(inspector.getByText('40.00 × 20.00 mm')).toBeVisible()
+  // ── edit the same dimension by its field; the project window's Undo reverts it ───────────
+  await setField(shapeInspector, 'Length', '60')
+  await expect(shapeInspector.getByText('60.00 × 20.00 mm')).toBeVisible()
+  await page
+    .getByRole('banner', { name: 'Main toolbar' })
+    .getByRole('button', { name: /^Undo Edit shape item/ })
+    .click()
+  await expect(input(shapeInspector, 'Length')).toHaveValue('40')
+  await expect(shapeInspector.getByText('40.00 × 20.00 mm')).toBeVisible()
 
-  // Escape leaves the editor for the part
+  // Escape in the view only cancels: the window stays on the shape
   await editor.focus()
-  await page.keyboard.press('Escape')
-  await expect(editor).toHaveCount(0)
+  await win.keyboard.press('Escape')
+  await expect(editor).toBeVisible()
+
+  // ── closing the project (with its window) closes its Shape Editor window ─────────────────
+  const closed = win.waitForEvent('close')
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as { dfyom: { window: { close(c: boolean): Promise<unknown> } } }
+    ).dfyom.window.close(true),
+  )
+  await closed
+  expect(await shapeEditorWindows(dfyom.app)).toHaveLength(0)
 })
 
 test('shape editor: a segment row opens its actions by right-click and Shift+F10 (DF70)', async ({
   dfyom,
 }) => {
   test.setTimeout(120_000)
-  const page = await dfyom.app.firstWindow()
-  const { inspector } = await newPart(page)
-  const shapes = await openPartSetup(page, 'Shapes')
+  const first = await dfyom.app.firstWindow()
+  await newPart(first)
+  const shapes = await openPartSetup(first, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
-  await page.getByRole('menuitem', { name: 'Path' }).click()
+  await first.getByRole('menuitem', { name: 'Path' }).click()
+  // the Shape Editor window (DF94) shows the path's segment table
+  const { page, inspector } = await shapeEditorWindow(dfyom.app)
   const grid = inspector.getByRole('grid', { name: /Segments of Path 1/ })
   await expect(grid).toBeVisible()
   // no button in the row: its actions are the row's context menu

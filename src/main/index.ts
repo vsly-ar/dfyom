@@ -34,11 +34,14 @@ import {
 import { createAppStateStore, loadAppState, type AppStateStore } from './settings/app-state'
 import { createSettingsStore, loadSettings } from './settings/store'
 import { createLibraryWindows, type LibraryWindows } from './library-window'
+import { shapeEditorHandlesMenuAction } from './shape-editor-context'
+import { createShapeEditorWindows, type ShapeEditorWindows } from './shape-editor-window'
 import { createLicencesWindow, noticesPath } from './licences-window'
 import {
   APP_NAME,
   LIBRARY_WINDOW_SIZE,
   libraryWindowStart,
+  SHAPE_EDITOR_WINDOW_SIZE,
   windowStart,
   windowTitle,
   type WindowStart,
@@ -65,7 +68,8 @@ const loaded = new WeakSet<BrowserWindow>()
  * A window, not shown yet (`windowFactory` shows it). A project window is cascaded from `from`
  * with its size (docs/conventions/ui.md#project-files); without one, the remembered last window
  * (#remembered-window-state-and-dialog-folders), else the default size, centred. The Library window
- * (docs/conventions/ui-library-window.md) starts from its own remembered bounds.
+ * (docs/conventions/ui-library-window.md) and the Shape Editor window (ui.md#shape-editor-window-df94)
+ * start from their own remembered bounds.
  */
 function createAppWindow(
   log: Logger,
@@ -78,8 +82,15 @@ function createAppWindow(
   const workAreas = screen.getAllDisplays().map((d) => d.workArea)
   const primary = screen.getPrimaryDisplay().workArea
   const library = kind === 'library'
-  const start = library
-    ? libraryWindowStart(appState.get().libraryWindow, workAreas, primary)
+  const shapes = kind === 'shapes'
+  // each of the two tool windows has its own size and record; project windows cascade
+  const own = library || shapes
+  const start = own
+    ? libraryWindowStart(
+        library ? appState.get().libraryWindow : appState.get().shapeEditorWindow,
+        workAreas,
+        primary,
+      )
     : windowStart({
         source: from === undefined || from.isDestroyed() ? undefined : from.getNormalBounds(),
         saved: appState.get().window,
@@ -89,13 +100,17 @@ function createAppWindow(
       })
   const version = app.getVersion()
   const win = new BrowserWindow({
-    ...(library ? LIBRARY_WINDOW_SIZE : { width: 1440, height: 900 }),
+    ...(library
+      ? LIBRARY_WINDOW_SIZE
+      : shapes
+        ? SHAPE_EDITOR_WINDOW_SIZE
+        : { width: 1440, height: 900 }),
     ...start.bounds,
-    // docs/conventions/ui.md#app-shell; the Library window's list and editor need less
-    minWidth: library ? 820 : 1024,
-    minHeight: library ? 520 : 640,
+    // docs/conventions/ui.md#app-shell; the Library and Shape Editor windows need less
+    minWidth: own ? 820 : 1024,
+    minHeight: own ? 520 : 640,
     show: false,
-    title: windowTitle(library ? 'Library' : APP_NAME, version),
+    title: windowTitle(library ? 'Library' : shapes ? 'Shapes' : APP_NAME, version),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -122,8 +137,8 @@ function createAppWindow(
     event.preventDefault()
     win.setTitle(windowTitle(title, version))
   })
-  // The last moved, resized or closed window is remembered for the next launch; the Library
-  // window has its own record.
+  // The last moved, resized or closed window is remembered for the next launch; the Library and
+  // Shape Editor windows have their own records.
   const remember = () => {
     if (win.isDestroyed() || win.isMinimized()) return
     const state = {
@@ -132,6 +147,7 @@ function createAppWindow(
       fullScreen: win.isFullScreen(),
     }
     if (library) appState.setLibraryWindow(state)
+    else if (shapes) appState.setShapeEditorWindow(state)
     else appState.setWindow(state)
   }
   win.on('resize', remember)
@@ -158,7 +174,7 @@ function windowFactory(
   settings: () => AppSettings,
   appState: AppStateStore,
   isLibrary: (win: BrowserWindow) => boolean,
-): WindowFactory & { createLibrary(): BrowserWindow } {
+): WindowFactory & { createLibrary(): BrowserWindow; createShapeEditor(): BrowserWindow } {
   const show = (win: BrowserWindow) => {
     win.show()
     const start = starts.get(win)
@@ -177,6 +193,7 @@ function windowFactory(
         from !== undefined && isLibrary(from) ? undefined : from,
       ),
     createLibrary: () => createAppWindow(log, level, settings(), appState, 'library', undefined),
+    createShapeEditor: () => createAppWindow(log, level, settings(), appState, 'shapes', undefined),
     reveal(win) {
       if (hideWindows || win.isDestroyed()) return
       if (ready.get(win) === true) show(win)
@@ -320,14 +337,16 @@ void app.whenReady().then(async () => {
     if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
   })
 
-  // set below; the factory asks it which window is the Library window
+  // set below; the factory asks them which window is a tool window (never cascaded from)
   const library: { current?: LibraryWindows } = {}
+  const shapeEditors: { current?: ShapeEditorWindows } = {}
   const windows = windowFactory(
     log.child({ scope: 'windows' }),
     level,
     () => settings.get(),
     appState,
-    (win) => library.current?.isLibrary(win) === true,
+    (win) =>
+      library.current?.isLibrary(win) === true || shapeEditors.current?.isShapeEditor(win) === true,
   )
   const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows, appState, {
     packaged: app.isPackaged,
@@ -364,15 +383,27 @@ void app.whenReady().then(async () => {
     focus: (win) => windows.focus(win),
   })
   library.current = libraryWindows
+  // One Shape Editor window per project (docs/conventions/ui.md#shape-editor-window-df94, DF94)
+  const shapeEditorWindows = createShapeEditorWindows(host, sessions, {
+    create: () => windows.createShapeEditor(),
+    reveal: (win) => windows.reveal(win),
+    focus: (win) => windows.focus(win),
+  })
+  shapeEditors.current = shapeEditorWindows
   // Help → Open-source licences (docs/conventions/packaging.md#third-party-notices)
   const licences = createLicencesWindow({
     path: noticesPath(app.isPackaged, process.resourcesPath, app.getAppPath()),
     hidden: hideWindows,
   })
+  /** Not a project window: the Library, a Shape Editor or the licences window. */
+  const toolWindow = (win: BrowserWindow) =>
+    libraryWindows.isLibrary(win) ||
+    shapeEditorWindows.isShapeEditor(win) ||
+    licences.isLicences(win)
   // The last focused project window: menu items the Library window does not handle go there.
   let lastProjectWindow: BrowserWindow | undefined
   app.on('browser-window-focus', (_e, win) => {
-    if (!libraryWindows.isLibrary(win) && !licences.isLicences(win)) lastProjectWindow = win
+    if (!toolWindow(win)) lastProjectWindow = win
   })
   // New / Open without any window (macOS): an empty window, whose start panel offers both.
   installAppMenu({
@@ -396,15 +427,18 @@ void app.whenReady().then(async () => {
         BrowserWindow.getAllWindows().find((w) => !licences.isLicences(w))
       if (focused === undefined) return undefined
       const library = libraryWindows.isLibrary(focused)
-      // the licences window runs nothing; the Library window runs its own items
-      if (!library && !licences.isLicences(focused)) return focused
+      const shapes = shapeEditorWindows.isShapeEditor(focused)
+      // the licences window runs nothing; the Library and Shape Editor windows run their own items
+      if (!toolWindow(focused)) return focused
       if (library && libraryHandlesMenuAction(action)) return focused
+      if (shapes && shapeEditorHandlesMenuAction(action)) return focused
+      // a Shape Editor window passes the rest to its project's window (Save saves that project)
+      const own = shapes ? shapeEditorWindows.projectWindowOf(focused) : undefined
+      if (own !== undefined) return own
       const project =
         lastProjectWindow !== undefined && !lastProjectWindow.isDestroyed()
           ? lastProjectWindow
-          : BrowserWindow.getAllWindows().find(
-              (w) => !libraryWindows.isLibrary(w) && !licences.isLicences(w),
-            )
+          : BrowserWindow.getAllWindows().find((w) => !toolWindow(w))
       return project
     },
   })
@@ -425,11 +459,7 @@ void app.whenReady().then(async () => {
   const projectWindows = () =>
     BrowserWindow.getAllWindows()
       .filter(
-        (w) =>
-          !w.isDestroyed() &&
-          sessions.isWindow(w.webContents.id) &&
-          !libraryWindows.isLibrary(w) &&
-          !licences.isLicences(w),
+        (w) => !w.isDestroyed() && sessions.isProjectWindow(w.webContents.id) && !toolWindow(w),
       )
       .sort((a, b) => a.id - b.id)
   const liveLastProject = () =>

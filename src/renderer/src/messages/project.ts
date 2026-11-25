@@ -103,6 +103,7 @@ export const projectMessages = {
       fit: 'Fit',
       orbit: 'Orbit (Shift: pan)',
       zoom: 'Zoom',
+      openShapeEditor: 'Open the Shape Editor window (Window → Shape Editor)',
       move: 'Move the operation up or down',
       rowMenu: 'Open the focused row’s menu (Chamfer, Make Clones…, Remove)',
       measure: 'Measure (dimension): point to point; Shift locks to an axis, Esc clears, then ends',

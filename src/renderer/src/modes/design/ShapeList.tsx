@@ -4,10 +4,10 @@
 // disabled while an operation uses the shape, with the reason in the menu and as visible text. "Add
 // shape" offers the primitives and a path; "Import SVG…" is a button beside it (DF49; task U2: the
 // file dialog, the options step of the import dialog, `design.shape.import`, then its report;
-// "Edit shape" selects the first created shape). With no shapes the empty-state text comes first
+// "Edit shape" opens the first created shape). With no shapes the empty-state text comes first
 // and the two buttons follow it. `useSvgImport` also serves the operation shape picker and the
-// Shape Editor (DF49). Adding or choosing a shape selects it, which opens the Shape Editor, and closes
-// the dialog (`onChosen`). Row actions are a context menu (DF70, ui.md decision 27): right-click,
+// Shape Editor (DF49). Adding or choosing a shape opens it in the Shape Editor window (DF94,
+// `useOpenShape`) and closes the dialog (`onChosen`); the window lists the same rows. Row actions are a context menu (DF70, ui.md decision 27): right-click,
 // Shift+F10 / the Menu key on a row open "Actions for Shape 1" (Remove; the row has no action
 // button). `Delete` (or `Backspace`) on a row removes an unused shape, and focus goes to the next
 // row (else the previous one, else "Add shape"). Doc: docs/conventions/ui.md#navigator-and-add,
@@ -21,6 +21,7 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useShell } from '../../shell/ShellContext'
+import { useOpenShape } from './useOpenShape'
 import {
   Button,
   ContextMenu,
@@ -99,7 +100,7 @@ export function useSvgImport(
   const { bridge, ui } = useShell()
   const call = useCommand()
   const port = useRegion2d()
-  const [, select] = useDesignSelection()
+  const openShape = useOpenShape()
   const [state, setState] = useState<ImportState>({ kind: 'closed' })
   const close = () => setState({ kind: 'closed' })
 
@@ -153,8 +154,7 @@ export function useSvgImport(
           const first = state.kind === 'report' ? state.shapeIds[0] : undefined
           close()
           if (first === undefined) return
-          ui.getState().selectShapeItem(first, 0)
-          select(first)
+          openShape(part.dto.id, first)
           onChosen?.()
         }}
       />
@@ -173,7 +173,7 @@ export function ShapeList({
   onChosen: () => void
 }): React.JSX.Element {
   const call = useCommand()
-  const { ui } = useShell()
+  const openShape = useOpenShape()
   const [selected, select] = useDesignSelection()
   const rows = useShapeList(part)
   const svg = useSvgImport(part, { onChosen })
@@ -189,8 +189,7 @@ export function ShapeList({
     })
     if (!r.ok) return
     const id = (r.value as { shapeId: string }).shapeId
-    ui.getState().selectShapeItem(id, 0)
-    select(id)
+    openShape(part.dto.id, id)
     onChosen()
   }
   const remove = async (id: string, name: string) => {
@@ -300,10 +299,8 @@ export function ShapeList({
                       if (!used) void remove(row.id, row.name)
                     }}
                     onClick={() => {
-                      if (selected !== row.id) {
-                        ui.getState().selectShapeItem(row.id, 0)
-                        select(row.id)
-                      }
+                      // a project window opens (or focuses) the Shape Editor window (DF94)
+                      if (selected !== row.id) openShape(part.dto.id, row.id)
                       onChosen()
                     }}
                   >

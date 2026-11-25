@@ -1,11 +1,11 @@
 // v0.3 snap and measure in the built app (task U3), through roles and labels: a pocket's rectangle
-// converted to a named shape opens face-on in the Shape Editor; its length handle dragged next to
+// converted to a named shape opens face-on in the Shape Editor window (DF94); its length handle dragged next to
 // the stock's right edge snaps to it (glyph "Stock edge", the value written exactly), then the
 // measure tool (D, Dimension) picks two stock corners (snapped) and shows their distance. Windows stay hidden
 // (app.fixture.ts).
 // Docs: docs/conventions/ui.md#snap-and-measure, docs/modes/design-v0.3.md#implementation-u3
 import type { Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { expect, shapeEditorWindow, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = input(scope, label)
@@ -19,10 +19,10 @@ const input = (scope: Locator, label: string) =>
 
 test('snap a handle to a stock edge, then measure two points', async ({ dfyom }) => {
   test.setTimeout(120_000)
-  const page = await dfyom.app.firstWindow()
+  let page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
-  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  let inspector = page.getByRole('complementary', { name: 'Inspector' })
 
   await navigator.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
@@ -42,7 +42,11 @@ test('snap a handle to a stock edge, then measure two points', async ({ dfyom })
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await inspector.getByRole('button', { name: 'Convert to shape' }).click()
   await inspector.getByRole('button', { name: 'Edit shape' }).click()
-  const editor = page.getByRole('region', { name: 'Shape Editor' })
+  // the rest happens in the Shape Editor window
+  const shapes = await shapeEditorWindow(dfyom.app)
+  page = shapes.page
+  inspector = shapes.inspector
+  const editor = shapes.editor
   await expect(editor.getByText('Shape · Top face')).toBeVisible()
   const before = await input(inspector, 'Length').inputValue()
 
