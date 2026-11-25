@@ -107,3 +107,162 @@ export function blankText(blank: readonly number[], units: 'mm' | 'inch'): strin
   const f = (v: number) => (units === 'mm' ? `${+v.toFixed(2)}` : `${+(v / 25.4).toFixed(3)}`)
   return `${blank.map(f).join(' × ')}${units === 'mm' ? ' mm' : '"'}`
 }
+
+// ── the exploded preview in the viewport (split parts 4a polish) ─────────────────────────────
+
+/** A split line (`axis` x or y) or level (`axis` z), its value in the source part frame (mm). */
+export interface SplitCut {
+  readonly kind: 'line' | 'level'
+  /** Index into `split.lines` or `split.levels`. */
+  readonly index: number
+  readonly axis: 'x' | 'y' | 'z'
+  readonly at: number
+}
+
+/** A cut moved by a viewport drag in progress. */
+export interface CutDraft {
+  readonly kind: 'line' | 'level'
+  readonly index: number
+  readonly at: number
+}
+
+/** The split's cuts, one of them moved to `draft` (a viewport drag in progress). */
+export function splitCuts(split: SplitDTO, draft?: CutDraft | null): SplitCut[] {
+  const moved = (kind: 'line' | 'level', index: number, at: number) =>
+    draft != null && draft.kind === kind && draft.index === index ? draft.at : at
+  return [
+    ...split.lines.map((l, i) => ({
+      kind: 'line' as const,
+      index: i,
+      axis: l.axis,
+      at: moved('line', i, mm(l.at)),
+    })),
+    ...split.levels.map((q, i) => ({
+      kind: 'level' as const,
+      index: i,
+      axis: 'z' as const,
+      at: moved('level', i, mm(q)),
+    })),
+  ]
+}
+
+/** Stock extents (mm): the part frame box is x 0…L, y 0…W, z −T…0. */
+export interface StockSize {
+  readonly L: number
+  readonly W: number
+  readonly T: number
+}
+
+type V3 = readonly [number, number, number]
+
+/** One grid cell of the exploded preview: its box in the part frame and how far it is pulled. */
+export interface ExplodedCell {
+  readonly key: string
+  readonly min: V3
+  readonly max: V3
+  /** The pull along the cut normals at full explode (mm). */
+  readonly offset: V3
+}
+
+/** The sorted cut values per axis inside the stock (cuts on or past an edge cut nothing). */
+function breaks(cuts: readonly SplitCut[], s: StockSize) {
+  const inside = (axis: 'x' | 'y' | 'z', lo: number, hi: number) =>
+    [
+      ...new Set(
+        cuts
+          .filter((c) => c.axis === axis && c.at > lo + 1e-9 && c.at < hi - 1e-9)
+          .map((c) => c.at),
+      ),
+    ].sort((a, b) => a - b)
+  return { x: inside('x', 0, s.L), y: inside('y', 0, s.W), z: inside('z', -s.T, 0) }
+}
+
+/** How far pieces are pulled apart per cut (mm): a few % of the part, 4–30 mm. */
+export function explodeGap(s: StockSize): number {
+  return Math.min(30, Math.max(4, Math.max(s.L, s.W, s.T) * 0.06))
+}
+
+/**
+ * The stock box cut into grid cells by the lines and levels, each pulled along the cut normals
+ * by `gap` per cut it lies beyond, symmetric about the middle (the preview clips the part's mesh to
+ * each cell; cells with no material show nothing).
+ */
+export function explodedCells(
+  cuts: readonly SplitCut[],
+  s: StockSize,
+  gap: number,
+): ExplodedCell[] {
+  const b = breaks(cuts, s)
+  const xs = [0, ...b.x, s.L]
+  const ys = [0, ...b.y, s.W]
+  const zs = [-s.T, ...b.z, 0]
+  const out: ExplodedCell[] = []
+  for (let i = 0; i + 1 < xs.length; i++)
+    for (let j = 0; j + 1 < ys.length; j++)
+      for (let k = 0; k + 1 < zs.length; k++)
+        out.push({
+          key: `${i}:${j}:${k}`,
+          min: [xs[i]!, ys[j]!, zs[k]!],
+          max: [xs[i + 1]!, ys[j + 1]!, zs[k + 1]!],
+          offset: [
+            (i - b.x.length / 2) * gap,
+            (j - b.y.length / 2) * gap,
+            (k - b.z.length / 2) * gap,
+          ],
+        })
+  return out
+}
+
+/** Where a cut's handle sits in the exploded preview: the middle of its gap, along its axis (mm). */
+export function cutShift(
+  cuts: readonly SplitCut[],
+  cut: SplitCut,
+  s: StockSize,
+  gap: number,
+): number {
+  const b = breaks(cuts, s)[cut.axis]
+  const rank = b.filter((v) => v < cut.at - 1e-9).length
+  return (rank + 0.5 - b.length / 2) * gap
+}
+
+/** A dragged cut is kept this far (mm) inside the stock. */
+const EDGE_KEEP = 1
+
+/**
+ * A dragged value snapped (split parts 4a polish): to the part's middle along the axis when within
+ * `pull` mm, else to whole millimetres; always kept inside the stock. `snap` false (snapping off,
+ * or Alt held) keeps 0.01 mm.
+ */
+export function snapCut(
+  value: number,
+  axis: 'x' | 'y' | 'z',
+  s: StockSize,
+  snap: boolean,
+  pull: number,
+): number {
+  const [lo, hi] = axis === 'x' ? [0, s.L] : axis === 'y' ? [0, s.W] : [-s.T, 0]
+  const mid = (lo + hi) / 2
+  const v = !snap
+    ? Math.round(value * 100) / 100
+    : Math.abs(value - mid) <= pull
+      ? mid
+      : Math.round(value)
+  return Math.min(hi - EDGE_KEEP, Math.max(lo + EDGE_KEEP, v))
+}
+
+/** The split findings that concern a cut (a thin glue face on it, a feature near it). */
+export function cutFindings<W extends { code: string; params?: Record<string, unknown> }>(
+  warnings: readonly W[],
+  cut: SplitCut,
+): W[] {
+  const near = (v: unknown) => typeof v === 'number' && Math.abs(v - cut.at) < 1e-6
+  const has = (v: unknown) => Array.isArray(v) && v.some(near)
+  return warnings.filter((w) => {
+    if (w.code !== 'design.split' || w.params === undefined) return false
+    const p = w.params
+    if (cut.kind === 'level') return near(p['level']) || has(p['nearZ'])
+    return (
+      (p['axis'] === cut.axis && near(p['at'])) || has(cut.axis === 'x' ? p['nearX'] : p['nearY'])
+    )
+  })
+}

@@ -1752,6 +1752,37 @@
   gap: var(--space-1);
 }
 
+.splitCut {
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* a cut's split findings under its field (4a polish): small, the warning icon in its colour */
+.splitFindings {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.splitFindings li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1);
+  align-items: start;
+}
+
+.splitFindings svg {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
 .splitPreview {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1816,4 +1847,8 @@
   line-height: var(--lh-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.splitMore {
+  padding-left: calc(12px + var(--space-1));
 }

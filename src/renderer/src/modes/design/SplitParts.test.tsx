@@ -3,7 +3,7 @@
 // the margin), the preview and piece chips, pieces indented under their source in the part menu,
 // a read-only piece ("Piece 1 of 4 of Bracket · Edit the split"), with axe on each state. The
 // viewport canvas is stubbed. Doc: docs/conventions/ui.md#split-part-split-parts-4a
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
@@ -13,6 +13,8 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { useDesignPart } from './useDesign'
+import { COMMIT_MS, useSplitScene } from './useSplitScene'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -77,7 +79,7 @@ describe('split part (split parts 4a)', () => {
     expect(within(section).getByRole('group', { name: 'Split preview' })).toBeVisible()
     expect(within(section).getByRole('img', { name: 'Split preview: Top' })).toBeVisible()
     expect(
-      within(section)
+      within(within(section).getByRole('list', { name: '2 pieces' }))
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual([
@@ -85,6 +87,16 @@ describe('split part (split parts 4a)', () => {
       expect.stringMatching(/^2 · .* × 10 mm · own blank$/),
     ])
     expect(within(section).getByLabelText('Level at Z', { selector: 'input' })).toBeVisible()
+    // the level's findings under its field (4a polish), at most three and a count
+    expect(
+      within(section).getByText(/^The glue face at level -10 is about 4 mm wide/),
+    ).toBeVisible()
+    expect(within(section).getByText('2 more in Warnings')).toBeVisible()
+    // focus in its field highlights the level in the viewport preview
+    within(section).getByLabelText('Level at Z', { selector: 'input' }).focus()
+    expect(t.shell.ui.getState().splitFocus).toEqual({ kind: 'level', index: 0 })
+    within(section).getByRole('button', { name: 'Add level' }).focus()
+    expect(t.shell.ui.getState().splitFocus).toBeNull()
     await expectNoAxeViolations()
     await t.user.click(within(section).getByRole('button', { name: 'Add line at X' }))
     await waitFor(() => expect(t.pieces()).toHaveLength(4))
@@ -149,6 +161,59 @@ describe('split part (split parts 4a)', () => {
     await screen.findByText('Piece 2 of 2 of Bracket')
     await t.user.click(within(await t.openMenu()).getByRole('menuitem', { name: 'Edit the split' }))
     await waitFor(() => expect(t.shell.ui.getState().designPart).toBe(t.s.partId))
+  })
+
+  it('the viewport drag: a live preview, snapped, committed as one gesture; Escape reverts', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    // the design scene's split overlay, as the viewport gets it (the canvas is stubbed here)
+    let scene: ReturnType<typeof useSplitScene> | undefined
+    function Probe() {
+      scene = useSplitScene(useDesignPart(), true, [])
+      return null
+    }
+    renderUi(
+      <ShellProvider shell={t.shell}>
+        <Probe />
+      </ShellProvider>,
+    )
+    await waitFor(() => expect(scene?.split?.cuts).toHaveLength(1))
+    expect(scene!.split!.cells).toHaveLength(2)
+    expect(scene!.summary).toMatch(/^Split preview: 2 pieces pulled apart\./)
+    const sets = () => t.bridge.calls.filter((c) => c.name === 'design.split.set')
+    const before = sets().length
+    // press, move (within COMMIT_MS of the press: preview only), release: one commit, snapped
+    act(() => scene!.split!.onDrag('start', 'level-0', -10, { alt: false }))
+    act(() => scene!.split!.onDrag('move', 'level-0', -6.4, { alt: false }))
+    expect(scene!.split!.cuts[0]).toMatchObject({ at: -6, dragging: true })
+    expect(sets()).toHaveLength(before)
+    act(() => scene!.split!.onDrag('end', 'level-0', -6.4, { alt: false }))
+    await waitFor(() => expect(sets()).toHaveLength(before + 1))
+    expect(sets().at(-1)).toMatchObject({
+      args: { split: { levels: ['-6 mm'] } },
+      gesture: expect.stringMatching(/^split-drag-/),
+    })
+    await waitFor(() => expect(scene!.split!.cuts[0]).toMatchObject({ at: -6, dragging: false }))
+    // the field follows
+    expect(within(t.split()).getByLabelText('Level at Z', { selector: 'input' })).toHaveValue(
+      '-6 mm',
+    )
+    // a longer drag commits on the way (Alt: no snapping); Escape reverts the whole gesture
+    act(() => scene!.split!.onDrag('start', 'level-0', -6, { alt: false }))
+    await new Promise((r) => setTimeout(r, COMMIT_MS + 20))
+    act(() => scene!.split!.onDrag('move', 'level-0', -12.346, { alt: true }))
+    await waitFor(() =>
+      expect(sets().at(-1)).toMatchObject({ args: { split: { levels: ['-12.35 mm'] } } }),
+    )
+    act(() => scene!.split!.onDrag('cancel', 'level-0', -6, { alt: false }))
+    await waitFor(() =>
+      expect(t.bridge.calls.at(-1)).toMatchObject({
+        name: 'history.undo',
+        args: { gesture: expect.stringMatching(/^split-drag-/) },
+      }),
+    )
+    await waitFor(() => expect(scene!.split!.cuts[0]).toMatchObject({ at: -6, dragging: false }))
   })
 
   it('Remove split removes the pieces in one command', async () => {

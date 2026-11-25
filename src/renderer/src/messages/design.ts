@@ -420,6 +420,10 @@ export const designMessages = {
       `${plans === 1 ? 'A plan of a removed piece is' : `${plans} plans of removed pieces are`} removed too. Undo brings them back.`,
     confirmAction: 'Remove pieces',
     noStock: 'The part has no stock yet.',
+    cutFindings: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
+    moreFindings: (n: number) => `${n} more in Warnings`,
+    viewportSummary: (pieces: number, cut: string | undefined) =>
+      `Split preview: ${pieces === 1 ? '1 piece' : `${pieces} pieces`} pulled apart.${cut === undefined ? '' : ` ${cut}.`} Drag a line or level to move it, or edit it in the Split section.`,
   },
 
   /** Drag to reorder and Alt+↑/↓ in the design lists (D45, ui.md § Reordering lists). */
