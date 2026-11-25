@@ -68,3 +68,62 @@ export function enclosureCommands(partId: string): [string, object][] {
     ],
   ] as [string, object][]
 }
+
+// ── the proposal's exit part (split parts 4b-2) ──────────────────────────────────────────────
+
+/**
+ * A 600 × 400 mm panel of 18 mm plywood (the proposal's exit, docs/modes/split-parts.md#slices):
+ * a 610 × 410 sheet with a 600 × 400 outline, two 8 mm holes and a pocket. Split by one line at
+ * x = 305 with a key; its two pieces fit an 800 × 800 machine.
+ */
+export const PANEL_STOCK = {
+  name: 'Plywood 610 × 410 × 18',
+  shape: 'block' as const,
+  length: '610',
+  width: '410',
+  thickness: '18',
+  material: { name: 'Birch plywood', class: 'sheetGood' as const },
+}
+
+/** The panel's line: through the middle, away from its features. */
+export const PANEL_LINE = { axis: 'x' as const, at: '305' }
+
+export function panelCommands(partId: string): [string, object][] {
+  const hole = (x: string, y: string) => [
+    'design.drilling.add',
+    { partId, center: [x, y], diameter: '8', bottom: 'through' },
+  ]
+  return [
+    hole('60', '60'),
+    hole('550', '350'),
+    [
+      'design.pocket.add',
+      {
+        partId,
+        shape: {
+          kind: 'rectangle',
+          center: ['150', '205'],
+          length: '120',
+          width: '80',
+          cornerRadius: '5',
+        },
+        depth: '6',
+      },
+    ],
+    [
+      'design.profile.add',
+      {
+        partId,
+        shape: {
+          kind: 'rectangle',
+          center: ['305', '205'],
+          length: '600',
+          width: '400',
+          cornerRadius: '3',
+        },
+        slotWidth: '6',
+        tabs: { count: '6', width: '6', thickness: '2' },
+      },
+    ],
+  ] as [string, object][]
+}

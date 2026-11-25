@@ -413,6 +413,8 @@ function geometricDfm(
         (rule, message, params) => splitFinding(id, rule, 'warning', message, params),
       ),
     )
+  // ── keys (4b-2) ──────────────────────────────────────────────────────────────────────────
+  out.push(...keyFindings(planned, (n) => pieces.find((p) => p.n === n)?.name ?? `piece ${n}`, id))
   // ── sliver ───────────────────────────────────────────────────────────────────────────────
   const partHeight = top - bottom
   const partVolume = regionArea(layout.footprint.region) * partHeight
@@ -434,6 +436,60 @@ function geometricDfm(
       )
   }
   return { findings: out, fb, partHeight }
+}
+
+/**
+ * `keyFit` (a run with no key: too short, only for a smaller tool, or no place clear of features
+ * and the edge) and `thinJoint` for a key's neck under max(10 mm, 3 × the outline's tool Ø).
+ */
+function keyFindings(planned: PiecesResult, name: (n: number) => string, id: string): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const tool = planned.outlineTool
+  for (const k of planned.keys.issues) {
+    const line = `${k.axis} = ${fmt(k.at)}`
+    const pair = `${name(k.male.n)} and ${name(k.female.n)}`
+    const run = `${k.axis === 'x' ? 'Y' : 'X'} ${fmt(k.run[0])}–${fmt(k.run[1])}`
+    const params = {
+      reason: k.reason,
+      axis: k.axis,
+      at: k.at,
+      run: [k.run[0], k.run[1]],
+      pieces: [k.male.n, k.female.n],
+      tool,
+    }
+    out.push(
+      splitFinding(
+        id,
+        'keyFit',
+        'warning',
+        k.reason === 'near'
+          ? `No key on ${line} between ${pair} at ${run}: a feature or the part edge is within one tool Ø (${fmt(tool)} mm) of every place`
+          : k.reason === 'tool'
+            ? `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} holds a key only for a tool of Ø${fmt(k.maxTool!)} or less (the outline's is Ø${fmt(tool)}): no key there`
+            : `The run of ${fmt(k.run[1] - k.run[0])} mm on ${line} between ${pair} is too short for a key: a butt joint there`,
+        k.maxTool === undefined ? params : { ...params, maxTool: k.maxTool },
+      ),
+    )
+  }
+  const limit = Math.max(THIN_JOINT_MM, 3 * tool)
+  const narrowest = new Map<string, (typeof planned.keys.keys)[number]>()
+  for (const k of planned.keys.keys) {
+    const key = `${k.axis}:${k.at}`
+    const prev = narrowest.get(key)
+    if (prev === undefined || k.size.neck < prev.size.neck) narrowest.set(key, k)
+  }
+  for (const k of narrowest.values())
+    if (k.size.neck < limit - EPS)
+      out.push(
+        splitFinding(
+          id,
+          'thinJoint',
+          'warning',
+          `The key neck on ${k.axis} = ${fmt(k.at)} is ${fmt(k.size.neck)} mm (< ${fmt(limit)} mm, 3 × the Ø${fmt(tool)} outline tool): a weak key`,
+          { axis: k.axis, at: k.at, width: k.size.neck, limit, what: 'keyNeck' },
+        ),
+      )
+  return out
 }
 
 /** `noStock`, `outsideTravel`, `fitsWhole`: the library and the project's machines (cheap). */

@@ -45,16 +45,25 @@ export interface SplitArgs {
   readonly lines: readonly { readonly axis: 'x' | 'y'; readonly at: string }[]
   readonly levels: readonly string[]
   readonly margin: string
+  /** The lines' key (4b-2); absent = butt lines. */
+  readonly joint?: 'puzzle' | 'dovetail'
+  /** The keys' socket clearance (4b-2); absent = the stored one, else the default. */
+  readonly clearance?: string
   /** Dowels joining the levels (4b); absent = butt levels. */
   readonly dowels?: DowelArgs
 }
 
 export function splitArgs(split: SplitDTO): SplitArgs {
   const d = split.joint.dowels
+  const kind = split.joint.kind
+  const c = split.joint.clearance
   return {
     lines: split.lines.map((l) => ({ axis: l.axis, at: l.at.source })),
     levels: split.levels.map((q) => q.source),
     margin: split.margin.source,
+    ...(kind === 'butt'
+      ? {}
+      : { joint: kind, ...(c === undefined ? {} : { clearance: c.source }) }),
     ...(d === undefined
       ? {}
       : {

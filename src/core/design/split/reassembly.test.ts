@@ -1,6 +1,7 @@
 // The reassembly invariant of split parts 4a (docs/modes/split-parts.md#model): the pieces, each
 // evaluated in its own blank and moved back by its offset, are the source inside their cells; the
-// dowel holes of 4b are the joint and are not compared (docs/modes/split-parts.md#implementation-4b).
+// dowel holes of 4b are the joint and are not compared (docs/modes/split-parts.md#implementation-4b);
+// with keys (4b-2) the source equals the pieces up to the clearance band.
 // Oracle: point membership (ray parity) on the evaluated meshes at random points of each cell
 // (inside the footprint, between the part's facings), source vs. piece.
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -14,9 +15,19 @@ import { nodeManifoldSource } from '../../geometry/testing/node-wasm'
 import { designSetup, type DesignSetup } from '../design.fixture'
 import { loadPart, partGeometryInput } from '../load'
 import { toGeometryInput } from '../geometry-input'
+import { regionLoops } from '../../geometry/2d/model'
+import { resolveShape } from '../shape'
+import { keyItem } from './keys'
 import { shapeRegion } from './layout'
 import { planPieces } from './pieces'
-import { ENCLOSURE_LEVEL, ENCLOSURE_STOCK, enclosureCommands } from './split.fixture'
+import {
+  ENCLOSURE_LEVEL,
+  ENCLOSURE_STOCK,
+  enclosureCommands,
+  PANEL_LINE,
+  PANEL_STOCK,
+  panelCommands,
+} from './split.fixture'
 
 const region2d = nodeRegion2d()
 let kernel: SolidKernel
@@ -157,6 +168,76 @@ describe('reassembly: pieces == source', () => {
       expect(checked).toBeGreaterThan(50 * planned.pieces.length)
       expect(solid).toBeGreaterThan(0)
       expect(solid).toBeLessThan(checked)
+    },
+    60_000,
+  )
+})
+
+// Split parts 4b-2: with keys the pieces meet along the keyed boundary, the knob in the female's
+// cell, so a point is checked against every piece of its band: in the source ⇔ in exactly one
+// piece, except in the clearance band (the socket around the knob, at most the clearance wide).
+describe('reassembly with keys (4b-2): pieces == source up to the clearance band', () => {
+  it.each(['puzzle', 'dovetail'] as const)(
+    '%s on the 600 × 400 panel',
+    async (kind) => {
+      const s = await designSetup({ stock: PANEL_STOCK, services: { region2d } })
+      for (const [name, args] of panelCommands(s.partId)) await s.run(name, args)
+      await s.run('design.split.set', {
+        partId: s.partId,
+        split: { lines: [PANEL_LINE], joint: kind },
+      })
+      const source = evaluate(s, s.partId)
+      const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+      const planned = expectOk(planPieces(loaded, loaded.dto.split!, region2d))
+      expect(planned.keys.keys.length).toBe(2)
+      const pieces = planned.pieces.map((plan) => {
+        const piece = Object.values(s.d.doc.parts).find((p) => p.derivedFrom?.index === plan.n)!
+        // the blank outside the outline's slot stays as an offcut: only the piece is compared
+        const pl = expectOk(loadPart(s.d.doc, piece.id, 'test'))
+        const g = expectOk(toGeometryInput(pl.part, pl.stock, region2d)).operations
+        const at = pl.part.operations.findIndex((o) => o.id === 'split1_outline')
+        const og = g[at]
+        const outline = og?.kind === 'profile' ? shapeRegion(og.shape) : undefined
+        expect(outline).toBeDefined()
+        return { plan, off: piece.offset!.map(mm), e: evaluate(s, piece.id), outline: outline! }
+      })
+      const knobs = planned.keys.keys.map((k) => {
+        const r = expectOk(resolveShape(region2d, [keyItem(k, 'male')]))
+        return r.kind === 'region' ? regionLoops(r.region) : []
+      })
+      const c = planned.keys.keys[0]!.clearance
+      const inBand = (p: readonly [number, number]) =>
+        knobs.some((loops) => (region2d.distance(loops, p)?.distance ?? Infinity) <= c + 0.01)
+      const random = lcg(11)
+      const points: [number, number, number][] = []
+      for (let k = 0; k < 300; k++)
+        points.push([5 + 600 * random(), 5 + 400 * random(), -18 * (0.01 + 0.98 * random())])
+      // and dense around each key, where the pieces meet
+      for (const key of planned.keys.keys)
+        for (let k = 0; k < 250; k++)
+          points.push([
+            key.at - 5 + (key.size.depth + 10) * random(),
+            key.u - key.size.half + 2 * key.size.half * random(),
+            -18 * (0.01 + 0.98 * random()),
+          ])
+      let solid = 0
+      let band = 0
+      for (const p of points) {
+        const want = inside(source, p)
+        const hits = pieces.filter(
+          ({ off, e, outline }) =>
+            regionContains(outline, [p[0] + off[0]!, p[1] + off[1]!]) &&
+            inside(e, [p[0] + off[0]!, p[1] + off[1]!, p[2] + off[2]!]),
+        ).length
+        if (want && hits === 0 && inBand([p[0], p[1]])) {
+          band++
+          continue
+        }
+        expect([p, hits]).toEqual([p, want ? 1 : 0])
+        if (want) solid++
+      }
+      expect(solid).toBeGreaterThan(400)
+      expect(band).toBeLessThan(40)
     },
     60_000,
   )

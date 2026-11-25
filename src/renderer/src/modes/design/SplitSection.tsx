@@ -3,14 +3,15 @@
 // `design.split.set`, one undo step; removing pieces with plans asks first), the preview (pieces
 // pulled apart in Top and Front, each with its blank, `--motion-slow`, none under reduced motion)
 // and the piece chips; a piece's own inspector ("Piece 3 of 8 of Enclosure · Edit the split") and
-// the read-only note for its operations.
+// the read-only note for its operations. Since 4b the joints: dowels on levels, keys on lines
+// (Puzzle / Dovetail with the clearance; the keys drawn in Top).
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { useUi } from '../../shell/ShellContext'
+import { useRegion2d, useUi } from '../../shell/ShellContext'
 import {
   Button,
   ConfirmDialog,
@@ -43,6 +44,8 @@ import {
   type SplitArgs,
 } from './split-view'
 import { DOWEL_SIZES } from '../../../../core/design/dowel'
+import { isKeyKind, keyPreviewPoints, type KeyPlan } from '../../../../core/design/split/keys'
+import { splitKeys } from '../../../../core/design/split/pieces'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
 const m = designMessages
@@ -118,6 +121,15 @@ export function SplitSection({
   const setFocus = useUi((st) => st.setSplitFocus)
   const split = part.dto.split
   const stock = part.loaded?.stock
+  // keys on the lines (4b-2): placed by the core from the source, for the preview and read-outs
+  const port = useRegion2d()
+  const loaded = part.loaded
+  const keys = useMemo(() => {
+    if (port === undefined || loaded === undefined || split === undefined) return undefined
+    if (!isKeyKind(split.joint.kind)) return undefined
+    const r = splitKeys(loaded, split, port)
+    return r.isOk() ? r.unwrap() : undefined
+  }, [port, loaded, split])
   const units = part.units
   const unit = defaultUnit('length', units)
   const confirmDialog = (
@@ -168,13 +180,16 @@ export function SplitSection({
   }
   const pieces = pieceViews(part.doc, part.dto.id)
   const holes = dowelHoles(split)
+  const knobs = (keys?.keys.keys ?? []).map((k) => keyPreviewPoints(k))
+  const keysOn = (axis: 'x' | 'y', at: number) =>
+    (keys?.keys.keys ?? []).filter((k) => k.axis === axis && Math.abs(k.at - at) < 1e-6).length
   return (
     <section aria-label={t.title} className={styles['splitSection']}>
       <h3 className={styles['groupTitle']}>
         {t.title} · {t.pieces(pieces.length)}
       </h3>
       <p className={styles['muted']}>{t.intro}</p>
-      <SplitPreview part={part} pieces={pieces} holes={holes} />
+      <SplitPreview part={part} pieces={pieces} holes={holes} knobs={knobs} />
       <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
         {pieces.map((p) => (
           <li key={p.id} className={styles['splitChip']}>
@@ -191,6 +206,7 @@ export function SplitSection({
             key={`line-${i}`}
             onFocus={() => setFocus({ kind: 'line', index: i })}
             onBlur={() => setFocus(null)}
+            {...(keys === undefined ? {} : { note: t.keyCount(keysOn(line.axis, mmOf(line.at))) })}
             findings={cutFindings(warnings, {
               kind: 'line',
               index: i,
@@ -272,7 +288,9 @@ export function SplitSection({
         value={quantityOf(split.margin)}
         onCommit={(q, gesture) => void send({ ...args, margin: q.source }, false, gesture)}
       />
-      <p className={styles['muted']}>{t.joint}</p>
+      {split.lines.length > 0 ? (
+        <KeyFields part={part} args={args} keys={keys} send={(a, g) => void send(a, false, g)} />
+      ) : null}
       {split.levels.length > 0 ? (
         <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
       ) : null}
@@ -289,6 +307,71 @@ export function SplitSection({
       {error ? <ErrorMessage error={error} /> : null}
       {confirmDialog}
     </section>
+  )
+}
+
+/**
+ * The lines' joint (split parts 4b-2): Butt, Puzzle or Dovetail; with keys the clearance (socket
+ * side only) and a read-out of the keys: how many, their neck and the largest tool that cuts them.
+ */
+function KeyFields({
+  part,
+  args,
+  keys,
+  send,
+}: {
+  part: DesignPart
+  args: SplitArgs
+  keys: { readonly keys: KeyPlan; readonly outlineTool: number } | undefined
+  send: (split: SplitArgs, gesture?: string) => void
+}): React.JSX.Element {
+  const split = part.dto.split!
+  const kind = split.joint.kind
+  const unit = defaultUnit('length', part.units)
+  const placed = keys?.keys.keys ?? []
+  const fmt = (v: number) => `${+v.toFixed(2)}`
+  return (
+    <div className={styles['splitGroup']} role="group" aria-label={t.lineJoint}>
+      <SegmentedControl
+        label={t.lineJoint}
+        size="sm"
+        options={[
+          { value: 'butt', label: t.jointButt },
+          { value: 'puzzle', label: t.jointPuzzle },
+          { value: 'dovetail', label: t.jointDovetail },
+        ]}
+        value={kind}
+        onValueChange={(v) => {
+          const { joint: _, clearance: _c, ...rest } = args
+          send(v === 'puzzle' || v === 'dovetail' ? { ...rest, joint: v } : rest)
+        }}
+      />
+      {kind === 'butt' ? null : (
+        <>
+          <QuantityInput
+            label={t.clearance}
+            kind="length"
+            defaultUnit={unit}
+            value={
+              split.joint.clearance === undefined ? undefined : quantityOf(split.joint.clearance)
+            }
+            onCommit={(q, gesture) => send({ ...args, clearance: q.source }, gesture)}
+          />
+          <p className={styles['muted']}>{t.clearanceHint}</p>
+          {keys === undefined ? null : (
+            <p className={styles['muted']}>
+              {placed.length === 0
+                ? t.noKeys
+                : t.keySummary(
+                    placed.length,
+                    fmt(Math.min(...placed.map((k) => k.size.neck))),
+                    fmt(Math.min(...placed.map((k) => k.size.maxTool))),
+                  )}
+            </p>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -466,11 +549,14 @@ function SplitPreview({
   part,
   pieces,
   holes,
+  knobs,
 }: {
   part: DesignPart
   pieces: readonly PieceView[]
   /** Dowel holes (4b), drawn in Top at their place on the part. */
   holes: readonly { readonly x: number; readonly y: number }[]
+  /** Each key's knob outline (4b-2, part frame), drawn in Top on its line. */
+  knobs: readonly (readonly (readonly [number, number])[])[]
 }) {
   const [apart, setApart] = useState(false)
   useEffect(() => {
@@ -521,6 +607,15 @@ function SplitPreview({
                   cx={d.x}
                   cy={W - d.y}
                   r={Math.max(L, W) * 0.012}
+                />
+              ))
+            : null}
+          {kind === 'top'
+            ? knobs.map((pts, k) => (
+                <polyline
+                  key={`key-${k}`}
+                  className={styles['splitKey']}
+                  points={pts.map((p) => `${p[0]},${W - p[1]}`).join(' ')}
                 />
               ))
             : null}

@@ -265,4 +265,48 @@ describe('split part (split parts 4a)', () => {
     expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.dowels')
     await expectNoAxeViolations()
   })
+
+  it('keys on lines (4b-2): Puzzle / Dovetail, the clearance kept by later edits, Butt drops it', async () => {
+    const t = await renderSplit()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split part…' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    // the lines' joint shows once there is a line
+    expect(within(t.split()).queryByRole('group', { name: 'Lines joined by' })).toBeNull()
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Add line at X' }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(4))
+    const joint = () => within(t.split()).getByRole('group', { name: 'Lines joined by' })
+    await t.user.click(within(joint()).getByRole('radio', { name: 'Puzzle' }))
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('puzzle'))
+    expect(t.callsOf('design.split.set').at(-1)).toMatchObject({ split: { joint: 'puzzle' } })
+    const section = t.split()
+    const clearance = within(section).getByLabelText('Key clearance', { selector: 'input' })
+    expect(clearance).toHaveValue('0.15 mm')
+    // the read-out: the keys placed (with their tool) or why none fits, and a count per line
+    expect(within(section).getByText(/needs a tool of Ø|No key fits yet/)).toBeVisible()
+    expect(within(section).getByText(/^\d+ keys?$/)).toBeVisible()
+    await expectNoAxeViolations()
+    await t.user.clear(clearance)
+    await t.user.type(clearance, '0.2{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('design.split.set').at(-1)).toMatchObject({
+        split: { joint: 'puzzle', clearance: '0.2' },
+      }),
+    )
+    // a later edit sends the joint and the clearance it shows
+    await t.user.click(within(joint()).getByRole('radio', { name: 'Dovetail' }))
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('dovetail'))
+    const margin = within(t.split()).getByLabelText('Blank margin', { selector: 'input' })
+    await t.user.clear(margin)
+    await t.user.type(margin, '6{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('design.split.set').at(-1)).toMatchObject({
+        split: { margin: '6', joint: 'dovetail', clearance: '0.2' },
+      }),
+    )
+    await t.user.click(within(joint()).getByRole('radio', { name: 'Butt' }))
+    await waitFor(() => expect(t.s.part().split?.joint.kind).toBe('butt'))
+    expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.joint')
+    expect(t.callsOf('design.split.set').at(-1)).not.toHaveProperty('split.clearance')
+    await expectNoAxeViolations()
+  })
 })

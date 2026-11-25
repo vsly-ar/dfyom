@@ -204,8 +204,11 @@ export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN)
 /** `split1`: one split per part (SP-D); generated operations are `<splitId>_<role>`. */
 export const SPLIT_ID_PATTERN = /^split[1-9]\d{0,5}$/
 export const SplitIdSchema = z.string().regex(SPLIT_ID_PATTERN)
-/** The lines' joint: butt (glue faces, no geometry); puzzle and dovetail keys come in 4b-2. */
-export const SPLIT_JOINTS = ['butt'] as const
+/**
+ * The lines' joint: butt (glue faces, no geometry), puzzle or dovetail key (split parts 4b-2,
+ * docs/modes/split-parts.md#implementation-4b).
+ */
+export const SPLIT_JOINTS = ['butt', 'puzzle', 'dovetail'] as const
 export type SplitJoint = (typeof SPLIT_JOINTS)[number]
 
 /**
@@ -236,8 +239,15 @@ export const SplitDtoSchema = z.object({
   lines: z.array(SplitLineDtoSchema),
   levels: z.array(length()),
   margin: length(),
-  /** `kind`: the lines' joint; `dowels`: the levels' (absent = butt levels). */
-  joint: z.object({ kind: z.enum(SPLIT_JOINTS), dowels: SplitDowelsDtoSchema.optional() }),
+  /**
+   * `kind`: the lines' joint; `clearance`: a key's socket offset (keys only, absent = 0.15 mm);
+   * `dowels`: the levels' joint (absent = butt levels).
+   */
+  joint: z.object({
+    kind: z.enum(SPLIT_JOINTS),
+    clearance: length().optional(),
+    dowels: SplitDowelsDtoSchema.optional(),
+  }),
 })
 export type SplitDTO = z.output<typeof SplitDtoSchema>
 

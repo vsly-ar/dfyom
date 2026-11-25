@@ -1861,6 +1861,15 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* a key's knob on its line (split parts 4b-2), drawn over the pieces in Top */
+.splitKey {
+  fill: var(--bg-viewport);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
 .splitDowels summary {
   cursor: pointer;
   font-size: var(--text-sm);

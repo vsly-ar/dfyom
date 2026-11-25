@@ -1,7 +1,8 @@
 // Test-only: the split parts 4a exit criterion (hardening DF91), run headless through the bundled
 // CLI (exit-criteria.mcp.test.ts): the enclosure (split.fixture.ts, built from scratch) split by
-// one level, then by the level and two lines, then by the level joined by dowels (4b-1); every
-// piece is planned, exported and run on the virtual machine, setup by setup. Not app code.
+// one level, then by the level and two lines, then by the level joined by dowels (4b-1), and the
+// proposal's 600 × 400 panel split by one line with a puzzle key (4b-2); every piece is planned,
+// exported and run on the virtual machine, setup by setup. Not app code.
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
 // docs/modes/split-parts.md#slices
 import { readFileSync } from 'node:fs'
@@ -13,13 +14,16 @@ import {
   ENCLOSURE_LEVEL,
   ENCLOSURE_STOCK,
   enclosureCommands,
+  PANEL_LINE,
+  PANEL_STOCK,
+  panelCommands,
 } from '../../core/design/split/split.fixture'
 import { withoutAppVersion } from '../../core/post/plan-export'
 import { agentSession, type Call, type RunJobStatus } from './exit-criteria.fixture'
 
 interface SplitResult {
   pieces: { partId: string; name: string; index: number; blank: number[] }[]
-  findings: { severity: string; params: { rule: string } }[]
+  findings: { severity: string; params: { rule: string; reason?: string } }[]
 }
 interface PlanGet {
   plan: { name: string; setups: { id: string; name: string; direction: string }[] }
@@ -65,10 +69,15 @@ export async function exitCriteriaSplitFlow(
     })
   ).value
   for (const [name, args] of enclosureCommands(partId)) await ok(name, args)
+  // split parts 4b-2: the proposal's exit part, a 600 × 400 panel, beside the enclosure
+  const panelId = (
+    await ok<{ partId: string }>('design.part.add', { name: 'Panel', stock: PANEL_STOCK })
+  ).value.partId
+  for (const [name, args] of panelCommands(panelId)) await ok(name, args)
 
   let pieces = 0
   let setups = 0
-  const splits: [string, object][] = [
+  const splits: [string, object, string?][] = [
     ['level', { levels: [ENCLOSURE_LEVEL] }],
     [
       'level-lines',
@@ -82,10 +91,20 @@ export async function exitCriteriaSplitFlow(
     ],
     // split parts 4b-1: the level joined by dowels placed by the helper
     ['level-dowels', { levels: [ENCLOSURE_LEVEL], dowels: {} }],
+    // split parts 4b-2: the panel in two pieces joined by puzzle keys
+    ['panel-puzzle', { lines: [PANEL_LINE], joint: 'puzzle' }, panelId],
   ]
-  for (const [label, split] of splits) {
-    const r = (await ok<SplitResult>('design.split.set', { partId, split, confirm: true })).value
+  for (const [label, split, splitPart = partId] of splits) {
+    const r = (
+      await ok<SplitResult>('design.split.set', { partId: splitPart, split, confirm: true })
+    ).value
     expect(r.pieces).toHaveLength(label === 'level-lines' ? 8 : 2)
+    const source = splitPart === panelId ? 'Panel' : 'Enclosure'
+    if (label === 'panel-puzzle') {
+      // every run holds its keys; the male piece's blank holds its knobs
+      expect(r.findings.filter((f) => f.params.rule === 'keyFit')).toEqual([])
+      expect(r.pieces[0]!.blank[0]).toBeGreaterThan(r.pieces[1]!.blank[0]!)
+    }
     if (label === 'level-dowels')
       expect(r.findings.filter((f) => /^dowel/.test(f.params.rule))).toEqual([])
     // a renamed piece keeps its number in the header and adds its name (split parts 4a polish)
@@ -125,9 +144,9 @@ export async function exitCriteriaSplitFlow(
         expect(gcode).toContain(`(Stock X ${bl} Y ${bw} Z ${bt} mm`)
         // the header names the piece after the plan (split parts 4a polish; golden for the first)
         // (a non-default name stays with the number through the second split)
-        const renamed = piece.index === 2 ? ': Ring' : ''
+        const renamed = piece.index === 2 && source === 'Enclosure' ? ': Ring' : ''
         expect(gcode).toContain(
-          `(Program: ${plan.name})\n(Piece ${piece.index} of ${r.pieces.length} of Enclosure${renamed})\n`,
+          `(Program: ${plan.name})\n(Piece ${piece.index} of ${r.pieces.length} of ${source}${renamed})\n`,
         )
         if (label === 'level' && piece.index === 1 && n === 0)
           await expect(programHeader(gcode)).toMatchFileSnapshot(
