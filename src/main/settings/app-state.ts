@@ -39,6 +39,8 @@ export const AppStateSchema = z.object({
   window: WindowStateSchema.optional().catch(undefined),
   /** The Library window's own bounds (docs/conventions/ui-library-window.md, L1). */
   libraryWindow: WindowStateSchema.optional().catch(undefined),
+  /** The Shape Editor window's bounds, one record for every project's (ui.md § DF94). */
+  shapeEditorWindow: WindowStateSchema.optional().catch(undefined),
   dialogFolders: z.record(z.string(), z.string().min(1)).default({}).catch({}),
 })
 export type AppState = Readonly<z.output<typeof AppStateSchema>>
@@ -51,6 +53,8 @@ export interface AppStateStore {
   setWindow(state: WindowState): void
   /** The Library window's state (moved, resized or closed). */
   setLibraryWindow(state: WindowState): void
+  /** The Shape Editor window's state (moved, resized or closed). */
+  setShapeEditorWindow(state: WindowState): void
   dialogFolder(kind: DialogKind): string | undefined
   rememberDialogFolder(kind: DialogKind, folder: string): void
   /** Writes a pending change now and resolves when every write has finished (tests, quit). */
@@ -120,6 +124,9 @@ export function createAppStateStore(o: {
     },
     setLibraryWindow(state) {
       change({ ...current, libraryWindow: state })
+    },
+    setShapeEditorWindow(state) {
+      change({ ...current, shapeEditorWindow: state })
     },
     dialogFolder: (kind) => current.dialogFolders[kind],
     rememberDialogFolder(kind, folder) {

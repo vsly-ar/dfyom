@@ -4,7 +4,7 @@
 // window; a project on a 255 × 185 × 40 hardwood board; the enclosure STL imported through the
 // stubbed "Import STL…" dialog and fitted onto the stock bottom; the X0 drawing imported with
 // "Import SVG…" (report: two shapes, Béziers fitted to arcs, the deviation); facing; the cavity
-// picked as a named shape on the facing floor, opened face-on in the Shape Editor where the back
+// picked as a named shape on the facing floor, opened face-on in the Shape Editor window (DF94) where the back
 // wall is measured (a shape midpoint to a snapped point on the reference section), the corner fix
 // offered at the largest fitting radius and the two sharp step corners filleted in the segment
 // table (1 / 0.25 mm, as X1); a cable notch built in the Shape Editor from an obround and a
@@ -27,6 +27,7 @@ import {
   launchApp,
   openPartSetup,
   openReferencePanel,
+  shapeEditorWindow,
   test,
   zeroXyz,
 } from './app.fixture'
@@ -366,9 +367,13 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
 
   // ── Shape Editor face-on: measure the back wall, snapped to the reference section ────────
   await shapeGroup.getByRole('button', { name: 'Edit shape' }).click()
-  const editor = page.getByRole('region', { name: 'Shape Editor' })
+  // it opens the project's Shape Editor window (DF94): the shape work happens there
+  const shapeWin = await shapeEditorWindow(dfyom.app)
+  const se = shapeWin.page
+  const shapeInspector = shapeWin.inspector
+  const editor = shapeWin.editor
   await expect(editor.getByText(/^Shape · /)).toBeVisible()
-  await expect(inspector.getByRole('heading', { name: 'cavity' })).toBeVisible()
+  await expect(shapeInspector.getByRole('heading', { name: 'cavity' })).toBeVisible()
   await expect(editor.getByTestId('shape-section')).toBeAttached({ timeout: 30_000 })
   const face = editor.getByTestId('shape-stock-face')
   /** A face-frame point (mm, X right and Y up on the top face) in page pixels. */
@@ -378,12 +383,12 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   }
   // zoom to the back wall (Ctrl + wheel zooms to the cursor), so the points are a few px apart
   const [zx, zy] = await at(127.5, 175)
-  await page.mouse.move(zx, zy)
-  await page.keyboard.down('Control')
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120)
-  await page.keyboard.up('Control')
+  await se.mouse.move(zx, zy)
+  await se.keyboard.down('Control')
+  for (let i = 0; i < 4; i++) await se.mouse.wheel(0, -120)
+  await se.keyboard.up('Control')
   await editor.focus()
-  await page.keyboard.press('d')
+  await se.keyboard.press('d')
   await expect(editor.getByRole('button', { name: /Measure/ })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -391,25 +396,25 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   const glyph = editor.getByTestId('snap-glyph')
   // the cavity's flat back stretch: its midpoint (x 127.5) at y 168.556 on the board
   const [ax, ay] = await at(127.5, 168.556)
-  await page.mouse.move(ax - 2, ay + 1)
-  await page.mouse.move(ax, ay)
+  await se.mouse.move(ax - 2, ay + 1)
+  await se.mouse.move(ax, ay)
   await expect(glyph).toHaveAttribute('data-kind', 'midpoint')
-  await page.mouse.click(ax, ay)
+  await se.mouse.click(ax, ay)
   // the reference's outer wall straight behind it (the STL section at mid-wall height)
   const [bx, by] = await at(127.5, 181.07)
-  await page.mouse.move(bx + 1, by + 2)
-  await page.mouse.move(bx, by)
+  await se.mouse.move(bx + 1, by + 2)
+  await se.mouse.move(bx, by)
   await expect(glyph).toHaveAttribute('data-kind', 'reference')
   await expect(glyph).toContainText('Reference')
-  await page.mouse.click(bx, by)
+  await se.mouse.click(bx, by)
   // X0: the back wall is ≈ 12.5 mm where the notch crosses it
   const chip = editor.getByTestId('measure-chip')
   await expect(chip).toHaveText(/^12\.[45]\d mm$/)
-  await page.keyboard.press('Escape')
+  await se.keyboard.press('Escape')
   await expect(chip).toHaveCount(0)
 
   // ── the two step corners filleted in the segment table (X1: vertex 72 → 1, vertex 0 → 0.25) ─
-  const segmentsGrid = inspector.getByRole('grid', { name: 'Segments of Path 1' })
+  const segmentsGrid = shapeInspector.getByRole('grid', { name: 'Segments of Path 1' })
   await expect(segmentsGrid).toBeVisible()
   const rows = await segmentsGrid.getByRole('row').count()
   const segmentCount = rows - 1
@@ -417,20 +422,16 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     // a vertex is the end of the segment before it; vertex 0 of the closed path ends the last one
     const label =
       f.vertex === 0
-        ? (await input(inspector, 'Fillet at start').count()) > 0
+        ? (await input(shapeInspector, 'Fillet at start').count()) > 0
           ? 'Fillet at start'
           : `Segment ${segmentCount} Fillet`
         : `Segment ${f.vertex} Fillet`
-    await setField(inspector, label, f.radius)
-    await expect(input(inspector, label)).toHaveValue(new RegExp(`^${f.radius}`))
+    await setField(shapeInspector, label, f.radius)
+    await expect(input(shapeInspector, label)).toHaveValue(new RegExp(`^${f.radius}`))
   }
-  await expect(inspector.getByText('This shape does not resolve')).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await editor.focus()
-  await page.keyboard.press('Escape')
-  await expect(editor).toHaveCount(0)
-  // what the cavity still says: corners below every end mill's radius, none sharp
-  await designRows(page).nth(1).click()
+  await expect(shapeInspector.getByText('This shape does not resolve')).toHaveCount(0)
+  // what the cavity still says: corners below every end mill's radius, none sharp (the project
+  // window still shows Pocket 1: the shape was edited in its own window, DF94)
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await expect(
     shapeGroup.getByText('A sharp inside corner cannot be cut by a round tool.'),
@@ -441,33 +442,30 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Obround' }).click()
-  await expect(inspector.getByRole('heading', { name: 'Shape 3' })).toBeVisible()
-  const nameField = inspector.getByRole('textbox', { name: 'Name', exact: true })
+  await expect(shapeInspector.getByRole('heading', { name: 'Shape 3' })).toBeVisible()
+  const nameField = shapeInspector.getByRole('textbox', { name: 'Name', exact: true })
   await nameField.fill('Cable notch')
   await nameField.press('Enter')
-  await expect(inspector.getByRole('heading', { name: 'Cable notch' })).toBeVisible()
-  await setField(inspector, 'Length', '24')
-  await setField(inspector, 'Width', '10')
-  const items = inspector.getByRole('region', { name: 'Items' })
+  await expect(shapeInspector.getByRole('heading', { name: 'Cable notch' })).toBeVisible()
+  await setField(shapeInspector, 'Length', '24')
+  await setField(shapeInspector, 'Width', '10')
+  const items = shapeInspector.getByRole('region', { name: 'Items' })
   await items.getByRole('button', { name: 'Add item' }).click()
-  await page.getByRole('menuitem', { name: 'Rectangle' }).click()
+  await se.getByRole('menuitem', { name: 'Rectangle' }).click()
   const itemRows = (scope: Locator) =>
     scope
       .getByRole('list', { name: 'Items in order' })
       .getByRole('button', { name: /^(Obround|Rectangle|Path) \d: / })
-  await expect(itemRows(inspector)).toHaveText([/Obround 24 × 10/, /Rectangle 40 × 20/])
-  await expect(inspector.getByRole('heading', { name: 'Rectangle 2' })).toBeVisible()
-  await setField(inspector, 'Centre X', '6')
-  await setField(inspector, 'Length', '12')
-  await setField(inspector, 'Width', '10')
-  await setField(inspector, 'Corner radius', '3')
+  await expect(itemRows(shapeInspector)).toHaveText([/Obround 24 × 10/, /Rectangle 40 × 20/])
+  await expect(shapeInspector.getByRole('heading', { name: 'Rectangle 2' })).toBeVisible()
+  await setField(shapeInspector, 'Centre X', '6')
+  await setField(shapeInspector, 'Length', '12')
+  await setField(shapeInspector, 'Width', '10')
+  await setField(shapeInspector, 'Corner radius', '3')
   // one round end (in the cavity), one square end with the 6 mm tool's radius: one loop, 24 × 10
-  const summary = inspector.getByRole('region', { name: 'Shape', exact: true })
+  const summary = shapeInspector.getByRole('region', { name: 'Shape', exact: true })
   await expect(summary.getByText('24.00 × 10.00 mm')).toBeVisible()
   await expect(summary.getByText(/· 1 loop$/)).toBeVisible()
-  await editor.focus()
-  await page.keyboard.press('Escape')
-  await expect(editor).toHaveCount(0)
 
   // its pocket across the back wall, rotated 90°
   await addOperation(page, 'Pocket', 'Pocket 2')
@@ -542,33 +540,30 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Path' }).click()
-  await expect(inspector.getByRole('heading', { name: 'Shape 4' })).toBeVisible()
+  await expect(shapeInspector.getByRole('heading', { name: 'Shape 4' })).toBeVisible()
   await nameField.fill('Label groove')
   await nameField.press('Enter')
-  await expect(inspector.getByRole('heading', { name: 'Label groove' })).toBeVisible()
-  await inspector.getByRole('switch', { name: 'Closed' }).click()
-  await expect(inspector.getByRole('switch', { name: 'Closed' })).not.toBeChecked()
+  await expect(shapeInspector.getByRole('heading', { name: 'Label groove' })).toBeVisible()
+  await shapeInspector.getByRole('switch', { name: 'Closed' }).click()
+  await expect(shapeInspector.getByRole('switch', { name: 'Closed' })).not.toBeChecked()
   // segment 1 stays the line to (40, 0); segment 2 becomes a tangent arc to (60, 20)
-  await choose(page, inspector, 'Segment 2 Type', 'Tangent arc')
-  await setField(inspector, 'Segment 2 End X', '60')
-  await setField(inspector, 'Segment 2 End Y', '20')
+  await choose(se, shapeInspector, 'Segment 2 Type', 'Tangent arc')
+  await setField(shapeInspector, 'Segment 2 End X', '60')
+  await setField(shapeInspector, 'Segment 2 End Y', '20')
   // the row's actions are its context menu (DF70): right-click anywhere on the row
-  await inspector
+  await shapeInspector
     .getByRole('row')
-    .filter({ has: page.getByLabel('Segment 3 End X') })
+    .filter({ has: se.getByLabel('Segment 3 End X') })
     .click({ button: 'right' })
-  await page
+  await se
     .getByRole('menu', { name: 'Actions for segment 3' })
     .getByRole('menuitem', { name: 'Remove segment 3' })
     .click()
   await expect(
-    inspector.getByRole('list', { name: 'Items in order' }).getByRole('button', {
+    shapeInspector.getByRole('list', { name: 'Items in order' }).getByRole('button', {
       name: /Open path · 2 segments/,
     }),
   ).toBeVisible()
-  await editor.focus()
-  await page.keyboard.press('Escape')
-  await expect(editor).toHaveCount(0)
 
   await addOperation(page, 'Profile', 'Profile 2')
   await pickOn(page, /^Stock bottom/)
@@ -792,17 +787,18 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await expect(references2.getByText('STL · 49 806 triangles')).toBeVisible()
     // the shapes: the cavity's fillets, the notch's two items, the groove's open path; choosing
     // a row selects it and closes the dialog
-    let shapes2 = await openPartSetup(page2, 'Shapes')
+    const shapes2 = await openPartSetup(page2, 'Shapes')
     for (const name of ['outline', 'cavity', 'Cable notch', 'Label groove'])
       await expect(shapes2.getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
     await shapes2.getByRole('button', { name: /^cavity/ }).click()
-    await expect(inspector2.getByRole('heading', { name: 'cavity' })).toBeVisible()
-    await expect(input(inspector2, `Segment ${FILLETS[0].vertex} Fillet`)).toHaveValue(/^1/)
-    shapes2 = await openPartSetup(page2, 'Shapes')
-    await shapes2.getByRole('button', { name: /^Cable notch/ }).click()
-    await expect(itemRows(inspector2)).toHaveText([/Obround 24 × 10/, /Rectangle 12 × 10/])
-    await page2.getByRole('region', { name: 'Shape Editor' }).focus()
-    await page2.keyboard.press('Escape')
+    // in the Shape Editor window (DF94); its list switches shapes there
+    const shapeWin2 = await shapeEditorWindow(second.app)
+    await expect(shapeWin2.inspector.getByRole('heading', { name: 'cavity' })).toBeVisible()
+    await expect(input(shapeWin2.inspector, `Segment ${FILLETS[0].vertex} Fillet`)).toHaveValue(
+      /^1/,
+    )
+    await shapeWin2.list.getByRole('button', { name: /^Cable notch/ }).click()
+    await expect(itemRows(shapeWin2.inspector)).toHaveText([/Obround 24 × 10/, /Rectangle 12 × 10/])
     // the placements, the notch's rotation, the tab positions and the tool lock
     await expect(designRows(page2)).toHaveCount(9)
     await designRows(page2).nth(1).click()

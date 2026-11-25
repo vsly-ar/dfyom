@@ -20,6 +20,8 @@ import {
   WINDOW_KIND_ARG,
   type LibraryCloseRequest,
   type LibraryContext,
+  type ShapeEditorTarget,
+  type WindowKind,
 } from '../shared/preload-api'
 import type { LibraryChange } from '../core/library/library'
 import type { AppSettings } from '../shared/settings'
@@ -57,8 +59,13 @@ ipcRenderer.on(IPC.windowOpenFile, (_e, file: unknown) => {
   else openFiles.listener(file)
 })
 
+/** The window argument as a kind; a project window when absent or unknown. */
+function windowKind(raw: string | undefined): WindowKind {
+  return raw === 'library' || raw === 'shapes' ? raw : 'project'
+}
+
 const api: PreloadApi = {
-  windowKind: flagValue(process.argv, WINDOW_KIND_ARG) === 'library' ? 'library' : 'project',
+  windowKind: windowKind(flagValue(process.argv, WINDOW_KIND_ARG)),
   versions: {
     electron: process.versions.electron ?? '',
     chrome: process.versions.chrome ?? '',
@@ -122,6 +129,11 @@ const api: PreloadApi = {
     report: (state) => ipcRenderer.send(IPC.libraryState, state),
     onCloseRequest: (listener) => on<LibraryCloseRequest>(IPC.libraryCloseRequest, listener),
     close: (quit) => ipcRenderer.invoke(IPC.libraryClose, quit === true) as Promise<void>,
+  },
+  shapeEditor: {
+    open: (target) => ipcRenderer.invoke(IPC.shapeEditorOpen, target) as Promise<void>,
+    target: () => ipcRenderer.invoke(IPC.shapeEditorTarget) as Promise<ShapeEditorTarget | null>,
+    onTarget: (listener) => on<ShapeEditorTarget>(IPC.shapeEditorTargetChanged, listener),
   },
   menu: {
     onAction: (listener) => on<MenuAction>(IPC.menuAction, listener),

@@ -30,7 +30,15 @@ import {
   SCREWS,
   VENTS,
 } from '../src/core/design/enclosure-lid.testing'
-import { closeDialog, expect, launchApp, openPartSetup, test, zeroXyz } from './app.fixture'
+import {
+  closeDialog,
+  expect,
+  launchApp,
+  openPartSetup,
+  shapeEditorWindow,
+  test,
+  zeroXyz,
+} from './app.fixture'
 import { withoutAppVersion } from '../src/core/post/plan-export'
 
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
@@ -432,19 +440,19 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Obround' }).click()
-  await expect(inspector.getByRole('heading', { name: /^Shape \d$/ })).toBeVisible()
-  const nameField = inspector.getByRole('textbox', { name: 'Name', exact: true })
+  // the shape is edited in the Shape Editor window (DF94)
+  const { inspector: shapeInspector } = await shapeEditorWindow(dfyom.app)
+  await expect(shapeInspector.getByRole('heading', { name: /^Shape \d$/ })).toBeVisible()
+  const nameField = shapeInspector.getByRole('textbox', { name: 'Name', exact: true })
   await nameField.fill('Vent slot')
   await nameField.press('Enter')
-  await expect(heading('Vent slot')).toBeVisible()
-  await setField(inspector, 'Centre X', '0')
-  await setField(inspector, 'Centre Y', '0')
-  await setField(inspector, 'Length', `${VENTS.length}`)
-  await setField(inspector, 'Width', `${VENTS.width}`)
-  const editor = page.getByRole('region', { name: 'Shape Editor' })
-  await editor.focus()
-  await page.keyboard.press('Escape')
-  await expect(editor).toHaveCount(0)
+  await expect(
+    shapeInspector.getByRole('heading', { name: 'Vent slot', exact: true }),
+  ).toBeVisible()
+  await setField(shapeInspector, 'Centre X', '0')
+  await setField(shapeInspector, 'Centre Y', '0')
+  await setField(shapeInspector, 'Length', `${VENTS.length}`)
+  await setField(shapeInspector, 'Width', `${VENTS.width}`)
 
   await addFromMenu(page, 'Profile')
   await expect(heading('Profile 3')).toBeVisible()

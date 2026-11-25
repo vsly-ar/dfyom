@@ -121,6 +121,7 @@ describe('evaluation push', () => {
       'CmdOrCtrl+2',
       'CmdOrCtrl+3',
       'CmdOrCtrl+Shift+L',
+      'CmdOrCtrl+Shift+E',
     ])
     expect(menuTemplate('darwin', true)[0]).toMatchObject({ role: 'appMenu' })
   })

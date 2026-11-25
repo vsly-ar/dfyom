@@ -33,6 +33,7 @@ import type {
   LibraryContext,
   LibraryTarget,
   LibraryWindowState,
+  ShapeEditorTarget,
   WindowKind,
 } from '../../../shared/preload-api'
 import type { LibraryChange } from '../../../core/library/library'
@@ -152,6 +153,10 @@ export interface FakeBridge extends PreloadApi {
   emitLibraryContext(context: LibraryContext): void
   emitLibraryChange(change: LibraryChange): void
   emitLibraryCloseRequest(request: LibraryCloseRequest): void
+  /** `shapeEditor.open` requests of a project window, in order (DF94). */
+  readonly shapeEditorOpens: { partId: string; shapeId: string | null }[]
+  /** Sets (and pushes) the Shape Editor window's target; `seq` grows by itself. */
+  emitShapeEditorTarget(target: { partId: string; shapeId: string | null }): void
 }
 
 export function errorReply(error: AppErrorData, retryable = false): CallReply {
@@ -197,6 +202,9 @@ export function createFakeBridge(
   const libraryOpens: LibraryTarget[] = []
   const libraryReports: LibraryWindowState[] = []
   const libraryCloses: boolean[] = []
+  const shapeEditorOpens: { partId: string; shapeId: string | null }[] = []
+  const shapeEditorTargets = channel<ShapeEditorTarget>()
+  let shapeEditorTarget: ShapeEditorTarget | null = null
   const events = channel<ActionEvent>()
   const bound = channel<string | null>()
   const sessions = channel<readonly AgentSessionInfo[]>()
@@ -382,6 +390,19 @@ export function createFakeBridge(
         libraryCloses.push(quit === true)
         return Promise.resolve()
       },
+    },
+    shapeEditor: {
+      open(target) {
+        shapeEditorOpens.push({ partId: target.partId, shapeId: target.shapeId })
+        return Promise.resolve()
+      },
+      target: () => Promise.resolve(shapeEditorTarget),
+      onTarget: shapeEditorTargets.on,
+    },
+    shapeEditorOpens,
+    emitShapeEditorTarget(t) {
+      shapeEditorTarget = { ...t, seq: (shapeEditorTarget?.seq ?? 0) + 1 }
+      shapeEditorTargets.emit(shapeEditorTarget)
     },
     libraryOpens,
     libraryReports,

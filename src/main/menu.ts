@@ -1,5 +1,5 @@
 // The native application menu (ui.md decision 12): the macOS app menu (with Settings… Cmd+,), File
-// (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library), Help (with
+// (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library and Shape Editor), Help (with
 // Connect an agent…, Open-source licences) with accelerators. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
@@ -146,6 +146,8 @@ export function menuTemplate(
         { type: 'separator' },
         // the one Library window, from every window and without a project (L2)
         { label: 'Library', accelerator: 'CmdOrCtrl+Shift+L', click: () => hooks.openLibrary() },
+        // the project's Shape Editor window, run by the project window (ui.md § DF94)
+        item('Shape Editor', 'window.shapeEditor', 'CmdOrCtrl+Shift+E'),
         ...(mac
           ? ([{ type: 'separator' }, { role: 'front' }] satisfies MenuItemConstructorOptions[])
           : [{ role: 'close' } satisfies MenuItemConstructorOptions]),

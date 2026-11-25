@@ -1,12 +1,11 @@
-// The Shape Editor's viewport side (task U1): while a shape is selected in design mode, its flat
-// view covers the 3D viewport (kept mounted underneath, so leaving the editor returns to the view
-// it had). The live outline comes from the renderer's 2D port (stored items plus the drag
+// The Shape Editor's view (task U1; since DF94 the middle of the Shape Editor window): the selected
+// shape's flat view, with no close button (the window closes instead). The live outline comes from the renderer's 2D port (stored items plus the drag
 // preview); an invalid state keeps the last valid outline and marks its issue. Without the port
 // (still loading, failed, tests) the outline is the one `design.shape.get` resolved. With an
 // operation using the shape, the view is face-on (task U2): the shape placed as the first such
 // operation places it, on that face's stock rectangle and axes. Task U3: snapping (the window's
 // "Snap" toggle and the snap grid setting) and the reference section on that face.
-// Doc: docs/conventions/ui.md#shape-editor, docs/architecture/shapes.md#where-the-2d-layer-runs
+// Doc: docs/conventions/ui.md#shape-editor, #shape-editor-window-df94, docs/architecture/shapes.md#where-the-2d-layer-runs
 import { useMemo, useState } from 'react'
 import { resolveShape, type ResolvedShape, type ShapeSummary } from '../../../../core/design/shape'
 import type { Element } from '../../../../core/geometry/2d/model'
@@ -101,7 +100,7 @@ export function faceContext(
   }
 }
 
-/** The flat view when the design selection is a shape; nothing otherwise. */
+/** The flat view when the window's design selection is a shape; nothing otherwise. */
 export function ShapeEditorLayer({
   insetRight = 0,
 }: {
@@ -120,7 +119,6 @@ function ShapeEditorView({
   insetRight: number
 }): React.JSX.Element | null {
   const part = useDesignPart()
-  const [, select] = useDesignSelection()
   const port = useRegion2d()
   const info = useShapeInfo(part, shapeId)
   const shape = part?.dto.shapes?.find((s) => s.id === shapeId)
@@ -204,7 +202,6 @@ function ShapeEditorView({
       bad={bad}
       units={part.units}
       onDrag={onDrag}
-      onExit={() => select(null)}
       summary={summary}
       insetRight={insetRight}
       snap={{ grid: snapGridMm(gridSetting, part.units), on: snapOn, onToggle: setSnapOn }}

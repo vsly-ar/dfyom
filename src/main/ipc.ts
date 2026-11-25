@@ -44,8 +44,15 @@ import type { SaveAllOutcome } from './quit'
 import { closeNeedsProject } from './window-close'
 import { isOpeningCommand, openTarget } from './window-open'
 
+/**
+ * A project window (the app shell), the Library window or a Shape Editor window. Only project
+ * windows keep a project open, show it for New / Open and close it with themselves.
+ */
+type SessionKind = 'project' | 'library' | 'shapes'
+
 interface WindowSession {
   readonly win: BrowserWindow
+  readonly kind: SessionKind
   readonly session: AgentSession
   /** The runtime whose log the window follows (identity: a reopened project is another). */
   following: Dispatcher | undefined
@@ -130,8 +137,17 @@ export interface WindowSessions {
    * commands; docs/conventions/ui-library-window.md), ended when it closes.
    */
   attachLibrary(win: BrowserWindow): void
-  /** Whether a DFYOM window (project or Library) owns these web contents. */
+  /**
+   * Makes a Shape Editor window a session bound to `key` (docs/conventions/ui.md#shape-editor-window-df94):
+   * it edits the project like its project window but never keeps the project open or closes it.
+   */
+  attachShapeEditor(win: BrowserWindow, key: string): void
+  /** Whether a DFYOM window (project, Library or Shape Editor) owns these web contents. */
   isWindow(webContentsId: number): boolean
+  /** Whether a project window (the app shell) owns these web contents. */
+  isProjectWindow(webContentsId: number): boolean
+  /** The project window showing `key`, if any. */
+  projectWindow(key: string): BrowserWindow | undefined
   /** The project a window shows: its key and runtime, if bound. */
   boundProject(webContentsId: number): { key: string; dispatcher: Dispatcher } | undefined
 }
@@ -380,7 +396,7 @@ export function registerProjectIpc(
    * to the window: unsaved changes ask for confirmation, other errors (a run) are shown.
    */
   const closeWindow = async (ws: WindowSession, confirm: boolean): Promise<CallReply> => {
-    const key = closeNeedsProject(ws.session.boundKey, otherKeys(ws))
+    const key = closesProject(ws)
     if (key === undefined) {
       ws.closeApproved = true
       ws.win.close()
@@ -405,8 +421,14 @@ export function registerProjectIpc(
     }
     return out
   }
+  /** The other project windows' projects (only project windows keep a project open). */
   const otherKeys = (ws: WindowSession): (string | undefined)[] =>
-    [...byContents.values()].filter((o) => o !== ws).map((o) => o.session.boundKey)
+    [...byContents.values()]
+      .filter((o) => o !== ws && o.kind === 'project')
+      .map((o) => o.session.boundKey)
+  /** The project closing `ws` must close first; never for a Library or Shape Editor window. */
+  const closesProject = (ws: WindowSession): string | undefined =>
+    ws.kind === 'project' ? closeNeedsProject(ws.session.boundKey, otherKeys(ws)) : undefined
 
   ipcMain.handle(IPC.windowClose, async (event, confirm: unknown): Promise<CallReply> => {
     const ws = sessionOf(event)
@@ -421,10 +443,15 @@ export function registerProjectIpc(
   })
 
   /** Makes `win` a session, bound to `key` if given; ended when the window closes. */
-  const attach = (win: BrowserWindow, key?: string): WindowSession => {
+  const attach = (
+    win: BrowserWindow,
+    key: string | undefined,
+    kind: SessionKind,
+  ): WindowSession => {
     const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
     const ws: WindowSession = {
       win,
+      kind,
       session,
       following: undefined,
       unsubscribe: undefined,
@@ -439,7 +466,7 @@ export function registerProjectIpc(
     // Closing the last window of a project closes the project (docs/conventions/ui.md#app-shell).
     win.on('close', (event) => {
       if (quitting || ws.closeApproved) return
-      if (closeNeedsProject(ws.session.boundKey, otherKeys(ws)) === undefined) return
+      if (closesProject(ws) === undefined) return
       event.preventDefault()
       if (!ws.closing) void closeWindow(ws, false)
     })
@@ -452,10 +479,11 @@ export function registerProjectIpc(
     return ws
   }
 
-  /** A window bound to `key`, other than `except`, if any. */
+  /** A project window bound to `key`, other than `except`, if any. */
   const showing = (key: string, except?: WindowSession): WindowSession | undefined =>
     [...byContents.values()].find(
-      (o) => o !== except && o.session.boundKey === key && !o.win.isDestroyed(),
+      (o) =>
+        o !== except && o.kind === 'project' && o.session.boundKey === key && !o.win.isDestroyed(),
     )
 
   const focused = (target: WindowSession, asking: WindowSession, key: string): CallReply => {
@@ -477,14 +505,16 @@ export function registerProjectIpc(
     IPC.windowOpenProject,
     async (event, name: unknown, args: unknown): Promise<CallReply> => {
       const ws = sessionOf(event)
-      if (ws === undefined || !isOpeningCommand(name)) return NOT_A_WINDOW
+      if (ws === undefined || ws.kind === 'shapes' || !isOpeningCommand(name)) return NOT_A_WINDOW
       const a = isPlainObject(args) ? args : {}
       const file = name === 'project.open' && typeof a['file'] === 'string' ? a['file'] : undefined
       const target = openTarget({
         name,
         senderKey: ws.session.boundKey,
         openKey: file === undefined ? undefined : await host.openKey(file),
-        windowKeys: [...byContents.values()].map((o) => o.session.boundKey),
+        windowKeys: [...byContents.values()]
+          .filter((o) => o.kind === 'project')
+          .map((o) => o.session.boundKey),
         bindsNone: name === 'project.recovery.resolve' && a['action'] === 'discard',
       })
       let kind = target.kind
@@ -501,7 +531,7 @@ export function registerProjectIpc(
       // Hidden until the command succeeded: a refusal (recovery, lock, error) closes it unseen and
       // the asking window shows the answer.
       const win = windows.create(ws.win)
-      const created = attach(win, undefined)
+      const created = attach(win, undefined, 'project')
       const r = await created.session.call(name, args ?? {})
       follow(created)
       const out = reply(r.result)
@@ -520,10 +550,7 @@ export function registerProjectIpc(
   )
 
   const windowOf = (key: string): BrowserWindow | null =>
-    [...byContents.values()].find((ws) => ws.session.boundKey === key && !ws.win.isDestroyed())
-      ?.win ??
-    BrowserWindow.getFocusedWindow() ??
-    null
+    showing(key)?.win ?? BrowserWindow.getFocusedWindow() ?? null
 
   return {
     markQuitting() {
@@ -553,14 +580,19 @@ export function registerProjectIpc(
     },
     open(key) {
       const win = windows.create(BrowserWindow.getFocusedWindow() ?? undefined)
-      attach(win, key)
+      attach(win, key, 'project')
       windows.reveal(win)
       return win
     },
     attachLibrary(win) {
-      attach(win, undefined)
+      attach(win, undefined, 'library')
+    },
+    attachShapeEditor(win, key) {
+      attach(win, key, 'shapes')
     },
     isWindow: (id) => byContents.has(id),
+    isProjectWindow: (id) => byContents.get(id)?.kind === 'project',
+    projectWindow: (key) => showing(key)?.win,
     boundProject(id) {
       const ws = byContents.get(id)
       const key = ws?.session.boundKey

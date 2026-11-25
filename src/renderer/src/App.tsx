@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react'
 import { LibraryWindow } from './library/LibraryWindow'
+import { ShapeEditorWindow } from './modes/design/ShapeEditorWindow'
 import { AppShell } from './shell/AppShell'
 import { useSettings, useShell } from './shell/ShellContext'
 import { applySettings } from './state/settings'
@@ -16,8 +17,9 @@ function subscribeHash(onChange: () => void): () => void {
 }
 
 /**
- * The window: the app shell, the Library window (window kind `library`, ui-library-window.md), or
- * the dev-only gallery at #gallery. Settings apply to the root.
+ * The window: the app shell, the Library window (window kind `library`, ui-library-window.md), a
+ * project's Shape Editor window (kind `shapes`, ui.md#shape-editor-window-df94), or the dev-only
+ * gallery at #gallery. Settings apply to the root.
  */
 export function App(): React.JSX.Element {
   const { bridge } = useShell()
@@ -32,5 +34,7 @@ export function App(): React.JSX.Element {
       </Suspense>
     )
   }
-  return bridge.windowKind === 'library' ? <LibraryWindow /> : <AppShell />
+  if (bridge.windowKind === 'library') return <LibraryWindow />
+  if (bridge.windowKind === 'shapes') return <ShapeEditorWindow />
+  return <AppShell />
 }

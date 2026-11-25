@@ -52,6 +52,21 @@ const elementCount = (kind: string, n: number): string => {
 
 export const shapeMessages = {
   kinds: KIND,
+  /** The Shape Editor window (DF94, ui.md § Shape Editor window). */
+  window: {
+    /** The document title; main adds the app name and version. */
+    title: (project: string | null) => (project === null ? 'Shapes' : `Shapes · ${project}`),
+    toolbar: 'Shape Editor toolbar',
+    edit: 'Edit',
+    part: (name: string) => `Part: ${name}`,
+    list: 'Shapes',
+    view: 'Shape view',
+    noShape: 'No shape chosen',
+    noShapeDescription: 'Choose a shape from the list, or add one.',
+    noPart: 'This part is gone',
+    noPartDescription: 'Open a shape again from the project window.',
+    noProject: 'No project',
+  },
   navigator: {
     title: 'Shapes',
     listLabel: 'Shapes of the part',

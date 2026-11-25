@@ -25,6 +25,7 @@ describe('app state store', () => {
     store.setWindow({ ...WINDOW, maximized: false })
     store.setWindow(WINDOW)
     store.setLibraryWindow({ ...WINDOW, maximized: false })
+    store.setShapeEditorWindow({ ...WINDOW, fullScreen: true })
     store.rememberDialogFolder('project', '/work/parts')
     store.rememberDialogFolder('reference-import', '/work/models')
     expect(store.dialogFolder('project')).toBe('/work/parts')
@@ -33,6 +34,7 @@ describe('app state store', () => {
     expect(await loadAppState(tmp.dir, log)).toEqual({
       window: WINDOW,
       libraryWindow: { ...WINDOW, maximized: false },
+      shapeEditorWindow: { ...WINDOW, fullScreen: true },
       dialogFolders: { project: '/work/parts', 'reference-import': '/work/models' },
     })
   })

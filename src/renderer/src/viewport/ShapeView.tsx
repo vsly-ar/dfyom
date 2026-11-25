@@ -152,8 +152,11 @@ export interface ShapeViewProps {
   readonly bad: { readonly item: number; readonly mark: BadMark } | null
   readonly units: UnitSystem
   onDrag(e: ShapeDragEvent): void
-  /** Escape outside a drag, or the close button: back to the part. */
-  onExit(): void
+  /**
+   * Escape outside a drag, or the close button: back to the part. Absent (the Shape Editor
+   * window, DF94): no close button, and Escape only cancels.
+   */
+  onExit?(): void
   /** Accessible summary ("Shape 1: 1 loop, 6 elements, in its own frame. Selected: …"). */
   readonly summary: string
   /** Px of the right edge covered by the inspector overlay: the toolbar and the fit move beside it. */
@@ -582,7 +585,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         endMeasure()
         return
       }
-      props.onExit()
+      props.onExit?.()
       return
     }
     if (
@@ -1062,13 +1065,15 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             tooltipSide="bottom"
             onClick={fit}
           />
-          <ToolbarButton
-            label={m.close}
-            shortcut="Esc"
-            icon={<Icon name="close" />}
-            tooltipSide="bottom"
-            onClick={props.onExit}
-          />
+          {props.onExit === undefined ? null : (
+            <ToolbarButton
+              label={m.close}
+              shortcut="Esc"
+              icon={<Icon name="close" />}
+              tooltipSide="bottom"
+              onClick={props.onExit}
+            />
+          )}
         </Toolbar>
         {props.section ? (
           <div className={styles['sectionPanel']}>

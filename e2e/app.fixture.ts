@@ -196,6 +196,50 @@ export async function openPartSetup(page: Page, name: 'Stock' | 'Shapes'): Promi
   return dialog
 }
 
+/** The Shape Editor windows open now (window kind `shapes`), oldest first. */
+export async function shapeEditorWindows(app: ElectronApplication): Promise<Page[]> {
+  const found: Page[] = []
+  for (const w of app.windows()) {
+    const kind = await w
+      // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+      .evaluate(
+        () =>
+          (globalThis as unknown as { dfyom?: { windowKind?: string } }).dfyom?.windowKind ?? null,
+      )
+      .catch(() => null)
+    if (kind === 'shapes') found.push(w)
+  }
+  return found
+}
+
+/**
+ * The project's Shape Editor window (DF94), once a shape row, "Edit shape" or Window → Shape
+ * Editor opened it (hidden like every window); with the parts the tests use: its inspector, its
+ * flat view (region "Shape Editor") and its shape list.
+ * Doc: docs/conventions/ui.md#shape-editor-window-df94
+ */
+export async function shapeEditorWindow(app: ElectronApplication): Promise<{
+  page: Page
+  inspector: Locator
+  editor: Locator
+  list: Locator
+}> {
+  let page: Page | undefined
+  await expect
+    .poll(async () => (page = (await shapeEditorWindows(app))[0]) !== undefined, {
+      timeout: 15_000,
+    })
+    .toBe(true)
+  const p = page!
+  await p.waitForLoadState('domcontentloaded')
+  return {
+    page: p,
+    inspector: p.getByRole('complementary', { name: 'Inspector' }),
+    editor: p.getByRole('region', { name: 'Shape Editor' }),
+    list: p.getByRole('navigation', { name: 'Shapes' }),
+  }
+}
+
 /**
  * Opens the Reference panel in the right sidebar (dogfood DF3: the toolbar's "Reference" toggle)
  * unless it is open; returns the inspector that shows it.
