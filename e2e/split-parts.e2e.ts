@@ -10,6 +10,7 @@
 // exported header. 4b-1: Dowels on the level in the editor, the piece's dowel holes, and the
 // doweled two-piece split planned and run. 4b-2: Puzzle on the lines in the editor (the clearance
 // field and the keys' read-out; the enclosure's cavity leaves no room for a key, so back to Butt).
+// 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed).
 // Selectors are roles and accessible names (the viewport handles by their `data-split-cut`
 // anchors).
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
@@ -265,6 +266,21 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await lineJoint.getByRole('radio', { name: 'Puzzle' }).click()
   await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveValue('0.15 mm')
   await expect(split.getByText('No key fits yet: see the findings under each line.')).toBeVisible()
+  // ── 4b-3: Test fit adds a coupon part of the key (nominal here) and shows it ──────────────
+  await split.getByRole('button', { name: 'Test fit…' }).click()
+  await page.getByRole('menuitem', { name: 'One coupon at 0.15 mm' }).click()
+  const couponName = 'Enclosure · test fit 0.15 mm'
+  await expect(partRow.getByRole('button', { name: couponName })).toBeVisible()
+  await expect(split.getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
+  await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveValue('0.15 mm')
+  await expect(split.getByText(/^1 key · neck/)).toBeVisible()
+  menu = await openParts()
+  await menu.getByRole('menuitemradio', { name: 'Enclosure', exact: true }).click()
+  // the coupon goes again, so the pieces planned below are the enclosure's
+  const coupon = (
+    await call<{ parts: { id: string; name: string }[] }>('design.part.list')
+  ).parts.find((p) => p.name === couponName)!
+  await call('design.part.remove', { partId: coupon.id })
   await lineJoint.getByRole('radio', { name: 'Butt' }).click()
   await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveCount(0)
   await render(page, 'split-exploded-8')

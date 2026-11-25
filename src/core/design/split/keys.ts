@@ -63,7 +63,7 @@ const cos = Math.cos((DOVETAIL_FLANK_DEG * Math.PI) / 180)
 const sin = Math.sin((DOVETAIL_FLANK_DEG * Math.PI) / 180)
 
 /** A key of neck `n` for a tool Ø `tool` and clearance `c`. */
-function sized(kind: KeyKind, n: number, tool: number, c: number): KeySize {
+export function sized(kind: KeyKind, n: number, tool: number, c: number): KeySize {
   const f = tool / 2 + c
   const q = n / 2
   const grow = 1.2 * c
@@ -146,6 +146,8 @@ export interface Key {
   readonly female: Cell
   readonly size: KeySize
   readonly clearance: number
+  /** The band's height between the facings (mm), which sized the key. */
+  readonly height: number
 }
 
 /** Why a run (or one key's share of it) has no key. */
@@ -161,6 +163,8 @@ export interface KeyIssue {
   readonly maxTool?: number
   /** The tool Ø the keys were sized for. */
   readonly tool: number
+  /** The band's height between the facings (mm). */
+  readonly height: number
 }
 
 export interface KeyPlan {
@@ -242,7 +246,7 @@ export function planKeys(
       const [lo, hi] = axis === 'x' ? [male.rect.y0, male.rect.y1] : [male.rect.x0, male.rect.x1]
       for (const run of runs(lo, hi, (u) => solidAcross(fp, axis, at, u))) {
         const length = run[1] - run[0]
-        const base = { axis, at, male, female, run, tool }
+        const base = { axis, at, male, female, run, tool, height: zt - zb }
         let count = Math.min(KEYS_MAX, Math.max(1, Math.round(length / KEYS_PER)))
         let size: KeySize | undefined
         for (; count >= 1; count--) {
@@ -305,7 +309,8 @@ export function planKeys(
             if (found !== undefined) break
           }
           if (found === undefined) issues.push({ ...base, run: [segLo, segHi], reason: 'near' })
-          else keys.push({ axis, at, u: found, male, female, size: s, clearance: c })
+          else
+            keys.push({ axis, at, u: found, male, female, size: s, clearance: c, height: zt - zb })
         }
       }
     }
