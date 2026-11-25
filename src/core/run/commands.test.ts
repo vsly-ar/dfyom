@@ -991,6 +991,54 @@ describe('machine client', () => {
     expectOk(await again)
     expect(spawned).toBe(2)
   })
+
+  it('an open right after a close starts a fresh host, not the one still exiting', async () => {
+    // A worker or utility process ends some time after `terminate` (late under load). The next
+    // connect went to that host, which answered nothing and then exited: "the machine host
+    // exited" (seen in the split exit criteria, open/close per piece).
+    let spawned = 0
+    const client = new MachineClient({
+      logLevel: 'warn',
+      factory: (events) => {
+        spawned++
+        let dead = false
+        return {
+          post: (raw) => {
+            if (dead) return
+            const m = raw as { type: string; requestId?: string }
+            const send = (x: unknown) => queueMicrotask(() => events.message(x))
+            const reply = (value: unknown) =>
+              send({ type: 'reply', requestId: m.requestId, result: { ok: true, value } })
+            if (m.type === 'init') send({ type: 'ready', protocol: 1 })
+            if (m.type === 'disconnect') reply(null)
+            if (m.type === 'connect')
+              reply({
+                target: 'virtual',
+                version: '1.1h',
+                settings: {},
+                workZero: [0, 0, 0],
+                modes: [],
+                homed: true,
+              })
+          },
+          terminate: () => {
+            dead = true
+            setTimeout(() => events.exit(0), 20)
+          },
+        }
+      },
+    })
+    clients.push(client)
+    const target = { kind: 'virtual' as const, settings: {}, homing: true, timeScale: 1 as const }
+    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    expectOk(await client.disconnect())
+    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    expect(spawned).toBe(2)
+    expect(client.status().connection.state).toBe('open')
+    // the first host's exit, arriving now, leaves the new connection alone
+    await sleep(40)
+    expect(client.status().connection.state).toBe('open')
+  })
 })
 
 describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () => {

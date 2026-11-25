@@ -214,6 +214,8 @@ function OverrideRow({
   // ±10 %: GRBL's own coarse step unless the machine cap or floor ends the range first (a value
   // below the floor, e.g. set before the run, goes up to the floor at once)
   const step = (dir: 1 | -1) => {
+    // a step ends a pending drag: its debounced target would follow and undo the step
+    clearTimeout(timer.current)
     const v = value ?? 100
     if (dir > 0 && cap.by === 'machine' && v + 10 > cap.max) return sendNow(cap.max)
     if (cap.floorBy === 'machine' && v + dir * 10 < cap.min) return sendNow(cap.min)

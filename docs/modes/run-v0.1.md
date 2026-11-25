@@ -144,6 +144,7 @@ SenderProgram = { lines: readonly string[]; sections: readonly { fromLine: numbe
 
 - The program's lines travel once, in `jobStart` (a few hundred KB at most for v0.1 parts); the host streams without main, so main's event loop (Zod, workers' messages) never starves the sender.
 - **Host exit** (crash or kill) while connected: main fails the job with `machine.connection`, marks the connection `closed`, logs `error`; no automatic reconnect (a controller's state after a host crash is unknown). The next `run.connection.open` starts a fresh host.
+- A host told to end (after `disconnect`, a lost connection or `close`) is never reused: its exit can come late (a worker's or utility process's, under load), so a `run.connection.open` before it starts a fresh host and settles the old one's waiters with `machine.connection` (hardening P1, an open right after a close failed with "the machine host exited").
 - `disconnect` stops a running job first (hold, then reset; a stop already under way is awaited) and closes the transport; `GrblSender.close()` during a run sends `0x18` before closing. **App quit** sends `disconnect` through `MachineClient.shutdown(3000)` and kills the host only after it answered or 3 s passed; quitting during a run asks first (3.12: a native message box "A run is in progress" with Cancel / "Stop run and quit"; `src/main/index.ts`, `before-quit`). A headless process (3.10) calls the same `shutdown` before it exits.
 
 ## Commands and queries

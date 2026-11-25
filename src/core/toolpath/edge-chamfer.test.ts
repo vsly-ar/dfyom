@@ -20,7 +20,7 @@ import {
 } from './edge-chamfer'
 import { generateRequest, GeneratorRequestSchema } from './request'
 import { chamferMill, HEIGHTS, RATES } from './testing/fixtures'
-import { Heightmap, render, samples, steps } from './testing/oracles'
+import { Heightmap, render, samples, steps, surfaceOf } from './testing/oracles'
 import { violations } from './testing/rules'
 
 const port = nodeRegion2d()
@@ -294,22 +294,34 @@ function bevelErrors(
   const R = i.tool.diameter / 2
   const edge = (i.tool.diameter - (i.tool.tipDiameter ?? 0)) / 2 / tan
   const wrong: string[] = []
+  // The shank check and the stamp in one pass over the cells under the tool, row by row and
+  // without an array per cell: the same numbers as `map.center` and `map.stamp`
+  // (this oracle was the whole test time; docs/conventions/testing.md#load-stable-tests).
+  const { cell, nx, z } = map
+  const shankReach = R - cell
+  const surface = surfaceOf(i.tool)
   for (const s of steps(tp)) {
     if (s.move.kind === 'rapid') continue
     for (const p of samples(s, 0.04)) {
-      // the shank: nothing above the cutting edge within DC (before this sample cuts)
-      const a0 = Math.max(0, Math.floor((p[0] - R) / map.cell))
-      const a1 = Math.min(map.nx - 1, Math.ceil((p[0] + R) / map.cell))
-      const b0 = Math.max(0, Math.floor((p[1] - R) / map.cell))
-      const b1 = Math.min(map.ny - 1, Math.ceil((p[1] + R) / map.cell))
-      for (let a = a0; a <= a1; a++)
-        for (let b = b0; b <= b1; b++) {
-          const [x, y] = map.center(a, b)
-          if (Math.hypot(x - p[0], y - p[1]) > R - map.cell) continue
-          if (map.z[b * map.nx + a]! > p[2] + edge + 0.05 && wrong.length < 3)
+      const a0 = Math.max(0, Math.floor((p[0] - R) / cell))
+      const a1 = Math.min(nx - 1, Math.ceil((p[0] + R) / cell))
+      const b0 = Math.max(0, Math.floor((p[1] - R) / cell))
+      const b1 = Math.min(map.ny - 1, Math.ceil((p[1] + R) / cell))
+      const rub = p[2] + edge + 0.05
+      for (let b = b0; b <= b1; b++) {
+        const y = (b + 0.5) * cell
+        const dy2 = (y - p[1]) ** 2
+        const row = b * nx
+        for (let a = a0; a <= a1; a++) {
+          const x = (a + 0.5) * cell
+          const rho = Math.sqrt((x - p[0]) ** 2 + dy2)
+          // the shank: nothing above the cutting edge within DC (before this sample cuts)
+          if (rho <= shankReach && z[row + a]! > rub && wrong.length < 3)
             wrong.push(`shank at ${x},${y} over ${p.join(',')}`)
+          const h = p[2] + surface(rho)
+          if (h < z[row + a]!) z[row + a] = h
         }
-      map.stamp(i.tool, p)
+      }
     }
   }
   for (let a = 0; a < map.nx; a++)

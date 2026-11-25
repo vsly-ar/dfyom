@@ -77,6 +77,27 @@ export function insideDistance(c: Contour, center: Vec2, p: Vec2): number {
 /** The tool's lower surface (production code since DF64: the field and the oracle share it). */
 export { toolSurface }
 
+/**
+ * `toolSurface(tool, ·)` with the tool's constants taken once: the same numbers, without a
+ * `Math.tan` per cell (that tangent was most of a chamfer or drill sweep's time;
+ * docs/conventions/testing.md#load-stable-tests).
+ */
+export function surfaceOf(tool: ToolpathTool): (rho: number) => number {
+  const R = tool.diameter / 2
+  if (tool.type === 'chamferMill') {
+    const tip = (tool.tipDiameter ?? 0) / 2
+    const tan = Math.tan(((tool.angle ?? 90) * Math.PI) / 360)
+    return (rho) => (rho > R + 1e-12 ? Infinity : rho <= tip ? 0 : (rho - tip) / tan)
+  }
+  if (tool.type === 'drill') {
+    const half = ((tool.pointAngle ?? 180) * Math.PI) / 360
+    if (half >= Math.PI / 2 - 1e-12) return (rho) => (rho > R + 1e-12 ? Infinity : 0)
+    const tan = Math.tan(half)
+    return (rho) => (rho > R + 1e-12 ? Infinity : rho / tan)
+  }
+  return (rho) => toolSurface(tool, rho)
+}
+
 /** Heightmap over `0..length × 0..width` (cell centers), starting at the stock top Z0. */
 export class Heightmap {
   readonly nx: number
@@ -110,6 +131,7 @@ export class Heightmap {
     // a flat end: toolSurface is 0 up to R + 1e-12 and Infinity beyond, so the cell takes the tip's Z
     const flat = tool.type !== 'chamferMill' && tool.type !== 'drill' && tool.cornerRadius === 0
     const reach = R + 1e-12
+    const surface = flat ? undefined : surfaceOf(tool)
     for (let j = j0; j <= j1; j++) {
       const dy2 = ((j + 0.5) * cell - p[1]) ** 2
       const row = j * nx
@@ -120,7 +142,7 @@ export class Heightmap {
         continue
       }
       for (let i = i0; i <= i1; i++) {
-        const h = p[2] + toolSurface(tool, Math.sqrt(((i + 0.5) * cell - p[0]) ** 2 + dy2))
+        const h = p[2] + surface!(Math.sqrt(((i + 0.5) * cell - p[0]) ** 2 + dy2))
         if (h < z[row + i]!) z[row + i] = h
       }
     }
