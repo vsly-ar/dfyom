@@ -321,6 +321,7 @@ test('the native title has the version; window bounds and the project folder sur
     .toEqual({
       window: { bounds, maximized: false, fullScreen: false },
       dialogFolders: { project: folder },
+      recentRunFiles: [],
     })
   await app.close()
 
