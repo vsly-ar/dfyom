@@ -27,19 +27,69 @@ export function piecesOf(doc: ProjectDoc, sourceId: string): PartDTO[] {
     .sort((a, b) => a.derivedFrom!.index - b.derivedFrom!.index)
 }
 
+/** One dowel hole as sources: `level` indexes the split's levels (split parts 4b). */
+export interface DowelHoleArgs {
+  readonly level: number
+  readonly at: readonly [string, string]
+}
+
+/** The dowels arg: absent fields are chosen by the core (Ø to fit, depth, placed holes). */
+export interface DowelArgs {
+  readonly diameter?: string
+  readonly depth?: string
+  readonly holes?: readonly DowelHoleArgs[]
+}
+
 /** `design.split.set`'s `split` arg as sources. */
 export interface SplitArgs {
   readonly lines: readonly { readonly axis: 'x' | 'y'; readonly at: string }[]
   readonly levels: readonly string[]
   readonly margin: string
+  /** Dowels joining the levels (4b); absent = butt levels. */
+  readonly dowels?: DowelArgs
 }
 
 export function splitArgs(split: SplitDTO): SplitArgs {
+  const d = split.joint.dowels
   return {
     lines: split.lines.map((l) => ({ axis: l.axis, at: l.at.source })),
     levels: split.levels.map((q) => q.source),
     margin: split.margin.source,
+    ...(d === undefined
+      ? {}
+      : {
+          dowels: {
+            diameter: d.diameter.source,
+            depth: d.depth.source,
+            holes: d.holes.map((h) => ({ level: h.level, at: [h.at[0].source, h.at[1].source] })),
+          },
+        }),
   }
+}
+
+/**
+ * The split without level `index`: its dowel holes go, the later levels' holes are renumbered
+ * (holes index the levels as stored, 4b).
+ */
+export function withoutLevel(args: SplitArgs, index: number): SplitArgs {
+  const levels = args.levels.filter((_, k) => k !== index)
+  if (args.dowels?.holes === undefined) return { ...args, levels }
+  const holes = args.dowels.holes.flatMap((h) =>
+    h.level === index ? [] : [{ ...h, level: h.level > index ? h.level - 1 : h.level }],
+  )
+  return { ...args, levels, dowels: { ...args.dowels, holes } }
+}
+
+/** The dowel holes of a split in the source part frame (mm), for the preview and the list. */
+export function dowelHoles(
+  split: SplitDTO,
+): { readonly k: number; readonly level: number; readonly x: number; readonly y: number }[] {
+  return (split.joint.dowels?.holes ?? []).map((h, i) => ({
+    k: i + 1,
+    level: h.level,
+    x: mm(h.at[0]),
+    y: mm(h.at[1]),
+  }))
 }
 
 /** A first split for "Split part…": one level at half the stock height (the user story's cut). */

@@ -1,5 +1,6 @@
 // The exploded split preview's view model (split parts 4a polish): grid cells pulled along the cut
-// normals, the handles in the gaps, snapping and the findings of a cut.
+// normals, the handles in the gaps, snapping and the findings of a cut; the editor's args with
+// dowels (4b: a removed level drops its holes, the later ones renumbered).
 // Spec: docs/conventions/ui.md#split-part-split-parts-4a
 import { describe, expect, it } from 'vitest'
 import { easeEmphasized } from '../../viewport/SplitLayer'
@@ -9,6 +10,7 @@ import {
   explodeGap,
   explodedCells,
   snapCut,
+  withoutLevel,
   type SplitCut,
 } from './split-view'
 
@@ -100,5 +102,38 @@ describe('exploded split preview', () => {
     expect(easeEmphasized(0)).toBeCloseTo(0, 5)
     expect(easeEmphasized(1)).toBeCloseTo(1, 5)
     expect(easeEmphasized(0.3)).toBeGreaterThan(0.6)
+  })
+})
+
+describe('split editor args with dowels (4b)', () => {
+  it('removing a level drops its holes and renumbers the later levels', () => {
+    const args = {
+      lines: [],
+      levels: ['-60 mm', '-40 mm', '-20 mm'],
+      margin: '5 mm',
+      dowels: {
+        diameter: '6 mm',
+        depth: '16 mm',
+        holes: [
+          { level: 0, at: ['10 mm', '10 mm'] as const },
+          { level: 1, at: ['20 mm', '20 mm'] as const },
+          { level: 2, at: ['30 mm', '30 mm'] as const },
+        ],
+      },
+    }
+    expect(withoutLevel(args, 1)).toEqual({
+      ...args,
+      levels: ['-60 mm', '-20 mm'],
+      dowels: {
+        ...args.dowels,
+        holes: [
+          { level: 0, at: ['10 mm', '10 mm'] },
+          { level: 1, at: ['30 mm', '30 mm'] },
+        ],
+      },
+    })
+    // without dowels only the level goes
+    const { dowels: _, ...butt } = args
+    expect(withoutLevel(butt, 0)).toEqual({ ...butt, levels: ['-40 mm', '-20 mm'] })
   })
 })

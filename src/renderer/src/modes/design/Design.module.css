@@ -1852,3 +1852,32 @@
 .splitMore {
   padding-left: calc(12px + var(--space-1));
 }
+
+/* Split parts 4b: dowel holes in the Top preview, the dowel position list */
+.splitDowel {
+  fill: var(--bg-viewport);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.splitDowels summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.splitDowels ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.splitDowels li {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: var(--space-2);
+}

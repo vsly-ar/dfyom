@@ -204,7 +204,7 @@ export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN)
 /** `split1`: one split per part (SP-D); generated operations are `<splitId>_<role>`. */
 export const SPLIT_ID_PATTERN = /^split[1-9]\d{0,5}$/
 export const SplitIdSchema = z.string().regex(SPLIT_ID_PATTERN)
-/** 4a: butt joints only (glue faces, no geometry); keyed joints come in 4b. */
+/** The lines' joint: butt (glue faces, no geometry); puzzle and dovetail keys come in 4b-2. */
 export const SPLIT_JOINTS = ['butt'] as const
 export type SplitJoint = (typeof SPLIT_JOINTS)[number]
 
@@ -219,12 +219,25 @@ export type SplitLineDTO = z.output<typeof SplitLineDtoSchema>
  * The split of a source part (docs/modes/split-parts.md#split): lines and levels (part-frame z,
  * between the stock bottom −T and the top 0) cut it into pieces; `margin` per side of each blank.
  */
+/**
+ * Dowels joining the levels (split parts 4b, docs/modes/split-parts.md#implementation-4b): the
+ * dowel Ø (the hole is 0.2 mm larger, design/dowel.ts), each hole's depth in each piece, and the
+ * holes: `level` indexes `split.levels` as stored, `at` is in the source part frame.
+ */
+export const SplitDowelsDtoSchema = z.object({
+  diameter: length(),
+  depth: length(),
+  holes: z.array(z.object({ level: z.number().int().min(0), at: z.tuple([length(), length()]) })),
+})
+export type SplitDowelsDTO = z.output<typeof SplitDowelsDtoSchema>
+
 export const SplitDtoSchema = z.object({
   id: SplitIdSchema,
   lines: z.array(SplitLineDtoSchema),
   levels: z.array(length()),
   margin: length(),
-  joint: z.object({ kind: z.enum(SPLIT_JOINTS) }),
+  /** `kind`: the lines' joint; `dowels`: the levels' (absent = butt levels). */
+  joint: z.object({ kind: z.enum(SPLIT_JOINTS), dowels: SplitDowelsDtoSchema.optional() }),
 })
 export type SplitDTO = z.output<typeof SplitDtoSchema>
 

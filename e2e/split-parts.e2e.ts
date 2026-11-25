@@ -7,9 +7,11 @@
 // bridge (DF91 exit). The 4a polish: the viewport's exploded preview, a level dragged in it (one
 // undo step, snapped to whole mm, the field follows) and its keyboard path (the field, which
 // highlights the level), "Split part…" in the part row's context menu, and the piece name in the
-// exported header. Selectors are roles and accessible names (the viewport handles by their
-// `data-split-cut` anchors).
-// Docs: docs/modes/split-parts.md#implementation-4a, docs/conventions/ui.md#split-part-split-parts-4a
+// exported header. 4b-1: Dowels on the level in the editor, the piece's dowel holes, and the
+// doweled two-piece split planned and run. Selectors are roles and accessible names (the viewport
+// handles by their `data-split-cut` anchors).
+// Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
+// docs/conventions/ui.md#split-part-split-parts-4a
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -238,6 +240,18 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await inspector.getByRole('button', { name: 'Edit the split' }).click()
   await expect(partRow.getByRole('button', { name: 'Enclosure' })).toBeVisible()
 
+  // ── 4b-1: dowels on the level, placed by the core; the piece drills them ─────────────────
+  const joint = split.getByRole('group', { name: 'Levels joined by' })
+  await joint.getByRole('radio', { name: 'Dowels' }).click()
+  await expect(split.getByRole('combobox', { name: 'Dowel Ø' })).toHaveValue('6 mm')
+  await expect(split.getByText('3 dowels')).toBeVisible()
+  menu = await openParts()
+  await menu.getByRole('menuitemradio', { name: 'Enclosure · 2' }).click()
+  await expect(navigator.getByRole('button', { name: /Dowel hole 1/ })).toBeVisible()
+  await inspector.getByRole('button', { name: 'Edit the split' }).click()
+  await joint.getByRole('radio', { name: 'Butt' }).click()
+  await expect(split.getByRole('combobox', { name: 'Dowel Ø' })).toHaveCount(0)
+
   // ── the level and two lines: eight pieces ─────────────────────────────────────────────────
   await split.getByRole('button', { name: 'Add line at X' }).click()
   await expect(split.getByRole('heading', { name: 'Split · 4 pieces' })).toBeVisible()
@@ -270,9 +284,10 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     ran++
   }
   expect(ran).toBe(8)
+  // the level joined by dowels (4b-1): the upper piece drills them from its bottom
   await call('design.split.set', {
     partId,
-    split: { levels: ['-40 mm'] },
+    split: { levels: ['-40 mm'], dowels: {} },
     confirm: true,
   })
   for (const p of await pieces()) {

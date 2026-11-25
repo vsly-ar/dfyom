@@ -5,6 +5,7 @@
  * docs/modes/alignment.md#implementation-slice-1 (S1)
  */
 import { z } from 'zod'
+import { DOWEL_DEFAULT, dowelHole } from '../design/dowel'
 import { RECORD_ID_PATTERN } from '../design/part.dto'
 
 /** The eight stock corners by part faces: top/bottom, front/back, left/right. */
@@ -123,8 +124,8 @@ export const AID = {
   holeInset: 3,
   /** A helper inset above this (mm) is a typo (DF83). */
   insetMax: 50,
-  /** A 6 mm dowel + 0.2 mm. */
-  holeDiameter: 6.2,
+  /** A 6 mm dowel + 0.2 mm (the dowel sizes and fit: design/dowel.ts). */
+  holeDiameter: dowelHole(DOWEL_DEFAULT),
   holeDiameterMax: 50,
   spoilboardDepth: 10,
   spoilboardDepthMax: 15,

@@ -1,8 +1,9 @@
 // Test-only: the split parts 4a exit criterion (hardening DF91), run headless through the bundled
 // CLI (exit-criteria.mcp.test.ts): the enclosure (split.fixture.ts, built from scratch) split by
-// one level, then by the level and two lines; every piece is planned, exported and run on the
-// virtual machine, setup by setup. Not app code.
-// Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#slices
+// one level, then by the level and two lines, then by the level joined by dowels (4b-1); every
+// piece is planned, exported and run on the virtual machine, setup by setup. Not app code.
+// Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
+// docs/modes/split-parts.md#slices
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
@@ -79,10 +80,14 @@ export async function exitCriteriaSplitFlow(
         ],
       },
     ],
+    // split parts 4b-1: the level joined by dowels placed by the helper
+    ['level-dowels', { levels: [ENCLOSURE_LEVEL], dowels: {} }],
   ]
   for (const [label, split] of splits) {
     const r = (await ok<SplitResult>('design.split.set', { partId, split, confirm: true })).value
-    expect(r.pieces).toHaveLength(label === 'level' ? 2 : 8)
+    expect(r.pieces).toHaveLength(label === 'level-lines' ? 8 : 2)
+    if (label === 'level-dowels')
+      expect(r.findings.filter((f) => /^dowel/.test(f.params.rule))).toEqual([])
     // a renamed piece keeps its number in the header and adds its name (split parts 4a polish)
     if (label === 'level')
       await ok('design.part.update', { partId: r.pieces[1]!.partId, name: 'Ring' })
@@ -101,6 +106,9 @@ export async function exitCriteriaSplitFlow(
       ).value.warnings.filter((w) => w.severity === 'error')
       expect(errors, `${label} ${piece.name}`).toEqual([])
       const plan = (await ok<PlanGet>('plan.get', { planId })).value.plan
+      // the upper piece's dowel holes are drilled from its bottom: a flip setup
+      if (label === 'level-dowels') expect(plan.setups.map((x) => x.direction)).toContain('-z')
+      let dowelHoles = 0
       await ok('run.connection.open', {
         target: 'virtual',
         planId,
@@ -113,6 +121,7 @@ export async function exitCriteriaSplitFlow(
         // the program is for the piece's own blank
         const [bl, bw, bt] = piece.blank.map((v) => +v.toFixed(3))
         const gcode = readFileSync(target, 'utf8')
+        dowelHoles += gcode.match(/Dowel hole \d+/g)?.length ?? 0
         expect(gcode).toContain(`(Stock X ${bl} Y ${bw} Z ${bt} mm`)
         // the header names the piece after the plan (split parts 4a polish; golden for the first)
         // (a non-default name stays with the number through the second split)
@@ -159,6 +168,8 @@ export async function exitCriteriaSplitFlow(
         setups++
       }
       await ok('run.connection.close')
+      // every piece of the doweled split drills its dowel holes
+      if (label === 'level-dowels') expect(dowelHoles, piece.name).toBeGreaterThan(0)
       pieces++
     }
   }

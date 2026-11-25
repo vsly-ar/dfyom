@@ -1,14 +1,14 @@
 /**
  * DFM near a split (split parts 4a): `noOutline`, `cutsFeature` (lines through holes, chamfers;
  * side-face operations), `featureNear`, `thinJoint`, `sliver`, `noStock`, `outsideTravel`,
- * `fitsWhole`. Warnings and infos with code `design.split`, never blocking. Pure; glue faces are
- * sampled on a grid from the 2.5D model (removal prisms), not from the evaluated mesh.
- * Doc: docs/modes/split-parts.md#dfm-near-a-split
+ * `fitsWhole`, and the dowel rules of 4b (`dowelNear`, `dowelFit`). Warnings and infos with code
+ * `design.split`, never blocking. Pure; glue faces are sampled on a grid from the 2.5D model
+ * (removal prisms), not from the evaluated mesh.
+ * Doc: docs/modes/split-parts.md#dfm-near-a-split, docs/modes/split-parts.md#implementation-4b
  */
 import type { Region2dPort } from '../../geometry/2d/port'
-import { regionArea, type Region } from '../../geometry/2d/model'
-import { regionContains } from '../../geometry/2d/measure'
-import type { DfmWarning, OperationGeometry } from '../../geometry/model'
+import { regionArea } from '../../geometry/2d/model'
+import type { DfmWarning } from '../../geometry/model'
 import type { Library } from '../../library/library'
 import { Machine } from '../../library/machine'
 import { Stock } from '../../library/stock'
@@ -16,10 +16,12 @@ import type { ProjectDoc } from '../../project/document'
 import type { LoadedPart } from '../load'
 import type { SplitDTO } from '../part.dto'
 import { toGeometryInput } from '../geometry-input'
-import { SurfaceTable } from '../surfaces'
 import { operationTools } from '../tool-choice'
 import { baseOf, isFrozenRecord } from '../frozen-memo'
-import { EPS, regionBounds, shapeRegion, splitNumbers } from './layout'
+import { EPS, regionBounds, splitNumbers } from './layout'
+import { materialAt, removals } from './removals'
+import { dowelFindings, dowelNumbers } from './dowels'
+import { DOWEL_WALL_MIN } from '../dowel'
 import { planPieces, splitFinding, type PiecesResult } from './pieces'
 
 /** A glue face narrower than this is thin (split-parts.md § DFM; butt joints have no joint tool). */
@@ -31,111 +33,6 @@ const SAMPLES_MAX = 60_000
 
 const fmt = (mm: number) => +mm.toFixed(2)
 const size3 = (a: readonly number[]) => a.map(fmt).join(' × ')
-
-interface Removal {
-  readonly id: string
-  readonly name: string
-  readonly dir: '+z' | '-z'
-  readonly zlo: number
-  readonly zhi: number
-  /** Face-frame region (a −z one is tested at (x, W − y)); undefined = the whole face. */
-  readonly region: Region | undefined
-  /** `out`: removes everything outside `region` (an outside step). */
-  readonly mode: 'in' | 'out' | 'all'
-  readonly bounds: { min: readonly [number, number]; max: readonly [number, number] } | undefined
-  readonly tool: number
-}
-
-/** The removals of the part's ±z operations (the outline excluded), part-frame z ranges. */
-function removals(
-  loaded: LoadedPart,
-  geometry: readonly OperationGeometry[],
-  outline: number | undefined,
-): Removal[] {
-  const T = loaded.stock.thickness.canonical
-  const table = SurfaceTable.build(loaded.part.operations, loaded.stock, loaded.part.shapes)
-  const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
-  const out: Removal[] = []
-  loaded.part.operations.forEach((op, i) => {
-    const g = geometry[i]
-    if (g === undefined || i === outline) return
-    const dir = g.direction ?? '+z'
-    if (dir !== '+z' && dir !== '-z') return
-    const e = table.get(op.on)
-    if (e.isNone()) return
-    const faceZ = e.unwrap().faceZ.toNumber()
-    const zOn = dir === '+z' ? faceZ : -T - faceZ
-    let depth = 0
-    let through = false
-    let region: Region | undefined
-    let mode: Removal['mode'] = 'in'
-    switch (g.kind) {
-      case 'facing':
-        depth = g.depth
-        mode = 'all'
-        break
-      case 'pocket':
-        depth = g.depth
-        region = shapeRegion(g.shape)
-        break
-      case 'drilling':
-        if (g.bottom.kind === 'through') through = true
-        else depth = g.bottom.depth
-        region = shapeRegion({
-          center: g.center,
-          contour: { kind: 'circle', radius: g.diameter / 2 },
-        })
-        break
-      case 'profile':
-        if (g.depth === undefined) through = true
-        else depth = g.depth
-        region = shapeRegion(g.shape)
-        if (region === undefined) return
-        if (g.side === 'outside') mode = 'out'
-        break
-      case 'chamfer':
-        return
-    }
-    if (mode !== 'all' && region === undefined) return
-    const tool =
-      tools[op.id]?.tool.diameter ??
-      (g.kind === 'profile' ? g.slotWidth : g.kind === 'drilling' ? g.diameter : 6)
-    out.push({
-      id: op.id,
-      name: op.name,
-      dir,
-      zlo: dir === '+z' ? (through ? -T : zOn - depth) : zOn,
-      zhi: dir === '+z' ? zOn : through ? 0 : zOn + depth,
-      region,
-      mode,
-      bounds: region === undefined ? undefined : regionBounds(region),
-      tool,
-    })
-  })
-  return out
-}
-
-/** Material at a part-frame point: inside the footprint and in no removal. */
-function materialAt(
-  footprint: Region,
-  rs: readonly Removal[],
-  W: number,
-  x: number,
-  y: number,
-  z: number,
-): boolean {
-  if (!regionContains(footprint, [x, y])) return false
-  for (const r of rs) {
-    if (z <= r.zlo + EPS || z >= r.zhi - EPS) continue
-    if (r.mode === 'all') return false
-    const p: [number, number] = r.dir === '+z' ? [x, y] : [x, W - y]
-    const b = r.bounds!
-    const inB = p[0] >= b.min[0] && p[0] <= b.max[0] && p[1] >= b.min[1] && p[1] <= b.max[1]
-    const inside = inB && regionContains(r.region!, p)
-    if (r.mode === 'in' ? inside : !inside) return false
-  }
-  return true
-}
 
 /**
  * The narrowest width of a sampled face: per solid sample the shorter of its runs along the two
@@ -327,6 +224,7 @@ function geometricDfm(
       ),
     )
   const anyCut = nums.xs.length + nums.ys.length + nums.levels.length > 0
+  const dowels = dowelNumbers(split)
   // ── cutsFeature: lines through holes and chamfers; side-face operations ─────────────────
   const tools = operationTools(loaded.part.operations, loaded.snapshots ?? {})
   loaded.part.operations.forEach((op, i) => {
@@ -457,19 +355,26 @@ function geometricDfm(
       }
       return min
     }
+    // a doweled level (4b) needs room for its holes: Ø + a wall on each side
+    const dowelLimit =
+      dowels === undefined ? undefined : Math.max(THIN_JOINT_MM, dowels.hole + 2 * DOWEL_WALL_MIN)
     const report = (
       what: string,
       w: number | undefined,
       params: Record<string, number | string>,
+      doweled = false,
     ) => {
-      if (w !== undefined && w < THIN_JOINT_MM - EPS)
+      const limit = doweled && dowelLimit !== undefined ? dowelLimit : THIN_JOINT_MM
+      if (w !== undefined && w < limit - EPS)
         out.push(
           splitFinding(
             id,
             'thinJoint',
             'warning',
-            `The glue face at ${what} is about ${fmt(w)} mm wide at its narrowest (< ${THIN_JOINT_MM} mm): a weak butt joint`,
-            { ...params, width: w, limit: THIN_JOINT_MM },
+            doweled && dowels !== undefined
+              ? `The glue face at ${what} is about ${fmt(w)} mm wide at its narrowest (< ${fmt(limit)} mm): Ø${fmt(dowels.diameter)} dowels fit only where it is wider`
+              : `The glue face at ${what} is about ${fmt(w)} mm wide at its narrowest (< ${THIN_JOINT_MM} mm): a weak butt joint`,
+            { ...params, width: w, limit },
           ),
         )
     }
@@ -492,9 +397,22 @@ function geometricDfm(
         nums.xs,
         nums.ys,
       )
-      report(`level ${fmt(z)}`, w, { level: z })
+      report(`level ${fmt(z)}`, w, { level: z }, true)
     }
   }
+  // ── dowels (4b) ──────────────────────────────────────────────────────────────────────────
+  if (dowels !== undefined)
+    out.push(
+      ...dowelFindings(
+        port,
+        layout,
+        split,
+        rs,
+        W,
+        (n) => pieces.find((p) => p.n === n)?.name ?? `piece ${n}`,
+        (rule, message, params) => splitFinding(id, rule, 'warning', message, params),
+      ),
+    )
   // ── sliver ───────────────────────────────────────────────────────────────────────────────
   const partHeight = top - bottom
   const partVolume = regionArea(layout.footprint.region) * partHeight
