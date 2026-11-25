@@ -280,6 +280,8 @@ export function dowelOperations(
   offset: readonly [number, number, number],
   blankWidth: number,
   length: (mm: number) => Extract<OperationDTO, { kind: 'drilling' }>['diameter'],
+  /** Blank thickness above the piece (4c): a hole from the top starts that much higher. */
+  surplus = 0,
 ): OperationDTO[] {
   const d = dowelNumbers(split)
   if (d === undefined) return []
@@ -301,7 +303,7 @@ export function dowelOperations(
       center: [length(x), length(top ? y : blankWidth - y)],
       diameter: length(d.hole),
       bottom: 'flat',
-      depth: length(cappedDepth(d.depth, height)),
+      depth: length(cappedDepth(d.depth, height) + (top ? surplus : 0)),
     })
   })
   return out

@@ -31,6 +31,7 @@ import { lengthDTO, pieceName, pieceRecord, planPieces, type PiecePlan } from '.
 import { splitWarnings } from './findings'
 import { derivedPartError } from './derived'
 import { completeDowels } from './dowels'
+import { blankValues, libraryStockOptions, resolveBlank, type ResolvedBlank } from './blanks'
 import { DOWEL_DEPTH_MAX, DOWEL_DIAMETER_MAX, DOWEL_DIAMETER_MIN } from '../dowel'
 import { isKeyKind, KEY_CLEARANCE_DEFAULT, KEY_CLEARANCE_MAX } from './keys'
 
@@ -178,10 +179,24 @@ export function regeneratePieces(
   if (loaded.isErr()) return loaded
   const port = requirePort(ctx.services.region2d, where)
   if (port.isErr()) return port
-  const planned = planPieces(loaded.unwrap(), split, port.unwrap())
+  const byIndex = new Map(existing.map((p) => [p.derivedFrom!.index, p]))
+  // blanks (4c): the user's choice kept by number, else with useStocks the automatic one
+  const options = libraryStockOptions(ctx.services.library)
+  const material = loaded.unwrap().stock.material
+  const blanks = new Map<number, ResolvedBlank>()
+  const planned = planPieces(loaded.unwrap(), split, port.unwrap(), (n, need) => {
+    const r = resolveBlank(
+      need,
+      byIndex.get(n)?.blank?.choice,
+      split.useStocks === true,
+      options,
+      material,
+    )
+    blanks.set(n, r)
+    return r.size
+  })
   if (planned.isErr()) return Err(planned.unwrapErr().withContext(where))
   const { pieces } = planned.unwrap()
-  const byIndex = new Map(existing.map((p) => [p.derivedFrom!.index, p]))
   const gone = existing.filter((p) => !pieces.some((q) => q.n === p.derivedFrom!.index))
   const removed = removePieces(draft, gone, confirm, where)
   if (removed.isErr()) return removed
@@ -204,22 +219,27 @@ export function regeneratePieces(
         ...(before.toolLocked === undefined ? {} : { toolLocked: before.toolLocked }),
       }
     })
+    const resolved = blanks.get(plan.n)
     const dto: PartDTO = {
       ...record,
       operations: ops,
       id: partId,
       name: keptName(prev, plan),
       stock: snapshotId,
+      ...(resolved?.record === undefined ? {} : { blank: resolved.record }),
     }
     const prevSnap = prev === undefined ? undefined : draft.snapshots[snapshotId]
-    const snap = ownBlock(
-      baseOf(sourceStock),
-      plan.blank,
-      'Blank',
-      snapshotId,
-      prevSnap?.takenAt ?? new Date(ctx.clock.now()).toISOString(),
-      units,
-    )
+    const takenAt = prevSnap?.takenAt ?? new Date(ctx.clock.now()).toISOString()
+    // a library blank: the stock's values, turned; unlinked like the own block (4c)
+    const snap: SnapshotDTO =
+      resolved?.stock === undefined
+        ? ownBlock(baseOf(sourceStock), plan.blank, 'Blank', snapshotId, takenAt, units)
+        : ({
+            id: snapshotId,
+            kind: 'stock',
+            takenAt,
+            values: blankValues(resolved.stock, resolved.rotation),
+          } as SnapshotDTO)
     if (prevSnap === undefined || !deepEqual(baseOf(prevSnap), snap))
       draft.snapshots[snapshotId] = snap
     if (prev === undefined || !deepEqual(baseOf(prev), dto)) draft.parts[partId] = dto
@@ -264,6 +284,7 @@ const SplitArg = z
       .nullable()
       .optional()
       .describe('Dowels on levels; absent = butt'),
+    useStocks: z.boolean().optional().describe('Pieces on library stocks; absent keeps'),
   })
   .nullable()
   .describe('The whole split; null removes it and its pieces')
@@ -494,6 +515,7 @@ function parseSplit(
         ...(clearanceDto === undefined ? {} : { clearance: clearanceDto }),
         ...(dowels === undefined ? {} : { dowels }),
       },
+      ...((a.useStocks ?? prev?.useStocks === true) ? { useStocks: true as const } : {}),
     },
     diameter: diaDto === undefined ? undefined : mmOf(diaDto),
     depth: depthDto === undefined ? undefined : mmOf(depthDto),
@@ -502,13 +524,40 @@ function parseSplit(
 
 // ── follow ────────────────────────────────────────────────────────────────────────────────
 
-/** Design commands a piece takes: its name only (split-parts.md § Source and pieces). */
+/** Design commands a piece takes: its name and blank (split-parts.md § Source and pieces, 4c). */
 function allowedOnPiece(name: string, args: Record<string, unknown>): boolean {
   if (name === 'design.part.update')
     return Object.keys(args).every(
-      (k) => k === 'partId' || k === 'name' || k === 'expectedRevision',
+      (k) => k === 'partId' || k === 'name' || k === 'blank' || k === 'expectedRevision',
     )
   return false
+}
+
+/**
+ * `design.part.update { blank }` on a piece (4c): a chosen library stock that does not hold the
+ * piece is refused (`blankTooSmall`), after the regeneration resolved it.
+ */
+function checkChosenBlank(
+  draft: Draft<ProjectDoc>,
+  command: { readonly name: string; readonly args: unknown } | undefined,
+): AppResult<void> {
+  if (command?.name !== 'design.part.update') return Ok(undefined)
+  const args = (command.args ?? {}) as Record<string, unknown>
+  const blank = args['blank'] as { stockLibraryItemId?: string } | string | undefined
+  if (typeof blank !== 'object' || blank.stockLibraryItemId === undefined) return Ok(undefined)
+  const id = args['partId'] as string
+  const piece = Object.hasOwn(draft.parts, id) ? draft.parts[id] : undefined
+  if (piece?.blank?.libraryItemId === blank.stockLibraryItemId) return Ok(undefined)
+  return fail('input.malformed', 'the chosen stock does not hold the piece', {
+    issues: [
+      {
+        path: ['blank', 'stockLibraryItemId'],
+        rule: 'blankTooSmall',
+        message: `the stock does not hold ${piece?.name ?? id} with its margins`,
+      },
+    ],
+    where: 'design.part.update',
+  })
 }
 
 /**
@@ -536,6 +585,12 @@ export function followSplits(
         typeof args['operationId'] === 'string' ? args['operationId'] : undefined,
       )
   }
+  // a piece this command changed (its blank choice, 4c) regenerates its source
+  const touched = new Set(
+    Object.values(draft.parts).flatMap((p) =>
+      p.derivedFrom !== undefined && !isFrozenRecord(baseOf(p)) ? [p.derivedFrom.partId] : [],
+    ),
+  )
   for (const id of Object.keys(draft.parts)) {
     const part = draft.parts[id]!
     if (part.derivedFrom !== undefined) {
@@ -553,11 +608,11 @@ export function followSplits(
     const stock = Object.hasOwn(draft.snapshots, part.stock)
       ? baseOf(draft.snapshots[part.stock])
       : undefined
-    if (isFrozenRecord(record) && isFrozenRecord(stock)) continue
+    if (isFrozenRecord(record) && isFrozenRecord(stock) && !touched.has(id)) continue
     const r = regeneratePieces(draft, id, ctx, false, where)
     if (r.isErr()) return r
   }
-  return Ok(undefined)
+  return checkChosenBlank(draft, command)
 }
 
 export const splitFollowHook: DocumentHook = {

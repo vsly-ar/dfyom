@@ -2,6 +2,7 @@
 // split editor's args (the whole split from the stored sources, one field changed), the pieces'
 // blanks and the preview's rectangles. Pure. Doc: docs/conventions/ui.md#split-part-split-parts-4a,
 // docs/modes/split-parts.md#ui-summary-design
+import { holds } from '../../../../core/design/split/blanks'
 import type { PartDTO, SplitDTO } from '../../../../core/design/part.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 
@@ -51,6 +52,8 @@ export interface SplitArgs {
   readonly clearance?: string
   /** Dowels joining the levels (4b); absent = butt levels. */
   readonly dowels?: DowelArgs
+  /** Nest the pieces on library stocks (4c); absent keeps the stored value. */
+  readonly useStocks?: boolean
 }
 
 export function splitArgs(split: SplitDTO): SplitArgs {
@@ -64,6 +67,7 @@ export function splitArgs(split: SplitDTO): SplitArgs {
     ...(kind === 'butt'
       ? {}
       : { joint: kind, ...(c === undefined ? {} : { clearance: c.source }) }),
+    ...(split.useStocks === true ? { useStocks: true } : {}),
     ...(d === undefined
       ? {}
       : {
@@ -131,6 +135,10 @@ export interface PieceView {
   readonly name: string
   /** Blank length, width, thickness. */
   readonly blank: readonly [number, number, number]
+  /** The library stock the blank is cut from (4c): its name, turned 90°; undefined = own block. */
+  readonly stock?: { readonly id: string; readonly name: string; readonly turned: boolean }
+  /** The user's blank choice (4c): undefined = automatic. */
+  readonly choice?: 'own' | string
   /** The blank's box in the source frame: x0, y0 (front-left) and z0 (bottom) to z1 (top). */
   readonly box: { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }
 }
@@ -142,12 +150,20 @@ export function pieceViews(doc: ProjectDoc, sourceId: string): PieceView[] {
     const v = snap.values
     const blank = [mm(v.length), mm(v.width), mm(v.thickness)] as const
     const [ox, oy, oz] = p.offset.map(mm) as [number, number, number]
+    const from = p.blank
+    const choice = from?.choice
     return [
       {
         id: p.id,
         n: p.derivedFrom!.index,
         name: p.name,
         blank,
+        ...(from?.libraryItemId === undefined
+          ? {}
+          : { stock: { id: from.libraryItemId, name: v.name, turned: from.rotation === 90 } }),
+        ...(choice === undefined
+          ? {}
+          : { choice: choice.kind === 'own' ? 'own' : choice.libraryItemId }),
         box: {
           x0: -ox,
           x1: -ox + blank[0],
@@ -333,4 +349,63 @@ export function cutFindings<W extends { code: string; params?: Record<string, un
 export function testFitClearances(c: number, max: number): number[] {
   const r = (v: number) => Math.round(v * 1000) / 1000
   return [...new Set([r(Math.max(0, c - 0.05)), r(c), r(Math.min(max, c + 0.05))])]
+}
+
+// ── blanks on library stocks (split parts 4c) ─────────────────────────────────────────────────
+
+/** A library block stock for the blank menu and Split to fit (mm). */
+export interface LibraryStockView {
+  readonly id: string
+  readonly name: string
+  readonly size: readonly [number, number, number]
+  readonly material: { readonly name: string; readonly class: string }
+}
+
+/** The library's block stocks from `library.stock.list` items. */
+export function libraryStockViews(items: readonly unknown[]): LibraryStockView[] {
+  return items.flatMap((raw) => {
+    const i = raw as {
+      kind?: string
+      shape?: string
+      id: string
+      name: string
+      length: { exact: { num: string; den: string } }
+      width: { exact: { num: string; den: string } }
+      thickness: { exact: { num: string; den: string } }
+      material: { name: string; class: string }
+    }
+    if (i.kind !== 'stock' || i.shape !== 'block') return []
+    return [
+      {
+        id: i.id,
+        name: i.name,
+        size: [mm(i.length), mm(i.width), mm(i.thickness)] as const,
+        material: i.material,
+      },
+    ]
+  })
+}
+
+const volume = (s: readonly number[]) => s[0]! * s[1]! * s[2]!
+
+/** The stocks of a material class, smallest first (Split to fit). */
+export function stocksOfClass(
+  stocks: readonly LibraryStockView[],
+  materialClass: string,
+): LibraryStockView[] {
+  return stocks
+    .filter((s) => s.material.class === materialClass)
+    .sort((a, b) => volume(a.size) - volume(b.size) || a.name.localeCompare(b.name))
+}
+
+/** The stocks of a class that hold a piece's need (turned 0° or 90°), smallest first. */
+export function stocksHolding(
+  stocks: readonly LibraryStockView[],
+  need: readonly [number, number, number],
+  materialClass: string,
+): { readonly stock: LibraryStockView; readonly turned: boolean }[] {
+  return stocksOfClass(stocks, materialClass).flatMap((stock) => {
+    const r = holds(need, stock.size)
+    return r === undefined ? [] : [{ stock, turned: r === 90 }]
+  })
 }

@@ -10,10 +10,12 @@
 // exported header. 4b-1: Dowels on the level in the editor, the piece's dowel holes, and the
 // doweled two-piece split planned and run. 4b-2: Puzzle on the lines in the editor (the clearance
 // field and the keys' read-out; the enclosure's cavity leaves no room for a key, so back to Butt).
-// 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed).
+// 4b-3: "Test fit…" adds a coupon part with the nominal key and shows it (then removed). 4c:
+// "Split to fit…" a library board: every chip names it, and the eight pieces run on it.
 // Selectors are roles and accessible names (the viewport handles by their `data-split-cut`
 // anchors).
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
+// docs/modes/split-parts.md#implementation-4c,
 // docs/conventions/ui.md#split-part-split-parts-4a
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -283,6 +285,22 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   await call('design.part.remove', { partId: coupon.id })
   await lineJoint.getByRole('radio', { name: 'Butt' }).click()
   await expect(split.getByRole('combobox', { name: 'Key clearance' })).toHaveCount(0)
+  // ── 4c: Split to fit a library board; every chip names it (the pieces below run on it) ────
+  await call('library.stock.add', {
+    values: {
+      ...ENCLOSURE_STOCK,
+      name: 'Block 200 × 100.1 × 40',
+      length: '200',
+      width: '100.1',
+      thickness: '40',
+    },
+  })
+  await split.getByRole('button', { name: 'Split to fit…' }).click()
+  await page.getByRole('menuitem', { name: /^Block 200 × 100\.1 × 40 · / }).click()
+  await expect(split.getByRole('switch', { name: 'Use library stocks' })).toBeChecked()
+  await expect(split.getByRole('list', { name: '8 pieces' }).getByRole('listitem')).toHaveText(
+    Array<RegExp>(8).fill(/^\d · 200 × 100\.1 × 40 mm · Block 200 × 100\.1 × 40$/),
+  )
   await render(page, 'split-exploded-8')
   menu = await openParts()
   await expect(menu.getByRole('menuitemradio')).toHaveCount(9)

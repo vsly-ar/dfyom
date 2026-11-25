@@ -168,6 +168,28 @@ export function planStockSize(doc: ProjectDoc, plan: PlanDTO): StockSize | undef
 }
 
 /**
+ * A split piece's blank for its plan's summary (split parts 4c): the library stock it is cut from
+ * (undefined = its own block) and the plan's stock copy in mm; undefined for a whole part.
+ */
+export function pieceBlank(
+  doc: ProjectDoc,
+  plan: PlanDTO,
+): { readonly stock: string | undefined; readonly size: StockSize } | undefined {
+  const part = plan.design.part
+  if (part.derivedFrom === undefined) return undefined
+  const s = planPart(doc, plan).loaded?.stock
+  if (s === undefined) return undefined
+  return {
+    stock: part.blank?.libraryItemId === undefined ? undefined : s.name,
+    size: {
+      length: s.length.canonical,
+      width: s.width.canonical,
+      thickness: s.thickness.canonical,
+    },
+  }
+}
+
+/**
  * A setup's WCS in the part frame (`setupFrame`), for the per-setup preview: its origin at the
  * work zero (`zero`, setup frame mm; DF78), absent = the front-left corner of the up face.
  */

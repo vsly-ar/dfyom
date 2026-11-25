@@ -25,6 +25,7 @@ import {
 import { HOLE_COMMANDS } from '../design/hole-commands'
 import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
 import { TEST_FIT_COMMANDS } from '../design/split/test-fit'
+import { SPLIT_QUERIES } from '../design/split/suggest'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -99,6 +100,7 @@ export const PROJECT_QUERIES: readonly AnyQueryDef[] = [
   ...SHAPE_QUERIES,
   ...FEATURE_QUERIES,
   ...CLONES_QUERIES,
+  ...SPLIT_QUERIES,
   ...REFERENCE_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,

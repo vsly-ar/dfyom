@@ -2,13 +2,14 @@
 // fixture with the 2D port): "Split part…" in the part inspector, the split editor (add a line,
 // the margin), the preview and piece chips, pieces indented under their source in the part menu,
 // a read-only piece ("Piece 1 of 4 of Bracket · Edit the split"), with axe on each state. The
-// viewport canvas is stubbed. Doc: docs/conventions/ui.md#split-part-split-parts-4a
+// viewport canvas is stubbed. 4c: Split to fit…, the blank chips and their menu, the switch. Doc: docs/conventions/ui.md#split-part-split-parts-4a
 import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
 import { Ok } from '../../../../shared/result'
 import { planSetup } from '../../../../core/plan/plan.fixture'
+import { testStock } from '../../../../core/design/design.fixture'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
@@ -35,8 +36,9 @@ const port = loadRegion2dSync(
   fs.getBuiltinModule('node:fs').readFileSync('vendor/cavalier-contours/cavalier_contours.wasm'),
 ).expect('the vendored 2D module loads')
 
-async function renderSplit() {
+async function renderSplit(before?: (s: Awaited<ReturnType<typeof planSetup>>) => Promise<void>) {
   const s = await planSetup({ services: { region2d: port } })
+  await before?.(s)
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   const shell = createShell(bridge, { region2d: Promise.resolve(Ok(port)) })
@@ -350,5 +352,68 @@ describe('split part (split parts 4a)', () => {
       '0.1 mm',
     )
     await expectNoAxeViolations()
+  })
+
+  it('blanks on library stocks (4c): Split to fit…, the chips name the blank, the menu, the switch', async () => {
+    const ids: Record<string, string> = {}
+    const t = await renderSplit(async (s) => {
+      for (const [k, l, w, th] of [
+        ['plate', '120', '80', '10'],
+        ['big', '200', '100', '20'],
+      ] as const)
+        ids[k] = (
+          (await s.run('library.stock.add', {
+            values: {
+              ...testStock(),
+              name: `Plate ${l} × ${w} × ${th}`,
+              length: l,
+              width: w,
+              thickness: th,
+            },
+          })) as { id: string }
+        ).id
+    })
+    await t.user.click(within(t.split()).getByRole('button', { name: 'Split to fit…' }))
+    const fit = await screen.findByRole('menu', { name: 'Split to fit…' })
+    await expectNoAxeViolations()
+    await t.user.click(within(fit).getByRole('menuitem', { name: /^Plate 120 × 80 × 10 · / }))
+    await waitFor(() => expect(t.pieces()).toHaveLength(2))
+    expect(t.callsOf('design.split.suggest')).toEqual([
+      { partId: t.s.partId, stockLibraryItemId: ids['plate'] },
+    ])
+    expect(t.callsOf('design.split.set')).toEqual([
+      {
+        partId: t.s.partId,
+        split: { lines: [], levels: ['-10 mm'], margin: '5 mm', useStocks: true },
+      },
+    ])
+    const chips = () =>
+      within(within(t.split()).getByRole('list', { name: '2 pieces' })).getAllByRole('button')
+    expect(chips().map((c) => c.textContent)).toEqual([
+      '1 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
+      '2 · 120 × 80 × 10 mm · Plate 120 × 80 × 10',
+    ])
+    expect(within(t.split()).getByRole('switch', { name: 'Use library stocks' })).toBeChecked()
+    await expectNoAxeViolations()
+    // the first piece on the bigger plate, by hand
+    await t.user.click(chips()[0]!)
+    // the menu is named by its chip (Radix labels it by the trigger)
+    const menu = await screen.findByRole('menu', { name: /^1 · 120 × 80 × 10 mm/ })
+    expect(within(menu).getByRole('menuitemradio', { name: 'Automatic' })).toBeChecked()
+    await expectNoAxeViolations()
+    await t.user.click(within(menu).getByRole('menuitemradio', { name: 'Plate 200 × 100 × 20' }))
+    const first = t.pieces().find((p) => p.derivedFrom?.index === 1)!
+    await waitFor(() =>
+      expect(t.callsOf('design.part.update')).toEqual([
+        { partId: first.id, blank: { stockLibraryItemId: ids['big'] } },
+      ]),
+    )
+    await waitFor(() =>
+      expect(chips()[0]!.textContent).toBe('1 · 200 × 100 × 20 mm · Plate 200 × 100 × 20'),
+    )
+    // library stocks off: the chosen blank stays, the other piece is back on its own block
+    await t.user.click(within(t.split()).getByRole('switch', { name: 'Use library stocks' }))
+    await waitFor(() => expect(chips()[1]!.textContent).toMatch(/^2 · .* · own blank$/))
+    expect(chips()[0]!.textContent).toMatch(/Plate 200 × 100 × 20$/)
   })
 })

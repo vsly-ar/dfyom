@@ -93,7 +93,16 @@ async function enclosure(): Promise<DesignSetup> {
   return s
 }
 
-const cases: [string, object][] = [
+/** A thicker library board of the enclosure's wood (4c): pieces sit on it with 10 mm surplus. */
+const THICK = {
+  ...ENCLOSURE_STOCK,
+  name: 'Block 280 × 200 × 50',
+  length: '280',
+  width: '200',
+  thickness: '50',
+}
+
+const cases: [string, object, object?][] = [
   ['one level', { levels: [ENCLOSURE_LEVEL] }],
   ['one level with dowels (4b)', { levels: [ENCLOSURE_LEVEL], dowels: {} }],
   [
@@ -106,13 +115,20 @@ const cases: [string, object][] = [
       ],
     },
   ],
+  // 4c: on a 50 mm library board, the surplus faced off (top facing deeper, or a glue face)
+  [
+    'the level on thicker library blanks (4c)',
+    { levels: [ENCLOSURE_LEVEL], dowels: {}, useStocks: true },
+    THICK,
+  ],
 ]
 
 describe('reassembly: pieces == source', () => {
   it.each(cases)(
     '%s',
-    async (_, split) => {
+    async (_, split, board) => {
       const s = await enclosure()
+      if (board !== undefined) await s.run('library.stock.add', { values: board })
       await s.run('design.split.set', { partId: s.partId, split })
       const source = evaluate(s, s.partId)
       const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
@@ -144,6 +160,18 @@ describe('reassembly: pieces == source', () => {
         // and they are cut: empty at half their depth
         for (const d of dowels) expect(inside(e, [d.c[0], d.c[1], d.z]), plan.name).toBe(false)
         const { bounds, band } = plan.cell
+        // 4c: the surplus above the piece is faced off
+        const T = pieceLoaded.stock.thickness.canonical
+        const surplus = T - (band.zt - band.zb)
+        if (board !== undefined) {
+          expect(surplus, plan.name).toBeCloseTo(10, 6)
+          const mid = [
+            (bounds.min[0] + bounds.max[0]) / 2 + off[0]!,
+            bounds.min[1] + 3 + off[1]!,
+            -surplus / 2,
+          ] as const
+          expect(inside(e, mid), plan.name).toBe(false)
+        }
         // the part between its facings: 9.738 below the top, above the bottom
         const zt = Math.min(band.zt, -9.738)
         const zb = Math.max(band.zb, -80 + 9.738)

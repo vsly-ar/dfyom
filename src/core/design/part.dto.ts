@@ -4,7 +4,7 @@
  * docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25
  */
 import { z } from 'zod'
-import { NAME_MAX, quantityDto } from '../library/item'
+import { ItemIdSchema, NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
 import { FeatureDtoSchema, FeatureIdSchema, FeatureRoleSchema } from './feature.dto'
 import { ShapeDtoSchema, ShapeIdSchema } from './shape.dto'
@@ -248,6 +248,8 @@ export const SplitDtoSchema = z.object({
     clearance: length().optional(),
     dowels: SplitDowelsDtoSchema.optional(),
   }),
+  /** Nest the pieces on library stocks (split parts 4c); absent = own blanks as in 4a. */
+  useStocks: z.literal(true).optional(),
 })
 export type SplitDTO = z.output<typeof SplitDtoSchema>
 
@@ -258,6 +260,23 @@ export const DerivedFromDtoSchema = z.object({
   index: z.number().int().min(1),
 })
 export type DerivedFromDTO = z.output<typeof DerivedFromDtoSchema>
+
+/**
+ * A piece's blank (split parts 4c, docs/modes/split-parts.md#implementation-4c): the library
+ * stock it is cut from (absent = own block), turned 90° about Z, and the user's choice (absent =
+ * automatic), kept by the piece's number across regeneration.
+ */
+export const PieceBlankDtoSchema = z.object({
+  libraryItemId: ItemIdSchema.optional(),
+  rotation: z.literal(90).optional(),
+  choice: z
+    .discriminatedUnion('kind', [
+      z.object({ kind: z.literal('own') }),
+      z.object({ kind: z.literal('library'), libraryItemId: ItemIdSchema }),
+    ])
+    .optional(),
+})
+export type PieceBlankDTO = z.output<typeof PieceBlankDtoSchema>
 
 export const PartDtoSchema = z.object({
   id: PartIdSchema,
@@ -275,5 +294,7 @@ export const PartDtoSchema = z.object({
   derivedFrom: DerivedFromDtoSchema.optional(),
   /** On a piece: source part frame + offset = piece frame (mm). */
   offset: z.tuple([length(), length(), length()]).optional(),
+  /** On a piece: where its blank comes from (split parts 4c); absent = own block, automatic. */
+  blank: PieceBlankDtoSchema.optional(),
 })
 export type PartDTO = z.output<typeof PartDtoSchema>

@@ -9,7 +9,10 @@ import {
   cutShift,
   explodeGap,
   explodedCells,
+  libraryStockViews,
   snapCut,
+  stocksHolding,
+  stocksOfClass,
   testFitClearances,
   withoutLevel,
   type SplitCut,
@@ -145,5 +148,51 @@ describe('Test fit clearances (4b-3)', () => {
     expect(testFitClearances(0.02, 1)).toEqual([0, 0.02, 0.07])
     expect(testFitClearances(0, 1)).toEqual([0, 0.05])
     expect(testFitClearances(1, 1)).toEqual([0.95, 1])
+  })
+})
+
+describe('library stocks for blanks and Split to fit (4c)', () => {
+  const q = (v: number) => ({ exact: { num: String(v * 10), den: '10' } })
+  const item = (
+    id: string,
+    l: number,
+    w: number,
+    t: number,
+    cls = 'hardwood',
+    shape = 'block',
+  ) => ({
+    kind: 'stock',
+    shape,
+    id,
+    name: id,
+    length: q(l),
+    width: q(w),
+    thickness: q(t),
+    material: { name: 'Oak', class: cls },
+  })
+  const stocks = libraryStockViews([
+    item('big', 300, 300, 40),
+    item('board', 200, 100.1, 40),
+    item('ply', 140, 100, 40, 'sheetGood'),
+    item('rod', 50, 50, 50, 'hardwood', 'round'),
+  ])
+
+  it('reads block stocks only, in mm', () => {
+    expect(stocks.map((s) => [s.id, s.size])).toEqual([
+      ['big', [300, 300, 40]],
+      ['board', [200, 100.1, 40]],
+      ['ply', [140, 100, 40]],
+    ])
+  })
+
+  it('lists the class smallest first; those holding a need, turned when needed', () => {
+    expect(stocksOfClass(stocks, 'hardwood').map((s) => s.id)).toEqual(['board', 'big'])
+    expect(
+      stocksHolding(stocks, [100, 134.75, 40], 'hardwood').map((h) => [h.stock.id, h.turned]),
+    ).toEqual([
+      ['board', true],
+      ['big', false],
+    ])
+    expect(stocksHolding(stocks, [100, 134.75, 41], 'hardwood')).toEqual([])
   })
 })

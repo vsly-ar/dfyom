@@ -2,10 +2,11 @@
 // CLI (exit-criteria.mcp.test.ts): the enclosure (split.fixture.ts, built from scratch) split by
 // one level, then by the level and two lines, then by the level joined by dowels (4b-1), and the
 // proposal's 600 × 400 panel split by one line with a puzzle key (4b-2) and its Test fit coupon
-// (4b-3); every piece is planned,
+// (4b-3), and the enclosure split to fit a library board by the suggestion (4c); every piece is
+// planned,
 // exported and run on the virtual machine, setup by setup. Not app code.
 // Docs: docs/modes/split-parts.md#implementation-4a, docs/modes/split-parts.md#implementation-4b,
-// docs/modes/split-parts.md#slices
+// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#slices
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
@@ -96,6 +97,9 @@ export async function exitCriteriaSplitFlow(
     ['panel-puzzle', { lines: [PANEL_LINE], joint: 'puzzle' }, panelId],
     // split parts 4b-3: the panel's Test fit coupon, its own two-piece part
     ['panel-coupon', {}, panelId],
+    // split parts 4c: the enclosure split to fit a 200 × 100.1 × 40 library board by the
+    // suggestion, every piece on that board
+    ['fit', {}],
   ]
   for (const [label, split, splitPart = partId] of splits) {
     let source = splitPart === panelId ? 'Panel' : 'Enclosure'
@@ -112,10 +116,45 @@ export async function exitCriteriaSplitFlow(
       expect(fit[0]!.size[2]).toBe(18)
       source = fit[0]!.name
       r = { pieces: fit[0]!.pieces, findings: [] }
+    } else if (label === 'fit') {
+      const board = (
+        await ok<{ id: string }>('library.stock.add', {
+          values: {
+            ...ENCLOSURE_STOCK,
+            name: 'Block 200 × 100.1 × 40',
+            length: '200',
+            width: '100.1',
+            thickness: '40',
+          },
+        })
+      ).value.id
+      const fit = (
+        await ok<{ lines: object[]; levels: string[]; pieces: number }>('design.split.suggest', {
+          partId,
+          stockLibraryItemId: board,
+        })
+      ).value
+      expect(fit).toMatchObject({
+        lines: [
+          { axis: 'x', at: '125 mm' },
+          { axis: 'y', at: '100 mm' },
+        ],
+        levels: ['-40 mm'],
+        pieces: 8,
+      })
+      r = (
+        await ok<SplitResult>('design.split.set', {
+          partId,
+          split: { lines: fit.lines, levels: fit.levels, useStocks: true },
+          confirm: true,
+        })
+      ).value
+      // every piece on the library board
+      expect(r.pieces.map((p) => p.blank)).toEqual(Array(8).fill([200, 100.1, 40]))
     } else
       r = (await ok<SplitResult>('design.split.set', { partId: splitPart, split, confirm: true }))
         .value
-    expect(r.pieces).toHaveLength(label === 'level-lines' ? 8 : 2)
+    expect(r.pieces).toHaveLength(label === 'level-lines' || label === 'fit' ? 8 : 2)
     if (label === 'panel-puzzle') {
       // every run holds its keys; the male piece's blank holds its knobs
       expect(r.findings.filter((f) => f.params.rule === 'keyFit')).toEqual([])
