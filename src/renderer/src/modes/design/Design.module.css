@@ -1798,9 +1798,14 @@
 }
 
 .splitView svg {
-  width: 100%;
+  /* the drawing's aspect (U9 P7): shrunk from its large intrinsic size to the figure's width or
+     120 px high, never stretched; on the figure's bottom so the captions share a baseline */
+  width: auto;
   height: auto;
+  max-width: 100%;
   max-height: 120px;
+  align-self: end;
+  justify-self: center;
   background: var(--bg-viewport);
   border: 1px solid var(--border);
   border-radius: 4px;

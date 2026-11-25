@@ -187,6 +187,19 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     .click()
   await expect(split.getByRole('heading', { name: 'Split · 2 pieces' })).toBeVisible()
   await expect(split.getByRole('img', { name: 'Split preview: Front' })).toBeVisible()
+  // U9 P7: the piece numbers read at --text-xs (11 px); each box at its drawing's aspect
+  for (const name of ['Split preview: Top', 'Split preview: Front']) {
+    const view = split.getByRole('img', { name })
+    const number = await view.locator('text').first().boundingBox()
+    expect(number!.height).toBeGreaterThan(9)
+    const [box, vb] = await view.evaluate((el) => {
+      const r = { width: el.clientWidth, height: el.clientHeight }
+      const v = (el as unknown as { viewBox: { baseVal: { width: number; height: number } } })
+        .viewBox.baseVal
+      return [r.width / r.height, v.width / v.height]
+    })
+    expect(box).toBeCloseTo(vb, 1)
+  }
   await expect(split.getByRole('list', { name: '2 pieces' }).getByRole('listitem')).toHaveText([
     '1 · 259.5 × 187 × 40 mm · own blank',
     '2 · 259.5 × 187 × 40 mm · own blank',

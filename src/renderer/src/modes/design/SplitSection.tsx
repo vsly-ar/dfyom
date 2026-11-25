@@ -9,7 +9,7 @@
 // its blank and opens a menu to change it, "Use library stocks" and "Split to fit…".
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design,
 // docs/modes/split-parts.md#implementation-4c
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
@@ -833,48 +833,51 @@ function SplitPreview({
       return [{ key, n: p.n, r, dx, dy }]
     })
     return (
-      <figure className={styles['splitView']}>
-        <svg
-          viewBox={box}
-          role="img"
-          aria-label={`${t.preview}: ${kind === 'top' ? t.top : t.front}`}
-        >
-          <rect className={styles['splitWhole']} x={0} y={0} width={L} height={h} />
-          {kind === 'top'
-            ? holes.map((d, k) => (
-                <circle
-                  key={`dowel-${k}`}
-                  className={styles['splitDowel']}
-                  cx={d.x}
-                  cy={W - d.y}
-                  r={Math.max(L, W) * 0.012}
-                />
-              ))
-            : null}
-          {kind === 'top'
-            ? knobs.map((pts, k) => (
-                <polyline
-                  key={`key-${k}`}
-                  className={styles['splitKey']}
-                  points={pts.map((p) => `${p[0]},${W - p[1]}`).join(' ')}
-                />
-              ))
-            : null}
-          {rects.map(({ key, n, r, dx, dy }) => (
-            <g
-              key={key}
-              className={styles['splitPiece']}
-              style={{ transform: `translate(${dx}px, ${dy}px)` }}
-            >
-              <rect x={r.x} y={r.y} width={r.w} height={r.h} />
-              <text x={r.x + r.w / 2} y={r.y + r.h / 2} fontSize={Math.max(L, W, T) * 0.06}>
-                {n}
-              </text>
-            </g>
-          ))}
-        </svg>
-        <figcaption className={styles['muted']}>{kind === 'top' ? t.top : t.front}</figcaption>
-      </figure>
+      <PreviewView
+        width={L + 2 * pad}
+        height={h + 2 * pad}
+        box={box}
+        label={`${t.preview}: ${kind === 'top' ? t.top : t.front}`}
+        caption={kind === 'top' ? t.top : t.front}
+      >
+        {(fontSize) => (
+          <>
+            <rect className={styles['splitWhole']} x={0} y={0} width={L} height={h} />
+            {kind === 'top'
+              ? holes.map((d, k) => (
+                  <circle
+                    key={`dowel-${k}`}
+                    className={styles['splitDowel']}
+                    cx={d.x}
+                    cy={W - d.y}
+                    r={Math.max(L, W) * 0.012}
+                  />
+                ))
+              : null}
+            {kind === 'top'
+              ? knobs.map((pts, k) => (
+                  <polyline
+                    key={`key-${k}`}
+                    className={styles['splitKey']}
+                    points={pts.map((p) => `${p[0]},${W - p[1]}`).join(' ')}
+                  />
+                ))
+              : null}
+            {rects.map(({ key, n, r, dx, dy }) => (
+              <g
+                key={key}
+                className={styles['splitPiece']}
+                style={{ transform: `translate(${dx}px, ${dy}px)` }}
+              >
+                <rect x={r.x} y={r.y} width={r.w} height={r.h} />
+                <text x={r.x + r.w / 2} y={r.y + r.h / 2} fontSize={fontSize}>
+                  {n}
+                </text>
+              </g>
+            ))}
+          </>
+        )}
+      </PreviewView>
     )
   }
   return (
@@ -882,6 +885,62 @@ function SplitPreview({
       {view('top')}
       {view('front')}
     </div>
+  )
+}
+
+/** The piece numbers' size on screen (`--text-xs`, 11 px), whatever the part's size (U9 P7). */
+const PIECE_NUMBER_PX = 11
+
+/**
+ * One view of the split preview: an SVG box at the drawing's aspect (U9 P7: it was stretched
+ * taller than its drawing), at most the figure's width and 120 px high, on the figure's bottom so
+ * both views' captions share a baseline. `children` gets the font size in drawing units that
+ * shows as `PIECE_NUMBER_PX` at the box's current scale.
+ */
+function PreviewView({
+  width,
+  height,
+  box,
+  label,
+  caption,
+  children,
+}: {
+  width: number
+  height: number
+  box: string
+  label: string
+  caption: string
+  children: (fontSize: number) => React.ReactNode
+}): React.JSX.Element {
+  const ref = useRef<SVGSVGElement>(null)
+  const [shown, setShown] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const read = () => setShown(el.getBoundingClientRect().width)
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // until measured (and in tests without layout): a size that reads at about the usual width
+  const scale = shown > 0 ? shown / width : 120 / width
+  return (
+    <figure className={styles['splitView']}>
+      <svg
+        ref={ref}
+        viewBox={box}
+        // a large intrinsic size at the drawing's aspect; CSS shrinks it to fit, keeping the aspect
+        width={1000}
+        height={(1000 * height) / width}
+        role="img"
+        aria-label={label}
+      >
+        {children(PIECE_NUMBER_PX / scale)}
+      </svg>
+      <figcaption className={styles['muted']}>{caption}</figcaption>
+    </figure>
   )
 }
 
