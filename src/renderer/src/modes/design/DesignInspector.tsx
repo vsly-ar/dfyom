@@ -34,6 +34,7 @@ import {
   type WarningView,
   StepScaleProvider,
   stockStepScale,
+  InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
 import { featureOfWarning, operationUnits, ownerFeature } from './feature-view'
@@ -300,15 +301,14 @@ function PartInspector({
         {/* how operations get onto a face (DF22) */}
         <p className={styles['muted']}>{m.face.emptyHint}</p>
         <SplitSection part={part} warnings={warnings.warnings} />
-        <section aria-label={dfmMessages.listTitle} className={styles['warnings']}>
-          <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
+        <InspectorGroup title={dfmMessages.listTitle}>
           <WarningList
             labels={warningLabels}
             items={warnings.warnings.map((w) => warningView(w, part, apply, select, fixIn))}
             empty={dfmMessages.none}
             {...(warnings.evaluation === 'pending' ? { note: dfmMessages.checksPending } : {})}
           />
-        </section>
+        </InspectorGroup>
       </div>
     </div>
   )

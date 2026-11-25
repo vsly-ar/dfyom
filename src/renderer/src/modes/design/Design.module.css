@@ -927,14 +927,6 @@
 }
 
 /* Shape Editor inspector (task U1, ui.md#shape-editor) */
-.groupHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-height: var(--control-md);
-}
-
 .pair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1513,35 +1505,6 @@
   background: var(--bg-field);
 }
 
-.holeDefaults {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.disclosure {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-}
-
-.disclosure:hover {
-  color: var(--text);
-}
-
-.disclosure:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: var(--radius-xs);
-}
-
 /* Clones inspector and draft (v0.4 task U3, ui.md § Clones) */
 .clonesReadout {
   display: flex;
@@ -1715,19 +1678,6 @@
   padding: 10px var(--space-3);
   border-top: 1px solid var(--border);
   background: var(--bg-chrome);
-}
-
-.instanceGroup {
-  display: grid;
-  gap: var(--space-2);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-2);
-}
-
-.instanceGroup > summary {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
 }
 
 /* compare overlay (DF60 P5, ui.md § Reference tools) */
@@ -2016,90 +1966,11 @@
   vector-effect: non-scaling-stroke;
 }
 
-/* A joint's settings (U9 Q131): a disclosure, collapsed once the joint is set; the summary a
-   one-line read-out; the content's height eases open and shut (cut under reduced motion) */
-.splitSettings {
-  interpolate-size: allow-keywords;
-}
-
-.splitSettings > summary {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-  padding: 2px 0;
-  list-style: none;
-  cursor: pointer;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.splitSettings > summary::-webkit-details-marker {
-  display: none;
-}
-
-.splitSettings > summary:hover {
-  color: var(--text);
-}
-
-.splitSettings > summary:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
-  border-radius: var(--radius-xs);
-}
-
-.splitSettings > summary svg {
-  flex: none;
-  align-self: center;
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  transform: rotate(-90deg);
-  transition: transform var(--motion-base) var(--ease-emphasized);
-}
-
-.splitSettings[open] > summary svg {
-  transform: none;
-}
-
-.splitSettingsTitle {
-  flex: none;
-  color: var(--text);
-}
-
-.splitSettingsSummary {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.splitSettings::details-content {
-  height: 0;
-  overflow: clip;
-  transition:
-    height var(--motion-base) var(--ease-emphasized),
-    content-visibility var(--motion-base) allow-discrete;
-}
-
-.splitSettings[open]::details-content {
-  height: auto;
-}
-
-.splitSettings > .splitGroup {
-  padding-top: var(--space-2);
-}
-
-.splitDowels summary {
-  cursor: pointer;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
+/* the dowel positions (an InspectorGroup accordion, DF110): X, Y and Remove per dowel */
 .splitDowels ul {
   display: grid;
   gap: var(--space-2);
-  margin: var(--space-2) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }

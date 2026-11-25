@@ -44,6 +44,8 @@ describe('settings store', () => {
       jogKeys: 'game',
       skipHomeConfirm: [],
       jogFeed: {},
+      inspectorGroups: {},
+      inspectorTabs: {},
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

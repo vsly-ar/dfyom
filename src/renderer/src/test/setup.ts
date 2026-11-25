@@ -3,6 +3,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { resetInspectorMemory } from '../ui/InspectorGroup/memory'
 import { resetSessionSteps } from '../ui/QuantityInput/StepContext'
 import { setReducedMotion } from './media'
 
@@ -16,6 +17,8 @@ afterEach(() => {
   setReducedMotion(false)
   // a step chosen in one test's adjust panel is remembered for the session (DF104 rule 4)
   resetSessionSteps()
+  // an accordion opened in one test stays open for the session without a shell (DF110)
+  resetInspectorMemory()
   vi.restoreAllMocks()
 })
 

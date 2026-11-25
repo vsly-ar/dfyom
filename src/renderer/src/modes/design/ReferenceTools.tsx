@@ -27,6 +27,7 @@ import {
   QuantityInput,
   SegmentedControl,
   Select,
+  InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, type DesignPart } from './model'
@@ -448,8 +449,7 @@ export function ReferenceTools({
         />
       </Field>
 
-      <section className={styles['group']} aria-label={t.levels} aria-busy={levels.busy}>
-        <h3 className={styles['groupTitle']}>{t.levels}</h3>
+      <InspectorGroup title={t.levels} aria-busy={levels.busy}>
         {levels.answer === null ? (
           <p className={styles['muted']} role="status">
             {t.finding}
@@ -466,10 +466,9 @@ export function ReferenceTools({
         ) : (
           <ErrorMessage error={levels.answer.error} message={t.findFailed} />
         )}
-      </section>
+      </InspectorGroup>
 
-      <section className={styles['group']} aria-label={t.section} aria-busy={section.busy}>
-        <h3 className={styles['groupTitle']}>{t.section}</h3>
+      <InspectorGroup title={t.section} aria-busy={section.busy}>
         <QuantityInput
           label={t.depth}
           stepKind="depth"
@@ -554,10 +553,9 @@ export function ReferenceTools({
         ) : (
           <ErrorMessage error={created.error} message={t.createFailed} />
         )}
-      </section>
+      </InspectorGroup>
 
-      <section className={styles['group']} aria-label={t.holes} aria-busy={holes.busy}>
-        <h3 className={styles['groupTitle']}>{t.holes}</h3>
+      <InspectorGroup title={t.holes} aria-busy={holes.busy}>
         {holes.answer === null ? (
           <p className={styles['muted']} role="status">
             {t.finding}
@@ -592,7 +590,7 @@ export function ReferenceTools({
         ) : (
           <ErrorMessage error={holesAdded.error} message={t.addFailed} />
         )}
-      </section>
+      </InspectorGroup>
 
       <ReferenceCompare part={part} reference={ref} />
     </>

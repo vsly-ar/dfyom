@@ -10,7 +10,6 @@
 // Doc: docs/conventions/ui.md#hole-inspector, #section-illustration;
 // docs/modes/design-v0.4.md#implementation-f3
 import { useEffect, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -24,6 +23,8 @@ import {
   FieldIcon,
   Icon,
   IconButton,
+  InspectorGroup,
+  revealInInspector,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -159,7 +160,6 @@ export function HoleInspector({
   const [errors, setErrors] = useState<FieldError[]>([])
   const [focused, setFocused] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
-  const [defaultsOpen, setDefaultsOpen] = useState(false)
 
   const hole = holeRecord(feature)
   const units = part.units
@@ -246,16 +246,13 @@ export function HoleInspector({
   }
 
   // focusing a field (a click on its part of the drawing, "Edited through", "Fix in"): the
-  // Defaults group opens first when the field is in it
-  const openDefaults = () => flushSync(() => setDefaultsOpen(true))
+  // Defaults accordion opens first when the field is in it
   useEffect(() => {
     if (focus === null || focus.featureId !== feature.id) return
     ui.getState().setFeatureFocus(null)
     const field = focus.field
-    // after this render (flushSync may not run inside an effect)
-    requestAnimationFrame(() =>
-      focusFeatureField(rootRef.current, field, () => flushSync(() => setDefaultsOpen(true))),
-    )
+    // after this render (the reveal's flushSync may not run inside an effect)
+    requestAnimationFrame(() => focusFeatureField(rootRef.current, field))
   }, [focus, feature.id, ui])
 
   // ── the drawing ──
@@ -456,13 +453,13 @@ export function HoleInspector({
           onCommit={(name) => void update({ name }, 'name')}
         />
 
-        <Group title={h.groups.position}>
+        <InspectorGroup title={h.groups.position}>
           {onField}
           {centerField(0)}
           {centerField(1)}
-        </Group>
+        </InspectorGroup>
 
-        <Group title={h.groups.type}>
+        <InspectorGroup title={h.groups.type}>
           <div {...track('type')}>
             <Field label={h.type} kind="toggle" messages={typeMessages}>
               <SegmentedControl<HoleType>
@@ -478,9 +475,9 @@ export function HoleInspector({
               />
             </Field>
           </div>
-        </Group>
+        </InspectorGroup>
 
-        <Group title={h.groups.fastener}>
+        <InspectorGroup title={h.groups.fastener}>
           <div {...track('fastener')}>
             <Field label={h.size} messages={messagesAt('fastener')}>
               <Select
@@ -537,14 +534,14 @@ export function HoleInspector({
               ))}
             </p>
           ) : null}
-        </Group>
+        </InspectorGroup>
 
-        <Group title={h.groups.sizes}>
+        <InspectorGroup title={h.groups.sizes}>
           <SketchView
             sketch={sketch}
             highlighted={focused ?? undefined}
             onPartHover={setHovered}
-            onPartClick={(field) => focusFeatureField(rootRef.current, field, openDefaults)}
+            onPartClick={(field) => focusFeatureField(rootRef.current, field)}
             className={styles['holeSketch']}
           />
           {sizeField('diameter')}
@@ -572,31 +569,20 @@ export function HoleInspector({
           {hole.type === 'countersink' && hole.csMethod === 'stepped'
             ? sizeField('csStepdown')
             : null}
-          <section className={styles['holeDefaults']} data-defaults aria-label={h.groups.defaults}>
-            <h4 className={styles['groupTitle']}>
-              <button
-                type="button"
-                className={styles['disclosure']}
-                aria-expanded={defaultsOpen}
-                onClick={() => setDefaultsOpen(!defaultsOpen)}
-              >
-                <span className={styles['chevronInline']} data-open={defaultsOpen || undefined}>
-                  <Icon name="chevron-down" size="sm" />
-                </span>
-                {h.groups.defaults}
-              </button>
-            </h4>
-            {defaultsOpen ? (
-              <>
-                <p className={styles['muted']}>{h.defaultsHint}</p>
-                {sizeField('headSink')}
-              </>
-            ) : null}
-          </section>
-        </Group>
+          <InspectorGroup
+            title={h.groups.defaults}
+            level={4}
+            collapsible
+            rememberKey="hole.defaults"
+            data-defaults
+          >
+            <p className={styles['muted']}>{h.defaultsHint}</p>
+            {sizeField('headSink')}
+          </InspectorGroup>
+        </InspectorGroup>
 
         {owned.length > 0 ? (
-          <Group title={h.groups.tools}>
+          <InspectorGroup title={h.groups.tools}>
             {owned.map((op) => (
               <div key={op.id} {...track(`tool:${op.id}`)}>
                 <ToolField
@@ -612,17 +598,16 @@ export function HoleInspector({
                 ) : null}
               </div>
             ))}
-          </Group>
+          </InspectorGroup>
         ) : null}
 
         {unplaced.length > 0 ? (
-          <section className={styles['group']} aria-label={m.features.findings}>
-            <h3 className={styles['groupTitle']}>{m.features.findings}</h3>
+          <InspectorGroup title={m.features.findings}>
             <WarningList
               labels={warningLabels}
               items={unplaced.map((w) => warningView(w, part, undefined, select))}
             />
-          </section>
+          </InspectorGroup>
         ) : null}
       </div>
     </div>
@@ -631,42 +616,16 @@ export function HoleInspector({
 
 /**
  * Focuses a hole field by its path (`cbDepth`, `center.0`; `center` = its first): the control in
- * its `data-feature-field` wrapper. `openDefaults` renders the collapsed Defaults group first
- * when the field is not shown (head sink).
+ * its `data-feature-field` wrapper. A field in the closed Defaults accordion (head sink) is
+ * revealed first (DF110: the accordion opens itself).
  */
-function focusFeatureField(
-  root: HTMLElement | null,
-  field: string,
-  openDefaults: () => void,
-): void {
+function focusFeatureField(root: HTMLElement | null, field: string): void {
   if (root === null) return
-  const find = () => {
-    const wrappers = [...root.querySelectorAll<HTMLElement>('[data-feature-field]')]
-    return (
-      wrappers.find((w) => w.dataset['featureField'] === field) ??
-      wrappers.find((w) => field.startsWith(`${w.dataset['featureField']}.`)) ??
-      wrappers.find((w) => w.dataset['featureField']?.startsWith(`${field}.`))
-    )
-  }
-  let target = find()
-  if (target === undefined && field === 'headSink') {
-    openDefaults()
-    target = find()
-  }
+  const wrappers = [...root.querySelectorAll<HTMLElement>('[data-feature-field]')]
+  const target =
+    wrappers.find((w) => w.dataset['featureField'] === field) ??
+    wrappers.find((w) => field.startsWith(`${w.dataset['featureField']}.`)) ??
+    wrappers.find((w) => w.dataset['featureField']?.startsWith(`${field}.`))
+  revealInInspector(target)
   target?.querySelector<HTMLElement>('input, [role="combobox"], button[data-state="on"]')?.focus()
-}
-
-function Group({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section className={styles['group']} aria-label={title}>
-      <h3 className={styles['groupTitle']}>{title}</h3>
-      {children}
-    </section>
-  )
 }

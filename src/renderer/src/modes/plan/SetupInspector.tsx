@@ -45,6 +45,7 @@ import {
   SegmentedControl,
   WarningList,
   type FieldMessage,
+  InspectorGroup,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { DirectionIcon } from './DirectionIcon'
@@ -329,8 +330,7 @@ export function SetupInspector({
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         <Workholding doc={doc} plan={plan} setup={setup} />
         {mine.length > 0 ? (
-          <section aria-label={m.findings} className={styles['warnings']}>
-            <h3 className={styles['groupTitle']}>{m.findings}</h3>
+          <InspectorGroup title={m.findings}>
             <WarningList
               labels={planWarningLabels}
               items={mine.map((w, i) => {
@@ -354,7 +354,7 @@ export function SetupInspector({
               })}
               empty=""
             />
-          </section>
+          </InspectorGroup>
         ) : null}
       </div>
     </div>

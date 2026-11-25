@@ -43,6 +43,7 @@ import {
   type AnchorValue,
   type FieldMessage,
   type WarningView,
+  InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
@@ -405,8 +406,7 @@ function ReferenceBody({
             />
           </Field>
 
-          <section className={styles['group']} aria-label={t.scaleGroup}>
-            <h3 className={styles['groupTitle']}>{t.scaleGroup}</h3>
+          <InspectorGroup title={t.scaleGroup}>
             <QuantityInput
               label={t.scale}
               stepKind="scale"
@@ -439,10 +439,9 @@ function ReferenceBody({
               messages={messagesAt('scale')}
             />
             {anchorField}
-          </section>
+          </InspectorGroup>
 
-          <section className={styles['group']} aria-label={t.rotation}>
-            <h3 className={styles['groupTitle']}>{t.rotation}</h3>
+          <InspectorGroup title={t.rotation}>
             {AXES.map((axis) => (
               <div key={axis} className={styles['turnRow']}>
                 <QuantityInput
@@ -471,10 +470,9 @@ function ReferenceBody({
                 </span>
               </div>
             ))}
-          </section>
+          </InspectorGroup>
 
-          <section className={styles['group']} aria-label={t.position}>
-            <h3 className={styles['groupTitle']}>{t.position}</h3>
+          <InspectorGroup title={t.position}>
             {AXES.map((axis) => (
               <QuantityInput
                 key={axis}
@@ -491,18 +489,17 @@ function ReferenceBody({
                 {...(resolver ? { resolver } : {})}
               />
             ))}
-          </section>
+          </InspectorGroup>
 
           <ReferenceTools part={part} reference={ref} />
 
-          <section aria-label={t.warnings} className={styles['warnings']}>
-            <h3 className={styles['groupTitle']}>{t.warnings}</h3>
+          <InspectorGroup title={t.warnings}>
             <WarningList
               labels={warningLabels}
               items={warnings.map(warningView)}
               empty={t.noWarnings}
             />
-          </section>
+          </InspectorGroup>
         </>
       )}
     </div>

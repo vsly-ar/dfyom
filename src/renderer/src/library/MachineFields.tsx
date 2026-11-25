@@ -6,9 +6,17 @@ import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
-import { Field, SegmentedControl, Select, Switch, type FieldIconName, type StepKind } from '../ui'
+import {
+  Field,
+  InspectorGroup,
+  SegmentedControl,
+  Select,
+  Switch,
+  type FieldIconName,
+  type StepKind,
+} from '../ui'
 import { AXES, type Axis, type MachineDraft, type QDto } from './form'
-import { FixedField, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
+import { FixedField, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import styles from './LibraryForm.module.css'
 
 const m = libraryMessages.machine
@@ -120,7 +128,7 @@ export function MachineFields({
     label: (axis: string) => string,
     note: string,
   ) => (
-    <Group title={title}>
+    <InspectorGroup title={title}>
       {AXES.map((a, i) =>
         q(
           `${field}.${a}`,
@@ -137,14 +145,14 @@ export function MachineFields({
           {e.text}
         </p>
       ))}
-    </Group>
+    </InspectorGroup>
   )
 
   const fixed = full ? (
-    <Group title={g.controller}>
+    <InspectorGroup title={g.controller}>
       <FixedField label={m.controller} value={m.controllerValue} />
       <FixedField label={m.toolChanger} value={m.toolChangerValue} />
-    </Group>
+    </InspectorGroup>
   ) : null
 
   return (
@@ -154,10 +162,12 @@ export function MachineFields({
         messages={messages('name')}
         onChange={(name) => set({ name })}
       />
-      <Group title={m.travel}>{axes('travel', 'length', m.travelAxis)}</Group>
-      <Group title={m.maxFeed}>{axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}</Group>
+      <InspectorGroup title={m.travel}>{axes('travel', 'length', m.travelAxis)}</InspectorGroup>
+      <InspectorGroup title={m.maxFeed}>
+        {axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}
+      </InspectorGroup>
       {/* DF68: the Z headroom estimate's distances, in both variants (a safety check) */}
-      <Group title={m.zHeight}>
+      <InspectorGroup title={m.zHeight}>
         {q(
           'noseToTable',
           m.noseToTable,
@@ -196,9 +206,9 @@ export function MachineFields({
           (probePlateThickness) => set({ probePlateThickness }),
           { optional: true, info: m.probePlateThicknessNote },
         )}
-      </Group>
+      </InspectorGroup>
       {full ? (
-        <Group title={m.homing}>
+        <InspectorGroup title={m.homing}>
           <Field
             label={m.homingCorner}
             messages={messages('homingCorner')}
@@ -224,13 +234,13 @@ export function MachineFields({
             checked={values.softLimits ?? true}
             onCheckedChange={(softLimits) => set({ softLimits })}
           />
-        </Group>
+        </InspectorGroup>
       ) : null}
       {full
         ? scalarAxes('acceleration', m.acceleration, m.accelerationAxis, m.accelerationNote)
         : null}
       {full ? (
-        <Group title={m.motion}>
+        <InspectorGroup title={m.motion}>
           {q(
             'junctionDeviation',
             m.junctionDeviation,
@@ -249,9 +259,9 @@ export function MachineFields({
             (arcTolerance) => set({ arcTolerance }),
             { optional: true, info: m.arcToleranceNote },
           )}
-        </Group>
+        </InspectorGroup>
       ) : null}
-      <Group title={m.spindle}>
+      <InspectorGroup title={m.spindle}>
         <Choice caption={m.control}>
           <SegmentedControl<'manual' | 'gcode'>
             label={m.control}
@@ -313,7 +323,7 @@ export function MachineFields({
           (power) => spindle({ power }),
           { optional: true, info: m.powerNote },
         )}
-      </Group>
+      </InspectorGroup>
       <Field label={m.rigidity} messages={messages('rigidity')}>
         <Select
           options={RIGIDITY_PRESETS.map((r) => ({ value: r, label: m.rigidities[r] }))}
@@ -335,13 +345,13 @@ export function MachineFields({
       {full ? scalarAxes('stepsPerMm', m.stepsPerMm, m.stepsPerMmAxis, m.stepsPerMmNote) : null}
       {fixed}
       {full ? (
-        <Group title={g.notes}>
+        <InspectorGroup title={g.notes}>
           <NotesField
             value={values.notes}
             messages={messages('notes')}
             onChange={(notes) => set({ notes })}
           />
-        </Group>
+        </InspectorGroup>
       ) : null}
     </>
   )

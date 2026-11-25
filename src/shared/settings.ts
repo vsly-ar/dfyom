@@ -76,6 +76,14 @@ const fields = {
   skipHomeConfirm: z.array(z.string().min(1)).max(1000),
   /** Jog feed (mm/min) per library machine id: the jog feed slider's last value (DF88). */
   jogFeed: z.record(z.string().min(1), z.number().positive().finite()),
+  /**
+   * Open state of inspector accordions and More rows per inspector kind and group id
+   * (`pocket.corners`: true = open), written when the user toggles one (DF110,
+   * docs/conventions/inspector-layout.md#accordions). Not in the dialog.
+   */
+  inspectorGroups: z.record(z.string().min(1).max(100), z.boolean()),
+  /** Selected tab per inspector kind (`plan.op` → `feeds`), as `inspectorGroups` (DF110). */
+  inspectorTabs: z.record(z.string().min(1).max(100), z.string().min(1).max(100)),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -93,6 +101,8 @@ export const AppSettingsSchema = z.object({
   jogKeys: fields.jogKeys.default('game'),
   skipHomeConfirm: fields.skipHomeConfirm.default([]),
   jogFeed: fields.jogFeed.default({}),
+  inspectorGroups: fields.inspectorGroups.default({}),
+  inspectorTabs: fields.inspectorTabs.default({}),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -103,7 +113,10 @@ export type AppSettingsPatch = Readonly<z.input<typeof AppSettingsPatchSchema>>
 
 export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 
-/** Applies a validated patch: plain fields replace, `layouts`, `sidePanels` and `jogFeed` merge by key. */
+/**
+ * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
+ * `inspectorGroups` and `inspectorTabs` merge by key.
+ */
 export function mergeSettings(
   current: AppSettings,
   patch: z.output<typeof AppSettingsPatchSchema>,
@@ -122,5 +135,7 @@ export function mergeSettings(
     jogKeys: patch.jogKeys ?? current.jogKeys,
     skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
     jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
+    inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
+    inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },
   }
 }

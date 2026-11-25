@@ -63,3 +63,39 @@
 .panel:focus-visible {
   outline-offset: 4px;
 }
+
+/* inspector use (DF110): the strip stays at the top of the scrolling body */
+.list[data-sticky] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* the side panels' surface (AppShell .side) */
+  background: var(--bg-app);
+}
+
+/* a problem in the tab's fields: a small dot after the label */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-1);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.dot[data-severity='error'] {
+  background: var(--danger);
+}
+
+.dot[data-severity='warning'] {
+  background: var(--warning);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

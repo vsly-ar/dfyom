@@ -27,6 +27,7 @@ import {
   FieldInput,
   Icon,
   IconButton,
+  InspectorGroup,
   QuantityInput,
   SegmentedControl,
   Select,
@@ -52,7 +53,7 @@ import {
 import { defaultUnit, dfmNames } from './model'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
-import { Group, ParamField, warningPath, type OperationFieldsContext } from './OperationFields'
+import { ParamField, warningPath, type OperationFieldsContext } from './OperationFields'
 import { useDesignEvaluation } from './useDesign'
 
 const t = chamferMessages
@@ -117,11 +118,11 @@ export function ChamferInspector({
 
   return (
     <>
-      <Group title={t.groups.edge} level={level}>
+      <InspectorGroup title={t.groups.edge} level={level}>
         {target('edgeOf', <EdgeField ctx={ctx} op={op} />)}
         <SideField ctx={ctx} />
-      </Group>
-      <Group title={t.groups.chamfer} level={level}>
+      </InspectorGroup>
+      <InspectorGroup title={t.groups.chamfer} level={level}>
         {sketch !== undefined ? (
           <div className={own['section']} data-readonly={ctx.readOnly || undefined}>
             <SketchView
@@ -157,7 +158,7 @@ export function ChamferInspector({
         )}
         {target('diameter', <DiameterField ctx={ctx} />)}
         <CornerLiftField ctx={ctx} />
-      </Group>
+      </InspectorGroup>
       <LoopsGroup ctx={ctx} level={level} />
       {tool}
     </>
@@ -383,7 +384,7 @@ function LoopsGroup({
   }
   const errors = ctx.errors.filter((e) => e.path === 'loops')
   return (
-    <Group title={t.loops} level={level}>
+    <InspectorGroup title={t.loops} level={level}>
       <ul className={own['loops']} aria-label={t.loops}>
         {labels.map((label, i) => (
           <li key={i}>
@@ -402,6 +403,6 @@ function LoopsGroup({
           {e.text}
         </p>
       ))}
-    </Group>
+    </InspectorGroup>
   )
 }

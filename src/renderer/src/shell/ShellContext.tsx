@@ -24,6 +24,11 @@ import { createReferenceMeshes, type ReferenceMeshes } from '../state/reference-
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
+import {
+  inspectorMemory,
+  InspectorMemoryProvider,
+  type InspectorMemory,
+} from '../ui/InspectorGroup/memory'
 import { StepMemoryProvider, type StepMemory } from '../ui/QuantityInput/StepContext'
 import { createProjectFiles, type ProjectFiles } from './project/files'
 
@@ -104,9 +109,23 @@ export function ShellProvider({
     get: (key) => shell.ui.getState().steps[key],
     set: (key, step) => shell.ui.getState().rememberStep(key, step),
   }))
+  // accordions, More rows and tabs remember their state in the app settings, across launches
+  // (docs/conventions/inspector-layout.md#accordions)
+  const [inspector] = useState<InspectorMemory>(() =>
+    inspectorMemory({
+      groups: () => shell.settings.getState().settings.inspectorGroups,
+      tabs: () => shell.settings.getState().settings.inspectorTabs,
+      setGroup: (key, open) =>
+        shell.settings.getState().update({ inspectorGroups: { [key]: open } }),
+      setTab: (key, value) => shell.settings.getState().update({ inspectorTabs: { [key]: value } }),
+      subscribe: (onChange) => shell.settings.subscribe(onChange),
+    }),
+  )
   return (
     <ShellContext.Provider value={shell}>
-      <StepMemoryProvider memory={stepMemory}>{children}</StepMemoryProvider>
+      <StepMemoryProvider memory={stepMemory}>
+        <InspectorMemoryProvider memory={inspector}>{children}</InspectorMemoryProvider>
+      </StepMemoryProvider>
     </ShellContext.Provider>
   )
 }

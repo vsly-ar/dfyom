@@ -3,9 +3,9 @@
 // its own short form. Doc: docs/conventions/ui-library-window.md#layout
 import { MATERIAL_CLASSES } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
-import { Field, FieldInput, Select } from '../ui'
+import { Field, FieldInput, InspectorGroup, Select } from '../ui'
 import type { StockDraft } from './form'
-import { FixedField, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
+import { FixedField, NameField, NotesField, QuantityField, type FormProps } from './fields'
 
 const m = libraryMessages.stock
 const g = libraryMessages.window.groups
@@ -56,13 +56,13 @@ export function StockFields({
         messages={messages('name')}
         onChange={(name) => set({ name })}
       />
-      <Group title={g.size}>
+      <InspectorGroup title={g.size}>
         <FixedField label={m.shape} value={libraryMessages.window.shapes[values.shape]} />
         {size('length', 'stock-length')}
         {size('width', 'stock-width')}
         {size('thickness', 'stock-thickness', m.thicknessNote)}
-      </Group>
-      <Group title={g.material}>
+      </InspectorGroup>
+      <InspectorGroup title={g.material}>
         <Field label={m.materialName} messages={messages('material.name')}>
           <FieldInput
             value={values.material.name}
@@ -77,14 +77,14 @@ export function StockFields({
             onValueChange={(c) => set({ material: { ...values.material, class: c } })}
           />
         </Field>
-      </Group>
-      <Group title={g.notes}>
+      </InspectorGroup>
+      <InspectorGroup title={g.notes}>
         <NotesField
           value={values.notes}
           messages={messages('notes')}
           onChange={(notes) => set({ notes })}
         />
-      </Group>
+      </InspectorGroup>
     </>
   )
 }
