@@ -91,15 +91,27 @@ export function operationUnits(part: Pick<DesignPart, 'dto' | 'loaded'>): Operat
   if (l === undefined || l.part.operations.length !== ops.length)
     return blockUnits(ops, features, 0, ops.length)
   const models = l.part.operations
+  // outer spans first where two start together (Clones v2: a group holding a Clones, DF40)
   const spans = l.features
     .filter((lf) => lf.spec.nested !== undefined)
     .map((lf) => ({ id: lf.feature.id, ...featureSpan(models, lf) }))
     .filter((sp) => sp.end > sp.start)
-    .toSorted((x, y) => x.start - y.start)
+    .toSorted((x, y) => x.start - y.start || y.end - x.end)
+  return spanUnitsIn(ops, features, spans, 0, ops.length)
+}
+
+/** The units of `[from, to)`: spans inside it as feature units (their own spans nested), the rest as blocks. */
+function spanUnitsIn(
+  ops: readonly OperationDTO[],
+  features: readonly FeatureDTO[],
+  spans: readonly { id: string; start: number; ownedStart: number; end: number }[],
+  from: number,
+  to: number,
+): OperationUnit[] {
   const out: OperationUnit[] = []
-  let i = 0
+  let i = from
   for (const sp of spans) {
-    if (sp.start < i) continue // nested in an earlier span (not in v0.4: no Clones of Clones)
+    if (sp.start < i || sp.end > to) continue // outside, or nested in an earlier span
     out.push(...blockUnits(ops, features, i, sp.start))
     const feature = features.find((f) => f.id === sp.id)
     if (feature === undefined) continue
@@ -108,15 +120,26 @@ export function operationUnits(part: Pick<DesignPart, 'dto' | 'loaded'>): Operat
       id: sp.id,
       feature,
       ops: ops.slice(sp.ownedStart, sp.end),
-      nested: blockUnits(ops, features, sp.start, sp.ownedStart),
+      nested: spanUnitsIn(
+        ops,
+        features,
+        spans.filter((x) => x !== sp),
+        sp.start,
+        sp.ownedStart,
+      ),
       start: sp.start,
       ownedStart: sp.ownedStart,
       end: sp.end,
     })
     i = sp.end
   }
-  out.push(...blockUnits(ops, features, i, ops.length))
+  out.push(...blockUnits(ops, features, i, to))
   return out
+}
+
+/** Every operation of a unit's span in design order: nested ones (recursively), then owned. */
+export function unitOperations(u: OperationUnit): OperationDTO[] {
+  return u.kind === 'operation' ? [u.op] : [...u.nested.flatMap(unitOperations), ...u.ops]
 }
 
 /** The instance rows of a Clones feature (ui.md § Clones in the navigator), from its path. */
@@ -462,10 +485,26 @@ function widthOf(op: OperationDTO, ops: readonly OperationDTO[]): number | undef
       : undefined
 }
 
+/** The u extent (mm) of operations' centres: a Clones' instances spread along u. */
+function centreSpread(ops: readonly OperationDTO[]): number {
+  const us = ops.flatMap((o) => {
+    const c =
+      o.kind === 'drilling'
+        ? o.center
+        : o.kind === 'facing' || o.kind === 'chamfer'
+          ? undefined
+          : o.shape.center
+    const u = c === undefined ? undefined : mmOf(c[0])
+    return u === undefined ? [] : [u]
+  })
+  return us.length === 0 ? 0 : Math.max(...us) - Math.min(...us)
+}
+
 /**
- * The Clones source of the selection (`selected`: a feature or operation id): a feature (not
- * Clones) or an operation that can be a source; an owned operation stands for its feature. The
- * reasons are the source rule's (design-v0.4.md § Clones in v0.4); the core checks the rest.
+ * The Clones source of the selection (`selected`: a feature or operation id): a feature (a Clones
+ * too, Clones v2 G2: the core adds its source) or an operation that can be a source; an owned
+ * operation stands for its feature. The reasons are the source rule's (design-v0.4.md § Clones in
+ * v0.4); the core checks the rest.
  */
 export function clonesSource(
   part: Pick<DesignPart, 'dto' | 'loaded'>,
@@ -486,14 +525,21 @@ export function clonesSource(
   const featureId = op !== undefined ? op.featureId : selected
   const feature = part.dto.features?.find((f) => f.id === featureId)
   if (feature !== undefined) {
-    if (feature.kind === 'clones') return no(c.select)
     const taken = nestedIn(feature.id)
     if (taken !== undefined) return no(c.taken(feature.name, taken.feature.name))
-    const owned = part.dto.operations.filter((o) => o.featureId === feature.id)
+    const unit = units.find((u) => u.id === feature.id)
+    const owned =
+      unit === undefined
+        ? part.dto.operations.filter((o) => o.featureId === feature.id)
+        : unitOperations(unit)
     const widths = owned
       .map((o) => widthOf(o, part.dto.operations))
       .filter((w): w is number => w !== undefined)
-    return { ok: true, source: { featureId: feature.id }, width: Math.max(0, ...widths) }
+    return {
+      ok: true,
+      source: { featureId: feature.id },
+      width: centreSpread(owned) + Math.max(0, ...widths),
+    }
   }
   if (op === undefined) return no(c.select)
   if (op.kind === 'facing') return no(c.facing)

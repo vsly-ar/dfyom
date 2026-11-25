@@ -10,6 +10,8 @@ import {
   CLONES_MAX,
   featurePath,
   mapRow,
+  sourceMembers,
+  sourceOf,
   sourceOperations,
   type CloneRowKind,
   type Clones,
@@ -25,7 +27,12 @@ import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { ClonesRowArg } from '../../state/ui-store'
 import type { IconName } from '../../ui'
 import type { ClonePathData } from '../../viewport/clone-path'
-import { operationUnits, type ClonesSourceChoice } from './feature-view'
+import {
+  operationUnits,
+  unitOperations,
+  type ClonesSourceChoice,
+  type OperationUnit,
+} from './feature-view'
 import { quantityOf, type DesignPart } from './model'
 
 /** A path row as `design.clones.add` / `.update` take it: quantities as their source text. */
@@ -155,12 +162,67 @@ export function firstRowGap(part: Pick<DesignPart, 'dto' | 'doc' | 'units'>, sou
   return Math.max(MIN_GAP_MM[part.units], ...tools)
 }
 
-/** The source operations' records (a feature source: its owned operations). */
+/** The source operations' records (a feature member: its owned operations). */
 function sourceDtos(part: Pick<DesignPart, 'dto'>, source: ClonesSource): OperationDTO[] {
-  if ('featureId' in source)
-    return part.dto.operations.filter((o) => o.featureId === source.featureId)
-  const ids = new Set(source.operationIds)
-  return part.dto.operations.filter((o) => ids.has(o.id))
+  const m = sourceMembers(source)
+  const ids = new Set(m.operationIds)
+  const features = new Set(m.featureIds)
+  return part.dto.operations.filter((o) => ids.has(o.id) || features.has(o.featureId ?? ''))
+}
+
+/** Every id a source names: feature ids, then operation ids (the inspector's resolver start). */
+export function sourceIdsOf(source: ClonesSource): string[] {
+  const m = sourceMembers(source)
+  return [...m.featureIds, ...m.operationIds]
+}
+
+/**
+ * The source without member `unit` (Clones v2, G5): a member Clones goes with its own source
+ * members (the units nested in it); undefined when nothing would be left.
+ */
+export function sourceWithout(source: ClonesSource, unit: OperationUnit): ClonesSource | undefined {
+  const drop = new Set<string>()
+  const walk = (u: OperationUnit) => {
+    drop.add(u.id)
+    if (u.kind === 'feature') u.nested.forEach(walk)
+  }
+  walk(unit)
+  const m = sourceMembers(source)
+  const featureIds = m.featureIds.filter((id) => !drop.has(id))
+  const operationIds = m.operationIds.filter((id) => !drop.has(id))
+  return featureIds.length + operationIds.length === 0
+    ? undefined
+    : sourceOf(featureIds, operationIds)
+}
+
+/** The source with feature or operation `id` added (G1). */
+export function sourceWith(source: ClonesSource, id: string, feature: boolean): ClonesSource {
+  const m = sourceMembers(source)
+  return feature
+    ? sourceOf([...m.featureIds, id], m.operationIds)
+    : sourceOf(m.featureIds, [...m.operationIds, id])
+}
+
+/**
+ * Features that could join a Clones' source ("Add to source…", G9): top-level holes, patterns and
+ * Clones on its face, not itself and not held by another Clones.
+ */
+export function addableFeatures(
+  part: Pick<DesignPart, 'dto' | 'loaded'>,
+  feature: FeatureDTO,
+): FeatureDTO[] {
+  const members = new Set(sourceMembers(clonesSourceOf(feature)).featureIds)
+  return operationUnits(part).flatMap((u) =>
+    u.kind === 'feature' &&
+    u.id !== feature.id &&
+    !members.has(u.id) &&
+    unitOperations(u).every((o) => {
+      const on = o.on ?? 'stock.top'
+      return on === feature.on || !on.startsWith('stock.')
+    })
+      ? [u.feature]
+      : [],
+  )
 }
 
 /**

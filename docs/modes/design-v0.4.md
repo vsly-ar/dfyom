@@ -153,6 +153,7 @@ Lengths, flutes, material and presets as for other types. Generalized: `{ kind: 
 - **Rows:** `grid`, `offset`, `polar`, `arc`, `point` as drafted, plus the **`along`** row (positions at a spacing or a count along a named shape's path, [features.md § Properties](features.md#properties); [§ Implementation (F6)](#implementation-f6)).
 - **Positions of instances** are values: the evaluated source position plus the row offset, rewritten on every regeneration; expressions stay on the source only.
 - **Plan:** nothing Clones-specific ([features.md § Plan and cut order](features.md#plan-and-cut-order)).
+- **Groups and Clones of Clones** came with hardening DF40: [features.md § Clones v2](features.md#clones-v2-groups-df40).
 
 ## Commands and queries (v0.4)
 

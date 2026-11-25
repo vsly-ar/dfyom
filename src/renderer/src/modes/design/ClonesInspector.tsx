@@ -33,6 +33,7 @@ import {
 import type { ClonePathData } from '../../viewport/clone-path'
 import { CloneRowList, type AxisNames } from './CloneRowList'
 import {
+  addableFeatures,
   clonesSourceOf,
   draftSource,
   featurePathData,
@@ -41,13 +42,16 @@ import {
   pointOf,
   readoutOf,
   rowArgsOf,
+  sourceIdsOf,
+  sourceWith,
+  sourceWithout,
   toggleSkip,
   type Readout,
   type RowArg,
 } from './clones-view'
 import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
-import { operationUnits } from './feature-view'
+import { operationUnits, unitOperations } from './feature-view'
 import { NameField } from './NameField'
 import { OperationFields, placeErrors, type FieldError } from './OperationFields'
 import { axisNames, surfaceDirection, type DesignPart } from './model'
@@ -362,7 +366,7 @@ export function ClonesInspector({
   const unit = operationUnits(part).find((u) => u.id === feature.id)
   const nested = unit?.kind === 'feature' ? unit.nested : []
   const owned = unit?.kind === 'feature' ? unit.ops : []
-  const sourceIds = 'featureId' in source ? [source.featureId] : source.operationIds
+  const sourceIds = sourceIdsOf(source)
   const resolver = part.table?.resolver(sourceIndex(part, sourceIds))
   const own = warnings.warnings.filter((w) => w.operation === feature.id)
   const ownedIds = new Set(owned.map((o) => o.id))
@@ -407,8 +411,15 @@ export function ClonesInspector({
     for (const n of numbers) if (!isSkipped(data, n)) next = toggleSkip(next, data, n)
     void update({ rows: next }, 'rows')
   }
-  const addable =
-    'operationIds' in source ? addableToSource(part, feature, source.operationIds) : []
+  // Clones v2 (G9): plain operations, then holes, patterns and Clones on the face
+  const addable = [
+    ...addableToSource(
+      part,
+      feature,
+      nested.flatMap(unitOperations).map((o) => o.id),
+    ).map((o) => ({ id: o.id, label: o.name, feature: false })),
+    ...addableFeatures(part, feature).map((x) => ({ id: x.id, label: x.name, feature: true })),
+  ]
 
   return (
     <div className={styles['inspector']}>
@@ -425,7 +436,8 @@ export function ClonesInspector({
           <ul className={styles['cloneSources']} aria-label={c.sourceList}>
             {nested.map((n) => {
               const label = n.kind === 'operation' ? n.op.name : n.feature.name
-              const removable = 'operationIds' in source && source.operationIds.length > 1
+              // a member Clones goes with its own source (G5); the last member stays
+              const next = nested.length > 1 ? sourceWithout(source, n) : undefined
               return (
                 <li key={n.id} className={styles['cloneSourceItem']}>
                   <button
@@ -435,50 +447,36 @@ export function ClonesInspector({
                   >
                     {label}
                   </button>
-                  {'operationIds' in source ? (
-                    <IconButton
-                      label={c.removeFromSource(label)}
-                      icon={<Icon name="close" />}
-                      {...(removable ? {} : { 'aria-disabled': true, title: c.removeLastSource })}
-                      onClick={() =>
-                        removable
-                          ? void update(
-                              {
-                                source: {
-                                  operationIds: source.operationIds.filter((x) => x !== n.id),
-                                },
-                              },
-                              'source',
-                            )
-                          : undefined
-                      }
-                    />
-                  ) : null}
+                  <IconButton
+                    label={c.removeFromSource(label)}
+                    icon={<Icon name="close" />}
+                    {...(next !== undefined
+                      ? {}
+                      : { 'aria-disabled': true, title: c.removeLastSource })}
+                    onClick={() =>
+                      next !== undefined ? void update({ source: next }, 'source') : undefined
+                    }
+                  />
                 </li>
               )
             })}
           </ul>
-          {'operationIds' in source ? (
-            <Menu
-              label={c.addToSource}
-              items={
-                addable.length > 0
-                  ? addable.map((o) => ({
-                      label: o.name,
-                      onSelect: () =>
-                        void update(
-                          { source: { operationIds: [...source.operationIds, o.id] } },
-                          'source',
-                        ),
-                    }))
-                  : [{ label: c.noneToAdd, onSelect: () => {}, disabledReason: c.noneToAdd }]
-              }
-            >
-              <Button size="sm" icon={<Icon name="add" />}>
-                {c.addToSource}
-              </Button>
-            </Menu>
-          ) : null}
+          <Menu
+            label={c.addToSource}
+            items={
+              addable.length > 0
+                ? addable.map((o) => ({
+                    label: o.label,
+                    onSelect: () =>
+                      void update({ source: sourceWith(source, o.id, o.feature) }, 'source'),
+                  }))
+                : [{ label: c.noneToAdd, onSelect: () => {}, disabledReason: c.noneToAdd }]
+            }
+          >
+            <Button size="sm" icon={<Icon name="add" />}>
+              {c.addToSource}
+            </Button>
+          </Menu>
           {errors
             .filter((e) => e.path.startsWith('source'))
             .map((e, i) => (
@@ -556,9 +554,7 @@ export function CloneInstanceInspector({
   const unit = operationUnits(part).find((u) => u.id === feature.id)
   const nested = unit?.kind === 'feature' ? unit.nested : []
   // the source operations in design order (a feature source: its owned operations)
-  const sourceOps: OperationDTO[] = nested.flatMap((u) =>
-    u.kind === 'operation' ? [u.op] : [...u.ops],
-  )
+  const sourceOps: OperationDTO[] = nested.flatMap(unitOperations)
   const instanceOp = (src: OperationDTO) =>
     part.dto.operations.find((o) => o.id === `${instanceId(feature.id, n)}_${src.id}`)
   const units = part.units

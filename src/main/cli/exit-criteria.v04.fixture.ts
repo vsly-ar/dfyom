@@ -58,7 +58,7 @@ const sheet = (name: string, values: Record<string, string>) => ({
 })
 
 /** Library tools (LID_TOOLS), with plywood presets (quantity strings, mm). */
-const TOOLS = [
+export const TOOLS = [
   {
     name: LID_TOOLS.profile.name,
     type: LID_TOOLS.profile.type,
@@ -109,7 +109,7 @@ const TOOLS = [
 ] as const
 
 /** A GRBL router; one setup on a 6 mm board, so a 100 mm Z will do. */
-const MACHINE = {
+export const MACHINE = {
   name: 'Router',
   controller: 'grbl',
   travel: { x: '800', y: '800', z: '100' },

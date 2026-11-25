@@ -302,6 +302,8 @@ export interface FeatureBuildContext {
   readonly on: string
   /** The operations before the feature's block. */
   readonly before: readonly Operation[]
+  /** The part's features before the edit (Clones v2 joins a member Clones' source, G2). */
+  readonly features: readonly LoadedFeature[]
 }
 
 /** A feature kind with its command parameters (`design.<kind>.add` / `.update`). */
@@ -378,6 +380,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
         name,
         on: args.on ?? defaultOn(ops),
         before: ops,
+        features: l.features,
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
@@ -435,6 +438,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
         name: args.name ?? prev.name,
         on: args.on ?? prev.on,
         before: l.part.operations.slice(0, start),
+        features: l.features,
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
