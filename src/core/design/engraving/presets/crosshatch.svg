@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DFYOM engraved-pattern preset "Crosshatch": diagonals, tile 10 × 10, square lattice, gap 0
+     Depth: stroke darkness (black = deepest, light grey = shallow); data-level (0..1, one value
+     or stops start → end) overrides the colour. Units: mm. Created for DFYOM, GPL-3.0-or-later. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"
+     fill="none" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 0 0 L 10 10" stroke="#333333"/>
+  <path d="M 10 0 L 0 10" stroke="#333333"/>
+</svg>

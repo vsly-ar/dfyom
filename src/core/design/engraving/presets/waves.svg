@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DFYOM engraved-pattern preset "Waves": sine waves, tile 20 × 10 on a square lattice, gap 0
+     Depth: stroke darkness (black = deepest, light grey = shallow); data-level (0..1, one value
+     or stops start → end) overrides the colour. Units: mm. Created for DFYOM, GPL-3.0-or-later. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"
+     fill="none" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 0 5 C 0.417 5.319, 0.833 5.662, 1.25 5.957 C 1.667 6.251, 2.083 6.542, 2.5 6.768 C 2.917 6.993, 3.333 7.188, 3.75 7.31 C 4.167 7.432, 4.583 7.5, 5 7.5 C 5.417 7.5, 5.833 7.432, 6.25 7.31 C 6.667 7.188, 7.083 6.993, 7.5 6.768 C 7.917 6.542, 8.333 6.251, 8.75 5.957 C 9.167 5.662, 9.583 5.319, 10 5 C 10.417 4.681, 10.833 4.338, 11.25 4.043 C 11.667 3.749, 12.083 3.458, 12.5 3.232 C 12.917 3.007, 13.333 2.812, 13.75 2.69 C 14.167 2.568, 14.583 2.5, 15 2.5 C 15.417 2.5, 15.833 2.568, 16.25 2.69 C 16.667 2.812, 17.083 3.007, 17.5 3.232 C 17.917 3.458, 18.333 3.749, 18.75 4.043 C 19.167 4.338, 19.583 4.681, 20 5" stroke="#000000"/>
+</svg>

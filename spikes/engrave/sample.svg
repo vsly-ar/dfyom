@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Spike E0 sample: depth encoded in stroke colour (darker = deeper), a chain of
+     differently coloured pieces, a data-level start→end ramp and a closed circle. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="60mm" viewBox="0 0 100 60"
+     fill="none" stroke-linecap="round">
+  <path id="wave" d="M 10 15 C 25 0, 35 30, 50 15 S 75 0, 90 15" stroke="#000000" stroke-width="1"/>
+  <path id="seg1" d="M 10 35 L 35 35" stroke="#000"/>
+  <path id="seg2" d="M 35 35 A 10 10 0 0 0 55 35" stroke="#808080"/>
+  <path id="seg3" d="M 55 35 L 90 35" stroke="rgb(192,192,192)"/>
+  <path id="ramp" d="M 10 52 L 60 52" stroke="#333" data-level="0.1 1"/>
+  <circle id="ring" cx="78" cy="50" r="7" style="stroke:#404040"/>
+</svg>

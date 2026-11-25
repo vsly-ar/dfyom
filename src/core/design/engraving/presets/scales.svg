@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DFYOM engraved-pattern preset "Scales": fish scales, tile 12 × 6, staggered lattice, gap 0
+     Depth: stroke darkness (black = deepest, light grey = shallow); data-level (0..1, one value
+     or stops start → end) overrides the colour. Units: mm. Created for DFYOM, GPL-3.0-or-later. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="12mm" height="6mm" viewBox="0 0 12 6"
+     fill="none" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 0 0 A 6 6 0 0 0 12 0" stroke="#000000"/>
+</svg>

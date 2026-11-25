@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DFYOM engraved-pattern preset "Chevrons": nested zigzags, tile 20 × 10, square lattice, gap 0
+     Depth: stroke darkness (black = deepest, light grey = shallow); data-level (0..1, one value
+     or stops start → end) overrides the colour. Units: mm. Created for DFYOM, GPL-3.0-or-later. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"
+     fill="none" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 0 2 L 5 7 L 10 2 L 15 7 L 20 2" stroke="#000000"/>
+  <path d="M 0 5 L 5 10 L 10 5 L 15 10 L 20 5" stroke="#808080"/>
+</svg>

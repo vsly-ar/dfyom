@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DFYOM engraved-pattern preset "Basket weave": over/under blocks, tile 16 × 16, square lattice, gap 0
+     Depth: stroke darkness (black = deepest, light grey = shallow); data-level (0..1, one value
+     or stops start → end) overrides the colour. Units: mm. Created for DFYOM, GPL-3.0-or-later. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16mm" height="16mm" viewBox="0 0 16 16"
+     fill="none" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 1 2 L 7 2" stroke="#000000"/>
+  <path d="M 1 4 L 7 4" stroke="#000000"/>
+  <path d="M 1 6 L 7 6" stroke="#000000"/>
+  <path d="M 10 1 L 10 7" stroke="#737373"/>
+  <path d="M 12 1 L 12 7" stroke="#737373"/>
+  <path d="M 14 1 L 14 7" stroke="#737373"/>
+  <path d="M 2 9 L 2 15" stroke="#737373"/>
+  <path d="M 4 9 L 4 15" stroke="#737373"/>
+  <path d="M 6 9 L 6 15" stroke="#737373"/>
+  <path d="M 9 10 L 15 10" stroke="#000000"/>
+  <path d="M 9 12 L 15 12" stroke="#000000"/>
+  <path d="M 9 14 L 15 14" stroke="#000000"/>
+</svg>
