@@ -221,7 +221,7 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
             })
         } else if (tool.type !== 'flatEndMill')
           add('tool', 'floorRadius', 'a sharp floor needs a flat end mill', { floorRadius })
-        const depth = belowTop(table, `${op.id}.floor`)
+        const depth = belowTop(table, `${op.id}.floor`) + pocketBreakthrough(op, i)
         if (depth > i.stickout + EPS)
           add('stickout', 'reach', 'pocket depth must be at most the stickout', {
             depth,
@@ -367,6 +367,12 @@ export const DEFLECTION_FACTOR_WARN = 2
 /** Excess stickout warns only for slender tools: stickout > this × D. */
 export const SLENDER_STICKOUT = 4
 
+/** A through pocket's breakthrough (patterns P4; its floor is the opposite face); else 0. */
+const pocketBreakthrough = (op: Operation, i: ToolCheckInput): number =>
+  op.kind === 'pocket' && op.through === true && i.strategy.kind === 'pocket'
+    ? (i.strategy.breakthrough ?? 0)
+    : 0
+
 /**
  * The depth of each cut below the stock face the `reach` rule compares with the stickout (mm):
  * pocket floor, hole (with breakthrough), profile cut, chamfer tip, facing depth.
@@ -377,7 +383,7 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
     case 'facing':
       return belowTop(table, op.on) + op.depth.canonical
     case 'pocket':
-      return belowTop(table, `${op.id}.floor`)
+      return belowTop(table, `${op.id}.floor`) + pocketBreakthrough(op, i)
     case 'drilling': {
       const through = op.bottom === 'through'
       const left = through ? i.throughDepths?.get(op.id) : undefined

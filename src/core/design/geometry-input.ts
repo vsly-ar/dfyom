@@ -172,7 +172,10 @@ function operationGeometry(
         ...direction,
         onZ: on.faceZ.toNumber(),
         shape,
-        depth: op.depth.canonical,
+        // a through pocket (patterns P4): the material below `on`, read fresh
+        ...(op.through === true
+          ? { depth: on.faceZ.add(table.extent(on.direction)).toNumber(), through: true as const }
+          : { depth: op.depth.canonical }),
         floorRadius: op.floorRadius.canonical,
       }))
     case 'drilling': {
@@ -238,7 +241,9 @@ function operationGeometry(
             shape: flip === undefined ? s : flipShape(s, flip),
             side: edgeOp.kind === 'profile' && edgeOp.side === 'outside' ? 'outside' : 'inside',
             ...(edgeOp.kind === 'pocket'
-              ? { depth: edgeOp.depth.canonical }
+              ? edgeOp.through === true
+                ? {}
+                : { depth: edgeOp.depth.canonical }
               : edgeOp.depth.isSome()
                 ? { depth: edgeOp.depth.unwrap().canonical }
                 : {}),

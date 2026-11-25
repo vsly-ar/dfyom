@@ -1,9 +1,10 @@
 /**
- * `design.pattern.add` / `.update` (patterns P1, P2, P3: `chamfer`): the pattern kind's arguments and how they
+ * `design.pattern.add` / `.update` (patterns P1, P2, P3: `chamfer`, P4: `through`): the pattern kind's arguments and how they
  * build a pattern. Kept terse for `tools/list` (llm-api.md § Implementation): `update` lists its
  * geometry args as sketches ("As add").
  * Doc: docs/modes/patterns.md#agent-api, docs/modes/patterns.md#implementation-p1,
- * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p3
+ * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p3,
+ * docs/modes/patterns.md#implementation-p4
  */
 import { z } from 'zod'
 import { None, Some, type Option } from '../../../shared/result'
@@ -68,11 +69,14 @@ const params = {
   boundary: z
     .object({ shapeId: z.string(), center: PointArg, rotation: Src.optional() })
     .nullable()
-    .describe('Closed shape (keep-outs: its subtract items), box centre at center; null = face'),
+    .describe(
+      'Closed shape (keep-outs: its subtract items), box centre at center; null = face (on a pattern floor: its cells)',
+    ),
   margin: Src.describe('Uncut border inside the boundary; default 5 mm / 3/16"'),
   fit: z.enum(['whole', 'clip']).describe('clip: cut cells at the border (slivers dropped)'),
   invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
+  through: z.boolean().describe('Cells cut through the stock'),
   chamfer: z
     .object({ width: Src.optional(), angle: Src.optional() })
     .nullable()
@@ -210,6 +214,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       fit: a.fit ?? prev?.fit ?? 'whole',
       invert: a.invert ?? prev?.invert ?? false,
       depth: len('depth', prev?.depth, 'patternDepth'),
+      through: a.through ?? prev?.through ?? false,
       chamfer: chamfer(),
     }
   },

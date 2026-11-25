@@ -84,6 +84,10 @@ export const designMessages = {
       on: 'On',
       boundary: 'Boundary',
       boundaryFace: 'Whole face',
+      /** P4: the face option on another pattern's floor (stacked). */
+      boundaryFloor: (pattern: string) => `${pattern}'s cells`,
+      stackedNote: (pattern: string) =>
+        `Stacked on ${pattern}: cells only inside its cells, less the margin, from its floor down.`,
       boundaryCenter: (i: number) => (i === 0 ? 'Boundary centre U' : 'Boundary centre V'),
       boundaryRotation: 'Boundary rotation',
       margin: 'Margin',
@@ -101,6 +105,9 @@ export const designMessages = {
         grille: 'Grille',
       } as Record<string, string>,
       depth: 'Depth',
+      through: 'Through',
+      throughNote:
+        'Every cell is cut through the stock and cleared: nothing comes loose. The breakthrough is set in Plan.',
       tool: 'Tool',
       chamfer: 'Chamfer every cell',
       chamferWidth: 'Chamfer width',

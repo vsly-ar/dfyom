@@ -168,8 +168,11 @@ export type OperationGeometry = FacePlacement &
         /** z of the `on` surface in the face frame (≤ 0), from the analytic model. */
         readonly onZ: number
         readonly shape: Shape
+        /** A through pocket's: the material below `onZ` (patterns P4). */
         readonly depth: number
         readonly floorRadius: number
+        /** Patterns P4: cleared through the opposite face (no floor); absent = blind. */
+        readonly through?: true
       }
     | {
         readonly kind: 'drilling'

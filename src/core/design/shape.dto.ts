@@ -211,8 +211,9 @@ export type PatternPrimitive = (typeof PATTERN_PRIMITIVES)[number]
  * part's shapes when placed, so it follows edits of that shape). `boundary` is the face rectangle
  * in the face frame (the frame placement anchors by); cells keep face-frame coordinates. P2
  * (docs/modes/patterns.md#implementation-p2): `area` a named boundary shape placed in the face
- * frame, `fit`, `invert`, and `clip` (a split piece's cell rectangle). Absent optional fields keep
- * a P1 record unchanged.
+ * frame, `fit`, `invert`, and `clip` (a split piece's cell rectangle). P4
+ * (docs/modes/patterns.md#implementation-p4): `through` and `floor` (stacking). Absent optional
+ * fields keep a P1 record unchanged.
  */
 export interface PatternRecord {
   cell: { item: ShapeItem<number> } | { shapeId: string }
@@ -233,6 +234,13 @@ export interface PatternRecord {
   invert?: true | undefined
   /** A split piece's cell rectangle (face frame): the cells are cut by it (split/pieces.ts). */
   clip?: { min: [number, number]; max: [number, number] } | undefined
+  /** P4: cut through the stock (a cell with holes would leave them loose: refused). */
+  through?: true | undefined
+  /**
+   * P4 (stacking): the owned shape of the pattern whose floor this one stands on; the area is
+   * that pattern's region (face frame, same direction) less the margin, within `area` if given.
+   */
+  floor?: string | undefined
 }
 
 const num = z.number().refine(Number.isFinite)
@@ -253,6 +261,11 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
   fit: z.literal('clip').optional(),
   invert: z.literal(true).optional(),
   clip: z.object({ min: pair, max: pair }).optional(),
+  through: z.literal(true).optional(),
+  floor: z
+    .string()
+    .regex(/^[a-z][a-zA-Z0-9]*_cells$/)
+    .optional(),
 }) as unknown as z.ZodType<PatternRecord>
 
 /**

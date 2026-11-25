@@ -94,11 +94,12 @@ function prism(
  */
 export function shapePocket(op: Pocket, ctx: ShapeSolidsContext): AppResult<LocalSolids> {
   const table = new Table()
-  const floor = table.add('floor')
+  // a through pocket (patterns P4) has no floor: down past the opposite face, like a profile
+  const floor = op.through === true ? AIR : table.add('floor')
   const { region } = pocketRegion(op)
   if (region.pieces.length === 0) return emptyShape(op)
   const roles = elementRoles(table, regionLoops(region))
-  const zf = op.onZ - op.depth
+  const zf = op.onZ - op.depth - (op.through === true ? OVERSHOOT : 0)
   return prism(
     region,
     'shrink',

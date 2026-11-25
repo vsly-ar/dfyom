@@ -200,8 +200,22 @@ export class SurfaceTable {
         )
       switch (op.kind) {
         case 'facing':
-        case 'pocket':
           below(op.on, op.depth, 'floor', true)
+          break
+        case 'pocket':
+          // a through pocket (patterns P4): its "floor" is the opposite stock face, nothing
+          // stands on it (docs/modes/patterns.md#implementation-p4)
+          if (op.through === true)
+            on(op.on).map((e) =>
+              put(
+                `${op.id}.floor`,
+                i,
+                e.direction,
+                minus(levels.face(e.direction), levels.extent(e.direction)),
+                false,
+              ),
+            )
+          else below(op.on, op.depth, 'floor', true)
           break
         case 'drilling':
           if (op.bottom === 'flat' && op.depth.isSome())

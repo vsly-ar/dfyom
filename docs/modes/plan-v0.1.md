@@ -167,6 +167,7 @@ Concentric offset rings from the center outwards; the last ring follows the pock
 | `rampAngle`       | angle  | 3°                  | 0.5°–30°; also the helix pitch angle                                        |
 | `finishAllowance` | length | 0.2 mm / 0.008″¹    | ≥ 0; 0 = no finishing pass; radial, walls only                              |
 | `finishStepdown`  | length | pocket depth²       | 0 < s ≤ `fluteLength`                                                       |
+| `breakthrough`    | length | 0.5 mm / 0.02″      | ≥ 0; a through pocket only ([patterns P4](patterns.md#implementation-p4))   |
 
 ¹ 0.5 mm / 0.02″ on softwood and hardwood stock; ² at most the flute length (and 2 × D on softwood and hardwood stock); both [Finishing defaults](#finishing-defaults-hardening-df75-df76).
 

@@ -139,6 +139,8 @@ export const PocketDtoSchema = z.object({
   shape: OperationShapeDtoSchema,
   depth: length(),
   floorRadius: length(),
+  /** Patterns P4: a through pocket (set by a pattern's `through` only). */
+  through: z.literal(true).optional(),
 })
 export const DrillingDtoSchema = z.object({
   kind: z.literal('drilling'),

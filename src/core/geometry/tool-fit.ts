@@ -311,8 +311,11 @@ export function wallDepth(
   unitSystem: 'metric' | 'inch',
 ): number {
   const [base] = reachDepth(op, stock)
-  // a through profile breaks through the far face; a blind groove stops at its depth
-  const through = op.kind === 'profile' && op.depth === undefined
+  // a through profile (or a pattern's through pocket, P4) breaks through the far face; a blind
+  // groove stops at its depth
+  const through =
+    (op.kind === 'profile' && op.depth === undefined) ||
+    (op.kind === 'pocket' && op.through === true)
   return through ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
 }
 

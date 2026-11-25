@@ -215,7 +215,9 @@ export function operationIssues(
         'an open path needs a profile on',
       )
       const depthOk = c.positive(op.depth, 'depth')
-      if (depthOk && on !== undefined) checkAboveBottom(c, 'depth', on, op.depth, T.exact)
+      // a through pocket (patterns P4) goes through the opposite face by definition
+      if (depthOk && on !== undefined && op.through !== true)
+        checkAboveBottom(c, 'depth', on, op.depth, T.exact)
       const f = op.floorRadius.exact
       if (op.shape.kind === 'named') {
         // a named shape's corners are its own: the floor fillet waits for G1 (design-v0.3.md)

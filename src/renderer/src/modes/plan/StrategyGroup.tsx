@@ -71,6 +71,8 @@ function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
   const design = plan.design.part.operations.find((o) => o.id === view.designOperationIds[0])
   // a through profile has no depth (a blind `on` groove stops at its depth: no breakthrough)
   if (design?.kind === 'profile') return (design as { depth?: unknown }).depth === undefined
+  // a pattern's through pocket (patterns P4)
+  if (design?.kind === 'pocket') return (design as { through?: boolean }).through === true
   return (design as { bottom?: string } | undefined)?.bottom === 'through'
 }
 

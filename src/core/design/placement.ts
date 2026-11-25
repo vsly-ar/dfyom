@@ -23,6 +23,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import { Rational } from '../quantity/rational'
 import { chainLength } from '../geometry/2d/measure'
 import { shapeRotation, type Operation, type Part, type Shape } from './operation'
+import type { PatternDefinition } from './pattern/layout'
 import type { ShapeDefinition } from './shape'
 import { definitionOf, resolveShape, type AnyShapeDefinition, type ResolvedShape } from './shape'
 import { isOpenShape } from './surfaces'
@@ -35,7 +36,12 @@ const WHERE = 'placeShape'
  * owned pattern shape (patterns P1) is its pattern with the cell's items in place (a named cell
  * from `shapes`, so the pattern follows edits of that shape: the definition is the cache key).
  */
-export function shapeDefinition(s: Shape, shapes: Part['shapes']): AppResult<AnyShapeDefinition> {
+export function shapeDefinition(
+  s: Shape,
+  shapes: Part['shapes'],
+  /** Owned shapes being nested (P4 stacks): a cycle is a corrupt part, not a hang. */
+  seen: ReadonlySet<string> = new Set(),
+): AppResult<AnyShapeDefinition> {
   const missing = (shapeId: string) =>
     fail('internal.unexpected', `shape ${shapeId} is not loaded`, {
       where: WHERE,
@@ -61,9 +67,30 @@ export function shapeDefinition(s: Shape, shapes: Part['shapes']): AppResult<Any
         if (a === undefined) return missing(p.area.shapeId)
         area = { items: definitionOf(a.items), center: p.area.center, rotation: p.area.rotation }
       }
-      const { cell: _, area: _a, ...rest } = p
+      // a stacked pattern (patterns P4) nests the definition of the one below it
+      let floor: readonly [PatternDefinition] | undefined
+      if (p.floor !== undefined) {
+        if (seen.has(s.shapeId) || seen.has(p.floor)) return missing(p.floor)
+        const below = shapeDefinition(
+          { ...s, shapeId: p.floor },
+          shapes,
+          new Set([...seen, s.shapeId]),
+        )
+        if (below.isErr()) return below
+        const d = below.unwrap()
+        if (d.length !== 1 || d[0]!.kind !== 'pattern') return missing(p.floor)
+        floor = d as readonly [PatternDefinition]
+      }
+      const { cell: _, area: _a, floor: _f, ...rest } = p
       return Ok([
-        { kind: 'pattern', op: 'add', ...rest, cell, ...(area === undefined ? {} : { area }) },
+        {
+          kind: 'pattern',
+          op: 'add',
+          ...rest,
+          cell,
+          ...(area === undefined ? {} : { area }),
+          ...(floor === undefined ? {} : { floor }),
+        },
       ])
     }
     case 'rectangle':

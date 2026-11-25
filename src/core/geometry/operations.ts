@@ -266,10 +266,11 @@ function pocketLevels(zf: number, f: number): Level[] {
 
 function pocket(op: AnalyticOperation<'pocket'>): AppResult<LocalSolids> {
   const table = new Table()
-  const floor = table.add('floor')
+  // a through pocket (patterns P4): no floor, past the opposite face
+  const floor = op.through === true ? AIR : table.add('floor')
   const role = contourRoles(table, op.shape.contour)
   const fillet = op.floorRadius > EPSILON ? table.add('floorFillet') : AIR
-  const zf = op.onZ - op.depth
+  const zf = op.onZ - op.depth - (op.through === true ? OVERSHOOT : 0)
   const at: Vec3 = [op.shape.center[0], op.shape.center[1], 0]
   const removal = offsetLoft(op.shape.contour, pocketLevels(zf, op.floorRadius), {
     band: (k, l) => (k === 0 ? role(l) : fillet),
