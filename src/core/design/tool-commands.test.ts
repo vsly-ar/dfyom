@@ -184,7 +184,7 @@ describe('tool field model', () => {
     expect(rules(g('bullNoseEndMill', '6'))).toEqual(['cornerRadius required'])
     expect(rules(g('bullNoseEndMill', '6', '3'))).toEqual(['cornerRadius range'])
     expect(rules(g('drill', '6', '1'))).toEqual(['cornerRadius notAllowed'])
-    // chamfer mill (v0.4 C1): angle required, 30°–150°, and only for a chamfer mill
+    // chamfer mill (v0.4 C1): angle required, 10°–150° (DF123), and only for a chamfer mill
     expectOk(g('chamferMill', '12', undefined, '90'))
     expect(rules(g('chamferMill', '12'))).toEqual(['angle required'])
     expect(rules(g('chamferMill', '12', undefined, '160'))).toEqual(['angle range'])

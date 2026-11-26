@@ -136,7 +136,7 @@ export interface ToolProps {
   readonly fluteCount: Quantity
   /** Drill only. */
   readonly pointAngle: Option<Quantity>
-  /** Chamfer mill only (required): included angle, 30°–150°. */
+  /** Chamfer mill only (required): included angle, 10°–150°. */
   readonly angle: Option<Quantity>
   /** Chamfer mill only: smallest cutting diameter, 0 ≤ tip < DC; None = pointed (0). */
   readonly tipDiameter: Option<Quantity>

@@ -287,9 +287,16 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   // a Line's default tool is a V-bit (engraved-patterns.md § Tools): chamfer mills first
   const vBit = (c: LibraryCandidate) =>
     input.op.kind === 'line' && c.tool.type === 'chamferMill' ? 0 : 1
+  // among V-bits, the angle nearest the default 60° (DF123): a sharp 10°–20° engraving bit cuts a
+  // groove a quarter as wide, so it is taken when locked or when it is the only V-bit
+  const off60 = (c: LibraryCandidate) =>
+    input.op.kind === 'line' && c.tool.type === 'chamferMill'
+      ? Math.abs(c.tool.angle.mapOr(60, (q) => q.canonical) - 60)
+      : 0
   return out.sort(
     (a, b) =>
       vBit(a) - vBit(b) ||
+      off60(a) - off60(b) ||
       Number(a.leavesRest) - Number(b.leavesRest) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
       cls(a) - cls(b) ||

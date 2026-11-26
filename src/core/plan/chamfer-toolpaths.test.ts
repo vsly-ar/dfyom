@@ -158,6 +158,14 @@ describe('chamfer plan operations', () => {
     const rules = () => t.errors().map((w) => `${w.field}:${w.rule}`)
     await t.assign(t.tools.cm60)
     expect(rules()).toEqual(['tool:angle'])
+    // DF123: a 15° engraving V-bit loads, but a 90° chamfer refuses it as any other angle
+    const cm15 = (
+      (await t.s.run('library.tool.add', {
+        values: libraryInput(chamferMill('3.175', { name: 'V-bit 15', angle: deg('15') })),
+      })) as { id: string }
+    ).id
+    await t.assign(cm15)
+    expect(rules()).toEqual(['tool:angle'])
     await t.assign(t.tools.short)
     expect(rules()).toEqual(['tool:tip'])
     await t.assign(t.tools.cm12)

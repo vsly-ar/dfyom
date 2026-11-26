@@ -138,13 +138,23 @@ describe('library commands', () => {
     const bad = expectErrCode(
       await d.dispatch(
         'library.tool.add',
-        { values: { ...values, angle: '20', tipDiameter: '12' } },
+        { values: { ...values, angle: '9', tipDiameter: '12' } },
         agent,
       ),
       'model.invariant',
     )
     expect(bad.issues.map((i) => i.path.join('.'))).toEqual(['values.angle', 'values.tipDiameter'])
+    expect(bad.issues[0]?.params).toMatchObject({ min: 10, max: 150 })
     expect(expectOk(await storage.list('tool'))).toHaveLength(1)
+    // DF123 (TG #407): a 15° engraving V-bit is a chamfer mill too
+    const v15 = await add(d, 'tool', {
+      ...values,
+      name: 'V-bit 15°',
+      angle: '15',
+      diameter: '3.175',
+    })
+    expect(v15).toMatchObject({ type: 'chamferMill', angle: { source: '15' } })
+    expect(expectOk(await storage.list('tool'))).toHaveLength(2)
   })
 
   it('a bad quantity string fails like in every command: its code, path below values', async () => {

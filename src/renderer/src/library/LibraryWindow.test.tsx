@@ -432,6 +432,36 @@ describe('Library window', () => {
     expect(within(grid()).queryByRole('row', { name: /Flat 6/ })).toBeNull()
   })
 
+  it('DF123 (TG #407): a 15° engraving V-bit saves; under 10° the angle is refused', async () => {
+    const { user, row, editor, library } = await renderLibrary()
+    await user.click(screen.getByRole('button', { name: 'New tool' }))
+    within(editor()).getByRole('combobox', { name: 'Type' }).focus()
+    await user.keyboard('{Enter}')
+    await user.click(
+      within(await screen.findByRole('listbox')).getByRole('option', { name: 'Chamfer mill' }),
+    )
+    const angle = within(editor()).getByLabelText('Included angle', { selector: 'input' })
+    await user.clear(angle)
+    await user.type(angle, '9{Enter}')
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    expect(await within(editor()).findByText(/10°/)).toBeInTheDocument()
+    expect(library.list('tool').items.some((i) => i.toDTO().name.startsWith('Chamfer'))).toBe(false)
+    await user.clear(angle)
+    await user.type(angle, '15{Enter}')
+    await waitFor(() =>
+      expect(within(editor()).getByRole('heading', { name: 'Chamfer 15° Ø6' })).toBeInTheDocument(),
+    )
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(row(/Chamfer 15° Ø6/)).not.toHaveTextContent('Unsaved'))
+    expect(
+      library
+        .list('tool')
+        .items.map((i) => i.toDTO())
+        .find((t) => t.name === 'Chamfer 15° Ø6'),
+    ).toMatchObject({ type: 'chamferMill', angle: { source: '15' } })
+    expect(row(/Chamfer 15° Ø6/)).toHaveTextContent('15°')
+  })
+
   it('offers Reload or Overwrite when the item changed elsewhere', async () => {
     const { user, row, editor, d, get, flat6 } = await renderLibrary()
     await user.click(row(/Flat 6/))
