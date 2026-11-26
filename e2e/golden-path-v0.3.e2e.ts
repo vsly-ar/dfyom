@@ -30,6 +30,7 @@ import {
   shapeEditorWindow,
   test,
   zeroXyz,
+  revealField,
 } from './app.fixture'
 import { withoutAppVersion } from '../src/core/post/plan-export'
 
@@ -473,6 +474,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await pickShape(page, 'Cable notch')
   await setField(inspector, 'Position X', PLACE.notch[0])
   await setField(inspector, 'Position Y', PLACE.notch[1])
+  await revealField(inspector, 'Rotation')
   await setField(inspector, 'Rotation', '90')
   await expect(input(inspector, 'Rotation')).toHaveValue(/^90/)
   await setField(inspector, 'Depth', '10')
@@ -486,6 +488,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     .getByRole('radiogroup', { name: 'Side' })
     .getByRole('radio', { name: 'Outside' })
     .click()
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', '12')
   await setField(inspector, 'Tab count', '4')
   await setField(inspector, 'Tab width', '12')
@@ -588,6 +591,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   // a blind 1 mm groove
   await setField(inspector, 'Position u', PLACE.groove[0])
   await setField(inspector, 'Position v', PLACE.groove[1])
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', '6')
   await setField(inspector, 'Depth', '1')
 
@@ -806,6 +810,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await designRows(page2).nth(1).click()
     await expect(input(inspector2, 'Position X')).toHaveValue(PLACE.cavity[0])
     await designRows(page2).nth(2).click()
+    await revealField(inspector2, 'Rotation')
     await expect(input(inspector2, 'Rotation')).toHaveValue(/^90/)
     await expect(input(inspector2, 'Position Y')).toHaveValue(PLACE.notch[1])
     await designRows(page2).nth(3).click()

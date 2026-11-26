@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, launchApp, test, zeroXyz } from './app.fixture'
+import { expect, launchApp, test, zeroXyz, revealField } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 
@@ -151,6 +151,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await expect(inspector.getByText(/Escape could not revert it/)).toHaveCount(0)
   await setField(inspector, 'Corner radius', '4')
   // the library's bull nose has RE 2 (plan-v0.1.md: a floor fillet needs a matching bull nose)
+  await revealField(inspector, 'Floor fillet radius')
   await setField(inspector, 'Floor fillet radius', '2')
   await expect(inspector.getByLabel('Floor fillet radius', { exact: true })).toHaveValue('2')
 

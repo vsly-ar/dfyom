@@ -342,4 +342,27 @@ export async function zeroXyz(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Shows an inspector field kept behind a closed More row, accordion or tab (DF110: Anchor,
+ * Rotation, Floor fillet radius, Slot width, tab positions) the way a message's target is shown:
+ * the field sends the reveal event (`revealInInspector`), every closed disclosure around it opens.
+ * `label` is the field's accessible name (an input's label, a radiogroup's name). Specs call this
+ * before setting a rarely used field, never ad-hoc clicks on "More (…)".
+ * Doc: docs/conventions/inspector-layout.md#inspector-structure-df110
+ */
+export async function revealField(scope: Locator, label: string): Promise<void> {
+  await scope
+    .getByLabel(label, { exact: true })
+    .first()
+    .evaluate((el) => {
+      // runs in the renderer; this tsconfig has no DOM lib, hence the structural types
+      const Event = (globalThis as unknown as { CustomEvent: new (n: string, o: object) => object })
+        .CustomEvent
+      ;(el as unknown as { dispatchEvent(e: object): boolean }).dispatchEvent(
+        new Event('dfyom-inspector-reveal', { bubbles: true }),
+      )
+    })
+  await expect(scope.getByLabel(label, { exact: true }).first()).toBeVisible()
+}
+
 export { expect } from '@playwright/test'

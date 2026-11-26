@@ -288,6 +288,19 @@ Built 2026-11-25 (provisional, awaits the user's review of the captures). Chrome
 - **Not changed:** the Run inspector (a parallel Run-mode fix; it takes the header style with S5), the per-operation `h4` in the Part (plan copy) group, the Reference panel's fit mode heading (a mode panel, not a group), the library tool Details' open state (the Library window's own, as before), the joint settings' "open when the joint was just chosen" (controlled, not remembered).
 - **Captures** (hidden, throwaway): Profile, Bolt hole, Part with a dowel split, Plan operation, light and dark, before and after.
 
+## S3 implementation notes
+
+Built 2026-11-25 (provisional, awaits the user's review of the captures). The Design operation inspectors (Facing, Pocket, Profile, Drilling, Chamfer; `OperationFields.tsx`, `ChamferInspector.tsx`) take their [target layout](#per-inspector-target-layout); values, commands and step kinds are unchanged (step kinds and (i) tips came with S1). The plan copy of the design (Plan operation's Part group) shares `OperationFields`, so it shows the same groups, More rows and accordions (level `h4`).
+
+- **Pocket:** Shape (Shape, Position X/Y, Length/Width or Diameter, Mirror of a named shape; More: Anchor, Rotation) · Depth · Tool · Corners accordion, open by default (Corner radius; More: Floor fillet radius; summary "r 3 mm · Floor r 0").
+- **Profile:** Shape (as the pocket, plus Corner radius) · Cut (On, Side, Depth) · Tool · Tabs accordion, open (count, width, thickness; More: Tab positions, which holds "Add tab"; summary "4 tabs" / "3 entered") · Slot accordion, closed (Slot width; summary its value).
+- **Drilling:** Position · Hole · Tool (Tool moved after Hole). **Facing:** unchanged. **Chamfer:** Edge · Chamfer · Tool · Loops accordion, open (Tool moved before Loops; summary "All 3" / "2 of 3").
+- **Remembered keys:** `pocket.shape.more`, `profile.shape.more`, `pocket.corners`, `pocket.corners.more`, `profile.tabs`, `profile.tabs.more`, `profile.slot`, `chamfer.loops`.
+- **Never hides a problem:** a More row or accordion whose field has an error or a DFM finding is shown open while the problem lasts (`forceOpen` from `problemAt(ctx, paths)`), so the message and its "Use …" fix stay at the field; the user's chosen state comes back after. Programmatic targets (a pick, Find, an agent selection) use `revealInInspector`, which opens every closed disclosure around the field. Tested in `Design.test.tsx` ("keeps rare fields behind More rows…").
+- **e2e:** `revealField(scope, label)` in `e2e/app.fixture.ts` sends the same reveal event from the field ([testing.md](testing.md#end-to-end)); `design-faces`, `design-tool`, `exit-criteria`, `golden-path-v0.2/v0.3/v0.4` call it before Anchor, Rotation, Floor fillet radius and Slot width.
+- **Deviations from the target table:** (1) a problem opens the More row or accordion instead of only marking a closed header (a More row has no header for the icon, and a DFM finding's fix lives at the field). (2) Entered tab positions replace the count, so once there are some they show in the Tabs group itself, not behind More; no More row where "Add tab" is not offered (plan copy, blind profile). (3) A circle pocket's Corners group holds Floor fillet radius directly (it would be the More row's only field and the group's only field). (4) Mirror of a named shape keeps its place in Shape (not listed in the table).
+- **Captures** (hidden, dark, throwaway): Facing, Pocket, Profile, Drilling, Chamfer before and after.
+
 ## Open questions
 
 None blocking (D70: recommended options taken). Revisit after S3 dogfood: the `depth` default `.1` for deep pockets; whether the (i) tip on keyboard focus is wanted or noisy; whether the Plan operation's Design tab should be a closed accordion instead.
