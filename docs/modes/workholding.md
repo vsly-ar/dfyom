@@ -110,7 +110,7 @@ Rules go to a [ui.md](../conventions/ui.md) amendment (plan task 1.6):
 
 - `obstacles` per kind (prisms, margins, rotations, every edge); `linkAroundWorkholding` (a link across one clamp hops once, across two hops to the higher top, no hop when the link clears); keep-out islands (coverage oracle: no cut inside the zone, leftover area equals `unmachined`).
 - `checkWorkholding` against the black-box test's case: the bottom program of the enclosure with retract 2 mm and the four clamps (pads 30 × 10 at x 30–60 / 190–220, y 0–10 / 190–200, 25 mm tall) reports the rapid at Z1 across the clamp at x 188–222; after the post-pass, none.
-- An **independent G-code oracle** in tests (parses the exported program, true G2/G3 arcs, like the test agent's `clampcheck`) confirms the minimum distance ≥ margin, so the check is never verified only by itself.
+- An **independent G-code oracle** in tests (parses the exported program, true G2/G3 arcs, like the test agent's `clampcheck`) confirms the minimum distance ≥ margin, so the check is never verified only by itself (`gcode-oracle.testing.ts`, with its own test; a later tool's Z0 on a lower surface, "(Z0 for tool n: …, d below the stock top)", counts from its tool change, found by the v0.4-llm-first X1 flow).
 
 ## Implementation notes (DF59)
 
