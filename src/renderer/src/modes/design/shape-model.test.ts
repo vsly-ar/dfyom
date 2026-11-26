@@ -6,6 +6,7 @@ import type { ShapeItemDTO } from '../../../../core/design/shape.dto'
 import { qty } from '../../../../core/library/library.fixture'
 import {
   anyFormula,
+  definitionNumbers,
   dragSource,
   dragUpdate,
   endVertex,
@@ -97,5 +98,27 @@ describe('shape model', () => {
     expect(newItemArgs('rectangle', 'mm')).toMatchObject({ kind: 'rectangle', length: '40' })
     expect(newItemArgs('circle', 'mm')).toMatchObject({ kind: 'circle', diameter: '20' })
     expect(newItemArgs('path', 'mm')).toMatchObject({ kind: 'path', closed: true })
+  })
+})
+
+describe('offset items (design-llm-first.md § Offset item)', () => {
+  const offset: ShapeItemDTO = {
+    kind: 'offset',
+    op: 'add',
+    shapeId: 'shape1',
+    distance: len('2'),
+    direction: 'inward',
+  }
+  const shapes = [
+    { id: 'shape1', name: 'Outline', items: [rect] },
+    { id: 'shape2', name: 'Inset', items: [offset] },
+  ]
+  it('definitionNumbers inlines the source from the part, a self-reference is a cycle', () => {
+    const def = definitionNumbers([offset], shapes, 'shape2')!
+    expect(def[0]).toMatchObject({ kind: 'offset', distance: 2, source: [{ kind: 'rectangle' }] })
+    expect(definitionNumbers([offset], shapes, 'shape1')![0]).toMatchObject({
+      source: 'shapeCycle',
+    })
+    expect(definitionNumbers([offset])![0]).not.toHaveProperty('source')
   })
 })

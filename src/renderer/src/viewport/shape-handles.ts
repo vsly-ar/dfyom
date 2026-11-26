@@ -134,6 +134,9 @@ export function itemHandles(item: Item): ShapeHandle[] {
     }
     case 'polygon':
       return [centre(item.center), size('diameter', polygonHandle(item))]
+    case 'offset':
+      // no handles: the item follows its source shape (design-llm-first.md § Offset item)
+      return []
     case 'path': {
       const out: ShapeHandle[] = [
         {
@@ -248,6 +251,7 @@ export interface DragOptions {
  */
 export function dragHandle(item: Item, id: string, p: Vec2, opts: DragOptions = {}): Item {
   const shift = opts.shift ?? false
+  if (item.kind === 'offset') return item
   if (id === 'center' && item.kind !== 'path') {
     const to = shift && opts.from ? constrain15(opts.from, p) : p
     return { ...item, center: [to[0], to[1]] }

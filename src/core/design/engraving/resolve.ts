@@ -96,7 +96,7 @@ function shapeMotifLines(
   const named = shapes?.get(shapeId)
   if (named === undefined)
     return invalid(['motif', 'shapeIds', k], 'unknownShape', `shape ${shapeId} is not loaded`)
-  const def = definitionOf(named.items)
+  const def = definitionOf(named.items, shapes, shapeId)
   const r = resolveShape(port, def)
   if (r.isErr()) return Err(r.unwrapErr().prefixIssues('motif', 'shapeIds', k))
   const s = r.unwrap()
@@ -181,7 +181,7 @@ function areaOf(
         'unknownShape',
         `shape ${rec.area.shapeId} is not loaded`,
       )
-    const r = resolveShape(p.unwrap(), definitionOf(named.items))
+    const r = resolveShape(p.unwrap(), definitionOf(named.items, shapes, rec.area.shapeId))
     if (r.isErr()) return Err(r.unwrapErr().prefixIssues('boundary'))
     const s = r.unwrap()
     if (s.kind !== 'region')
@@ -239,7 +239,7 @@ function readsKey(rec: EngravingRecord, shapes: Shapes): string {
     rec,
     ids.map((id) => {
       const s = shapes?.get(id)
-      return s === undefined ? null : definitionOf(s.items)
+      return s === undefined ? null : definitionOf(s.items, shapes, id)
     }),
   ])
 }

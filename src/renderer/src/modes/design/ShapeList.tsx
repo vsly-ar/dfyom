@@ -36,14 +36,14 @@ import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
 import { itemName, type DesignPart } from './model'
 import { shapeLoops } from './ShapePicker'
-import { newItemArgs } from './shape-model'
+import { newItemArgs, type DrawnItemKind } from './shape-model'
 import { ShapeKindIcon } from './ShapeKindIcon'
 import { useCommand, useDesignSelection } from './useDesign'
 import { useShapeList, type ShapeRow } from './useShapes'
 
 const m = shapeMessages.navigator
 const nav = designMessages.navigator
-export const SHAPE_KINDS: readonly ShapeItemKind[] = [
+export const SHAPE_KINDS: readonly DrawnItemKind[] = [
   'rectangle',
   'circle',
   'obround',
@@ -52,7 +52,7 @@ export const SHAPE_KINDS: readonly ShapeItemKind[] = [
 ]
 
 /** The "Add shape" entries: the kinds ("Import SVG…" is a button of its own since DF49). */
-export function addShapeEntries(onAdd: (kind: ShapeItemKind) => void): MenuEntry[] {
+export function addShapeEntries(onAdd: (kind: DrawnItemKind) => void): MenuEntry[] {
   return SHAPE_KINDS.map((k) => ({
     label: m.addKind(k),
     icon: <ShapeKindIcon kind={k} />,
@@ -182,7 +182,7 @@ export function ShapeList({
   const addButton = useRef<HTMLButtonElement>(null)
   const hintId = useId()
 
-  const add = async (kind: ShapeItemKind) => {
+  const add = async (kind: DrawnItemKind) => {
     const r = await call('design.shape.add', {
       partId: part.dto.id,
       items: [newItemArgs(kind, part.units)],

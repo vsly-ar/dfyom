@@ -53,20 +53,25 @@ export function shapeDefinition(
       const named = shapes?.get(s.shapeId)
       if (named === undefined) return missing(s.shapeId)
       const p = named.pattern
-      if (p === undefined) return Ok(definitionOf(named.items))
+      // offset items carry their sources (design-llm-first.md § Offset item)
+      if (p === undefined) return Ok(definitionOf(named.items, shapes, s.shapeId))
       let cell: ShapeDefinition
       if ('item' in p.cell) cell = [p.cell.item]
       else {
         const c = shapes?.get(p.cell.shapeId)
         if (c === undefined) return missing(p.cell.shapeId)
-        cell = definitionOf(c.items)
+        cell = definitionOf(c.items, shapes, p.cell.shapeId)
       }
       // a boundary shape (patterns P2) is carried by its items too, so its edits restale
       let area: { items: ShapeDefinition; center: [number, number]; rotation: number } | undefined
       if (p.area !== undefined) {
         const a = shapes?.get(p.area.shapeId)
         if (a === undefined) return missing(p.area.shapeId)
-        area = { items: definitionOf(a.items), center: p.area.center, rotation: p.area.rotation }
+        area = {
+          items: definitionOf(a.items, shapes, p.area.shapeId),
+          center: p.area.center,
+          rotation: p.area.rotation,
+        }
       }
       // a stacked pattern (patterns P4) nests the definition of the one below it
       let floor: readonly [PatternDefinition] | undefined

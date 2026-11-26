@@ -138,6 +138,15 @@ export function mapItem<A, B>(item: ShapeItem<A>, f: (a: A, path: ParamPath) => 
           ? {}
           : { levels: typeof item.levels === 'number' ? item.levels : [...item.levels] }),
       }
+    case 'offset':
+      // `source` is the resolver's (withOffsetSources), never mapped or stored
+      return {
+        kind: 'offset',
+        op: item.op,
+        shapeId: item.shapeId,
+        distance: f(item.distance, ['distance']),
+        direction: item.direction,
+      }
   }
 }
 
@@ -198,8 +207,70 @@ export type ShapeDefinition = readonly ShapeItem<number>[]
 /** A shape's items, or a pattern (patterns P1): its one `pattern` item, the cell as items. */
 export type AnyShapeDefinition = ShapeDefinition | readonly [PatternDefinition]
 
-export const definitionOf = (items: readonly ShapeItem<Quantity>[]): ShapeDefinition =>
+const numbersOf = (items: readonly ShapeItem<Quantity>[]): ShapeDefinition =>
   items.map((item) => mapItem(item, (q) => q.canonical))
+
+/**
+ * The resolver's definition of a shape's items. With `shapes` (the part's named shapes by id) the
+ * sources of its offset items are inlined (`withOffsetSources`; `self`, the shape's own id, counts
+ * as visited so a shape offsetting itself is a cycle); without, an offset item resolves as
+ * `unknownShape`.
+ */
+export function definitionOf(
+  items: readonly ShapeItem<Quantity>[],
+  shapes?: ReadonlyMap<string, NamedShape>,
+  self?: string,
+): ShapeDefinition {
+  const def = numbersOf(items)
+  if (shapes === undefined) return def
+  const lookup: ShapeLookup = (id) => {
+    const s = shapes.get(id)
+    // an owned shape (pattern, engraving) has no items: not a source (the args take named ids)
+    return s === undefined || s.owner !== undefined ? undefined : numbersOf(s.items)
+  }
+  return withOffsetSources(def, lookup, new Set(self === undefined ? [] : [self]))
+}
+
+/** A named shape's definition by id (offset items not yet inlined), or undefined. */
+export type ShapeLookup = (shapeId: string) => ShapeDefinition | undefined
+
+/**
+ * A lookup over stored shapes (commands, queries): named shapes only; one that does not load is
+ * undefined (`unknownShape` where an offset needs it).
+ */
+export function lookupInDtos(shapes: readonly ShapeDTO[]): ShapeLookup {
+  return (id) => {
+    const dto = shapes.find((s) => s.id === id)
+    if (dto === undefined || dto.owner !== undefined) return undefined
+    const named = shapeFromDTO(dto)
+    return named.isOk() ? numbersOf(named.unwrap().items) : undefined
+  }
+}
+
+/**
+ * The definition with every offset item's `source` inlined from `lookup`, recursively
+ * (docs/modes/design-llm-first.md#offset-item): the source's own offsets are inlined too, a shape
+ * met again on the chain (`seen`) is `shapeCycle`, a missing one `unknownShape`. The result is a
+ * plain value, so `resolveShape`'s cache and the operations' staleness key on the sources too.
+ */
+export function withOffsetSources(
+  def: ShapeDefinition,
+  lookup: ShapeLookup,
+  seen: ReadonlySet<string> = new Set(),
+): ShapeDefinition {
+  if (!def.some((item) => item.kind === 'offset')) return def
+  return def.map((item): ShapeItem<number> => {
+    if (item.kind !== 'offset') return item
+    const { source: _, ...rest } = item
+    if (seen.has(item.shapeId)) return { ...rest, source: 'shapeCycle' }
+    const raw = lookup(item.shapeId)
+    if (raw === undefined) return { ...rest, source: 'unknownShape' }
+    return {
+      ...rest,
+      source: [...withOffsetSources(raw, lookup, new Set([...seen, item.shapeId]))],
+    }
+  })
+}
 
 // ── resolving ───────────────────────────────────────────────────────────────────────────────
 
@@ -275,15 +346,22 @@ export function resolveDefinition(
   const structure = structureIssues(def)
   if (structure.length > 0) return invalid(structure)
   const issues: Issue[] = []
-  const chains = def.map((item, n) => itemChain(item, n, issues))
+  // an offset item is a region already (its source resolved and offset), not a chain
+  const chains = def.map((item, n) =>
+    item.kind === 'offset' ? undefined : itemChain(item, n, issues),
+  )
   if (issues.length > 0) return invalid(issues)
-  const first = chains[0]!
-  if (!first.closed) return Ok({ kind: 'path', path: first.loop })
+  const first = chains[0]
+  if (first !== undefined && !first.closed) return Ok({ kind: 'path', path: first.loop })
   let acc: Region | undefined
-  for (const [n, chain] of chains.entries()) {
-    const item = def[n]!
-    const region = port.normalise([chain!.loop])
-    if (region.isErr()) return Err(region.unwrapErr().prefixIssues('items', n).withContext(WHERE))
+  for (const [n, item] of def.entries()) {
+    const region =
+      item.kind === 'offset'
+        ? offsetRegion(port, item, n)
+        : port
+            .normalise([chains[n]!.loop])
+            .mapErr((e) => e.prefixIssues('items', n).withContext(WHERE))
+    if (region.isErr()) return region
     if (acc === undefined) {
       acc = region.unwrap()
       continue
@@ -310,6 +388,60 @@ export function resolveDefinition(
       { path: ['items'], rule: 'shapeEmpty', message: 'the shape has no area', params: { area } },
     ])
   return Ok({ kind: 'region', region })
+}
+
+type OffsetItem = Extract<ShapeItem<number>, { kind: 'offset' }>
+
+/**
+ * Item `n`, an offset item, as a region (docs/modes/design-llm-first.md#offset-item): its inlined
+ * source resolved (cached), then offset through the port (`inward` = +d shrinks, `outward` = −d
+ * grows with round convex corners), in the source's coordinates. Refusals are `model.invariant` at
+ * `items.<n>.<param>`: `unknownShape`, `shapeCycle`, `offsetOpenPath`, `nonNegative`, `shapeEmpty`;
+ * a source that does not resolve keeps its own issues under `items.<n>.shapeId`.
+ */
+function offsetRegion(port: Region2dPort, item: OffsetItem, n: number): AppResult<Region> {
+  const at = (param: string, rule: string, message: string, params?: Record<string, unknown>) =>
+    invalid([
+      {
+        path: ['items', n, param],
+        rule,
+        message,
+        params: { shapeId: item.shapeId, ...params },
+      },
+    ])
+  const src = item.source
+  if (src === undefined || src === 'unknownShape')
+    return at('shapeId', 'unknownShape', 'no such shape in the part')
+  if (src === 'shapeCycle')
+    return at('shapeId', 'shapeCycle', 'the shape would offset itself through this source')
+  if (!(item.distance >= 0))
+    return at('distance', 'nonNegative', 'must be 0 or more', { actual: item.distance })
+  const resolved = resolveShape(port, src)
+  if (resolved.isErr()) {
+    const e = resolved.unwrapErr()
+    // a cycle further down the chain is this item's cycle
+    if (e.issues.some((i) => i.rule === 'shapeCycle'))
+      return at('shapeId', 'shapeCycle', 'the shape would offset itself through this source')
+    return Err(e.prefixIssues('items', n, 'shapeId').withContext(WHERE))
+  }
+  const r = resolved.unwrap()
+  if (r.kind === 'path')
+    return at(
+      'shapeId',
+      'offsetOpenPath',
+      'the source is an open path: only closed shapes can be offset',
+    )
+  if (item.distance === 0) return Ok(r.region)
+  const d = item.direction === 'inward' ? item.distance : -item.distance
+  const out = port.offset(r.region, d)
+  if (out.isErr())
+    return Err(out.unwrapErr().prefixIssues('items', n, 'distance').withContext(WHERE))
+  const area = regionArea(out.unwrap())
+  if (out.unwrap().pieces.length === 0 || area <= AREA_EPSILON)
+    return at('distance', 'shapeEmpty', 'the inward offset leaves nothing of the source', {
+      distance: item.distance,
+    })
+  return Ok(out.unwrap())
 }
 
 // ── cache ───────────────────────────────────────────────────────────────────────────────────

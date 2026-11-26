@@ -62,9 +62,11 @@ export interface ShapeActions {
 export function shapeLoops(
   port: Region2dPort | undefined,
   shape: ShapeDTO,
+  /** The part's shapes: the sources of offset items (design-llm-first.md § Offset item). */
+  all?: readonly ShapeDTO[],
 ): { elements: readonly Element[]; closed: boolean }[] {
   if (port === undefined) return []
-  const def = definitionNumbers(shape.items)
+  const def = definitionNumbers(shape.items, all, shape.id)
   if (def === undefined) return []
   const r = resolveShape(port, def)
   if (r.isErr()) return []
@@ -133,7 +135,7 @@ export function ShapePicker({
     [ctx.part],
   )
   const outlines = useMemo(
-    () => new Map(shapes.map((s) => [s.id, shapeLoops(port, s)])),
+    () => new Map(shapes.map((s) => [s.id, shapeLoops(port, s, shapes)])),
     [shapes, port],
   )
   if (op.kind !== 'pocket' && op.kind !== 'profile') return null

@@ -15,6 +15,7 @@ interface PartLike {
   readonly shapes?:
     | readonly {
         readonly id: string
+        readonly items?: readonly { readonly kind: string; readonly shapeId?: unknown }[]
         readonly pattern?: { readonly cell: object } | undefined
         readonly engraving?: { readonly motif: object } | undefined
       }[]
@@ -26,8 +27,13 @@ interface PartLike {
  * K3; a Line's paths), or an owned pattern shape whose cell it is (patterns P1), or an owned
  * engraving shape whose motif it is (engraved-patterns.md E3); in design order.
  */
-export function operationsUsingShape(part: PartLike, shapeId: string): string[] {
-  const ids = new Set([shapeId])
+export function operationsUsingShape(
+  part: PartLike,
+  shapeId: string,
+  /** Also through shapes offsetting it, by any chain (design-llm-first.md § Offset item). */
+  throughOffsets = true,
+): string[] {
+  const ids = new Set([shapeId, ...(throughOffsets ? shapesOffsetting(part, shapeId) : [])])
   for (const sh of part.shapes ?? []) {
     if ((sh.pattern?.cell as { shapeId?: unknown } | undefined)?.shapeId === shapeId) ids.add(sh.id)
     const motif = sh.engraving?.motif as { shapeIds?: unknown } | undefined
@@ -44,6 +50,31 @@ export function operationsUsingShape(part: PartLike, shapeId: string): string[] 
         (op.paths ?? []).some((p) => ids.has((p as { shapeId?: string }).shapeId ?? '')),
     )
     .map((op) => op.id)
+}
+
+/**
+ * Ids of the named shapes with an offset item on `shapeId` (docs/modes/design-llm-first.md#offset-item):
+ * the direct ones, or with `transitive` also those offsetting them, in record order. They follow
+ * its edits, and it cannot be removed while one exists.
+ */
+export function shapesOffsetting(
+  part: Pick<PartLike, 'shapes'>,
+  shapeId: string,
+  transitive = true,
+): string[] {
+  const found = new Set<string>()
+  const queue = [shapeId]
+  for (let id = queue.shift(); id !== undefined; id = queue.shift())
+    for (const sh of part.shapes ?? [])
+      if (
+        !found.has(sh.id) &&
+        sh.id !== shapeId &&
+        (sh.items ?? []).some((i) => i.kind === 'offset' && i.shapeId === id)
+      ) {
+        found.add(sh.id)
+        if (transitive) queue.push(sh.id)
+      }
+  return (part.shapes ?? []).filter((s) => found.has(s.id)).map((s) => s.id)
 }
 
 /**

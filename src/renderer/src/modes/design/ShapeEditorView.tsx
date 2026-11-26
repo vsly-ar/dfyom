@@ -128,7 +128,7 @@ function ShapeEditorView({
   const showItems = useUi((s) => s.showShapeItems)
   const setShowItems = useUi((s) => s.setShowShapeItems)
   const selectShapeItem = useUi((s) => s.selectShapeItem)
-  const onDrag = useShapeDrag(part?.dto.id ?? '', shape, port)
+  const onDrag = useShapeDrag(part?.dto.id ?? '', shape, port, part?.dto.shapes)
   // the last valid outline, kept while the current state does not resolve
   const [lastGood, setLastGood] = useState<FlatDrawing | null>(null)
 
@@ -142,14 +142,14 @@ function ShapeEditorView({
   // the live outline: the current definition through the renderer's port
   const live = useMemo((): { drawing: FlatDrawing | null; issues: readonly Issue[] } => {
     if (port === undefined || shape === undefined) return { drawing: null, issues: [] }
-    const def = definitionNumbers(shape.items)
+    const def = definitionNumbers(shape.items, part?.dto.shapes ?? [], shape.id)
     if (def === undefined) return { drawing: null, issues: [] }
     if (preview?.shapeId === shapeId) def[preview.index] = preview.item
     const r = resolveShape(port, def)
     return r.isOk()
       ? { drawing: drawingOfResolved(r.unwrap()), issues: [] }
       : { drawing: null, issues: r.unwrapErr().issues }
-  }, [port, shape, preview, shapeId])
+  }, [port, shape, preview, shapeId, part?.dto.shapes])
 
   const fromSummary = useMemo(
     () => (info?.resolved !== undefined ? drawingOfSummary(info.resolved) : null),

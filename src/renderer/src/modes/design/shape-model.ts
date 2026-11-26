@@ -3,8 +3,9 @@
 // drag (`design.shape.item.update`, sources written in the unit as typed), the items a new shape
 // or item starts with, and where a command issue belongs. Commands do the checking.
 // Doc: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor
-import { itemQuantities, mapItem } from '../../../../core/design/shape'
+import { itemQuantities, mapItem, withOffsetSources } from '../../../../core/design/shape'
 import type {
+  ShapeDTO,
   ShapeItem,
   ShapeItemDTO,
   ShapeItemKind,
@@ -32,15 +33,28 @@ export function itemNumbers(dto: ShapeItemDTO): ItemNumbers | undefined {
   return ok ? out : undefined
 }
 
-/** The shape's items as numbers (the resolver's definition), or undefined. */
-export function definitionNumbers(items: readonly ShapeItemDTO[]): ItemNumbers[] | undefined {
+/**
+ * The shape's items as numbers (the resolver's definition), or undefined. With the part's
+ * `shapes`, offset items carry their source inlined (core `withOffsetSources`; `self` is the
+ * shape's own id, so a self-reference reads as a cycle); without, they resolve as `unknownShape`.
+ */
+export function definitionNumbers(
+  items: readonly ShapeItemDTO[],
+  shapes?: readonly ShapeDTO[],
+  self?: string,
+): ItemNumbers[] | undefined {
   const out: ItemNumbers[] = []
   for (const dto of items) {
     const n = itemNumbers(dto)
     if (n === undefined) return undefined
     out.push(n)
   }
-  return out
+  if (shapes === undefined) return out
+  const lookup = (id: string) => {
+    const s = shapes.find((x) => x.id === id)
+    return s === undefined || s.owner !== undefined ? undefined : definitionNumbers(s.items)
+  }
+  return [...withOffsetSources(out, lookup, new Set(self === undefined ? [] : [self]))]
 }
 
 /** The item as command args: quantities as entered. */
@@ -153,8 +167,11 @@ export function dragUpdate(
 const len = (mm: number, units: UnitSystem): string =>
   units === 'mm' ? String(mm) : String(+(mm / 25.4).toFixed(4))
 
+/** The kinds drawn from scratch (an offset item needs a source shape: "Offset…", task U3). */
+export type DrawnItemKind = Exclude<ShapeItemKind, 'offset'>
+
 /** Items a new shape (or a new item of a shape) starts with, as command args. */
-export function newItemArgs(kind: ShapeItemKind, units: UnitSystem): Record<string, unknown> {
+export function newItemArgs(kind: DrawnItemKind, units: UnitSystem): Record<string, unknown> {
   const l = (mm: number) => len(mm, units)
   const inch = units === 'inch'
   const centre = ['0', '0']
