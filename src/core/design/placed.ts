@@ -19,6 +19,7 @@ import {
   type Vec3,
 } from '../geometry/model'
 import { toGeometryInput } from './geometry-input'
+import { grooveWidth, lineMaxDepth } from '../geometry/line'
 import type { Operation, Part } from './operation'
 import type { Stock } from '../library/stock'
 
@@ -71,6 +72,22 @@ function outline(g: OperationGeometry, stock: StockGeometry): Bounds2 {
     case 'pocket':
     case 'profile':
       return shapeBounds(g.shape)
+    case 'line': {
+      // every path's bounds, grown by half the groove's widest width
+      const half = grooveWidth(g.cutter, lineMaxDepth(g)) / 2
+      const bs = g.paths.map(shapeBounds)
+      if (bs.length === 0) return { min: [0, 0], max: [0, 0] }
+      return {
+        min: [
+          Math.min(...bs.map((b) => b.min[0])) - half,
+          Math.min(...bs.map((b) => b.min[1])) - half,
+        ],
+        max: [
+          Math.max(...bs.map((b) => b.max[0])) + half,
+          Math.max(...bs.map((b) => b.max[1])) + half,
+        ],
+      }
+    }
   }
 }
 
@@ -139,6 +156,8 @@ function depthRange(g: OperationGeometry, stock: StockGeometry): readonly [numbe
       ]
     case 'chamfer':
       return [g.onZ - (isLoopChamfer(g) ? loopChamferDepth(g) : chamferDepth(g)), g.onZ]
+    case 'line':
+      return [g.onZ - lineMaxDepth(g), g.onZ]
   }
 }
 

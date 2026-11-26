@@ -13,6 +13,7 @@ import { translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { OperationGeometry, Shape } from '../../geometry/model'
 import { shapeOutline } from '../../geometry/outline'
+import { grooveWidth, lineMaxDepth } from '../../geometry/line'
 import type { UV } from './path'
 
 /** The Minkowski sum of the box centre ± (hu, hv) and a disk of radius `r` (a circle: hu = hv = 0). */
@@ -120,6 +121,11 @@ export function sourceFootprint(
         const grow =
           op.side === 'inside' ? 0 : op.side === 'outside' ? op.slotWidth : op.slotWidth / 2
         return shapePart(op.shape, grow, port)
+      }
+      case 'line': {
+        // each path grown by half the groove's widest width (engraved-patterns.md E1)
+        const half = grooveWidth(op.cutter, lineMaxDepth(op)) / 2
+        return op.paths.flatMap((p) => shapePart(p, half, port))
       }
     }
   })

@@ -1,0 +1,140 @@
+// The Line inspector (engraved-patterns.md E1, minimal): the `line` kind's groups inside
+// OperationFields, so the Design inspector and the plan copy share it. Paths (`on`, then per path
+// its shape, a Select of the part's shapes, and its centre on the face), Depth (a segmented choice
+// Constant / Start → end, then the fields; to Constant keeps the deeper end), then the tool group.
+// Each commit is one `design.line.update` (one undo step). "From levels" and blend come with E2.
+// Doc: docs/modes/engraved-patterns.md#ui, docs/conventions/inspector-layout.md
+import type { OperationDTO } from '../../../../core/design/part.dto'
+import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
+import { lineMessages } from '../../messages/line'
+import { Field, InspectorGroup, SegmentedControl, Select } from '../../ui'
+import { linePathArgs, quantityAt } from './model'
+import { OnField, ParamField, type OperationFieldsContext } from './OperationFields'
+
+const t = lineMessages
+
+type LineDTO = Extract<OperationDTO, { kind: 'line' }>
+type Mode = 'constant' | 'ramp'
+
+export function LineInspector({
+  ctx,
+  level,
+  tool,
+}: {
+  ctx: OperationFieldsContext
+  level: 3 | 4
+  tool: React.ReactNode
+}): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'line') return null
+  const ramp = 'start' in op.depth
+  return (
+    <>
+      <InspectorGroup title={t.groups.paths} level={level}>
+        <OnField ctx={ctx} />
+        {op.paths.map((_, i) => (
+          <PathFields key={i} ctx={ctx} op={op} index={i} />
+        ))}
+      </InspectorGroup>
+      <InspectorGroup title={t.groups.depth} level={level}>
+        <Field label={t.depthMode} kind="toggle" readOnly={ctx.readOnly}>
+          <SegmentedControl<Mode>
+            label={t.depthMode}
+            options={(['constant', 'ramp'] as const).map((m) => ({ value: m, label: t.modes[m] }))}
+            value={ramp ? 'ramp' : 'constant'}
+            disabled={ctx.readOnly}
+            onValueChange={(m) => ctx.send({ depth: depthFor(op, m) }, 'depth')}
+          />
+        </Field>
+        {ramp ? (
+          <>
+            <ParamField
+              ctx={ctx}
+              path="depth.start"
+              stepKind="depth"
+              label={t.start}
+              kind="length"
+              icon="depth"
+              info={t.rampNote}
+            />
+            <ParamField
+              ctx={ctx}
+              path="depth.end"
+              stepKind="depth"
+              label={t.end}
+              kind="length"
+              icon="depth"
+            />
+          </>
+        ) : (
+          <ParamField
+            ctx={ctx}
+            path="depth"
+            stepKind="depth"
+            label={t.depth}
+            kind="length"
+            icon="depth"
+          />
+        )}
+      </InspectorGroup>
+      {tool}
+    </>
+  )
+}
+
+/** The depth arg when the mode changes: a ramp starts flat, a constant keeps the deeper end. */
+export function depthFor(op: LineDTO, mode: Mode): unknown {
+  const d = op.depth
+  if (mode === 'ramp')
+    return 'start' in d
+      ? { start: d.start.source, end: d.end.source }
+      : { start: d.source, end: d.source }
+  if (!('start' in d)) return d.source
+  const s = quantityAt(op, 'depth.start')?.canonical ?? 0
+  const e = quantityAt(op, 'depth.end')?.canonical ?? 0
+  return e >= s ? d.end.source : d.start.source
+}
+
+function PathFields({
+  ctx,
+  op,
+  index,
+}: {
+  ctx: OperationFieldsContext
+  op: LineDTO
+  index: number
+}): React.JSX.Element {
+  const shapes = (ctx.part.dto.shapes ?? []).filter((s) => SHAPE_ID_PATTERN.test(s.id))
+  const id = op.paths[index]!.shapeId
+  const options = shapes.map((s) => ({ value: s.id, label: s.name }))
+  if (!options.some((o) => o.value === id)) options.push({ value: id, label: t.shapeMissing })
+  const choose = (shapeId: string) => {
+    const paths = linePathArgs(op)
+    paths[index] = { ...paths[index]!, shapeId }
+    ctx.send({ paths }, `paths.${index}.shapeId`)
+  }
+  return (
+    <>
+      <Field label={t.path(index + 1)} readOnly={ctx.readOnly}>
+        <Select options={options} value={id} disabled={ctx.readOnly} onValueChange={choose} />
+      </Field>
+      <ParamField
+        ctx={ctx}
+        path={`paths.${index}.center.0`}
+        stepKind="xy"
+        label={t.pathU}
+        kind="length"
+        icon="length"
+        info={t.pathNote}
+      />
+      <ParamField
+        ctx={ctx}
+        path={`paths.${index}.center.1`}
+        stepKind="xy"
+        label={t.pathV}
+        kind="length"
+        icon="length"
+      />
+    </>
+  )
+}

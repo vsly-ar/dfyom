@@ -157,6 +157,8 @@ const MILLING: readonly FeedField[] = [
   'stepover',
 ]
 const DRILLING: readonly FeedField[] = ['spindleSpeed', 'feedRate', 'plungeRate']
+/** A Line (engraved-patterns.md § Toolpath): depth passes, no stepover (one groove). */
+const LINE: readonly FeedField[] = ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown']
 
 /**
  * Fields that can be locked (docs/modes/plan-v0.1.md#locks-and-auto-mode): the inputs other
@@ -168,6 +170,7 @@ export function lockableFields(kind: OperationKind): readonly FeedField[] {
       return ['spindleSpeed', 'feedRate', 'stepdown', 'stepover']
     case 'pocket':
     case 'profile':
+    case 'line':
       return ['spindleSpeed', 'feedRate', 'stepdown']
     case 'drilling':
     case 'chamfer':
@@ -275,6 +278,11 @@ function engagementOf(
       return i.tool.type === 'flatEndMill'
         ? { kind: 'helix', ap: i.chamferDepth ?? 0.25 * D }
         : { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
+    case 'line':
+      // engraved-patterns.md § Toolpath: a V-bit by F10 at the deepest point, else a full slot
+      return i.tool.type === 'chamferMill'
+        ? { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
+        : { kind: 'slot' }
   }
 }
 
@@ -305,7 +313,8 @@ const perField = <T>(f: (field: FeedField) => T): Record<FeedField, T> =>
  * strategy fallback (stepdown/stepover). `data` is the material table (tests may pass a fixture).
  */
 export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): ResolvedFeeds {
-  const applicable = i.kind === 'drilling' || i.kind === 'chamfer' ? DRILLING : MILLING
+  const applicable =
+    i.kind === 'drilling' || i.kind === 'chamfer' ? DRILLING : i.kind === 'line' ? LINE : MILLING
   const engagement = engagementOf(i)
   const base: CuttingInput = {
     tool: i.tool,

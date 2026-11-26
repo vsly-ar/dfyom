@@ -9,6 +9,7 @@ import type {
   ProfileInput,
   ToolpathTool,
 } from '../model'
+import type { LineInput } from '../line'
 
 export const endMill = (diameter: number, fluteLength = 25): ToolpathTool => ({
   id: `em${diameter}`,
@@ -159,6 +160,26 @@ export function chamferInput(
     stock,
     operation,
     strategy: { entry: 'contour', rampAngle: 3, direction: 'climb', ...strategy },
+    maxFeedRate: RATES,
+  }
+}
+
+/** A Line input (engraved-patterns.md E1): ramp-back at 10° by default, stepdown 0.5 mm. */
+export function lineInput(
+  stock: StockGeometry,
+  operation: LineInput['operation'],
+  tool: ToolpathTool,
+  strategy: Partial<LineInput['strategy']> = {},
+  over: Partial<LineInput['cutting']> = {},
+): LineInput {
+  return {
+    planOperationId: `op-${operation.id}`,
+    tool,
+    cutting: { spindleSpeed: 18000, feedRate: 1000, plungeRate: 300, stepdown: 0.5, ...over },
+    heights: HEIGHTS,
+    stock,
+    operation,
+    strategy: { entry: 'ramp', rampAngle: 10, ...strategy },
     maxFeedRate: RATES,
   }
 }

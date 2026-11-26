@@ -353,6 +353,19 @@ export function operationIssues(
         )
       break
     }
+    case 'line': {
+      // every depth > 0 and above the stock's far face (engraved-patterns.md § Line operation)
+      const depths: [string, Quantity][] =
+        op.depth.kind === 'constant'
+          ? [['depth', op.depth.depth]]
+          : [
+              ['depth.start', op.depth.start],
+              ['depth.end', op.depth.end],
+            ]
+      for (const [path, q] of depths)
+        if (c.positive(q, path) && on !== undefined) checkAboveBottom(c, path, on, q, T.exact)
+      break
+    }
     case 'chamfer': {
       const edge = ops.slice(0, index).find((o) => o.id === op.edgeOf)
       const edgeKind = chamferEdgeKind(edge)

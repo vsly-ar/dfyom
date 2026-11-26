@@ -323,6 +323,7 @@ const RANK: Record<Operation['kind'], number> = {
   drilling: 1,
   pocket: 2,
   chamfer: 3,
+  line: 3,
   profile: 4,
 }
 

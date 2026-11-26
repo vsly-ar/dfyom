@@ -43,6 +43,7 @@ import {
 import { tiledBox, type Triangulate } from './prism'
 import { shapePocket, shapeProfile } from './shape-solids'
 import { loopChamferSolids } from './chamfer-solids'
+import { lineSolids } from './line'
 import { analyticTabCentres } from './tab-hold'
 import type { Region2dPort } from './2d/port'
 
@@ -219,6 +220,8 @@ function build(
     case 'profile':
       if (isAnalyticOperation(op)) return profile(op, stock)
       return general(op, context).andThen((c) => shapeProfile(op, stock, c))
+    case 'line':
+      return lineSolids(op)
   }
 }
 

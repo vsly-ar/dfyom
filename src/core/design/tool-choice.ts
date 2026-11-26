@@ -248,8 +248,12 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   }
   const size = sizeClasses(out.map((c) => c.tool.diameter.canonical))
   const cls = (c: LibraryCandidate) => size.get(c.tool.diameter.canonical) ?? 0
+  // a Line's default tool is a V-bit (engraved-patterns.md § Tools): chamfer mills first
+  const vBit = (c: LibraryCandidate) =>
+    input.op.kind === 'line' && c.tool.type === 'chamferMill' ? 0 : 1
   return out.sort(
     (a, b) =>
+      vBit(a) - vBit(b) ||
       Number(a.leavesRest) - Number(b.leavesRest) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
       cls(a) - cls(b) ||
@@ -330,7 +334,7 @@ export function nearLibraryTool(g: GeneralizedTool, input: ChoiceInput): Option<
 
 /**
  * The generalized tools the auto choice tries, in its order: a chamfer's standard chamfer mills
- * at its angle (largest first: it plunges); a pointed hole's drill of its diameter; then end mills
+ * at its angle (largest first: it plunges), a Line's at 60°; a pointed hole's drill of its diameter; then end mills
  * of the standard sizes, largest first (bull nose with RE = `floorRadius`, only sizes with
  * RE < DC/2).
  */
@@ -338,14 +342,18 @@ function generalizedCandidates(input: ChoiceInput): GeneralizedTool[] {
   const { op, units } = input
   const plain = (q: Quantity) => plainLength(q.exact, units)
   const out: GeneralizedTool[] = []
-  if (op.kind === 'chamfer') {
-    const angle = Quantity.create({
-      kind: 'angle',
-      source: `${Number(op.angle.canonical.toFixed(4))}°`,
-      defaultUnit: 'deg',
-      exact: op.angle.exact,
-      tolerance: None,
-    }).unwrap()
+  if (op.kind === 'chamfer' || op.kind === 'line') {
+    // a Line's generalized tool is a 60° V-bit (engraved-patterns.md § Tools)
+    const angle =
+      op.kind === 'line'
+        ? Quantity.parse('60°', { kind: 'angle', defaultUnit: 'deg' }).unwrap()
+        : Quantity.create({
+            kind: 'angle',
+            source: `${Number(op.angle.canonical.toFixed(4))}°`,
+            defaultUnit: 'deg',
+            exact: op.angle.exact,
+            tolerance: None,
+          }).unwrap()
     for (const size of [...CHAMFER_MILL_STANDARD.sizes[units]].reverse()) {
       const diameter = Quantity.parse(size, { kind: 'length', defaultUnit: 'mm' }).unwrap()
       out.push({

@@ -18,6 +18,8 @@ import type { Machine } from '../../library/machine'
 import { generateChamfer } from '../../toolpath/chamfer'
 import { generateDrilling } from '../../toolpath/drilling'
 import { generateFacing } from '../../toolpath/facing'
+import { generateLine } from '../../toolpath/line'
+import { arc, line } from '../../geometry/2d/model'
 import type { Move, Toolpath, Vec3 } from '../../toolpath/model'
 import { generatePocket } from '../../toolpath/pocket'
 import { generateProfile } from '../../toolpath/profile'
@@ -29,6 +31,7 @@ import {
   drillingInput,
   endMill,
   facingInput,
+  lineInput,
   pocketInput,
   profileInput,
   RATES,
@@ -125,6 +128,72 @@ const profileOp = () => {
  * Chamfers (v0.4 T1) on two holes of Ø `d` at the face: one contoured with a mill of DC = d, one
  * plunged with a mill twice as wide; in mm or inch sizes (1 mm or 1/32" wider than the hole).
  */
+/** Lines (engraved-patterns.md E1): a 60° V-bit fluting an open curve 0.2 → 1.5 mm. */
+const lineRampOps = (): ExportOperation[] => {
+  const tool = chamferMill(6, 60)
+  const op = {
+    kind: 'line',
+    id: 'line1',
+    onZ: 0,
+    paths: [
+      {
+        center: [30, 20],
+        contour: {
+          kind: 'path',
+          path: { elements: [line([-20, -5], [0, -5]), arc([0, -5], [10, 5], [0, 5], true)] },
+        },
+      },
+    ],
+    depth: { start: 0.2, end: 1.5 },
+    cutter: { kind: 'vBit', diameter: 6, angle: 60, tipDiameter: 0 },
+  } as const
+  const stock = { length: 60, width: 40, thickness: 10 }
+  return [operation(generateLine(lineInput(stock, op, tool)).unwrap(), tool)]
+}
+
+/** A constant 0.8 mm V-groove round a closed rounded square (E1). */
+const lineClosedOps = (): ExportOperation[] => {
+  const tool = chamferMill(6, 90)
+  const r = 3
+  const s = 10
+  const op = {
+    kind: 'line',
+    id: 'line1',
+    onZ: 0,
+    paths: [
+      {
+        center: [20, 20],
+        contour: {
+          kind: 'region',
+          region: {
+            pieces: [
+              {
+                outer: {
+                  elements: [
+                    line([-s + r, -s], [s - r, -s]),
+                    arc([s - r, -s], [s, -s + r], [s - r, -s + r], true),
+                    line([s, -s + r], [s, s - r]),
+                    arc([s, s - r], [s - r, s], [s - r, s - r], true),
+                    line([s - r, s], [-s + r, s]),
+                    arc([-s + r, s], [-s, s - r], [-s + r, s - r], true),
+                    line([-s, s - r], [-s, -s + r]),
+                    arc([-s, -s + r], [-s + r, -s], [-s + r, -s + r], true),
+                  ],
+                },
+                holes: [],
+              },
+            ],
+          },
+        },
+      },
+    ],
+    depth: { start: 0.8, end: 0.8 },
+    cutter: { kind: 'vBit', diameter: 6, angle: 90, tipDiameter: 0 },
+  } as const
+  const stock = { length: 40, width: 40, thickness: 10 }
+  return [operation(generateLine(lineInput(stock, op, tool)).unwrap(), tool)]
+}
+
 const chamferOps = (inch = false): ExportOperation[] => {
   const d = inch ? 25.4 / 4 : 6
   const stock = { length: 40, width: 30, thickness: 10 }
@@ -454,6 +523,8 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['chamfer', () => chamferOps()],
     ['chamfer-inch', () => chamferOps(true), testMachine({ programUnits: 'in' })],
     ['countersink-stepped', steppedCountersinkOps],
+    ['line-ramp', lineRampOps],
+    ['line-vgroove-closed', lineClosedOps],
     [
       'multi-tool-inch-manual-spindle',
       facedMultiToolOps,

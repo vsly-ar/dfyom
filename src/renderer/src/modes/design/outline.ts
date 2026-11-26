@@ -281,6 +281,12 @@ export function operationOutline(
         ...shapeLoops(op.shape, face.w, ctx),
         ...shapeLoops(op.shape, through, ctx),
       ])
+    case 'line':
+      // a Line (engraved-patterns.md E1): its paths at the face (the groove is the solid)
+      return place(
+        face,
+        op.paths.flatMap((p) => shapeLoops(p, face.w, ctx)),
+      )
     case 'chamfer': {
       const edge = chamferEdge(ops, op.edgeOf)
       if (edge === undefined) {
@@ -321,6 +327,8 @@ export function markerPoint(
     case 'pocket':
     case 'profile':
       return at(...shapeCentre(op.shape))
+    case 'line':
+      return op.paths[0] === undefined ? at(0, 0) : at(...shapeCentre(op.paths[0]))
     case 'drilling':
       return at(op.center[0].canonical, op.center[1].canonical)
     case 'chamfer': {
@@ -374,7 +382,10 @@ export function anchorPoint(
   // a chamfer sits on its edge's axis: no anchor of its own
   if (op.kind === 'facing' || op.kind === 'chamfer') return null
   const face = operationFace(op, stock, table)
-  const c = op.kind === 'drilling' ? op.center : op.shape.center
+  const first = op.kind === 'line' ? op.paths[0] : undefined
+  if (op.kind === 'line' && first === undefined) return null
+  const c =
+    op.kind === 'drilling' ? op.center : op.kind === 'line' ? first!.center : op.shape.center
   return {
     at: toPartFrame(face.frame, [c[0].canonical, c[1].canonical, face.w]),
     u: face.frame.u,

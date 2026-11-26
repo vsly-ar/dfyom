@@ -16,6 +16,7 @@ import { noSteps, type Steps } from '../workers/steps'
 import { generateChamfer } from './chamfer'
 import { generateEdgeChamfer, type EdgeChamferInput } from './edge-chamfer'
 import { generateMark, type MarkInput } from './mark'
+import { generateLine, type LineInput } from './line'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
 import type {
@@ -38,6 +39,7 @@ import {
   EdgeChamferInputSchema,
   FacingInputSchema,
   MarkInputSchema,
+  LineInputSchema,
   PocketInputSchema,
   ProfileInputSchema,
   RegionPocketInputSchema,
@@ -58,6 +60,7 @@ export type GeneratorRequest = (
   | { readonly kind: 'chamfer'; readonly inputs: readonly ChamferInput[] }
   | { readonly kind: 'edgeChamfer'; readonly inputs: readonly EdgeChamferInput[] }
   | { readonly kind: 'mark'; readonly inputs: readonly MarkInput[] }
+  | { readonly kind: 'line'; readonly inputs: readonly LineInput[] }
 ) & {
   /**
    * The setup's quarter turn (v0.2 task C3) and work zero (alignment phase 1): the inputs are in
@@ -104,6 +107,7 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
   }),
   z.object({ kind: z.literal('edgeChamfer'), inputs: one(EdgeChamferInputSchema), wcs }),
   z.object({ kind: z.literal('mark'), inputs: one(MarkInputSchema), wcs }),
+  z.object({ kind: z.literal('line'), inputs: one(LineInputSchema), wcs }),
 ])
 
 /** The 2D port of the worker, loaded on first use; the region generators need it. */
@@ -146,6 +150,8 @@ function generateLocal(
       return joined(request.inputs, generateChamfer, 'chamfer', steps)
     case 'mark':
       return generateMark(request.inputs[0]!, steps)
+    case 'line':
+      return generateLine(request.inputs[0]!, steps)
     case 'edgeChamfer': {
       const input = request.inputs[0]!
       return region2d().andThen((port) => generateEdgeChamfer(input, port, steps))

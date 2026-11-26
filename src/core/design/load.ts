@@ -132,6 +132,6 @@ export function partGeometryInput(
   region2d?: Region2dPort,
 ): AppResult<PartGeometryInput> {
   return loadEnabledPart(doc, partId, 'partGeometryInput').andThen((l) =>
-    toGeometryInput(l.part, l.stock, region2d),
+    toGeometryInput(l.part, l.stock, region2d, l.snapshots),
   )
 }

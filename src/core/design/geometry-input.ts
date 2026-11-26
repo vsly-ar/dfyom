@@ -4,9 +4,13 @@
  * `on` and expression references to `references` (for `dfm.surfaceMissing`). Pure; the geometry types are owned by src/core/geometry/model.ts.
  * Doc: docs/modes/design.md#implementation-task-25, docs/architecture/geometry.md#evaluation-rules
  */
-import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
+import type { ProjectDoc } from '../project/document'
+import { DEFAULT_LINE_CUTTER } from '../geometry/line'
+import { resolveDesignTool } from './tool-choice'
 import type {
   Contour,
+  LineCutter,
   OperationGeometry,
   LoopChamferTab,
   PartGeometryInput,
@@ -26,6 +30,7 @@ import {
   circularEdgeDiameter,
   isBottomChamfer,
   isGeneralShape,
+  lineDepths,
   type Operation,
   type Part,
   type Point,
@@ -88,6 +93,11 @@ export function toGeometryInput(
   part: Part,
   stock: Stock,
   port?: Region2dPort,
+  /**
+   * The document's snapshots: a Line's specific tool resolves here for its groove's shape
+   * (engraved-patterns.md E1); absent or unresolved = the default V-bit.
+   */
+  snapshots?: ProjectDoc['snapshots'],
 ): AppResult<PartGeometryInput> {
   const table = SurfaceTable.build(part.operations, stock, part.shapes)
   const operations: OperationGeometry[] = []
@@ -96,6 +106,7 @@ export function toGeometryInput(
     const g = operationGeometry(op, i, table, part.shapes, port, part.operations, {
       built: operations,
       stock,
+      ...(snapshots === undefined ? {} : { snapshots }),
     })
     if (g.isErr()) return Err(g.unwrapErr())
     operations.push(g.unwrap())
@@ -153,7 +164,11 @@ function operationGeometry(
   shapes: Part['shapes'],
   port: Region2dPort | undefined,
   ops: readonly Operation[],
-  ctx: { readonly built: readonly OperationGeometry[]; readonly stock: Stock },
+  ctx: {
+    readonly built: readonly OperationGeometry[]
+    readonly stock: Stock
+    readonly snapshots?: ProjectDoc['snapshots']
+  },
 ): AppResult<OperationGeometry> {
   const entry = table.get(op.on)
   if (entry.isNone() || entry.unwrap().owner >= index)
@@ -287,7 +302,42 @@ function operationGeometry(
         ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
       })
     }
+    case 'line': {
+      const paths = collect(op.paths.map((p) => shapeGeometry(p, shapes, port)))
+      if (paths.isErr()) return Err(paths.unwrapErr())
+      return Ok({
+        kind: 'line',
+        id: op.id,
+        ...direction,
+        onZ: on.faceZ.toNumber(),
+        paths: paths.unwrap(),
+        depth: lineDepths(op.depth),
+        cutter: lineCutter(op, ctx.snapshots),
+      })
+    }
   }
+}
+
+/**
+ * The tool a Line's groove takes (engraved-patterns.md § Line operation): its tool field's chamfer
+ * mill (V-bit), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
+ * that does not resolve) the default 60° V-bit.
+ */
+export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
+  if (op.tool.isNone()) return DEFAULT_LINE_CUTTER
+  const t = resolveDesignTool(op.tool.unwrap(), snapshots ?? {})
+  if (t.isNone()) return DEFAULT_LINE_CUTTER
+  const tool = t.unwrap()
+  if (tool.type === 'chamferMill' && tool.angle !== undefined)
+    return {
+      kind: 'vBit',
+      diameter: tool.diameter,
+      angle: tool.angle,
+      tipDiameter: tool.tipDiameter ?? 0,
+    }
+  if (tool.type === 'ballEndMill') return { kind: 'ball', diameter: tool.diameter }
+  if (tool.type === 'flatEndMill') return { kind: 'flat', diameter: tool.diameter }
+  return DEFAULT_LINE_CUTTER
 }
 
 /** A pattern's own chamfers: its top edges (P3) and its through cells' bottom edges (P5). */

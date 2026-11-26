@@ -204,6 +204,10 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `The bevels meet on a ${L(p['wall'])} wall: its top becomes a ridge. Use a width of at most ${L(num(p['wall']) / 2)}.`,
   'dfm.chamferIncomplete': (p, L, name) =>
     `The ${L(p['tipDiameter'])} tip of the ${String(p['tool'])} does not fit where the air beside ${name.item(String(p['edgeOf']))} is narrower: ${L(p['length'])} of its edge is not chamfered fully.`,
+  'dfm.lineTooDeep': (p, L) =>
+    `The line is ${L(p['depth'])} deep but the tool cuts only ${L(p['cuts'])} deep. Make it shallower or pick a longer tool.`,
+  'dfm.lineShallow': (p, L) =>
+    `The line is only ${L(p['depth'])} deep at its shallowest: an uneven stock top can erase it.`,
   'dfm.chamferTabs': (p, L, name) =>
     `The bottom bevel stops ${L(p['gap'])} short across each of the ${String(p['count'])} tabs of ${name.item(String(p['edgeOf']))}, so they keep holding the part. Finish those stretches by hand when you remove the tabs.`,
 }

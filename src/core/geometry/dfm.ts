@@ -55,6 +55,7 @@ import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
 import { chamferIncomplete, chamferMeets } from './chamfer-findings'
+import { elementPoint, lineChains, lineMaxDepth, vBitEdgeHeight } from './line'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -212,6 +213,8 @@ export function parameterChecks(
           ...reach(op, stock, lib, own, options.unitSystem),
           ...tool,
         ]
+      case 'line':
+        return [...lineChecks(op, own), ...tool]
       case 'profile':
         return [
           ...(isAnalyticOperation(op)
@@ -226,6 +229,55 @@ export function parameterChecks(
     }
   })
   return [...perOperation, ...setups(input)]
+}
+
+/** A Line shallower than this is a hairline a stock height error erases (mm). */
+export const LINE_SHALLOW = 0.05
+
+/**
+ * A Line's findings (engraved-patterns.md § DFM): `dfm.lineTooDeep` when its deepest point is
+ * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2), an end
+ * mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm.
+ */
+function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const deepest = lineMaxDepth(op)
+  const cuts = op.cutter.kind === 'vBit' ? vBitEdgeHeight(op.cutter) : own?.tool.fluteLength
+  if (cuts !== undefined && deepest > cuts + EPSILON) {
+    const at = deepestPoint(op)
+    out.push(
+      warning(
+        'dfm.lineTooDeep',
+        op,
+        'depth',
+        `the line is ${mm(deepest)} deep, the tool cuts ${mm(cuts)} deep`,
+        { depth: deepest, cuts, ...(at !== undefined && { at }) },
+      ),
+    )
+  }
+  const shallowest = Math.min(op.depth.start, op.depth.end)
+  if (shallowest < LINE_SHALLOW - EPSILON)
+    out.push(
+      warning(
+        'dfm.lineShallow',
+        op,
+        'depth',
+        `the line is ${mm(shallowest)} deep at its shallowest: a stock height error erases it`,
+        { depth: shallowest, minimum: LINE_SHALLOW },
+        { severity: 'info' },
+      ),
+    )
+  return out
+}
+
+/** `[u, v]` of a Line's deepest place (its first line's end at the deeper depth). */
+function deepestPoint(op: Op<'line'>): number[] | undefined {
+  const l = lineChains(op).lines[0]
+  if (l === undefined) return undefined
+  const atEnd = op.depth.end > op.depth.start
+  const e = atEnd ? l.elements.at(-1)! : l.elements[0]!
+  const p = elementPoint(e, atEnd ? 1 : 0)
+  return [p[0], p[1]]
 }
 
 /**

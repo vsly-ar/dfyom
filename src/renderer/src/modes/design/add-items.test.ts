@@ -39,7 +39,7 @@ describe('Add items (DF98)', () => {
       for (const why of Object.values(ADD_EXCEPTIONS[s])) expect(why, s).toMatch(/\S/)
     }
     // today no surface leaves anything out: Pattern was missing from the empty list and the face
-    expect(SURFACES.map((s) => addItemsFor(s).length)).toEqual([6, 6, 6])
+    expect(SURFACES.map((s) => addItemsFor(s).length)).toEqual([7, 7, 7])
   })
 
   it('labels each item once per surface', () => {
@@ -49,5 +49,7 @@ describe('Add items (DF98)', () => {
     }
     expect(ADD_ITEMS.map((i) => addItemLabel(i.id, 'face'))).toContain('Add pattern here')
     expect(ADD_ITEMS.map((i) => addItemLabel(i.id, 'empty'))).toContain('Add pattern')
+    // engraved-patterns.md E1: Line among the operations
+    expect(ADD_ITEMS.map((i) => addItemLabel(i.id, 'menu'))).toContain('Line')
   })
 })

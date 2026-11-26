@@ -368,6 +368,8 @@ export function firstGeometricPath(op: OperationDTO): string {
       return 'depth'
     case 'chamfer':
       return 'diameter'
+    case 'line':
+      return 'paths.0.center.0'
   }
 }
 
@@ -469,7 +471,7 @@ const mmOf = (q: unknown): number | undefined => {
 /** A footprint width (mm) of an operation along u, or undefined when it has none to read. */
 function widthOf(op: OperationDTO, ops: readonly OperationDTO[]): number | undefined {
   if (op.kind === 'drilling') return mmOf(op.diameter)
-  if (op.kind === 'facing') return undefined
+  if (op.kind === 'facing' || op.kind === 'line') return undefined
   if (op.kind === 'chamfer') {
     // D45: edge Ø + 2 × width
     const edge = ops.find((o) => o.id === op.edgeOf)
@@ -493,7 +495,9 @@ function centreSpread(ops: readonly OperationDTO[]): number {
         ? o.center
         : o.kind === 'facing' || o.kind === 'chamfer'
           ? undefined
-          : o.shape.center
+          : o.kind === 'line'
+            ? o.paths[0]?.center
+            : o.shape.center
     const u = c === undefined ? undefined : mmOf(c[0])
     return u === undefined ? [] : [u]
   })

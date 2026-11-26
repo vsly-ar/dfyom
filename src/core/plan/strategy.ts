@@ -13,6 +13,7 @@ import {
   fieldContext,
   isGeneralShape,
   isLoopChamferOp,
+  lineDepths,
   type Operation,
 } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
@@ -51,6 +52,8 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance', 'finishStepdown'],
   // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
   chamfer: ['entry', 'rampAngle'],
+  // Line (engraved-patterns.md § Toolpath): ramp-back (default) or plunge (V-bits)
+  line: ['entry', 'rampAngle'],
 }
 
 const LENGTH_KEYS = [
@@ -76,11 +79,11 @@ export const StrategyArgSchema = z
     axis: clear(z.enum(FACING_AXES)).describe('Facing: x (default, along length) or y'),
     overshoot: clear(Src).describe('Facing: tool edge past the stock edge; default 1 mm / 0.04"'),
     entry: clear(z.enum(ENTRIES)).describe(
-      'Pocket: helix (default), ramp or plunge; profile: ramp (default) or plunge; chamfer: plunge or contour (default: plunge when DC ≥ the chamfer Ø)',
+      'Pocket: helix (default), ramp or plunge; profile/line: ramp (default) or plunge; chamfer: plunge or contour (default: plunge when DC ≥ the chamfer Ø)',
     ),
     helixDiameter: clear(Src).describe('Pocket: default 0.8 D'),
     rampAngle: clear(Src).describe(
-      'Pocket/profile/drilling (helix)/chamfer (contour): 0.5°–30°, default 3°',
+      'Pocket/profile/drilling (helix)/chamfer (contour)/line: 0.5°–30°, default 3°, line 10°',
     ),
     finishAllowance: clear(Src).describe(
       'Pocket/profile: default 0.2 mm / 0.008" (wood 0.5 mm / 0.02"); 0 = none',
@@ -154,10 +157,20 @@ const DEF = {
   breakthrough: { mm: 0.5, inch: 0.508 },
 } as const
 const RAMP_ANGLE = 3
+/** A Line's default ramp angle (engraved-patterns.md § Line operation, the chamfer's range). */
+export const LINE_RAMP_ANGLE = 10
 
 type Direction = (typeof DIRECTIONS)[number]
 
 export type ResolvedStrategy =
+  | {
+      readonly kind: 'line'
+      /** Ramp-back entry (default) or a straight plunge (V-bits only). */
+      readonly entry: 'ramp' | 'plunge'
+      readonly rampAngle: number
+      /** The deepest point of the groove (mm): F10's `depth` for a V-bit's feeds. */
+      readonly cutDepth: number
+    }
   | {
       readonly kind: 'chamfer'
       /**
@@ -340,6 +353,17 @@ export function resolveStrategy(
         finishStepdown: mm(s.finishStepdown).unwrapOr(finishStepdownDefault(depth, c.tool, wood)),
       }
     }
+    case 'line':
+      return {
+        kind,
+        entry: s.entry === 'plunge' ? 'plunge' : 'ramp',
+        rampAngle: mm(s.rampAngle).unwrapOr(LINE_RAMP_ANGLE),
+        cutDepth: c.ops.reduce((m, op) => {
+          if (op.kind !== 'line') return m
+          const d = lineDepths(op.depth)
+          return Math.max(m, d.start, d.end)
+        }, 0),
+      }
     case 'chamfer': {
       const tool = c.tool.isSome() ? c.tool.unwrap() : undefined
       const plunge = c.ops.every((op) => {
@@ -488,6 +512,19 @@ export function strategyIssues(
     bad('entry', 'notForKind', 'a profile enters by ramp or plunge')
   if (kind === 'pocket' && s.entry === 'contour')
     bad('entry', 'notForKind', 'a pocket enters by helix, ramp or plunge')
+  if (kind === 'line' && (s.entry === 'helix' || s.entry === 'contour'))
+    bad('entry', 'notForKind', 'a line enters by a ramp or a plunge')
+  if (
+    kind === 'line' &&
+    s.entry === 'plunge' &&
+    tool.isSome() &&
+    tool.unwrap().type !== 'chamferMill'
+  )
+    bad(
+      'entry',
+      'linePlunge',
+      'only a V-bit plunges into a line; ramp with a ball or flat end mill',
+    )
   if (kind === 'chamfer' && (s.entry === 'helix' || s.entry === 'ramp'))
     bad('entry', 'notForKind', 'a chamfer is plunged or contoured')
   if (r.kind === 'chamfer' && r.entry === 'stepped' && s.entry !== undefined)

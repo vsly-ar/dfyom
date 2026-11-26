@@ -8,6 +8,7 @@ import { z } from 'zod'
 import {
   ChamferGeometrySchema,
   LoopChamferGeometrySchema,
+  LineGeometrySchema,
   DrillingGeometrySchema,
   FacingGeometrySchema,
   AnalyticPocketGeometrySchema,
@@ -30,6 +31,7 @@ import type {
 } from './model'
 import type { EdgeChamferInput } from './edge-chamfer'
 import type { MarkInput } from './mark'
+import type { LineInput } from './line'
 import type { RegionPocketInput } from './region-pocket'
 import type { RegionProfileInput } from './region-profile'
 
@@ -267,6 +269,19 @@ export const EdgeChamferInputSchema: z.ZodType<EdgeChamferInput> = z.object({
   cutting: DrillCuttingSchema,
   operation: LoopChamferGeometrySchema.omit({ direction: true }),
   strategy: z.object({ direction: Direction }),
+})
+
+/** A Line (engraved-patterns.md E1), in the face frame; `entry`/`rampAngle` resolved by the plan. */
+export const LineInputSchema: z.ZodType<LineInput> = z.object({
+  ...base,
+  cutting: CuttingSchema.pick({
+    spindleSpeed: true,
+    feedRate: true,
+    plungeRate: true,
+    stepdown: true,
+  }),
+  operation: LineGeometrySchema.omit({ direction: true }),
+  strategy: z.object({ entry: z.enum(['ramp', 'plunge']), rampAngle: z.number() }),
 })
 
 /** A witness mark (alignment aid, S14): a spot (`from` = `to`) or a line at `depth`, face frame. */

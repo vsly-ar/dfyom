@@ -89,7 +89,7 @@ describe('feature UI (U1)', () => {
       within(group)
         .getAllByRole('menuitem')
         .map((i) => i.querySelector('span')?.textContent)
-    expect(labels(ops)).toEqual(['Facing', 'Pocket', 'Profile', 'Drilling'])
+    expect(labels(ops)).toEqual(['Facing', 'Pocket', 'Profile', 'Drilling', 'Line'])
     const features = within(menu).getByRole('group', { name: 'Features' })
     expect(labels(features)).toEqual(['Bolt hole', 'Pattern'])
     expect(within(menu).queryByRole('menuitem', { name: /Chamfer|Make Clones/ })).toBeNull()

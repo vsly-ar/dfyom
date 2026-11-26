@@ -32,6 +32,7 @@ import {
   type StepKind,
 } from '../../ui'
 import { ChamferInspector } from './ChamferInspector'
+import { LineInspector } from './LineInspector'
 import { isOpenNamed } from './operation-shape'
 import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
 import { TabPositions } from './TabsFields'
@@ -406,6 +407,8 @@ export function OperationFields({
     }
     case 'chamfer':
       return <ChamferInspector ctx={ctx} level={level} tool={toolGroup} />
+    case 'line':
+      return <LineInspector ctx={ctx} level={level} tool={toolGroup} />
     default:
       return null
   }
@@ -710,7 +713,7 @@ export function ParamField({
  * `on`: the face the operation starts from – a list of its face targets grouped by direction, or
  * pick it in the viewport (every direction, with a normal glyph; task F1).
  */
-function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+export function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
   const { part, op } = ctx

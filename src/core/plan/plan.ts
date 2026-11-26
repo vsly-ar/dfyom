@@ -209,5 +209,7 @@ export function planGeometryInput(
   if (stock.isErr()) return Err(stock.unwrapErr().withContext(where))
   const values = stock.unwrap().values
   if (!(values instanceof Stock)) return broken(plan, 'the stock copy is not a stock', where)
-  return toGeometryInput(part.unwrap(), values, region2d)
+  // a Line's groove takes its tool's shape from the plan's copies (engraved-patterns.md E1)
+  const snapshots = Object.fromEntries(plan.snapshots.map((s) => [s.id, s]))
+  return toGeometryInput(part.unwrap(), values, region2d, snapshots)
 }
