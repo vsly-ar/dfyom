@@ -412,6 +412,7 @@ function ReferenceBody({
               stepKind="scale"
               kind="scalar"
               defaultUnit={defaultUnit('scalar', part.units)}
+              unitLabel="×"
               value={quantityOf(ref.scale)}
               onCommit={(q, gesture) => {
                 const k = q.canonical

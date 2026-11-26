@@ -192,7 +192,8 @@ export function AlignmentFields({
 
   return (
     <>
-      <InspectorGroup title={m.zeroTitle}>
+      {/* design review R11: the static hint is the group's (i); a zero on a point stays a note */}
+      <InspectorGroup title={m.zeroTitle} info={m.zeroHint}>
         {failed ? (
           <ErrorMessage error={failed} message={planMessages.inspector.commandFailed} />
         ) : null}
@@ -208,12 +209,12 @@ export function AlignmentFields({
             readOnly={readOnly}
             messages={[
               ...messages(k),
-              ...(k === 1
+              ...(k === 1 && onPoint !== undefined
                 ? [
                     {
-                      id: 'zeroHint',
+                      id: 'zeroOnPoint',
                       severity: 'note' as const,
-                      text: onPoint === undefined ? m.zeroHint : m.zeroOnPoint(pointName(onPoint)),
+                      text: m.zeroOnPoint(pointName(onPoint)),
                     },
                   ]
                 : []),

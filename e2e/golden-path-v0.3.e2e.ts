@@ -349,13 +349,12 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await setField(inspector, 'Position X', PLACE.cavity[0])
   await setField(inspector, 'Position Y', PLACE.cavity[1])
   await setField(inspector, 'Depth', '34.8')
-  // X0: two sharp corners at the back wall's step (one shown, "1 more"); the picker offers the
-  // 6 mm tool's radius
+  // X0: two sharp corners at the back wall's step (both shown in full, design review R19); the
+  // picker offers the 6 mm tool's radius
   const shapeGroup = inspector.getByRole('region', { name: 'Shape' })
-  await expect(
-    shapeGroup.getByText('A sharp inside corner cannot be cut by a round tool.').first(),
-  ).toBeVisible()
-  await expect(shapeGroup.getByRole('button', { name: '1 more' })).toBeVisible()
+  const sharp = shapeGroup.getByText('A sharp inside corner cannot be cut by a round tool.')
+  await expect(sharp.first()).toBeVisible()
+  await expect(sharp.nth(1)).toBeVisible()
   // the tool radius does not fit between the fitted wall's segments: the fix offers the largest
   // radius the corner takes and says the warning stays (X2 finding). Not applied here: the step
   // corners are filleted in the segment table below, as X1 does

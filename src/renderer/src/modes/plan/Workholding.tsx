@@ -319,26 +319,34 @@ export function Workholding({
         </p>
       )}
       {items.length > 0 ? (
-        <QuantityInput
-          label={m.margin}
-          stepKind="xy"
-          info={m.marginHint}
-          kind="length"
-          defaultUnit={defaultUnit('length', units)}
-          value={quantityOf(setup.workholdingMargin ?? defaultMargin(units))}
-          readOnly={readOnly}
-          messages={[
-            ...errors
-              .filter((i) => i.path[0] === 'margin')
-              .map((i, k) => ({
-                id: `margin-${k}`,
-                severity: 'error' as const,
-                text: sentence(i.message),
-              })),
-          ]}
-          onCommit={(q, gesture) => void set({ margin: q.source }, gesture)}
-          onCancelGesture={cancelGesture}
-        />
+        // design review R10: the rarely changed margin in a More row under the buttons, so it no
+        // longer reads as a property of the last item or of Arrange automatically
+        <InspectorGroup.More
+          fields={[m.margin]}
+          rememberKey="workholding.more"
+          forceOpen={errors.some((i) => i.path[0] === 'margin')}
+        >
+          <QuantityInput
+            label={m.margin}
+            stepKind="xy"
+            info={m.marginHint}
+            kind="length"
+            defaultUnit={defaultUnit('length', units)}
+            value={quantityOf(setup.workholdingMargin ?? defaultMargin(units))}
+            readOnly={readOnly}
+            messages={[
+              ...errors
+                .filter((i) => i.path[0] === 'margin')
+                .map((i, k) => ({
+                  id: `margin-${k}`,
+                  severity: 'error' as const,
+                  text: sentence(i.message),
+                })),
+            ]}
+            onCommit={(q, gesture) => void set({ margin: q.source }, gesture)}
+            onCancelGesture={cancelGesture}
+          />
+        </InspectorGroup.More>
       ) : null}
     </InspectorGroup>
   )
@@ -493,11 +501,8 @@ function ItemFields({
       )
     case 'surface':
       return (
-        <Field
-          label={m.type}
-          readOnly={readOnly}
-          messages={[{ id: 'surfaceNote', severity: 'note', text: m.surfaceNote }]}
-        >
+        // design review R11: the static note is the Type's (i), boxes are for findings
+        <Field label={m.type} readOnly={readOnly} info={m.surfaceNote}>
           <Select
             options={[
               { value: 'tape', label: m.kinds.tape },

@@ -164,6 +164,7 @@ export function Field({
   const controlId = children.props.id ?? `${base}-control`
   const echoId = `${base}-echo`
   const statusId = `${base}-status`
+  const secondId = `${base}-second`
   const moreId = `${base}-more`
   const lockReasonId = `${base}-lock-reason`
   const infoId = `${base}-info`
@@ -234,7 +235,9 @@ export function Field({
   const visible = messages
     .filter((m) => !(m.severity === 'soft' && dismissed.has(m.id)))
     .toSorted((a, b) => RANK[a.severity] - RANK[b.severity])
-  const [primary, ...rest] = visible
+  // design review R19: two messages show in full; a disclosure only from the third ("1 more" for
+  // a second message cost more than it saved)
+  const [primary, second, ...rest] = visible
   const dismissedCount = messages.filter((m) => m.severity === 'soft' && dismissed.has(m.id)).length
   const invalid = messages.some((m) => m.severity === 'error')
   const tier = primary && RANK[primary.severity] <= RANK.soft ? primary.severity : 'none'
@@ -271,6 +274,7 @@ export function Field({
     tag !== undefined ? tagId : undefined,
     shown !== undefined ? echoId : undefined,
     primary ? statusId : undefined,
+    second ? secondId : undefined,
     readOnly ? readOnlyReason : undefined,
   ]
     .filter(Boolean)
@@ -434,6 +438,13 @@ export function Field({
                   </Tooltip>
                 ) : null}
               </span>
+            </div>
+          ) : null}
+          {second ? (
+            <div className={styles['item']} data-severity={second.severity}>
+              {second.icon ?? ICON[second.severity]}
+              <span id={secondId}>{second.text}</span>
+              <span />
             </div>
           ) : null}
           {lock?.disabledReason !== undefined ? (

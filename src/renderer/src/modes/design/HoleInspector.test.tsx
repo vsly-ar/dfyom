@@ -170,11 +170,16 @@ describe('hole inspector (U2)', () => {
       return r
     })
     expect(tap).toBeDisabled()
+    // design review R11: the reason is the Purpose field's (i), not a note box
+    expect(within(insp()).getByRole('radiogroup', { name: 'Purpose' })).toHaveAccessibleDescription(
+      'A tap drill hole is a simple hole: change the type to Simple first.',
+    )
     expect(
-      within(insp()).getByText(
-        'A tap drill hole is a simple hole: change the type to Simple first.',
-      ),
-    ).toBeInTheDocument()
+      within(insp())
+        .getByRole('radiogroup', { name: 'Purpose' })
+        .closest('[data-kind]')!
+        .querySelector('[data-severity]'),
+    ).toBeNull()
     expect(within(insp()).getByLabelText('Counterbore Ø', { selector: 'input' })).toHaveValue(
       '6.5 mm',
     )

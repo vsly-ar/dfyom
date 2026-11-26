@@ -27,6 +27,8 @@ export interface PickRequestState {
   readonly field: string
   /** Surface ids that may be picked. */
   readonly eligible: ReadonlySet<string>
+  /** The banner's hint while no eligible surface faces the camera (R18; viewport default). */
+  readonly noneFacing?: string | undefined
   /** Called with the picked surface id; pick mode then ends. */
   readonly onPick: (surface: string) => void
 }

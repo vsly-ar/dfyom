@@ -59,7 +59,7 @@ describe('Field', () => {
     )
   })
 
-  it('shows the highest severity first and collapses the rest into "n more"', async () => {
+  it('shows the highest severity first, two in full, and collapses from the third (R19)', async () => {
     const { user } = renderUi(
       <Field
         label="Stepdown"
@@ -73,15 +73,29 @@ describe('Field', () => {
       </Field>,
     )
     expect(screen.getByRole('textbox', { name: 'Stepdown' })).toHaveAccessibleDescription(
-      'Smaller than the tool can cut',
+      'Smaller than the tool can cut Changed by agent 2 min ago',
     )
+    expect(screen.getByText('Changed by agent 2 min ago')).toBeVisible()
     expect(screen.queryByText('Recommended 0.60–1.20 mm')).not.toBeVisible()
-    const more = screen.getByRole('button', { name: '2 more' })
+    const more = screen.getByRole('button', { name: '1 more' })
     expect(more).toHaveAttribute('aria-expanded', 'false')
     await user.click(more)
     expect(screen.getByRole('button', { name: 'Fewer' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Recommended 0.60–1.20 mm')).toBeVisible()
-    expect(screen.getByText('Changed by agent 2 min ago')).toBeVisible()
+  })
+
+  it('shows two messages in full, without a disclosure (R19)', () => {
+    renderUi(
+      <Field
+        label="Stepdown"
+        messages={[{ id: 'hard', severity: 'error', text: 'Must be greater than 0' }, note]}
+      >
+        <input />
+      </Field>,
+    )
+    expect(screen.getByText('Must be greater than 0')).toBeVisible()
+    expect(screen.getByText('Recommended 0.60–1.20 mm')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull()
   })
 
   it('applies a fix with its button', async () => {

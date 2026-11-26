@@ -146,7 +146,11 @@ test('deviation panel (U4): compare the plan with the reference, regions, a regi
   await expect(panel.getByRole('status')).toHaveText(/^\d+ regions? over 0\.1 mm/, {
     timeout: 60_000,
   })
-  await expect(panel.getByText('Worst over-cut')).toBeVisible()
+  // R7: the regions first, the statistics in a closed accordion after them
+  const statistics = panel.getByRole('region', { name: 'Statistics' })
+  await expect(statistics.getByText('Worst over-cut')).toBeHidden()
+  await statistics.getByRole('button', { name: /^Statistics/ }).click()
+  await expect(statistics.getByText('Worst over-cut')).toBeVisible()
   const rows = panel.getByRole('list', { name: 'Regions' }).getByRole('button')
   await expect(rows.first()).toHaveAccessibleName(/^Over-cut .* mm · .+, top, .* mm², /)
   await panel.scrollIntoViewIfNeeded()

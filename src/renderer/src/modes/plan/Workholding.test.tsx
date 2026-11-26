@@ -98,6 +98,26 @@ describe('Workholding in the setup inspector', () => {
     await expectNoAxeViolations()
   })
 
+  it('keeps Margin in a closed More row after the buttons (design review R10)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', { planId, setupId, items: [clamp] })
+    })
+    const more = within(t.section()).getByRole('button', { name: 'More (Margin)' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    const arrange = within(t.section()).getByRole('button', { name: /Arrange automatically/ })
+    expect(arrange.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(t.section()).queryByRole('textbox', { name: 'Margin' })).toBeNull()
+    await t.user.click(more)
+    const margin = within(t.section()).getByLabelText('Margin', { selector: 'input' })
+    expect(margin).toBeVisible()
+    await t.user.clear(margin)
+    await t.user.type(margin, '4{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toMatchObject({ margin: '4' }),
+    )
+  })
+
   it('edits an item by id, the clearance follows it, Remove takes it out', async () => {
     const t = await renderInspector(async (s, planId) => {
       const setupId = s.plan(planId).setups[0]!.id

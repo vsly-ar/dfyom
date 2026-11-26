@@ -31,7 +31,15 @@ vi.mock('./Scene', () => ({
   },
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
 }))
-vi.mock('./ViewCube', () => ({ ViewCube: () => null }))
+// the cube reports the camera's axes every frame: driven through `cube.camera`
+type OnCamera = (axes: { back: [number, number, number]; up: [number, number, number] }) => void
+const cube = vi.hoisted(() => ({ camera: null as null | OnCamera }))
+vi.mock('./ViewCube', () => ({
+  ViewCube: ({ onCamera }: { onCamera: OnCamera }) => {
+    cube.camera = onCamera
+    return null
+  },
+}))
 // the 3D measure layer raycasts the scene: stubbed, its picks driven through `measurePick`
 type Pick = (p: [number, number, number] | null) => void
 type OnAxis = (axis: 'x' | 'y' | 'z' | null) => void
@@ -245,6 +253,40 @@ describe('Viewport', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(onPickCancel).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('pick mode with no eligible surface facing the camera says so in the banner (R18)', () => {
+    type P = { eligible: typeof SAMPLE_PICK_ELIGIBLE; field: string; noneFacing?: string }
+    let setPick: (p: P) => void = () => {}
+    function Host(): React.JSX.Element {
+      const [p, set] = useState<P>({ eligible: SAMPLE_PICK_ELIGIBLE, field: 'On' })
+      setPick = set
+      return <Viewport mesh={mesh} pick={p} />
+    }
+    renderUi(<Host />)
+    const banner = () => screen.getByRole('status')
+    // from above: the eligible (upward) surfaces face the camera
+    act(() => cube.camera?.({ back: [0, 0, 1], up: [0, 1, 0] }))
+    expect(banner()).toHaveTextContent('Pick a surface for On · Esc to cancel')
+    // from below: none face it
+    act(() => cube.camera?.({ back: [0, 0, -1], up: [0, -1, 0] }))
+    expect(banner()).toHaveTextContent(
+      'Pick a surface for On · none face you: turn the view · Esc to cancel',
+    )
+    // the field's own way out
+    act(() =>
+      setPick({
+        eligible: SAMPLE_PICK_ELIGIBLE,
+        field: 'Depth',
+        noneFacing: 'none face you: turn the view, or use Through',
+      }),
+    )
+    expect(banner()).toHaveTextContent(
+      'Pick a surface for Depth · none face you: turn the view, or use Through · Esc to cancel',
+    )
+    // turning the view back clears it
+    act(() => cube.camera?.({ back: [0.5, -0.5, 0.7], up: [0, 0, 1] }))
+    expect(banner()).toHaveTextContent('Pick a surface for Depth · Esc to cancel')
   })
 
   it('announces politely when pick mode ends without a pick (Escape, the toggle again; DF10)', () => {

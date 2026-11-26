@@ -5,7 +5,8 @@
 // `ContextMenu` (right-click; same entries and look) and `openContextMenu` (Shift+F10 / Menu key).
 // Doc: docs/conventions/ui.md#radix-wrapping-pattern, #inventory-v01, #feature-rows-and-add
 import { ContextMenu as RadixContextMenu, DropdownMenu } from 'radix-ui'
-import { useId, type ComponentType, type ReactElement, type ReactNode } from 'react'
+import { useId, useState, type ComponentType, type ReactElement, type ReactNode } from 'react'
+import { dialogCollision } from '../Dialog/modal-stack'
 import { Icon } from '../icons/Icon'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Menu.module.css'
@@ -113,13 +114,21 @@ export function ContextMenu({
   onCloseAutoFocus,
 }: ContextMenuProps): React.JSX.Element {
   const container = usePortalContainer()
+  // R21: in a modal dialog the menu stays inside it and above its footer (flips or shifts up)
+  const [avoid, setAvoid] = useState<ReturnType<typeof dialogCollision>>(undefined)
   return (
     <RadixContextMenu.Root>
-      <RadixContextMenu.Trigger asChild>{children}</RadixContextMenu.Trigger>
+      <RadixContextMenu.Trigger
+        asChild
+        onContextMenu={(e) => setAvoid(dialogCollision(e.currentTarget))}
+      >
+        {children}
+      </RadixContextMenu.Trigger>
       <RadixContextMenu.Portal container={container}>
         <RadixContextMenu.Content
           className={`${styles['content']} ${styles['context']}`}
-          collisionPadding={8}
+          collisionPadding={avoid?.padding ?? 8}
+          {...(avoid !== undefined ? { collisionBoundary: avoid.boundary } : {})}
           aria-label={label}
           {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         >

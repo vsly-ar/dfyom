@@ -100,6 +100,17 @@ export interface PickRequest {
   readonly eligible: ReadonlySet<SurfaceId>
   /** The field asking, for the banner ("Pick a surface for On"). */
   readonly field: string
+  /**
+   * The banner's hint while no eligible surface faces the camera (design review R18); default
+   * "none face you: turn the view". A depth pick adds its other way out ("or use Through").
+   */
+  readonly noneFacing?: string | undefined
+}
+
+/** True when a surface with this normal faces a camera looking back along `back`. */
+const facesCamera = (normal: Vec3, back: Vec3): boolean => {
+  const d = normal[0] * back[0] + normal[1] * back[1] + normal[2] * back[2]
+  return d > 0.05 * Math.hypot(...normal) * Math.hypot(...back)
 }
 
 export interface ViewportProps {
@@ -474,17 +485,32 @@ export function Viewport({
     [setupFrame],
   )
   const axesRef = useRef<CameraAxes | null>(null)
+  // R18: in pick mode, whether no eligible surface faces the camera (nothing would light up); the
+  // banner then says so. Checked as the camera moves and as the eligible surfaces change.
+  const glyphsRef = useRef(glyphs)
+  const [noneFacing, setNoneFacing] = useState(false)
+  const checkFacing = useCallback(() => {
+    const g = glyphsRef.current
+    const axes = axesRef.current
+    const none = g !== null && axes !== null && !g.some((x) => facesCamera(x.normal, axes.back))
+    setNoneFacing((prev) => (prev === none ? prev : none))
+  }, [])
+  useEffect(() => {
+    glyphsRef.current = glyphs
+    checkFacing()
+  }, [glyphs, checkFacing])
   const [shown, setShown] = useState<ShownView>({ kind: 'custom' })
   const [along, setAlong] = useState<CubeRegion | null>(null)
   const onCamera = useCallback(
     (axes: CameraAxes) => {
       axesRef.current = axes
+      checkFacing()
       const next = shownView(axes, setup)
       setShown((prev) => (sameShownView(prev, next) ? prev : next))
       const region = regionAlong(axes) ?? null
       setAlong((prev) => (prev === region || sameRegion(prev, region) ? prev : region))
     },
-    [setup],
+    [setup, checkFacing],
   )
   const [cubeHover, setCubeHover] = useState<CubeRegion | null>(null)
   const onCubeHover = useCallback(
@@ -871,7 +897,8 @@ export function Viewport({
       </div>
       {pick ? (
         <div className={styles['banner']} role="status">
-          {msg.pickPrompt(pick.field)} · {msg.pickCancel}
+          {msg.pickPrompt(pick.field)}
+          {noneFacing ? ` · ${pick.noneFacing ?? msg.pickNoneFacing}` : ''} · {msg.pickCancel}
         </div>
       ) : null}
       {measureOn ? (

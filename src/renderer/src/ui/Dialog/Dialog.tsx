@@ -7,7 +7,7 @@ import { useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { ApplyScope, MODAL_ATTR } from '../ApplyButton/ApplyScope'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Dialog.module.css'
-import { useModalStack } from './modal-stack'
+import { DIALOG_FOOTER_ATTR, useModalStack } from './modal-stack'
 
 /** Controlled or uncontrolled open state, so a toast's Escape can close the dialog (U1). */
 export function useOpenState(
@@ -100,7 +100,12 @@ export function Dialog({
               <div className={styles['body']}>{children}</div>
             </ApplyScope>
           ) : null}
-          {footer ? <div className={styles['footer']}>{footer}</div> : null}
+          {/* a context menu opened in the dialog keeps clear of it (Menu.tsx, design review R21) */}
+          {footer ? (
+            <div className={styles['footer']} {...{ [DIALOG_FOOTER_ATTR]: '' }}>
+              {footer}
+            </div>
+          ) : null}
         </RadixDialog.Content>
       </RadixDialog.Portal>
     </RadixDialog.Root>

@@ -380,7 +380,10 @@ export function useDesignScene(): SceneProps {
       const owner = part?.dto.operations.find((o) => o.id === target.operation)?.featureId
       select(owner !== undefined && selected === target.operation ? owner : target.operation)
     },
-    pick: pick === null ? null : { eligible: pick.eligible, field: pick.field },
+    pick:
+      pick === null
+        ? null
+        : { eligible: pick.eligible, field: pick.field, noneFacing: pick.noneFacing },
     onPick: (target) => {
       pick?.onPick(target.surface)
       setPick(null)

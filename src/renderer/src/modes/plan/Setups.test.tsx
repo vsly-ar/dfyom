@@ -679,6 +679,13 @@ describe('Setup work zero and alignment points', () => {
     await t.user.click(t.setupRows()[1]!)
     const insp = t.inspector()
     await within(insp).findByRole('heading', { name: 'Work zero' })
+    // design review R11: the static hint is the group's (i), no note under Work zero Y
+    expect(within(insp).getByRole('region', { name: 'Work zero' })).toHaveAccessibleDescription(
+      /^From the front-left corner of the up face/,
+    )
+    expect(
+      within(insp).getByLabelText('Work zero Y', { selector: 'input' }),
+    ).not.toHaveAccessibleDescription(/front-left corner/)
     expect(within(insp).getByRole('button', { name: 'Reset to corner' })).toBeDisabled()
     expect(within(insp).getByText(/^None\. After zeroing/)).toBeInTheDocument()
 

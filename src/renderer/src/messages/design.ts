@@ -947,6 +947,8 @@ export const designMessages = {
       'Cut through to the opposite face (or what an earlier setup left there), with the breakthrough. Off: the depth below On.',
     /** DF115: a Depth pick takes the surface the cut goes down to (ui.md#depth-pick-df115). */
     depthPickField: (label: string) => `${label} (cut down to it)`,
+    /** The depth pick's banner hint when no target faces the camera (R18): Through is the other way. */
+    depthPickNoneFacing: 'none face you: turn the view, or use Through',
     depthPickedThrough: (op: string, surface: string) => `${op}: cut through to ${surface}.`,
     tabs: {
       entered: 'Positions entered by you.',

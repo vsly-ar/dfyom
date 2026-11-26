@@ -22,9 +22,12 @@ export const deviationMessages = {
   failed: 'The plan could not be compared.',
   outdated: 'The plan changed since this comparison. Compare again to update it.',
   within: (threshold: string) => `The programs make the reference within ${threshold}.`,
-  /** "3 regions over 0.1 mm · 1 unexplained". */
+  /** "3 regions over 0.1 mm · 1 without a known cause" (design review R5). */
   summary: (n: number, threshold: string, unexplained: number) =>
-    `${n === 1 ? '1 region' : `${n} regions`} over ${threshold}${unexplained > 0 ? ` · ${unexplained} unexplained` : ''}`,
+    `${n === 1 ? '1 region' : `${n} regions`} over ${threshold}${unexplained > 0 ? ` · ${unexplained} without a known cause` : ''}`,
+  /** The closed accordion after the regions (design review R7) and its summary. */
+  statistics: 'Statistics',
+  statisticsSummary: (max: string, p95: string) => `max ${max} · 95 % ${p95}`,
   stat: {
     mean: 'Mean',
     p95: '95 %',
@@ -49,9 +52,12 @@ export const deviationMessages = {
     drillPoint: 'drill point',
     tab: 'tab',
   } as Record<DeviationCause, string>,
-  noCause: 'no cause',
-  unexplained: 'unexplained',
-  /** The row's accessible name: "Over-cut 0.5 mm · Facing 1, top, 120 mm², no cause". */
+  // "No known cause": none of the known causes applies; the operation name before it is who cut
+  // the region, not its cause (design review R5).
+  noCause: 'no known cause',
+  /** A region over 0.5 mm without a cause (the result's `unexplained`). */
+  unexplained: 'check: no known cause',
+  /** The row's accessible name: "Over-cut 0.5 mm · Facing 1, top, 120 mm², no known cause". */
   regionName: (row: string, face: string, area: string, cause: string) =>
     `${row}, ${face}, ${area}, ${cause}`,
   more: (n: number) => `${n} more regions not shown.`,

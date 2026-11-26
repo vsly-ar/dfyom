@@ -93,6 +93,15 @@ describe('QuantityInput: display', () => {
     await expectNoAxeViolations()
   })
 
+  it('shows the unit label of a dimensionless field in the unit slot ("×" for a scale, R17)', () => {
+    const scale = { kind: 'scalar', defaultUnit: '1' } as const
+    const { unmount } = setup({ ...scale, initial: undefined })
+    expect(document.querySelector('.unit')).toBeNull()
+    unmount()
+    setup({ ...scale, initial: undefined, unitLabel: '×' })
+    expect(document.querySelector('.unit')).toHaveTextContent('×')
+  })
+
   it('follows the unit typed instead of the suffix, and shows the computed value when unfocused', async () => {
     const { user, input } = setup()
     await retype(user, input, '1/16"')

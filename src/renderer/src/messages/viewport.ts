@@ -48,4 +48,6 @@ export const viewportMessages = {
     return `${part}.`
   },
   pickPrompt: (field: string): string => `Pick a surface for ${field}`,
+  /** Pick mode with no eligible surface facing the camera (design review R18). */
+  pickNoneFacing: 'none face you: turn the view',
 } as const
