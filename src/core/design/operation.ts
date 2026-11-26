@@ -1029,10 +1029,15 @@ function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShap
 }
 
 /**
- * The named shapes the loaded owned pattern shapes take as their cell (patterns P1), added to
- * `out`; a cell that does not exist is `input.malformed` (`unknownShape`).
+ * The named shapes the loaded shapes refer to, added to `out`: an offset item's source, an owned
+ * pattern's cell (patterns P1), boundary and lower pattern, an engraving's motif and boundary; a
+ * shape that does not exist is `input.malformed` (`unknownShape`). Re-anchoring an operation on
+ * a named shape uses it too (commands.ts, X2).
  */
-function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>): AppResult<void> {
+export function patternCells(
+  out: Map<string, NamedShape>,
+  dto: Pick<PartDTO, 'shapes'>,
+): AppResult<void> {
   // a worklist: a stacked pattern's lower pattern (P4) brings its own cell and boundary
   const queue = [...out.values()]
   for (let s = queue.shift(); s !== undefined; s = queue.shift()) {

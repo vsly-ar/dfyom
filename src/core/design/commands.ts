@@ -56,6 +56,7 @@ import {
   isBottomChamfer,
   operationToDTO,
   isGeneralShape,
+  patternCells,
   recordOf,
   shapesOf,
   type Anchor,
@@ -513,7 +514,10 @@ export class Fields {
     )
   }
 
-  /** The named shape `shape` places, loaded (absent for other kinds). */
+  /**
+   * The named shape `shape` places, loaded with the shapes it refers to (an offset item's source,
+   * a pattern's cell: without them it does not resolve); absent for other kinds.
+   */
   private shapesFor(shape: Shape): AppResult<Part['shapes']> {
     if (shape.kind !== 'named') return Ok(undefined)
     const dto = this.env.dto.shapes?.find((s) => s.id === shape.shapeId)
@@ -527,7 +531,10 @@ export class Fields {
           },
         ],
       })
-    return namedShapeFromDTO(dto).map((n) => new Map([[shape.shapeId, n]]))
+    return namedShapeFromDTO(dto).andThen((n) => {
+      const out = new Map([[shape.shapeId, n]])
+      return patternCells(out, this.env.dto).map(() => out)
+    })
   }
 
   /**

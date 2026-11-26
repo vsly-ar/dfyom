@@ -202,6 +202,26 @@ describe('offset items through the shape commands', () => {
     expect(pending.map((c) => c['shapeId'])).toEqual(['shape1'])
   })
 
+  it('re-anchors an operation on an offset shape without moving it (X2: its source is loaded)', async () => {
+    const s = await setup()
+    await s.run('design.shape.add', { partId: s.partId, items: [rect] })
+    await s.run('design.shape.add', { partId: s.partId, items: [offset('shape1', '2', 'inward')] })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      side: 'outside',
+      shape: { kind: 'named', shapeId: 'shape2', center: ['50', '30'] },
+    })
+    await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      anchor: { u: 'min', v: 'min' },
+    })
+    expect(placedBounds(s, 'profile1')).toEqual({ min: [32, 22], max: [68, 38] })
+    const op = s.part().operations[0] as unknown as { shape: { center: { source: string }[] } }
+    const shape = op.shape
+    expect(shape.center.map((c) => c.source)).toEqual(['32', '22'])
+  })
+
   it('refuses unknownShape, shapeCycle, offsetOpenPath, shapeEmpty and negative distances', async () => {
     const s = await setup()
     await s.run('design.shape.add', { partId: s.partId, items: [rect] })
