@@ -1,6 +1,7 @@
 /**
  * Geometry checks of a composed part, run in the worker after composition, in table order:
- * pieces and `dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceMissing`.
+ * pieces and `dfm.loosePiece`, `dfm.retainedRemoved` (then `dfm.surfaceCutAway` in
+ * `construction.ts`).
  * Doc: docs/architecture/geometry.md#evaluation-checks
  *
  * The two error checks (`status`, `airSurface`) stay in `evaluate.ts`; parameter and tool checks
@@ -11,8 +12,6 @@ import {
   EPSILON,
   EPSILON_VOLUME,
   type DfmWarning,
-  type SurfaceId,
-  type SurfaceReference,
   type Vec3,
   unapplyPlacement,
   type Placement,
@@ -43,9 +42,6 @@ export interface CheckInput {
   readonly operations: readonly ComposedOperation[]
   /** original id → operation (incl. the stock), as used for surface mapping. */
   readonly tables: ReadonlyMap<number, OperationSolids>
-  /** Surface ids that have triangles. */
-  readonly surfaces: readonly SurfaceId[]
-  readonly references: readonly SurfaceReference[]
 }
 
 export interface CheckResult {
@@ -69,7 +65,7 @@ export function geometryChecks(
   const { count, warnings } = pieces.unwrap()
   return Ok({
     pieces: count,
-    warnings: [...warnings, ...removed.unwrap(), ...surfaceMissing(input)],
+    warnings: [...warnings, ...removed.unwrap()],
   })
 }
 
@@ -289,19 +285,4 @@ function removedVolume(
       return solids.subtract(cut, own).andThen((rest) => solids.volume(rest))
     }),
   )
-}
-
-/** A surface referenced by `on` or an expression has no triangles. */
-function surfaceMissing(input: CheckInput): DfmWarning[] {
-  const present = new Set(input.surfaces)
-  return input.references
-    .filter((r) => !present.has(r.surface))
-    .map((r) => ({
-      code: 'dfm.surfaceMissing',
-      severity: 'warning',
-      message: `${r.operation}.${r.parameter} refers to ${r.surface}, which the part no longer has; pick another surface`,
-      operation: r.operation,
-      parameter: r.parameter,
-      params: { surface: r.surface },
-    }))
 }

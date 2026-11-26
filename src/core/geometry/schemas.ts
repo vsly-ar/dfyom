@@ -224,6 +224,7 @@ export const PartGeometryInputSchema: z.ZodType<PartGeometryInput> = z.object({
     .array(z.object({ operation: z.string(), parameter: z.string(), surface: z.string() }))
     .readonly()
     .exactOptional(),
+  dependants: z.record(z.string(), z.array(z.string()).readonly()).readonly().exactOptional(),
   cloneGroups: z.array(z.array(z.string()).readonly()).readonly().exactOptional(),
 })
 
@@ -263,5 +264,23 @@ export const PartEvaluationSchema: z.ZodType<PartEvaluation> = z.object({
   volume: z.number(),
   pieces: z.number(),
   warnings: z.array(DfmWarningSchema).readonly(),
+  construction: z
+    .array(
+      z.object({
+        surface: z.string(),
+        consumedBy: z.array(z.string()).readonly(),
+        referencedBy: z
+          .array(z.object({ operationId: z.string(), param: z.string() }).readonly())
+          .readonly(),
+        patch: z.object({
+          direction: z.enum(DIRECTIONS),
+          z: z.number(),
+          loops: z
+            .array(z.array(z.tuple([z.number(), z.number()]).readonly()).readonly())
+            .readonly(),
+        }),
+      }),
+    )
+    .readonly(),
   stats: z.object({ ms: z.number(), triangles: z.number() }),
 })

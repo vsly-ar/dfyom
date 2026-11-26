@@ -39,12 +39,16 @@ describe('dfm messages', () => {
 
   it('names operations and surfaces by their readable names, never their ids (DF43)', () => {
     const missing = dfmMessages.text(
-      w({ code: 'dfm.surfaceMissing', parameter: 'on', params: { surface: 'pocket1.floor' } }),
+      w({
+        code: 'dfm.surfaceCutAway',
+        parameter: 'on',
+        params: { surface: 'pocket1.floor', by: ['drill1'] },
+      }),
       'mm',
       names,
     )
     expect(missing).toBe(
-      'It starts from or refers to Pocket 1 floor, which the part no longer has. Pick another surface.',
+      'It starts from or refers to Pocket 1 floor, which Drilling 1 cuts away. Its level still holds, so the cut is measured from a surface the part no longer has. Check the depth or start from another surface.',
     )
     const removed = dfmMessages.text(
       w({

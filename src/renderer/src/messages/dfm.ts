@@ -79,8 +79,13 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     const regions = ((p['regions'] as readonly string[] | undefined) ?? []).map(regionName)
     return `${by} cuts away ${regions.length > 0 ? list(regions) : 'retained regions'} of this operation. Move one of them.`
   },
-  'dfm.surfaceMissing': (p, _L, name) =>
-    `It starts from or refers to ${typeof p['surface'] === 'string' ? name.surface(p['surface']) : 'a surface'}, which the part no longer has. Pick another surface.`,
+  // DF118: only a non-dependant cut raises it (docs/modes/construction-surfaces.md#check-dfmsurfacecutaway)
+  'dfm.surfaceCutAway': (p, _L, name) => {
+    const surface = typeof p['surface'] === 'string' ? name.surface(p['surface']) : 'a surface'
+    const ids = Array.isArray(p['by']) ? (p['by'] as readonly string[]) : []
+    const by = ids.length > 0 ? list(ids.map((id) => name.item(id))) : 'a later operation'
+    return `It starts from or refers to ${surface}, which ${by} ${ids.length > 1 ? 'cut' : 'cuts'} away. Its level still holds, so the cut is measured from a surface the part no longer has. Check the depth or start from another surface.`
+  },
   'dfm.facingDeep': (p, L) =>
     `A facing depth of ${L(p['depth'])} removes a lot of material. Check the stock thickness.`,
   'dfm.pocketNoToolFits': (p, L) =>

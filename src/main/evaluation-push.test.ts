@@ -15,6 +15,7 @@ const evaluation = {
   surfaces: ['stock.top'],
   volume: 1,
   pieces: 1,
+  construction: [],
   warnings: [],
   stats: { ms: 1, triangles: 1 },
 }

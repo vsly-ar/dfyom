@@ -98,6 +98,7 @@ const evaluation = (warnings: DfmWarning[] = []): PartEvaluation => ({
   surfaces: [],
   volume: 1,
   pieces: 1,
+  construction: [],
   warnings,
   stats: { ms: 1, triangles: 1 },
 })
