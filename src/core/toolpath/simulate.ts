@@ -61,6 +61,11 @@ export interface CutMap {
   readonly nu: number
   readonly nv: number
   readonly h: Float32Array
+  /**
+   * Which toolpath last lowered each cell: its 1-based index over every setup's toolpaths in
+   * input order; 0 = never cut (V3 names the operation of a region, deviation.md#result).
+   */
+  readonly by: Uint16Array
 }
 
 /** The lower surface of a tool above its tip at radial distance ρ ≤ R (`toolSurface`). */
@@ -104,6 +109,9 @@ export class CutGrid {
   readonly nu: number
   readonly nv: number
   readonly h: Float64Array
+  /** The `by` of `CutMap`; `owner` is written into every cell a move lowers. */
+  readonly by: Uint16Array
+  owner = 0
 
   constructor(
     readonly length: number,
@@ -113,6 +121,7 @@ export class CutGrid {
     this.nu = Math.max(1, Math.ceil(length / cell - EPS))
     this.nv = Math.max(1, Math.ceil(width / cell - EPS))
     this.h = new Float64Array(this.nu * this.nv)
+    this.by = new Uint16Array(this.nu * this.nv)
   }
 
   /** Lowers the map under every feed move of `moves` from `from`; returns the end position. */
@@ -195,7 +204,7 @@ export class CutGrid {
     const R = p.radius
     const reach2 = (R + EPS) * (R + EPS)
     const c = this.cell
-    const { nu, h } = this
+    const { nu, h, by, owner } = this
     const [i0, i1] = this.range(Math.min(a[0], b[0]) - R, Math.max(a[0], b[0]) + R, nu)
     const [j0, j1] = this.range(Math.min(a[1], b[1]) - R, Math.max(a[1], b[1]) + R, this.nv)
     if (i1 < i0 || j1 < j0) return
@@ -237,7 +246,10 @@ export class CutGrid {
           }
         }
         const k = row + i
-        if (v < h[k]!) h[k] = v
+        if (v < h[k]!) {
+          h[k] = v
+          by[k] = owner
+        }
       }
     }
   }
@@ -247,7 +259,8 @@ export class CutGrid {
     const R = p.radius
     const reach2 = (R + EPS) * (R + EPS)
     const c = this.cell
-    const { nu, h } = this
+    const { nu, h, owner } = this
+    const cutBy = this.by
     // start and end directions; ccw from `lo` to `hi`
     const [lo, hi] = e >= s ? [s, e] : [e, s]
     const lx = Math.cos(lo)
@@ -294,7 +307,10 @@ export class CutGrid {
         if (d2 > reach2) continue
         const v = p.flat ? z : z + surface(Math.sqrt(d2))
         const k = row + i
-        if (v < h[k]!) h[k] = v
+        if (v < h[k]!) {
+          h[k] = v
+          cutBy[k] = owner
+        }
       }
     }
   }
@@ -367,6 +383,7 @@ export function simulateHeightmap(
       const step = steps.step({ done, total, label })
       if (step.isErr()) return step
       const profile = toolProfile(tool)
+      grid.owner = Math.min(done + 1, 0xffff)
       let at: Vec3 | undefined
       let count = 0
       for (const pass of toolpath.passes) {
@@ -388,7 +405,7 @@ export function simulateHeightmap(
       const floor = -localStock(direction, input.stock).thickness
       const h = new Float32Array(g.h.length)
       for (let k = 0; k < h.length; k++) h[k] = Math.max(floor, g.h[k]!)
-      return { direction, cell, nu: g.nu, nv: g.nv, h }
+      return { direction, cell, nu: g.nu, nv: g.nv, h, by: g.by }
     }),
   )
 }

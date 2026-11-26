@@ -17,7 +17,7 @@ import {
   type AnyCommand,
   type AnyQueryDef,
 } from '../commands/define'
-import type { CommandContext } from '../commands/context'
+import type { CommandContext, JobContext } from '../commands/context'
 import { quantityFromSource } from '../expression/quantity'
 import { NAME_MAX } from '../library/item'
 import type { AssetRef } from '../project/assets'
@@ -72,7 +72,20 @@ import {
   targetReference,
   fittedSection,
   referenceCompareOf,
+  referenceHeightmapsOf,
 } from './reference-find'
+import {
+  comparePlanMaps,
+  cutHoles,
+  PLAN_REGIONS_MAX,
+  type CutKeepOut,
+  type CutOwner,
+} from './reference-compare-plan'
+import { planOperationInputs } from '../plan/inputs'
+import { cacheOf, ensureToolpath } from '../toolpath/generate'
+import { toGeneratorInputs, toolpathTool } from '../toolpath/inputs'
+import { simulateHeightmapTask } from '../workers/tasks'
+import { SIMULATE_CELL, type SimulateSetup } from '../toolpath/simulate'
 import {
   COMPARE_LIMIT,
   COMPARE_PIECES_MAX,
@@ -1127,6 +1140,48 @@ const CompareRegionSchema = z.object({
   cause: z.literal('cornerRadius').optional(),
 })
 
+const V2 = z.tuple([z.number(), z.number()])
+const PlanStatsSchema = z.object({
+  cells: z.number().int(),
+  mean: z.number(),
+  p50: z.number(),
+  p95: z.number(),
+  p99: z.number(),
+  max: z.number(),
+  overcutMax: z.number(),
+  undercutMax: z.number(),
+  areaOver: z.number(),
+})
+
+/** `source: plan` (V3, docs/modes/deviation.md#result): the simulated cut against the reference. */
+const PlanCompareResultSchema = z.object({
+  source: z.literal('plan'),
+  method: z.literal('heightmap'),
+  cell: z.number(),
+  threshold: z.number(),
+  stats: PlanStatsSchema.describe(
+    '|dev| (mm) over the compared cells: in the part, off the edge band',
+  ),
+  faces: z.array(PlanStatsSchema.extend({ face: z.string() })),
+  excluded: z.object({ outsidePart: z.number(), edgeBand: z.number() }).describe('mm²'),
+  regions: z.array(
+    z.object({
+      face: z.string(),
+      bounds: z.tuple([V2, V2]).describe('Face frame [u, v], mm'),
+      area: z.number(),
+      volume: z.number(),
+      maxDev: z.number(),
+      sign: z.enum(['undercut', 'overcut']),
+      depthRange: V2.describe('Depths below the face, mm'),
+      cause: z.enum(['toolRadius', 'workholding', 'holeMouth', 'drillPoint', 'tab']).optional(),
+      operationId: z.string().optional().describe('Plan operation'),
+    }),
+  ),
+  more: z.number().int().optional(),
+  unexplained: z.number().int().describe('Regions over 0.5 mm without a cause'),
+  planId: z.string(),
+})
+
 /**
  * The design against its reference (DF60 P4, docs/modes/reference-tools.md#3-compare): a job,
  * since a large reference takes a second or two and the overlay (P5) cancels a stale run.
@@ -1135,36 +1190,42 @@ const referenceCompare = defineCommand({
   kind: 'job',
   name: 'design.reference.compare',
   summary:
-    'Compare the evaluated part with its reference (part frame, mm): missing (cut away) and extra (left) material as regions over threshold, with the surfaces and operations they touch.',
+    "Compare the evaluated part with its reference (part frame, mm): missing (cut away) and extra (left) material as regions over threshold, with the surfaces and operations they touch. source plan: the plan's simulated cut instead, |dev| statistics and regions with causes.",
   title: () => 'Compare with reference',
   machine: false,
   args: z.object({
     partId: PartIdSchema,
     referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
-    source: z.object({ kind: z.literal('part') }).describe('part: the evaluated design'),
+    source: z
+      .object({ kind: z.enum(['part', 'plan']), planId: z.string().optional() })
+      .describe('part: the evaluated design; plan: needs planId'),
     threshold: z.number().min(0.001).max(10).optional().describe('mm, default 0.1'),
     limit: z.number().int().min(1).max(COMPARE_PIECES_MAX).optional().describe('default 10'),
   }),
-  result: z.object({
-    method: z.enum(['boolean', 'heightmap']),
-    threshold: z.number(),
-    stats: z.object({
-      missingVolume: z.number(),
-      extraVolume: z.number(),
-      maxMissing: z.number(),
-      maxExtra: z.number(),
-      referenceVolume: z.number(),
-      partVolume: z.number(),
+  result: z.union([
+    z.object({
+      method: z.enum(['boolean', 'heightmap']),
+      threshold: z.number(),
+      stats: z.object({
+        missingVolume: z.number(),
+        extraVolume: z.number(),
+        maxMissing: z.number(),
+        maxExtra: z.number(),
+        referenceVolume: z.number(),
+        partVolume: z.number(),
+      }),
+      regions: z.array(CompareRegionSchema),
+      more: z.number().int().optional(),
+      below: z.object({ count: z.number().int(), volume: z.number() }),
+      offcuts: z.object({ count: z.number().int(), volume: z.number() }).optional(),
+      note: z.string().optional(),
+      evaluation: z.string().describe('Input hash of the evaluation compared; stale after an edit'),
     }),
-    regions: z.array(CompareRegionSchema),
-    more: z.number().int().optional(),
-    below: z.object({ count: z.number().int(), volume: z.number() }),
-    offcuts: z.object({ count: z.number().int(), volume: z.number() }).optional(),
-    note: z.string().optional(),
-    evaluation: z.string().describe('Input hash of the evaluation compared; stale after an edit'),
-  }),
+    PlanCompareResultSchema,
+  ]),
   async run(doc, args, ctx) {
     const where = 'design.reference.compare'
+    if (args.source.kind === 'plan') return comparePlan(doc, args, ctx, where)
     const evaluations = ctx.services.evaluations
     if (evaluations === undefined)
       return fail('internal.unexpected', 'no evaluation service configured', { where })
@@ -1254,6 +1315,137 @@ const referenceCompare = defineCommand({
 })
 
 type Vec3Tuple = [number, number, number]
+
+/**
+ * `source: plan` (V3, docs/modes/deviation.md#implementation-v3): the plan's toolpaths (from the
+ * cache, generated when stale, as the export does) swept per setup direction on the toolpath
+ * lane while the geometry lane maps the reference on the same grid; the host subtracts them.
+ */
+async function comparePlan(
+  doc: ProjectDoc,
+  args: {
+    partId: string
+    referenceId?: string | undefined
+    source: { planId?: string | undefined }
+    threshold?: number | undefined
+    limit?: number | undefined
+  },
+  ctx: JobContext,
+  where: string,
+) {
+  const planId = args.source.planId
+  if (planId === undefined)
+    return fail('input.malformed', 'source plan needs planId', {
+      where,
+      issues: [{ path: ['source', 'planId'], rule: 'required', message: 'the plan to compare' }],
+    })
+  const plan = doc.plans[planId]
+  if (plan !== undefined && plan.design.partId !== args.partId)
+    return fail('input.malformed', `${planId} machines another part`, {
+      where,
+      data: { planId, partId: args.partId },
+      issues: [
+        { path: ['source', 'planId'], rule: 'otherPart', message: `not a plan of ${args.partId}` },
+      ],
+    })
+  const found = targetReference(doc, args.partId, args.referenceId, where)
+  if (found.isErr()) return found
+  const ref = found.unwrap()
+  const p = placementOf(ref, where)
+  if (p.isErr()) return p
+  const cache = cacheOf(ctx.services, where)
+  if (cache.isErr()) return cache
+  const inputs = planOperationInputs(doc, planId, undefined, ctx.services.region2d)
+  if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where, { planId }))
+  const all = inputs.unwrap()
+  const first = all[0]
+  if (first === undefined)
+    return fail('plan.check', 'the plan has no operations to compare', {
+      where,
+      data: { planId },
+      issues: [
+        { path: ['source', 'planId'], rule: 'empty', message: 'the plan has no operations' },
+      ],
+    })
+  const control = { signal: ctx.signal, progress: ctx.progress, pause: ctx.pause }
+  const setups: { setupId: string; setup: SimulateSetup }[] = []
+  const owners: CutOwner[] = []
+  const keepOut: CutKeepOut[] = []
+  for (const [i, input] of all.entries()) {
+    ctx.progress({ done: i, total: all.length, label: 'Toolpaths' })
+    const tp = await ensureToolpath(
+      cache.unwrap(),
+      ctx.services.workers,
+      input,
+      control,
+      ctx.services.region2d,
+    )
+    if (tp.isErr())
+      return Err(
+        tp.unwrapErr().withContext(where, { planId, planOperationId: input.planOperationId }),
+      )
+    const s = input.setup
+    let last = setups[setups.length - 1]
+    if (last?.setupId !== s.id) {
+      last = {
+        setupId: s.id,
+        setup: { direction: s.direction, rotation: s.rotation, zero: s.zero, toolpaths: [] },
+      }
+      setups.push(last)
+    }
+    ;(last.setup.toolpaths as SimulateSetup['toolpaths'][number][]).push({
+      tool: toolpathTool(input.tool, input.toolSnapshotId),
+      toolpath: tp.unwrap().toolpath,
+    })
+    owners.push({
+      operationId: input.planOperationId,
+      toolRadius: input.tool.diameter.canonical / 2,
+      tabs: input.operations.some(
+        (o) =>
+          o.kind === 'profile' &&
+          o.tabs.positions.mapOr(o.tabs.count.canonical, (q) => q.length) > 0,
+      ),
+    })
+    if (input.keepOut !== undefined && ctx.services.region2d !== undefined) {
+      const request = toGeneratorInputs(input, ctx.services.region2d)
+      for (const u of request.isOk() ? (request.unwrap().unmachined ?? []) : [])
+        keepOut.push({ direction: s.direction, bounds: u.bounds })
+    }
+  }
+  const stock = {
+    length: first.stock.length.canonical,
+    width: first.stock.width.canonical,
+    thickness: first.stock.thickness.canonical,
+  }
+  const simulate = { stock, cell: SIMULATE_CELL, setups: setups.map((x) => x.setup) }
+  const directions = [...new Set(setups.map((x) => x.setup.direction))]
+  const [cut, reference] = await Promise.all([
+    ctx.services.workers.run(simulateHeightmapTask, simulate, control),
+    referenceHeightmapsOf(
+      ctx,
+      ref,
+      { matrix: ghostMatrix(ref.asset.bounds, p.unwrap()), stock, directions, cell: SIMULATE_CELL },
+      control,
+      where,
+    ),
+  ])
+  if (cut.isErr()) return Err(cut.unwrapErr().withContext(where, { planId }))
+  if (reference.isErr()) return reference
+  const threshold = args.threshold ?? COMPARE_THRESHOLD_MM
+  return Ok({
+    ...comparePlanMaps({
+      stock,
+      threshold,
+      reference: reference.unwrap(),
+      cut: cut.unwrap(),
+      owners,
+      holes: cutHoles(simulate),
+      keepOut,
+      limit: Math.min(args.limit ?? PLAN_REGIONS_MAX, PLAN_REGIONS_MAX),
+    }),
+    planId,
+  })
+}
 
 /**
  * The offcut sides of the through profiles with tabs on the top face (DF90): their shapes'

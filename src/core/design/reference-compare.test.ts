@@ -233,7 +233,7 @@ describe('design.reference.compare (boolean)', () => {
     expect(e.unwrapErr().issues.map((i) => i.rule)).toEqual(['noReference'])
     const bad = await s.d.dispatch(
       'design.reference.compare',
-      { partId: s.partId, source: { kind: 'plan' } },
+      { partId: s.partId, source: { kind: 'mesh' } },
       ui,
     )
     expect(bad.unwrapErr().code).toBe('input.malformed')

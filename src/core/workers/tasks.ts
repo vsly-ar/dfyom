@@ -19,6 +19,9 @@ import {
   type WasteLoops,
   CompareRawSchema,
   prepareReference,
+  referenceHeightmaps,
+  transformSoup,
+  type ReferenceMap,
   type CompareMesh,
   type CompareRaw,
   type PreparedReference,
@@ -420,6 +423,10 @@ const UINT32 = z.custom<Uint32Array>(
   (v) => Object.prototype.toString.call(v) === '[object Uint32Array]',
   'expected a Uint32Array',
 )
+const UINT16 = z.custom<Uint16Array>(
+  (v) => Object.prototype.toString.call(v) === '[object Uint16Array]',
+  'expected a Uint16Array',
+)
 
 export interface CompareInput {
   readonly path: string
@@ -574,11 +581,59 @@ export const simulateHeightmapTask: WorkerTask<SimulateInput, CutMap[]> = {
       nu: z.number().int().positive(),
       nv: z.number().int().positive(),
       h: FLOAT32,
+      by: UINT16,
+    }),
+  ),
+  timeoutMs: 120_000,
+  transfer: (maps) => maps.flatMap((m) => [m.h, m.by]),
+  run: (input, ctl) => simulateHeightmap(input, ctl.steps),
+}
+
+export interface ReferenceHeightmapInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the part frame (mm). */
+  readonly matrix: readonly number[]
+  readonly stock: StockSize
+  readonly directions: readonly Direction[]
+  readonly cell: number
+}
+
+/**
+ * The reference maps for the simulated-cut compare (V3, docs/modes/deviation.md#height-map-method):
+ * the kept mesh placed in the part frame, its first surface per cell centre seen from each face,
+ * on the cut map's grid. Transferred to the host, which subtracts the cut maps.
+ */
+export const referenceHeightmapTask: WorkerTask<ReferenceHeightmapInput, ReferenceMap[]> = {
+  name: 'reference.heightmap',
+  lane: 'geometry',
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    stock: z.object({
+      length: z.number().positive(),
+      width: z.number().positive(),
+      thickness: z.number().positive(),
+    }),
+    directions: z.array(z.enum(DIRECTIONS)),
+    cell: z.number().min(SIMULATE_CELL_MIN),
+  }),
+  output: z.array(
+    z.object({
+      direction: z.enum(DIRECTIONS),
+      cell: z.number(),
+      nu: z.number().int().positive(),
+      nv: z.number().int().positive(),
+      h: FLOAT32,
     }),
   ),
   timeoutMs: 120_000,
   transfer: (maps) => maps.map((m) => m.h),
-  run: (input, ctl) => simulateHeightmap(input, ctl.steps),
+  async run(input, ctl) {
+    const read = await referencePositions(input.path, input.triangles, ctl, 'reference.heightmap')
+    if (read.isErr()) return read
+    const placed = transformSoup(read.unwrap(), input.matrix)
+    return referenceHeightmaps(placed, input.stock, input.directions, input.cell, ctl.steps)
+  },
 }
 
 export const WORKER_TASKS: readonly AnyWorkerTask[] = [
@@ -592,5 +647,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   referenceCompare,
   referenceCompareView,
   simulateHeightmapTask,
+  referenceHeightmapTask,
   svgImportTask,
 ]

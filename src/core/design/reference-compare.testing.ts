@@ -14,6 +14,7 @@ import type { SolidKernel } from '../geometry/solid-port'
 import { hashJson } from '../plan/snapshot'
 import { assetPathOf, type AssetRef } from '../project/assets'
 import type { ProjectSession } from '../project/storage'
+import type { Services } from '../commands/context'
 import { designSetup, testStock, type DesignSetup } from './design.fixture'
 import type { EvaluationService } from './evaluation'
 import { partGeometryInput } from './load'
@@ -64,7 +65,11 @@ export type CompareSetup = DesignSetup & {
 }
 
 /** A design setup whose session imports from `SOURCES`; `workers` shared when given. */
-export async function compareSetup(stock?: object, workers?: WorkerPort): Promise<CompareSetup> {
+export async function compareSetup(
+  stock?: object,
+  workers?: WorkerPort,
+  services: Partial<Services> = {},
+): Promise<CompareSetup> {
   const kernel = await testKernel()
   const session = {
     async importAsset(source: string) {
@@ -93,6 +98,7 @@ export async function compareSetup(stock?: object, workers?: WorkerPort): Promis
       workers: w,
       region2d,
       evaluations,
+      ...services,
     },
   })
   return Object.assign(s, { workers: w, evaluations })

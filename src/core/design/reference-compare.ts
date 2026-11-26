@@ -1272,6 +1272,59 @@ export function compareHeightmap(
   })
 }
 
+/**
+ * The reference map of one direction for the simulated-cut compare (deviation.md § Height map
+ * method, V3): cell (i, j) centred at ((i + ½)·cell, (j + ½)·cell) of the face frame, as the cut
+ * map (`simulateHeightmap`) lays out its grid; `h` is the highest reference surface seen from the
+ * face (0 = the face, negative inside), NaN where the column misses the reference.
+ */
+export interface ReferenceMap {
+  readonly direction: Direction
+  readonly cell: number
+  readonly nu: number
+  readonly nv: number
+  readonly h: Float32Array
+}
+
+/** Cells along one axis of a face, as `CutGrid` counts them (a whole number of cells exactly). */
+export const gridCells = (size: number, cell: number) => Math.max(1, Math.ceil(size / cell - 1e-9))
+
+/** The reference maps of `directions` from the placed reference soup (part frame, mm). */
+export function referenceHeightmaps(
+  placed: Float64Array,
+  stock: StockSize,
+  directions: readonly Direction[],
+  cell: number,
+  steps: Steps,
+): AppResult<ReferenceMap[]> {
+  const out: ReferenceMap[] = []
+  for (const [di, direction] of directions.entries()) {
+    const step = steps.step({ done: di, total: directions.length, label: 'Mapping the reference' })
+    if (step.isErr()) return Err(step.unwrapErr())
+    const frame = faceFrame(direction, stock)
+    const local = localStock(direction, stock)
+    const nu = gridCells(local.length, cell)
+    const nv = gridCells(local.width, cell)
+    const m = heightMap(
+      placed.length / 9,
+      (t, k, q) => {
+        q[0] = placed[9 * t + 3 * k]!
+        q[1] = placed[9 * t + 3 * k + 1]!
+        q[2] = placed[9 * t + 3 * k + 2]!
+      },
+      (p) => unapplyPlacement(frame, p),
+      nu,
+      nv,
+      cell,
+      -Infinity,
+    )
+    const h = new Float32Array(nu * nv)
+    for (let c = 0; c < h.length; c++) h[c] = m.tri[c]! >= 0 ? m.h[c]! : NaN
+    out.push({ direction, cell, nu, nv, h })
+  }
+  return Ok(out)
+}
+
 /** The directions of the faces the design's operations use (`+z` when there are none). */
 export function operationDirections(ops: readonly OperationGeometry[]): Direction[] {
   const used = new Set<Direction>(ops.map((o) => o.direction ?? '+z'))
