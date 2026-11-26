@@ -846,6 +846,8 @@ Bounded, and the first item cut if v0.3 runs long (U3, [Q23](../modes/design-v0.
 
 Soft tier ([severities](#warnings-and-dfm)): neutral, "i" icon, dismissible, with no fix button.
 
+- **A value changed on apply** (DF120 Round, [hole-slots-and-round-corners.md § Implementation (R2)](../modes/hole-slots-and-round-corners.md#implementation-r2)) is not a field note but the mode's undo toast with the command's `adjusted` message ("3 mm is more than half the width (2.75 mm): set to Round."). Its Undo reverts the edit itself: an Apply entry that Enter added on top is undone first (`undoEdit`, `setRemovedToast(message, { edit: true })`); other undo toasts stay one step.
+
 - **Clamped stepover** ([plan-v0.3.md T-H](../modes/plan-v0.3.md#decisions)): at the plan operation's stepover field, "Clamped to 3.00 mm (half the tool) for offset clearing." with the effective value. The entered value stays.
 - **`dfm.shapeHeavy`** ([design-v0.3.md § DFM](../modes/design-v0.3.md#dfm-checks-for-shapes)): on the operation, "This shape has 4 200 segments after flattening, so the part updates more slowly." The status bar's "Updating…" is unchanged.
 - **Shape DFM markers** (corners, rest material) sit at `params.at` in the face frame; a corner's marker is a small arc. With more than 10 corners the list shows a count, and the viewport still marks every one.

@@ -157,7 +157,12 @@ export interface UiState {
    * for the mode, which the inspector's removals (segment table, task U1) also use.
    */
   readonly removedToast: string | null
-  setRemovedToast(message: string | null): void
+  /**
+   * The toast reports an edit (DF120 R2: "… set to Round."): its Undo reverts that edit, through
+   * the Apply entry Enter may have added on top (`undoEdit`); false: Undo is one step.
+   */
+  readonly removedToastEdit: boolean
+  setRemovedToast(message: string | null, opts?: { edit?: boolean }): void
   /**
    * The operation whose rotation field has focus (task U2): the viewport draws its placed,
    * rotated bounding box thin and dashed; null otherwise.
@@ -396,7 +401,9 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     shapeIssues: null,
     setShapeIssues: (shapeIssues) => set({ shapeIssues }),
     removedToast: null,
-    setRemovedToast: (removedToast) => set({ removedToast }),
+    removedToastEdit: false,
+    setRemovedToast: (removedToast, opts) =>
+      set({ removedToast, removedToastEdit: opts?.edit === true }),
     rotationGuide: null,
     setRotationGuide: (rotationGuide) => set({ rotationGuide }),
     steps: {},

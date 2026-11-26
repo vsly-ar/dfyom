@@ -45,6 +45,7 @@ import { ImportReportDialog } from './ImportReportDialog'
 import { addShapeEntries, useSvgImport } from './ShapeList'
 import { shapeLoops } from './ShapePicker'
 import { ShapeKindIcon } from './ShapeKindIcon'
+import { adjustedNote, RoundField } from './RoundField'
 import {
   endVertex,
   fieldUpdate,
@@ -118,6 +119,9 @@ export function ShapeInspector({
     if (r.ok) {
       setErrors(undefined)
       ui.getState().setShapeIssues(null)
+      // DF120: a radius too large for the rectangle applied as Round; say so, with Undo
+      const note = adjustedNote(r)
+      if (note !== undefined) ui.getState().setRemovedToast(note, { edit: true })
     } else {
       setErrors(placeShapeErrors(r.error, n))
       ui.getState().setShapeIssues({ shapeId: shape.id, issues: r.error.issues })
@@ -424,6 +428,7 @@ export function ItemQuantity({
   icon,
   optional = false,
   compact = false,
+  derived = false,
 }: {
   ctx: ItemEditContext
   path: readonly (string | number)[]
@@ -435,6 +440,8 @@ export function ItemQuantity({
   optional?: boolean
   /** A segment table cell: no illustration, the label for screen readers only. */
   compact?: boolean
+  /** The value follows other fields (a Round corner radius, DF120): shown read-only. */
+  derived?: boolean
 }): React.JSX.Element {
   const key = path.join('.')
   let q: unknown = ctx.dto
@@ -460,6 +467,7 @@ export function ItemQuantity({
     ...(ctx.part.table ? { resolver: ctx.part.table.resolver(0) } : {}),
     ...(icon && !compact ? { illustration: <FieldIcon name={icon} /> } : {}),
     ...(compact ? { className: styles['cellInput'], dense: true } : {}),
+    ...(derived ? { readOnly: true } : {}),
   }
   return optional ? (
     <QuantityInput
@@ -506,7 +514,9 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
             stepKind="small"
             label={t.cornerRadius}
             icon="corner"
+            derived={item.round === true}
           />
+          <RoundField checked={item.round === true} onChange={(round) => ctx.send({ round })} />
           <ItemQuantity
             ctx={ctx}
             path={['rotation']}

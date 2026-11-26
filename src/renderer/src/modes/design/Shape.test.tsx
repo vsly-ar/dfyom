@@ -300,6 +300,28 @@ describe('shape editor', () => {
     await waitFor(() => expect(shape().items[0]).toMatchObject({ round: true }))
     // Rectangle 40 × 20: R 10
     expect(shape().items[0]).toMatchObject({ cornerRadius: { exact: { num: '10', den: '1' } } })
+    // R2: the Round switch is on, the radius read-only, and the window's toast says why
+    const round = within(inspector()).getByRole('switch', { name: 'Round' })
+    await waitFor(() => expect(round).toBeChecked())
+    expect(field('Corner radius')).toHaveAttribute('readonly')
+    expect(
+      await within(editorWindow).findByText(
+        '30 mm is more than half the width (10 mm): set to Round.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations(inspector())
+    // a size edit follows; switching off keeps the radius, and the field is editable again
+    await retype(user, field('Width'), '16{Enter}')
+    await waitFor(() =>
+      expect(shape().items[0]).toMatchObject({ cornerRadius: { exact: { num: '8', den: '1' } } }),
+    )
+    await user.click(round)
+    await waitFor(() => expect(shape().items[0]).not.toHaveProperty('round'))
+    expect(shape().items[0]).toMatchObject({ cornerRadius: { exact: { num: '8', den: '1' } } })
+    await waitFor(() => expect(field('Corner radius')).not.toHaveAttribute('readonly'))
+    // on again from the switch
+    await user.click(round)
+    await waitFor(() => expect(shape().items[0]).toMatchObject({ round: true }))
   })
 
   it('drags a handle as one gesture; one undo step reverts it', async () => {
