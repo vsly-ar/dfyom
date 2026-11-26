@@ -1,6 +1,6 @@
 /**
  * Geometry checks of the evaluation: piece count, `dfm.loosePiece`, `dfm.retainedRemoved`,
- * `dfm.surfaceMissing`. Doc: docs/architecture/geometry.md#evaluation-checks
+ * construction surfaces and `dfm.surfaceCutAway`. Doc: docs/architecture/geometry.md#evaluation-checks
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
@@ -407,23 +407,45 @@ describe('evaluatePart: retainedRemoved', () => {
   })
 })
 
-describe('evaluatePart: surfaceMissing', () => {
-  it('warns when a referenced surface has no triangles', () => {
-    const e = evaluate({
-      ...testPart(),
-      references: [
-        { operation: 'pocket1', parameter: 'on', surface: 'stock.top' },
-        { operation: 'drill1', parameter: 'on', surface: 'facing1.floor' },
-      ],
-    })
-    expect(e.warnings).toEqual([
+describe('evaluatePart: construction surfaces and surfaceCutAway', () => {
+  const references = [
+    { operation: 'pocket1', parameter: 'on', surface: 'stock.top' },
+    { operation: 'drill1', parameter: 'on', surface: 'facing1.floor' },
+  ]
+
+  it('warns when an operation that is not a dependant cuts a referenced surface away', () => {
+    const e = evaluate({ ...testPart(), references, dependants: { 'stock.top': ['pocket1'] } })
+    expect(only(e, 'dfm.surfaceCutAway')).toEqual([
       expect.objectContaining({
-        code: 'dfm.surfaceMissing',
+        code: 'dfm.surfaceCutAway',
+        severity: 'warning',
         operation: 'pocket1',
         parameter: 'on',
-        params: { surface: 'stock.top' },
+        params: { surface: 'stock.top', by: ['facing1'] },
       }),
     ])
+    expect(e.construction.map((c) => [c.surface, c.consumedBy, c.referencedBy])).toEqual([
+      // the facing takes the whole face first; overshoots above later faces count for nothing
+      ['stock.top', ['facing1'], [{ operationId: 'pocket1', param: 'on' }]],
+    ])
+    // the stock top face, seen from above at its level
+    expect(e.construction[0]!.patch).toMatchObject({ direction: '+z', z: 0 })
+  })
+
+  it('is silent when every consumer is a dependant of the surface', () => {
+    const e = evaluate({
+      ...testPart(),
+      references,
+      dependants: { 'stock.top': ['facing1', 'pocket1'] },
+    })
+    expect(only(e, 'dfm.surfaceCutAway')).toEqual([])
+    expect(e.construction.map((c) => c.surface)).toEqual(['stock.top'])
+  })
+
+  it('reports nothing for referenced surfaces that keep triangles', () => {
+    const e = evaluate({ ...testPart(), references: [references[1]!] })
+    expect(e.construction).toEqual([])
+    expect(only(e, 'dfm.surfaceCutAway')).toEqual([])
   })
 })
 

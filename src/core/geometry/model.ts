@@ -429,7 +429,8 @@ export function chamferTerraces(
 
 /**
  * A surface an operation parameter refers to (`on`, or a reference in an expression), so
- * evaluation can warn when the surface no longer exists (`dfm.surfaceMissing`).
+ * evaluation can tell construction surfaces and warn when an operation that does not depend on
+ * the surface cuts it away (`dfm.surfaceCutAway`, docs/modes/construction-surfaces.md#check-dfmsurfacecutaway).
  */
 export interface SurfaceReference {
   /** Id of the referencing operation. */
@@ -445,6 +446,13 @@ export interface PartGeometryInput {
   readonly operations: readonly OperationGeometry[]
   /** Surfaces referenced by operation parameters; absent = none. */
   readonly references?: readonly SurfaceReference[]
+  /**
+   * Per referenced surface, its dependants (`surfaceDependants`, design layer): the operations a
+   * later cut of the surface is expected from, so it raises no `dfm.surfaceCutAway`. Only
+   * surfaces with dependants are listed; absent = none
+   * (docs/modes/construction-surfaces.md#check-dfmsurfacecutaway).
+   */
+  readonly dependants?: Readonly<Record<SurfaceId, readonly string[]>>
   /**
    * Clone groups (v0.4 Clones): per repeated source operation, its id and its instances' ids
    * (`toGeometryInput`). Evaluation subtracts them in clone layers before the other operations
@@ -462,7 +470,8 @@ export const DFM_WARNING_CODES = [
   // geometry checks (evaluation): docs/architecture/geometry.md#evaluation-checks
   'dfm.loosePiece',
   'dfm.retainedRemoved',
-  'dfm.surfaceMissing',
+  // a referenced surface a non-dependant cuts away (DF118): docs/modes/construction-surfaces.md
+  'dfm.surfaceCutAway',
   // parameter and tool checks: docs/modes/design.md#operations-v01
   'dfm.facingDeep',
   'dfm.pocketNoToolFits',
@@ -541,6 +550,27 @@ export interface DfmSuggestion {
 }
 
 /** One DFM warning: never blocks, derived on every evaluation, never stored. */
+/**
+ * A construction surface (docs/modes/construction-surfaces.md#resolution): referenced, defined
+ * by the surface table, and with no triangles in the evaluated part. Its level still holds.
+ */
+export interface ConstructionSurface {
+  readonly surface: SurfaceId
+  /** Later operations that cut it away (its slab), in operation order. */
+  readonly consumedBy: readonly string[]
+  /** The operation parameters that refer to it. */
+  readonly referencedBy: readonly { readonly operationId: string; readonly param: string }[]
+  /**
+   * The face's region at its level in its owner's face frame: `z` (0 at the stock face, negative
+   * below it) and boundary loops of `[u, v]` points.
+   */
+  readonly patch: {
+    readonly direction: Direction
+    readonly z: number
+    readonly loops: readonly (readonly Vec2[])[]
+  }
+}
+
 export interface DfmWarning {
   readonly code: DfmWarningCode
   /** `warning`: likely a problem; `info`: worth knowing (e.g. needs pecking). */

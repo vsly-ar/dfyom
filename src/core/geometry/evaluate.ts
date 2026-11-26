@@ -8,7 +8,8 @@
  */
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
 import { boxOf, boxesOverlap, geometryChecks, type Box, type ComposedOperation } from './checks'
-import type { DfmWarning, PartGeometryInput, SurfaceId } from './model'
+import { constructionSurfaces } from './construction'
+import type { ConstructionSurface, DfmWarning, PartGeometryInput, SurfaceId } from './model'
 import {
   AIR,
   operationSolids,
@@ -34,8 +35,13 @@ export interface PartEvaluation {
   readonly volume: number
   /** Pieces of volume > ε_V: 1 when the part and every offcut hang together. */
   readonly pieces: number
-  /** Geometry warnings in check order: `dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceMissing`. */
+  /** Geometry warnings in check order: `dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceCutAway`. */
   readonly warnings: readonly DfmWarning[]
+  /**
+   * Referenced surfaces with no triangles, in reference order, with their consumers and patches
+   * (docs/modes/construction-surfaces.md#resolution); empty when none.
+   */
+  readonly construction: readonly ConstructionSurface[]
   readonly stats: { readonly ms: number; readonly triangles: number }
 }
 
@@ -187,7 +193,9 @@ export function evaluatePart(
     }
     return Ok(part)
   }
+  let stockOriginalId: number | undefined
   const built = build(stockSolidsValue).andThen((stockSolid) => {
+    stockOriginalId = stockSolid.id
     for (const { op, box } of placed) {
       const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
       if (s.isErr()) return Err(s.unwrapErr())
@@ -242,25 +250,34 @@ export function evaluatePart(
     .andThen((labelled) =>
       solids.volume(part).andThen((volume) =>
         geometryChecks(
-          {
-            part,
-            operations: ops.map((op) => composed.get(op)!),
-            tables,
-            surfaces: labelled.surfaces,
-            references: input.references ?? [],
-          },
+          { part, operations: ops.map((op) => composed.get(op)!), tables },
           solids,
           steps,
-        ).map((checks): PartEvaluation => ({
-          ...labelled,
-          volume,
-          pieces: checks.pieces,
-          warnings: checks.warnings,
-          stats: {
-            ms: performance.now() - started,
-            triangles: labelled.indices.length / 3,
-          },
-        })),
+        ).andThen((checks) =>
+          constructionSurfaces(
+            {
+              stock: input.stock,
+              stockSolids: stockSolidsValue,
+              stockOriginalId: stockOriginalId!,
+              operations: ops.map((op) => composed.get(op)!),
+              surfaces: labelled.surfaces,
+              references: input.references ?? [],
+              dependants: input.dependants ?? {},
+            },
+            solids,
+            steps,
+          ).map((cs): PartEvaluation => ({
+            ...labelled,
+            volume,
+            pieces: checks.pieces,
+            warnings: [...checks.warnings, ...cs.warnings],
+            construction: cs.construction,
+            stats: {
+              ms: performance.now() - started,
+              triangles: labelled.indices.length / 3,
+            },
+          })),
+        ),
       ),
     )
 }

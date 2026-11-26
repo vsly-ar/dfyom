@@ -28,10 +28,14 @@ describe('design → geometry input', () => {
       parameter: 'on',
       surface: 'facing1.floor',
     }))
-    expect(expectOk(partGeometryInput(s.d.doc, s.partId))).toEqual({ ...testPart(), references })
+    expect(expectOk(partGeometryInput(s.d.doc, s.partId))).toEqual({
+      ...testPart(),
+      references,
+      dependants: { 'facing1.floor': references.map((r) => r.operation) },
+    })
   })
 
-  it('lists `on` and each formula reference once per operation and parameter (dfm.surfaceMissing)', async () => {
+  it('lists `on` and each formula reference once per operation and parameter, with dependants (dfm.surfaceCutAway)', async () => {
     const s = await designSetup()
     const partId = s.partId
     await s.run('design.facing.add', { partId })
@@ -56,14 +60,22 @@ describe('design → geometry input', () => {
       { operation: 'drill1', parameter: 'depth', surface: 'pocket1.floor' },
       { operation: 'drill1', parameter: 'depth', surface: 'stock.bottom' },
     ])
+    // the drilling depends on the pocket, so it is a dependant of every surface the pocket uses
+    expect(expectOk(partGeometryInput(s.d.doc, s.partId)).dependants).toEqual({
+      'stock.top': ['pocket1', 'drill1'],
+      'facing1.floor': ['pocket1', 'drill1'],
+      'pocket1.floor': ['drill1'],
+      'stock.bottom': ['drill1'],
+    })
   })
 
-  it('an evaluation of a part whose references all exist reports no dfm.surfaceMissing', async () => {
+  it('an evaluation of a part whose referenced surfaces all keep triangles has no construction surfaces', async () => {
     const s = await designSetup()
     await buildTestPart(s)
     const input = expectOk(partGeometryInput(s.d.doc, s.partId))
     const e = expectOk(kernel.withSolids((solids) => evaluatePart(input, solids)))
-    expect(e.warnings.filter((w) => w.code === 'dfm.surfaceMissing')).toEqual([])
+    expect(e.warnings.filter((w) => w.code === 'dfm.surfaceCutAway')).toEqual([])
+    expect(e.construction).toEqual([])
   })
 
   it('evaluates it: every surface id, volume within the chord-error bound', async () => {

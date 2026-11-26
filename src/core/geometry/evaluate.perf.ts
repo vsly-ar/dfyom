@@ -178,3 +178,68 @@ it('meets the warm budget on the test part with side and bottom operations (v0.2
   expect(triangles).toBeLessThanOrEqual(20_000)
   expect(kernel.liveObjects()).toBe(0)
 })
+
+/**
+ * DF118 construction surfaces (docs/modes/construction-surfaces.md#risks): 100 cloned recesses,
+ * each with a deeper slot and then a stepped pocket of the same outline on its floor, so every
+ * floor is a construction surface consumed by two operations (one boolean each, as clamps_40). Against the same part without
+ * references (no construction work).
+ */
+it('measures the construction-surface check on 100 clones that consume their floors', async () => {
+  const kernel = (await loadManifold(nodeManifoldSource())).unwrap()
+  const recess = (i: number, id: string, onZ: number, size = 1): OperationGeometry => ({
+    kind: 'pocket',
+    id,
+    onZ,
+    shape: {
+      center: [10 + 18 * (i % 10), 10 + 18 * Math.floor(i / 10)],
+      contour: { kind: 'rectangle', length: 12 * size, width: 8 * size, cornerRadius: 2 * size },
+    },
+    depth: 2 / size,
+    floorRadius: 0,
+  })
+  const n = 100
+  const a = Array.from({ length: n }, (_, i) => recess(i, `a${i}`, 0))
+  const slot = Array.from({ length: n }, (_, i) => recess(i, `s${i}`, -2, 0.5))
+  const b = Array.from({ length: n }, (_, i) => recess(i, `b${i}`, -2))
+  const plain: PartGeometryInput = {
+    stock: { length: 190, width: 190, thickness: 10 },
+    operations: [...a, ...slot, ...b],
+    cloneGroups: [a, slot, b].map((g) => g.map((o) => o.id)),
+  }
+  const referenced: PartGeometryInput = {
+    ...plain,
+    references: [...slot, ...b].map((o) => ({
+      operation: o.id,
+      parameter: 'on',
+      surface: `a${o.id.slice(1)}.floor`,
+    })),
+    dependants: Object.fromEntries(a.map((_, i) => [`a${i}.floor`, [`s${i}`, `b${i}`]])),
+  }
+  // interleaved runs after a warm-up of both, so neither pays the first evaluations alone
+  const runs = { plain: [] as number[], referenced: [] as number[] }
+  let construction = 0
+  for (let i = 0; i < 14; i++)
+    for (const key of ['plain', 'referenced'] as const) {
+      const t = performance.now()
+      const e = kernel
+        .withSolids((s) => evaluatePart(key === 'plain' ? plain : referenced, s))
+        .unwrap()
+      if (i >= 3) runs[key].push(performance.now() - t)
+      if (key === 'referenced') {
+        construction = e.construction.length
+        expect(e.construction[7]!.consumedBy).toEqual(['s7', 'b7'])
+      }
+      expect(e.warnings.filter((w) => w.code === 'dfm.surfaceCutAway')).toEqual([])
+    }
+  const median = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)]!
+  const without = { median: median(runs.plain) }
+  const withChecks = { median: median(runs.referenced), construction }
+  console.log(
+    `100 clones consuming their floors: ${without.median.toFixed(1)} ms without references, ` +
+      `${withChecks.median.toFixed(1)} ms with ${withChecks.construction} construction surfaces ` +
+      `(+${(withChecks.median - without.median).toFixed(1)} ms)`,
+  )
+  expect(withChecks.construction).toBe(n)
+  expect(kernel.liveObjects()).toBe(0)
+})

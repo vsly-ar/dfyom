@@ -1,7 +1,8 @@
 /**
  * Design part → geometry input: quantities to canonical float64 mm/degrees, `on` to the
  * operation's `direction` and `onZ` (the z of `on` in its face frame, 0 at the stock face),
- * `on` and expression references to `references` (for `dfm.surfaceMissing`). Pure; the geometry types are owned by src/core/geometry/model.ts.
+ * `on` and expression references to `references` and their surfaces' `dependants` (for
+ * construction surfaces and `dfm.surfaceCutAway`). Pure; the geometry types are owned by src/core/geometry/model.ts.
  * Doc: docs/modes/design.md#implementation-task-25, docs/architecture/geometry.md#evaluation-rules
  */
 import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
@@ -47,7 +48,7 @@ import {
 } from './operation'
 import { throughDepths, withThroughDepths } from '../geometry/through-depth'
 import { placeShape } from './placement'
-import { operationReferences, SurfaceTable } from './surfaces'
+import { operationReferences, surfaceDependants, SurfaceTable } from './surfaces'
 import { shapeCentre } from './anchor'
 import { instanceOf, stepOf } from './feature'
 
@@ -129,6 +130,12 @@ export function toGeometryInput(
       references.push({ operation: op.id, parameter: r.param, surface: r.surface })
     }
   }
+  const dependants = surfaceDependants(
+    part.operations,
+    table,
+    references.map((r) => r.surface),
+  )
+  if (dependants.isErr()) return Err(dependants.unwrapErr().withContext('toGeometryInput'))
   const stockGeometry = {
     length: stock.length.canonical,
     width: stock.width.canonical,
@@ -139,6 +146,7 @@ export function toGeometryInput(
     // through profiles over material an earlier setup cleared (DF50), in the default setup order
     operations: withThroughDepths(operations, throughDepths(operations, stockGeometry, port)),
     references,
+    ...(Object.keys(dependants.unwrap()).length === 0 ? {} : { dependants: dependants.unwrap() }),
     ...cloneGroups(part.operations),
   })
 }

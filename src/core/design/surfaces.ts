@@ -346,6 +346,47 @@ export function operationReferences(op: Operation): AppResult<OperationReference
   return Ok(out)
 }
 
+/**
+ * Dependants of each surface in `surfaces` (docs/modes/construction-surfaces.md#check-dfmsurfacecutaway):
+ * the operations whose `on` or a formula references it, or that depend on such an operation
+ * (reference one of its surfaces, or chamfer its edge via `edgeOf`), transitively. Owned
+ * operations of features count like any other. Ids in design order; surfaces without
+ * dependants are left out.
+ */
+export function surfaceDependants(
+  ops: readonly Operation[],
+  table: SurfaceTable,
+  surfaces: Iterable<string>,
+): AppResult<Record<string, string[]>> {
+  // per operation: the surfaces it references and the earlier operations it depends on
+  const refs: Set<string>[] = []
+  const on: Set<number>[] = []
+  const index = new Map(ops.map((o, i) => [o.id, i]))
+  for (const op of ops) {
+    const r = operationReferences(op)
+    if (r.isErr()) return Err(r.unwrapErr().withContext('surfaceDependants', { op: op.id }))
+    const names = new Set(r.unwrap().map((x) => x.surface))
+    const deps = new Set<number>()
+    for (const n of names) {
+      const e = table.get(n)
+      if (e.isSome() && e.unwrap().owner >= 0) deps.add(e.unwrap().owner)
+    }
+    if (op.kind === 'chamfer' && index.has(op.edgeOf)) deps.add(index.get(op.edgeOf)!)
+    refs.push(names)
+    on.push(deps)
+  }
+  const out: Record<string, string[]> = {}
+  for (const surface of new Set(surfaces)) {
+    const found = new Set<number>()
+    // dependencies always point to earlier operations: one pass in design order
+    ops.forEach((_, i) => {
+      if (refs[i]!.has(surface) || [...on[i]!].some((d) => found.has(d))) found.add(i)
+    })
+    if (found.size > 0) out[surface] = [...found].map((i) => ops[i]!.id)
+  }
+  return Ok(out)
+}
+
 export interface Dependant {
   readonly operationId: string
   readonly param: string
