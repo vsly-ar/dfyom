@@ -1,6 +1,6 @@
 /**
  * A stored library item: common meta (`id`, `revision`, `updatedAt`) plus the values of one
- * kind (Stock, Tool or Machine). The values alone are what a snapshot copies.
+ * kind (Stock, Tool, Machine or Workholding). The values alone are what a snapshot copies.
  * Doc: docs/architecture/library.md#common-fields, #storage
  */
 import { z } from 'zod'
@@ -21,9 +21,11 @@ import { Stock } from './stock'
 import { StockValuesDtoSchema, type StockValuesDTO } from './stock.dto'
 import { Tool } from './tool'
 import { ToolValuesDtoSchema, type ToolValuesDTO } from './tool.dto'
+import { Workholding } from './workholding'
+import { WorkholdingValuesDtoSchema, type WorkholdingValuesDTO } from './workholding.dto'
 
-export type ItemValues = Stock | Tool | Machine
-export type ItemValuesDTO = StockValuesDTO | ToolValuesDTO | MachineValuesDTO
+export type ItemValues = Stock | Tool | Machine | Workholding
+export type ItemValuesDTO = StockValuesDTO | ToolValuesDTO | MachineValuesDTO | WorkholdingValuesDTO
 export type ValuesOf<K extends LibraryItemKind> = Extract<ItemValues, { kind: K }>
 export type ValuesDtoOf<K extends LibraryItemKind> = Extract<ItemValuesDTO, { kind: K }>
 
@@ -32,12 +34,14 @@ export const VALUES_SCHEMAS = {
   stock: StockValuesDtoSchema,
   tool: ToolValuesDtoSchema,
   machine: MachineValuesDtoSchema,
+  workholding: WorkholdingValuesDtoSchema,
 } as const
 
 export const ItemValuesDtoSchema = z.discriminatedUnion('kind', [
   StockValuesDtoSchema,
   ToolValuesDtoSchema,
   MachineValuesDtoSchema,
+  WorkholdingValuesDtoSchema,
 ])
 
 /** One stored file: meta + values, flat. */
@@ -45,6 +49,7 @@ export const LibraryItemDtoSchema = z.discriminatedUnion('kind', [
   StockValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
   ToolValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
   MachineValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
+  WorkholdingValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
 ])
 export type LibraryItemDTO = z.output<typeof LibraryItemDtoSchema>
 
@@ -57,6 +62,8 @@ export function valuesFromDTO(dto: ItemValuesDTO): AppResult<ItemValues> {
       return Tool.fromDTO(dto)
     case 'machine':
       return Machine.fromDTO(dto)
+    case 'workholding':
+      return Workholding.fromDTO(dto)
   }
 }
 

@@ -3,7 +3,7 @@
 // Field names follow docs/architecture/library.md (ISO 13399 symbols in the drawing); terms from
 // docs/glossary.md. Doc: docs/conventions/ui-library-window.md, docs/conventions/ui.md#plan-mode-task-37,
 // #internationalization
-import type { LibraryItemKind, MaterialClass } from '../../../core/library/item'
+import type { LibraryTabKind, MaterialClass } from '../../../core/library/item'
 import type { HomingCorner, Rigidity } from '../../../core/library/machine.dto'
 import type { ToolMaterial, ToolType } from '../../../core/library/tool.dto'
 
@@ -18,7 +18,7 @@ const classes = {
   other: 'Other',
 } satisfies Record<MaterialClass, string>
 
-const kindWord: Record<LibraryItemKind, string> = {
+const kindWord: Record<LibraryTabKind, string> = {
   tool: 'tool',
   machine: 'machine',
   stock: 'stock',
@@ -34,7 +34,7 @@ export const libraryMessages = {
   unnamed: 'Name it, or leave it empty for the suggested name.',
   copySuffix: 'copy',
   /** A typed name that repeats another item's (DF47): allowed, with this soft warning. */
-  nameTaken: (kind: LibraryItemKind, name: string) =>
+  nameTaken: (kind: LibraryTabKind, name: string) =>
     `Another ${kind === 'stock' ? 'stock block' : kindWord[kind]} is already named ${name}: a different name tells them apart in lists.`,
   /** Context links that open the Library window (L2). */
   links: { edit: 'Edit in library', open: 'Open library' },
@@ -46,20 +46,20 @@ export const libraryMessages = {
     toolbar: 'Library',
     tabsLabel: 'Library items',
     tabs: { machine: 'Machines', tool: 'Tools', stock: 'Stock' } satisfies Record<
-      LibraryItemKind,
+      LibraryTabKind,
       string
     >,
     search: 'Search',
-    searchPlaceholder: (kind: LibraryItemKind) =>
+    searchPlaceholder: (kind: LibraryTabKind) =>
       `Search ${kind === 'stock' ? 'stock' : `${kindWord[kind]}s`} by name or notes`,
     units: 'Units',
     unitOptions: { mm: 'mm', inch: 'in' },
     newItem: { tool: 'New tool', machine: 'New machine', stock: 'New stock' } satisfies Record<
-      LibraryItemKind,
+      LibraryTabKind,
       string
     >,
     newShortcut: 'New',
-    list: (kind: LibraryItemKind) =>
+    list: (kind: LibraryTabKind) =>
       kind === 'tool' ? 'Tools' : kind === 'machine' ? 'Machines' : 'Stock',
     editor: 'Item editor',
     used: 'Used in this project',
@@ -70,17 +70,17 @@ export const libraryMessages = {
     unreadable: 'Does not load',
     unreadableHint: (message: string) =>
       `This file does not load, so it cannot be edited: ${message} The app never changes or deletes it.`,
-    newRow: (kind: LibraryItemKind) => `New ${kindWord[kind]}`,
-    count: (kind: LibraryItemKind, n: number) =>
+    newRow: (kind: LibraryTabKind) => `New ${kindWord[kind]}`,
+    count: (kind: LibraryTabKind, n: number) =>
       kind === 'stock'
         ? `${n} stock ${n === 1 ? 'item' : 'items'}`
         : `${n} ${kindWord[kind]}${n === 1 ? '' : 's'}`,
     unreadableCount: (n: number) => `${n} unreadable ${n === 1 ? 'file' : 'files'}`,
     shown: (n: number) => `${n} shown`,
     noProject: 'No project',
-    empty: (kind: LibraryItemKind) =>
+    empty: (kind: LibraryTabKind) =>
       kind === 'stock' ? 'The stock library is empty.' : `No ${kindWord[kind]}s yet.`,
-    emptyHint: (kind: LibraryItemKind) => `Create one with “New ${kindWord[kind]}”.`,
+    emptyHint: (kind: LibraryTabKind) => `Create one with “New ${kindWord[kind]}”.`,
     noMatch: (query: string) => `Nothing matches “${query}”.`,
     noSelection: 'Select an item to edit it.',
     columns: {
@@ -121,7 +121,7 @@ export const libraryMessages = {
     actions: 'Item actions',
     removeTitle: (name: string) => `Remove ${name} from the library?`,
     removeDescription: 'Projects keep their copies. Library changes are not undoable.',
-    removeConfirm: (kind: LibraryItemKind) => `Remove ${kindWord[kind]}`,
+    removeConfirm: (kind: LibraryTabKind) => `Remove ${kindWord[kind]}`,
     leaveTitle: (name: string) => `Save changes to ${name}?`,
     leaveDescription:
       'Your changes are not saved yet. Library changes apply to every project and are not undoable.',

@@ -4,7 +4,7 @@
 // actions Duplicate, New variant (stock), Remove…,
 // Import $$… (machines), Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LibraryItemKind } from '../../../core/library/item'
+import type { LibraryTabKind } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
 import {
@@ -34,7 +34,7 @@ import { TOOL_FIELDS, ToolFields } from './ToolFields'
 import styles from './LibraryWindow.module.css'
 
 const w = libraryMessages.window
-const FIELDS: Record<LibraryItemKind, readonly string[]> = {
+const FIELDS: Record<LibraryTabKind, readonly string[]> = {
   tool: TOOL_FIELDS,
   machine: MACHINE_FIELDS,
   stock: STOCK_FIELDS,

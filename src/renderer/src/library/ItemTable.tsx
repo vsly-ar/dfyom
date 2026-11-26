@@ -4,7 +4,7 @@
 // row being drafted shows "Unsaved", and a file that does not load is listed with its error and
 // cannot be selected for editing. Stock variants follow their parent, indented (DF13). Doc: docs/conventions/ui-library-window.md#layout, #accessibility
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import type { LibraryItemKind } from '../../../core/library/item'
+import type { LibraryTabKind } from '../../../core/library/item'
 import type { LibraryItemDTO } from '../../../core/library/library-item'
 import { TOOL_TYPES, type ToolType } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
@@ -43,7 +43,7 @@ const nameCol: Column = {
   sort: (i) => i.name.toLocaleLowerCase(),
 }
 
-function columns(kind: LibraryItemKind): Column[] {
+function columns(kind: LibraryTabKind): Column[] {
   if (kind === 'tool')
     return [
       nameCol,
@@ -182,7 +182,7 @@ export function ItemTable({
   onSelect,
   onEnter,
 }: {
-  kind: LibraryItemKind
+  kind: LibraryTabKind
   listing: Listing
   search: string
   selected: string | null

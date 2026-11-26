@@ -2,7 +2,7 @@
  * Filesystem `LibraryStorage`: one JSON file per item under `<appData>/library/`.
  * Doc: docs/architecture/library.md#storage
  *
- * Layout: `library.json` (manifest), `stock/`, `tools/`, `machines/` with `<id>.json` each.
+ * Layout: `library.json` (manifest), `stock/`, `tools/`, `machines/`, `workholding/` with `<id>.json` each.
  * Writes are atomic per file (temp + fsync + rename + directory fsync). Every app instance shares
  * the folder; read → revision check → write/delete runs under a per-item lock file
  * (`<id>.json.lock`, created with `wx`), so two instances cannot both pass the check. Locks and
@@ -38,6 +38,7 @@ const FOLDER: Record<LibraryItemKind, string> = {
   stock: 'stock',
   tool: 'tools',
   machine: 'machines',
+  workholding: 'workholding',
 }
 const ITEM_FILE = /^([a-z0-9_-]{1,120})\.json$/
 const TEMP_FILE = /\.tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -90,8 +91,15 @@ export async function createFsLibraryStorage(
   return Ok({
     async list(kind) {
       const dir = join(root, FOLDER[kind])
-      const names = await tryAsync(() => readdir(dir), 'persist.io', `cannot list ${dir}`)
-      if (names.isErr()) return names
+      let listed: string[]
+      try {
+        listed = await readdir(dir)
+      } catch (cause) {
+        // A kind's missing folder means no items (workholding-library.md#snapshots-and-persistence).
+        if (isMissing(cause)) return Ok([])
+        return fail('persist.io', `cannot list ${dir}`, { cause, where: dir })
+      }
+      const names = Ok(listed)
       const ids = names
         .unwrap()
         .flatMap((n) => {

@@ -78,6 +78,30 @@ describe('MCP server', () => {
     expect(await call('library.tool.list')).toMatchObject({ items: [] })
   })
 
+  it('adds, lists and removes a workholding device (workholding-library.md WL1)', async () => {
+    const { client, call, raw } = await connect()
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    for (const verb of ['add', 'update', 'remove', 'get', 'list'])
+      expect(names).toContain(`library_workholding_${verb}`)
+    const added = (await call('library.workholding.add', {
+      values: { name: 'Strap clamp M8', type: 'toeClamp', width: '25', length: '70', top: '30' },
+    })) as { id: string; revision: number }
+    const ids = async () =>
+      (
+        (await call('library.workholding.list', { type: 'toeClamp' })) as {
+          items: { id: string }[]
+        }
+      ).items.map((i) => i.id)
+    expect(await ids()).toEqual([added.id, 'builtin-toe-clamp'])
+    const refused = await raw('library.workholding.remove', {
+      id: 'builtin-toe-clamp',
+      confirm: true,
+    })
+    expect(refused.structuredContent?.error?.issues[0]?.rule).toBe('builtIn')
+    await call('library.workholding.remove', { id: added.id, revision: 1, confirm: true })
+    expect(await ids()).toEqual(['builtin-toe-clamp'])
+  })
+
   it('returns AppErrors as tool results and unknown tools as protocol errors', async () => {
     const { raw, client } = await connect()
     const r = await raw('design.part.list')

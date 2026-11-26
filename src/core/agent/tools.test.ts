@@ -336,6 +336,7 @@ describe('agent tools', () => {
       'library.machine.update',
       'library.stock.update',
       'library.tool.update',
+      'library.workholding.update',
       'plan.design.operation.update',
     ])
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {

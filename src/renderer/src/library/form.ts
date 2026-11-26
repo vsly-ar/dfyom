@@ -12,7 +12,7 @@ import {
   presetRecommendation,
   type FollowedField,
 } from '../../../core/feeds-speeds/preset'
-import type { LibraryItemKind, MaterialClass } from '../../../core/library/item'
+import type { LibraryTabKind, MaterialClass } from '../../../core/library/item'
 import {
   valuesFromDTO,
   type ItemValuesDTO,
@@ -206,7 +206,7 @@ export function defaultStockValues(units: UnitSystem): StockDraft {
   }
 }
 
-export function defaultValues(kind: LibraryItemKind, units: UnitSystem): DraftValues {
+export function defaultValues(kind: LibraryTabKind, units: UnitSystem): DraftValues {
   return kind === 'tool'
     ? defaultToolValues(units)
     : kind === 'machine'

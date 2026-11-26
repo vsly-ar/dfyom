@@ -30,7 +30,13 @@ describe('filesystem library storage', () => {
   it('creates the folders and the manifest', async () => {
     const root = join(dir, 'library')
     expectOk(await createFsLibraryStorage(root))
-    expect((await readdir(root)).sort()).toEqual(['library.json', 'machines', 'stock', 'tools'])
+    expect((await readdir(root)).sort()).toEqual([
+      'library.json',
+      'machines',
+      'stock',
+      'tools',
+      'workholding',
+    ])
     expect(JSON.parse(await readFile(join(root, 'library.json'), 'utf8'))).toEqual({
       format: 'dfyom-library',
       schemaVersion: 1,
@@ -129,6 +135,15 @@ describe('filesystem library storage', () => {
     expect(await readdir(join(root, 'stock'))).toEqual(['x.json'])
   })
 
+  it('a library from before WL1 gains workholding/ on open; a missing kind folder lists no items', async () => {
+    const root = join(dir, 'library')
+    const s = expectOk(await createFsLibraryStorage(root))
+    await rm(join(root, 'workholding'), { recursive: true })
+    expect(expectOk(await s.list('workholding'))).toEqual([])
+    expectOk(await createFsLibraryStorage(root))
+    expect(await readdir(join(root, 'workholding'))).toEqual([])
+  })
+
   it('opening sweeps stale temp and lock files, keeping fresh ones', async () => {
     const root = join(dir, 'library')
     expectOk(await createFsLibraryStorage(root))
@@ -146,6 +161,12 @@ describe('filesystem library storage', () => {
       'u.json.tmp-0f8e2a4c-1b2d-4e6f-8a9b-0c1d2e3f4a5d',
     ])
     expect(await readdir(join(root, 'stock'))).toEqual([])
-    expect((await readdir(root)).sort()).toEqual(['library.json', 'machines', 'stock', 'tools'])
+    expect((await readdir(root)).sort()).toEqual([
+      'library.json',
+      'machines',
+      'stock',
+      'tools',
+      'workholding',
+    ])
   })
 })

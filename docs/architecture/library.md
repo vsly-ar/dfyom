@@ -2,19 +2,19 @@
 
 Status: implemented · Storage rule: [persistence.md](persistence.md#library-references) · Values: [quantities.md](quantities.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Terms: [glossary.md](../glossary.md) · UI: [ui-library-window.md](../conventions/ui-library-window.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.7 (models: 2.4)
 
-The library holds the user's **stock**, **tools** and **machines**. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding joins the library later ([workholding-library.md](../modes/workholding-library.md), draft). Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
+The library holds the user's **stock**, **tools**, **machines** and **workholding** devices. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding devices (clamps, vises, screws, …) have their own model, read-only built-ins and a default per type: [workholding-library.md](../modes/workholding-library.md) (slice WL1 implemented: library kind and agent tools; plan copies, Library window tab and setup inspector follow in WL2–WL4). Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
 
 ## Common fields
 
-| Field       | Type                             | v0.1 | Invariants        | Why                                                           |
-| ----------- | -------------------------------- | ---- | ----------------- | ------------------------------------------------------------- |
-| `id`        | string (UUID)                    | yes  | non-empty         | Target of `libraryItemId` in snapshots.                       |
-| `kind`      | `'stock' \| 'tool' \| 'machine'` | yes  | –                 | Discriminates the record and the snapshot `kind`.             |
-| `name`      | string                           | yes  | 1–120 chars       | Shown in pickers, plan sheets and gCode comments.             |
-| `notes`     | string                           | no   | ≤ 4000 chars      | Vendor, product number, where it is stored.                   |
-| `revision`  | integer                          | yes  | ≥ 1, +1 per write | Stale-write check across app instances ([Storage](#storage)). |
-| `updatedAt` | ISO 8601 string                  | yes  | –                 | Sorting; "library changed since snapshot" hint.               |
-| `parentId`  | item id                          | no   | a root stock      | Stock only: the parent of a [variant](#stock-variants-df13).  |
+| Field       | Type                                              | v0.1 | Invariants        | Why                                                           |
+| ----------- | ------------------------------------------------- | ---- | ----------------- | ------------------------------------------------------------- |
+| `id`        | string (UUID)                                     | yes  | non-empty         | Target of `libraryItemId` in snapshots.                       |
+| `kind`      | `'stock' \| 'tool' \| 'machine' \| 'workholding'` | yes  | –                 | Discriminates the record and the snapshot `kind`.             |
+| `name`      | string                                            | yes  | 1–120 chars       | Shown in pickers, plan sheets and gCode comments.             |
+| `notes`     | string                                            | no   | ≤ 4000 chars      | Vendor, product number, where it is stored.                   |
+| `revision`  | integer                                           | yes  | ≥ 1, +1 per write | Stale-write check across app instances ([Storage](#storage)). |
+| `updatedAt` | ISO 8601 string                                   | yes  | –                 | Sorting; "library changed since snapshot" hint.               |
+| `parentId`  | item id                                           | no   | a root stock      | Stock only: the parent of a [variant](#stock-variants-df13).  |
 
 ## Stock
 
@@ -186,14 +186,14 @@ The snapshot record and rule are owned by [persistence.md](persistence.md#librar
 
 The app host opens the library once per instance (`Library.open` over `<appData>/library`) and passes it as `services.library` to the app-scope dispatcher, which runs the `library.*` commands without an open project, and to every project dispatcher (snapshots) ([llm-api.md](llm-api.md#app-scope-and-project-scope), task 3.10).
 
-| Item     | Path                                                 | Content                                                  |
-| -------- | ---------------------------------------------------- | -------------------------------------------------------- |
-| Manifest | `<appData>/library/library.json`                     | `{ format: 'dfyom-library', schemaVersion: 1 }`          |
-| Items    | `<appData>/library/{stock,tools,machines}/<id>.json` | One item DTO per file, pretty-printed, stable key order. |
+| Item     | Path                                                             | Content                                                                                                          |
+| -------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Manifest | `<appData>/library/library.json`                                 | `{ format: 'dfyom-library', schemaVersion: 1 }`                                                                  |
+| Items    | `<appData>/library/{stock,tools,machines,workholding}/<id>.json` | One item DTO per file, pretty-printed, stable key order; a missing kind folder means no items (created on open). |
 
 - Writes are atomic per file (temp + fsync + rename), like the [working folder](persistence.md#working-folder-writes). Every instance shares the folder; a write whose `revision` differs from the file on disk fails with `command.conflict`.
 - An item that does not load is listed with its error and never deleted or overwritten automatically ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
-- Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)); the `$$` import adds `library.machine.settings.{preview,import}` ([GRBL `$$` import](#grbl--import)). The commands are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
+- Commands: `library.{stock,tool,machine,workholding}.{add,update,remove}`; queries `.get` and `.list` (workholding: built-ins listed too, [workholding-library.md § Agent API](../modes/workholding-library.md#agent-api)) ([naming](commands.md#naming)); the `$$` import adds `library.machine.settings.{preview,import}` ([GRBL `$$` import](#grbl--import)). The commands are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
 - **UI (v0.1):** the stock setup adds a block ([design.md](../modes/design.md#workflow); since DF13 only on "Save to library", [ui.md § Stock dialog](../conventions/ui.md#stock-dialog-df11df13)); plan mode's "New tool…" and "New machine…" forms add a tool or machine with the fields v0.1 needs ([ui.md](../conventions/ui.md#plan-mode-task-37)). Editing and removing items needs the library editor (later milestone; drafted as the [Library window](../conventions/ui-library-window.md), B24).
 - `add`/`update` take [quantity strings](#command-input), not stored quantity objects; results are the stored item DTO.
 - `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
@@ -223,21 +223,23 @@ Where this doc was silent, the implementation chose conservatively:
 
 ## Files
 
-| File                                            | Contents                                                                       |
-| ----------------------------------------------- | ------------------------------------------------------------------------------ |
-| `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`, model helpers               |
-| `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                                               |
-| `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`                            |
-| `src/core/feeds-speeds/preset.ts`               | Recommended presets: `presetRecommendation`, `followRecommended`               |
-| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO, `RIGIDITY_PRESETS`                                    |
-| `src/core/library/library-item.ts`              | `LibraryItem` (meta + values), item/values schemas, `parseLibraryItem`         |
-| `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, `refreshSnapshot`, status, notices   |
-| `src/core/library/storage.ts`                   | `LibraryStorage` port (`list`, `get`, `put`, `remove`) and its revision checks |
-| `src/core/library/memory-storage.ts`            | In-memory port for tests and headless use                                      |
-| `src/core/library/storage.contract.ts`          | Contract tests every port implementation runs                                  |
-| `src/core/library/library.ts`                   | `Library` service: cache, serialized writes, change events                     |
-| `src/core/library/commands.ts`                  | Library commands and queries                                                   |
-| `src/core/library/values-input.ts`              | Command input of values: string schema, parsing into DTOs, `libraryUnit`       |
-| `src/core/library/grbl-import.ts`               | `$$` settings → machine diff and apply ([GRBL `$$` import](#grbl--import))     |
-| `src/core/library/used.ts`                      | `usedLibraryItemIds`: the items a project uses (Library window chips)          |
-| `src/main/library/fs-storage.ts`                | Filesystem implementation of the port                                          |
+| File                                                    | Contents                                                                                                                         |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/library/item.ts`                              | Common fields, `LibraryItemKind`, `MaterialClass`, model helpers                                                                 |
+| `src/core/library/stock.ts`, `stock.dto.ts`             | `Stock` model and Zod DTO schema                                                                                                 |
+| `src/core/library/tool.ts`, `tool.dto.ts`               | `Tool` model (per-type invariants), `CuttingPreset`                                                                              |
+| `src/core/feeds-speeds/preset.ts`                       | Recommended presets: `presetRecommendation`, `followRecommended`                                                                 |
+| `src/core/library/machine.ts`, `machine.dto.ts`         | `Machine` model and DTO, `RIGIDITY_PRESETS`                                                                                      |
+| `src/core/library/workholding.ts`, `workholding.dto.ts` | `Workholding` device model (flat, per-type rules) and DTO ([workholding-library.md](../modes/workholding-library.md#item-model)) |
+| `src/core/library/workholding-builtins.ts`              | Read-only built-in workholding items, the default per type, `lookupWorkholding`                                                  |
+| `src/core/library/library-item.ts`                      | `LibraryItem` (meta + values), item/values schemas, `parseLibraryItem`                                                           |
+| `src/core/library/snapshot.ts`                          | `Snapshot` model and DTO, `takeSnapshot`, `refreshSnapshot`, status, notices                                                     |
+| `src/core/library/storage.ts`                           | `LibraryStorage` port (`list`, `get`, `put`, `remove`) and its revision checks                                                   |
+| `src/core/library/memory-storage.ts`                    | In-memory port for tests and headless use                                                                                        |
+| `src/core/library/storage.contract.ts`                  | Contract tests every port implementation runs                                                                                    |
+| `src/core/library/library.ts`                           | `Library` service: cache, serialized writes, change events                                                                       |
+| `src/core/library/commands.ts`                          | Library commands and queries                                                                                                     |
+| `src/core/library/values-input.ts`                      | Command input of values: string schema, parsing into DTOs, `libraryUnit`                                                         |
+| `src/core/library/grbl-import.ts`                       | `$$` settings → machine diff and apply ([GRBL `$$` import](#grbl--import))                                                       |
+| `src/core/library/used.ts`                              | `usedLibraryItemIds`: the items a project uses (Library window chips)                                                            |
+| `src/main/library/fs-storage.ts`                        | Filesystem implementation of the port                                                                                            |

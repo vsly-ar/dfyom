@@ -6,7 +6,7 @@
 // Pure parts: src/main/library-context.ts. Contract: src/shared/preload-api.ts
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { Dispatcher } from '../core/commands/dispatcher'
-import type { LibraryItemKind } from '../core/library/item'
+import type { LibraryTabKind } from '../core/library/item'
 import {
   IPC,
   type LibraryCloseRequest,
@@ -51,7 +51,7 @@ export function createLibraryWindows(
 ): LibraryWindows {
   let win: BrowserWindow | undefined
   let draft: string | null = null
-  let tab: LibraryItemKind = 'tool'
+  let tab: LibraryTabKind = 'tool'
   let target: LibraryContext['target'] = null
   let seq = 0
   /** The web contents of the window that opened it last (its project is the context). */

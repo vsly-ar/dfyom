@@ -11,6 +11,12 @@ import { z } from 'zod'
 import type { Issue } from '../../../shared/errors/app-error'
 import { fieldContext } from '../../design/operation'
 import { NAME_MAX, quantityDto } from '../../library/item'
+import {
+  BASE_TYPES,
+  SURFACE_TYPES,
+  WORKHOLDING_TYPES,
+  type WorkholdingType,
+} from '../../library/workholding.dto'
 import { Quantity } from '../../quantity/quantity'
 import type { UnitSystem } from '../../project/document'
 import type { QuantityDTO } from '../../quantity/quantity.dto'
@@ -18,8 +24,9 @@ import type { QuantityDTO } from '../../quantity/quantity.dto'
 /** As plan.dto.ts' `LengthDTO` (not imported: plan.dto.ts imports this module). */
 type LengthDTO = QuantityDTO & { kind: 'length' }
 
-export const WORKHOLDING_KINDS = ['toeClamp', 'vise', 'screw', 'block', 'base', 'surface'] as const
-export type WorkholdingKind = (typeof WORKHOLDING_KINDS)[number]
+/** The setup item kinds are the library's device types (workholding-library.md § Item model). */
+export const WORKHOLDING_KINDS = WORKHOLDING_TYPES
+export type WorkholdingKind = WorkholdingType
 
 /** Stock edges seen from above on the machine: left, right, front, back. */
 export const EDGES = ['uMin', 'uMax', 'vMin', 'vMax'] as const
@@ -32,8 +39,7 @@ export const EDGE_WORD: Readonly<Record<Edge, string>> = {
 }
 
 export const VISE_AXES = ['u', 'v'] as const
-export const BASE_TYPES = ['spoilboard', 'fixturePlate'] as const
-export const SURFACE_TYPES = ['tape', 'vacuum', 'glue'] as const
+export { BASE_TYPES, SURFACE_TYPES }
 
 const Len = quantityDto('length')
 const Angle = quantityDto('angle')

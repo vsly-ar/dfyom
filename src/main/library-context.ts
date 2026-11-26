@@ -2,7 +2,7 @@
 // from the window that opened it (project, units, used items), the open request and state it is
 // sent, and which menu actions it handles itself. src/main/library-window.ts wires them.
 // Doc: docs/conventions/ui-library-window.md
-import { LIBRARY_ITEM_KINDS, type LibraryItemKind } from '../core/library/item'
+import { LIBRARY_TAB_KINDS, type LibraryTabKind } from '../core/library/item'
 import { usedLibraryItemIds } from '../core/library/used'
 import type { ProjectDoc } from '../core/project/document'
 import type {
@@ -12,8 +12,8 @@ import type {
   MenuAction,
 } from '../shared/preload-api'
 
-const isKind = (v: unknown): v is LibraryItemKind =>
-  (LIBRARY_ITEM_KINDS as readonly unknown[]).includes(v)
+const isKind = (v: unknown): v is LibraryTabKind =>
+  (LIBRARY_TAB_KINDS as readonly unknown[]).includes(v)
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
