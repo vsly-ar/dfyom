@@ -1,6 +1,6 @@
 /**
  * Plan findings of workholding (WH-A–F): `plan.workholding.none` (info), `.clearanceLow` (error),
- * `.unmachined` (warning, needs the 2D port), `.inPart` and `.partLoose` (warnings, W5,
+ * `.unmachined` (warning, one per operation, needs the 2D port), `.inPart` and `.partLoose` (warnings, W5,
  * `held.ts`), and on a setup's current toolpaths `.collision` (error), `.close` (warning) and
  * `.breakthrough` (error). Errors block `plan.export` and
  * `run.job.start` of their setup (the export guard), never toolpath generation.
@@ -182,9 +182,12 @@ const maxTop = (h: SetupWorkholding, itemId: string) =>
   Math.max(...h.prisms.filter((p) => p.itemId === itemId).map((p) => p.zMax))
 
 /**
- * `plan.workholding.unmachined`: per facing or pocket and item, the material the keep-out leaves
- * (area and bounds in the setup's WCS). Needs the 2D port; a mapping failure is left to the
- * toolpath job.
+ * `plan.workholding.unmachined`: per facing or pocket, one finding for the material the keep-out
+ * leaves under every item it goes around (design review R13, D75: one per item read as if an
+ * automatic arrangement failed). The message names each item with its area and bounds in the
+ * setup's WCS; `params` carry the total `area`, the union bounds, `itemIds` (comma-separated, in
+ * the keep-out's order) and, with one item, `itemId`. Needs the 2D port; a mapping failure is left
+ * to the toolpath job.
  */
 export function unmachinedFindings(
   plan: LoadedPlan,
@@ -197,7 +200,7 @@ export function unmachinedFindings(
     const request = toGeneratorInputs(input, port)
     if (request.isErr()) continue
     const list = request.unwrap().unmachined
-    if (list === undefined) continue
+    if (list === undefined || list.length === 0) continue
     const setup = plan.setups.find((s) => s.id === input.setup.id)
     if (setup === undefined) continue
     const h = setupWorkholding(setup, plan.stock)
@@ -211,31 +214,49 @@ export function unmachinedFindings(
       },
       input.setup.zero,
     )
-    for (const u of list) {
+    const parts = list.map((u) => {
       const corners = [u.bounds[0], u.bounds[1]].map((p) => (wcs === undefined ? p : toWcs(p, wcs)))
       const xs = corners.map((p) => p[0])
       const ys = corners.map((p) => p[1])
-      const name = planOpLabel(plan.dto.design.part, {
-        designOperationIds: input.operations.map((o) => o.id),
-        ...aidName(plan.dto, input.planOperationId),
-      })
-      out.push({
-        code: 'plan.workholding.unmachined',
-        severity: 'warning',
-        message: `${name} leaves ${mm(u.area)} mm² uncut under ${itemName(h, u.itemId)} (X${mm(Math.min(...xs))}–${mm(Math.max(...xs))} Y${mm(Math.min(...ys))}–${mm(Math.max(...ys))})`,
-        planOperationId: input.planOperationId,
-        rule: 'unmachined',
-        params: {
-          setupId: input.setup.id,
-          itemId: u.itemId,
-          area: u.area,
-          xMin: Math.min(...xs),
-          xMax: Math.max(...xs),
-          yMin: Math.min(...ys),
-          yMax: Math.max(...ys),
-        },
-      })
-    }
+      return {
+        itemId: u.itemId,
+        area: u.area,
+        xMin: Math.min(...xs),
+        xMax: Math.max(...xs),
+        yMin: Math.min(...ys),
+        yMax: Math.max(...ys),
+      }
+    })
+    const name = planOpLabel(plan.dto.design.part, {
+      designOperationIds: input.operations.map((o) => o.id),
+      ...aidName(plan.dto, input.planOperationId),
+    })
+    const box = (p: (typeof parts)[number]) =>
+      `X${mm(p.xMin)}–${mm(p.xMax)} Y${mm(p.yMin)}–${mm(p.yMax)}`
+    const area = parts.reduce((a, p) => a + p.area, 0)
+    const one = parts.length === 1 ? parts[0] : undefined
+    const each = parts.map((p) => `${itemName(h, p.itemId)} (${mm(p.area)} mm², ${box(p)})`)
+    const under =
+      one !== undefined
+        ? `${itemName(h, one.itemId)} (${box(one)})`
+        : `${each.slice(0, -1).join(', ')} and ${each[each.length - 1]!}`
+    out.push({
+      code: 'plan.workholding.unmachined',
+      severity: 'warning',
+      message: `${name} leaves ${mm(area)} mm² uncut under ${under}`,
+      planOperationId: input.planOperationId,
+      rule: 'unmachined',
+      params: {
+        setupId: input.setup.id,
+        ...(one === undefined ? {} : { itemId: one.itemId }),
+        itemIds: parts.map((p) => p.itemId).join(','),
+        area,
+        xMin: Math.min(...parts.map((p) => p.xMin)),
+        xMax: Math.max(...parts.map((p) => p.xMax)),
+        yMin: Math.min(...parts.map((p) => p.yMin)),
+        yMax: Math.max(...parts.map((p) => p.yMax)),
+      },
+    })
   }
   return out
 }
