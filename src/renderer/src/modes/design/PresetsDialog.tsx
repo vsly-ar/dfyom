@@ -1,4 +1,4 @@
-// The presets dialogs' one shell (P11): the Pattern presets (DF107) and the Engraving presets (E3)
+// The presets dialogs' one shell (P12): the Pattern presets (DF107) and the Engraving presets (E3)
 // share it so they cannot drift. A modal grid of preview cards, one per preset: its preview, name
 // (with Current), one-line description and key numbers; optional group headings before the first
 // preset of each group. The cards are one radio group with a roving focus: arrows move (Up/Down
@@ -59,7 +59,7 @@ export function PresetsDialog<P extends { readonly id: string }>({
     if (o) setActive(Math.max(current, 0))
     setOpen(o)
   }
-  // focus alone may leave the card cut at the dialog's edge (P11): show it whole
+  // focus alone may leave the card cut at the dialog's edge (P12): show it whole
   useEffect(() => {
     if (!open) return
     const id = requestAnimationFrame(() =>

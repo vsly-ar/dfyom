@@ -1,7 +1,7 @@
 // The engraved pattern's Presets dialog (engraved-patterns.md E3, § Presets dialog): a modal grid
 // of the 13 shipped presets in three groups (Tiles, Motifs, Round), each card the motif's lines
 // (light lines drawn light), its name, a one-line description and its size. It is the shared
-// PresetsDialog shell with the pattern's (P11): one radio group with a roving focus (arrows,
+// PresetsDialog shell with the pattern's (P12): one radio group with a roving focus (arrows,
 // Up/Down by a row, Home/End), Enter, Space or a click applies and closes, Escape or the footer's
 // Close closes without a change; the current preset is marked and focused on open.
 // Applying is the caller's one `design.engraving.update` (one undo step).

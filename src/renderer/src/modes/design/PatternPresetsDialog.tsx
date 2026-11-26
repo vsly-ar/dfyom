@@ -1,7 +1,7 @@
 // The pattern's Presets dialog (hardening DF107): a modal grid of preview cards, one per preset,
 // each a window onto its lattice (`presetThumb` at PREVIEW size), its name, a one-line
 // description and its key numbers. It is the shared PresetsDialog shell with the engraving's
-// (P11): one radio group with a roving focus, arrows move (up/down a row), Home/End jump, Enter,
+// (P12): one radio group with a roving focus, arrows move (up/down a row), Home/End jump, Enter,
 // Space or a click applies and closes, Escape or the footer's Close (P10) closes without a change.
 // The preset the pattern already is is marked Current and focused on open. Applying is the
 // caller's one `design.pattern.update` (one undo step).
