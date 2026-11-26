@@ -1,8 +1,8 @@
 // The pattern's Presets dialog (hardening DF107): preview cards in one radio group, the current
 // preset marked and focused, arrows and Home/End move, Enter or a click applies once and closes,
-// Escape closes without applying.
+// Escape or the footer's Close (P10) closes without applying; the polar preview's ring guides (P10).
 // Doc: docs/modes/patterns.md#presets-dialog-and-more-presets-df107
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
@@ -83,6 +83,28 @@ describe('PatternPresetsDialog (DF107)', () => {
     expect(onApply).toHaveBeenCalledTimes(1)
     expect(onApply.mock.calls[0]![0].id).toBe(PATTERN_PRESETS[2]!.id)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('P10: the footer Close button closes without applying, focus back on Presets…', async () => {
+    const onApply = vi.fn()
+    const { user } = renderUi(<PatternPresetsDialog feature={honeycomb} onApply={onApply} />)
+    const trigger = screen.getByRole('button', { name: 'Presets…' })
+    await user.click(trigger)
+    const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(onApply).not.toHaveBeenCalled()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('P10: the polar preview draws ring guides; the row lattices none', async () => {
+    const { user } = renderUi(<PatternPresetsDialog feature={honeycomb} onApply={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Presets…' }))
+    const grille = screen.getByRole('radio', { name: 'Speaker grille' })
+    expect(grille.querySelectorAll('circle[data-ring]').length).toBeGreaterThanOrEqual(3)
+    expect(grille.querySelector('mask path')?.getAttribute('d')).toMatch(/^M/)
+    const hc = screen.getByRole('radio', { name: 'Honeycomb' })
+    expect(hc.querySelectorAll('circle[data-ring]')).toHaveLength(0)
   })
 
   it('a click applies that preset', async () => {

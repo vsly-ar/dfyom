@@ -1,7 +1,7 @@
 // The Presets menu's thumbnails (design review U9 P5): a window onto each preset's lattice.
 import { describe, expect, it } from 'vitest'
 import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
-import { cellPoints, presetThumb, PREVIEW, THUMB } from './pattern-thumbs'
+import { cellPoints, presetRings, presetThumb, PREVIEW, THUMB } from './pattern-thumbs'
 
 const preset = (id: string) => PATTERN_PRESETS.find((p) => p.id === id)!
 const centre = (pts: readonly (readonly [number, number])[]) => {
@@ -79,5 +79,34 @@ describe('preset thumbnails (U9 P5)', () => {
     const rings = [...new Set(radii.map((r) => Math.round(r * 10) / 10))].sort((a, b) => a - b)
     expect(rings.length).toBeGreaterThanOrEqual(3)
     expect(rings[2]! - rings[1]!).toBeCloseTo(rings[1]! - rings[0]!, 0)
+  })
+
+  it("P10: polar rings hold the layout's counts (⌊π / asin(1 / 2k)⌋), not a hex grid's 6k", () => {
+    const grille = preset('speakerGrille')
+    const cells = presetThumb(grille, PREVIEW)
+    const [cx, cy] = centre(cells[0]!)
+    const step = presetRings(grille, PREVIEW)[0]!.r
+    const perRing = new Map<number, number>()
+    for (const c of cells) {
+      const [x, y] = centre(c)
+      const k = Math.round(Math.hypot(x! - cx!, y! - cy!) / step)
+      perRing.set(k, (perRing.get(k) ?? 0) + 1)
+    }
+    // rings 1–3 lie wholly inside the window (about 3.8 rings from the centre to its top edge)
+    for (const k of [1, 2, 3])
+      expect(perRing.get(k)).toBe(Math.floor(Math.PI / Math.asin(1 / (2 * k)) + 1e-9))
+    // ring 4 has 25 cells in the layout, 24 under the old 6k rule; part of it is cut by the box
+    expect(Math.floor(Math.PI / Math.asin(1 / 8) + 1e-9)).toBe(25)
+  })
+
+  it('P10: ring guides through each ring of a polar preset, about the box centre; none for rows', () => {
+    const rings = presetRings(preset('speakerGrille'), PREVIEW)
+    expect(rings.length).toBeGreaterThanOrEqual(3)
+    for (const [i, g] of rings.entries()) {
+      expect(g.cx).toBeCloseTo(PREVIEW.w / 2)
+      expect(g.cy).toBeCloseTo(PREVIEW.h / 2)
+      expect(g.r).toBeCloseTo(rings[0]!.r * (i + 1))
+    }
+    expect(presetRings(preset('honeycomb'), PREVIEW)).toEqual([])
   })
 })

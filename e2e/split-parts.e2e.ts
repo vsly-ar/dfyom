@@ -203,6 +203,14 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
     })
     expect(box).toBeCloseTo(vb, 1)
   }
+  // P10: Remove split is the editor's last control, after the Blanks accordion, out of the Split group
+  const removeSplit = split.getByRole('region', { name: 'Remove split' })
+  await expect(removeSplit.getByRole('button', { name: 'Remove split' })).toBeVisible()
+  const blanksTop = (await split.getByRole('region', { name: /^Blanks/ }).boundingBox())!.y
+  expect((await removeSplit.boundingBox())!.y).toBeGreaterThan(blanksTop)
+  await expect(
+    split.getByRole('region', { name: /^Split/ }).getByRole('button', { name: 'Remove split' }),
+  ).toHaveCount(0)
   // U9 Q132: one row for the shared blank, a numbered chip per piece named by its chip text
   const twoPieces = split.getByRole('list', { name: '2 pieces' })
   await expect(twoPieces.getByRole('listitem')).toHaveText(['12259.5 × 187 × 40 mm · own blank'])

@@ -3,7 +3,8 @@
 // fields update the pattern (one `design.pattern.update` each). P2: a preset, the Polar lattice,
 // Clip and Invert. P3: the Chamfer switch and its width. P4: the Through switch. P5: the chamfer's
 // Edges (Both shows the bottom V-bit) and the Triangles preset's Flip. DF107: the Presets dialog
-// (preview cards, Current, arrow keys, Enter applies). DF108: the Roughing switch and its tool.
+// (preview cards, Current, arrow keys, Enter applies; P10: the polar rings and Close). DF108: the
+// Roughing switch and its tool.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/patterns.md#implementation-p1, #implementation-p2, #implementation-p3, #implementation-p4,
 // #implementation-p5, #implementation-df107df109,
@@ -95,13 +96,19 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(presets).toBeHidden()
   await expect(readout).not.toHaveText(`${large} cells`)
   expect(Number((await readout.textContent())?.split(' ')[0])).toBeGreaterThan(large * 3)
+  const grilleCells = await readout.textContent()
   // reopened: Grille is Current and has focus
   await inspector.getByRole('button', { name: 'Presets…' }).click()
   const grille = presets.getByRole('radio', { name: 'Grille', exact: true })
   await expect(grille).toHaveAttribute('aria-checked', 'true')
   await expect(grille).toBeFocused()
   await expect(grille.getByText('Current')).toBeVisible()
-  await page.keyboard.press('Escape')
+  // P10: the polar Speaker grille draws its rings; the footer's Close closes without a change
+  const speaker = presets.getByRole('radio', { name: 'Speaker grille', exact: true })
+  await expect(speaker.locator('circle[data-ring]').first()).toBeAttached()
+  await presets.getByRole('button', { name: 'Close' }).click()
+  await expect(presets).toBeHidden()
+  await expect(readout).toHaveText(grilleCells!)
 
   // ── DF108: Roughing adds the roughing tool's field; off removes it ─────────────────────────
   // Roughing, Boundary cells and Invert sit behind More rows, Chamfer in an accordion (DF110 S4)
