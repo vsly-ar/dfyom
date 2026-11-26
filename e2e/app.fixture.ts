@@ -296,7 +296,9 @@ export interface IdleActivity {
  * Counts the viewport's WebGL frames and the run-status pushes in `page` over `ms` of wall time
  * (P7, idle cost: an idle window draws nothing and hears nothing; the viewport renders on demand,
  * the machine host posts a status only when it changed). The one wait on time in the suite: idling
- * is what it checks. Doc: docs/research/2026-11-23-idle-cost.md
+ * is what it checks. Counting starts after two animation frames, so a render the state the test
+ * waited on already scheduled is drawn first, not counted as idle work.
+ * Doc: docs/research/2026-11-23-idle-cost.md
  */
 export async function idleActivity(page: Page, ms = 2000): Promise<IdleActivity> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -305,7 +307,11 @@ export async function idleActivity(page: Page, ms = 2000): Promise<IdleActivity>
       WebGL2RenderingContext: { prototype: { clear(mask: number): void } }
       dfyom: { run: { onStatus(l: () => void): () => void } }
       setTimeout(fn: () => void, ms: number): void
+      requestAnimationFrame(fn: () => void): number
     }
+    const frame = () => new Promise<void>((r) => g.requestAnimationFrame(() => r()))
+    await frame()
+    await frame()
     const proto = g.WebGL2RenderingContext.prototype
     const clear = proto.clear
     let frames = 0
@@ -330,16 +336,39 @@ export async function closeDialog(dialog: Locator, button = 'Done'): Promise<voi
 
 /**
  * Sets the work zero on X, Y and Z with the "0" buttons in the Run inspector's Position table
- * (DF88: there is no "Zero X Y Z" button), waiting for each to reach the DRO.
+ * (DF88: there is no "Zero X Y Z" button), waiting for each to reach the DRO and then for the
+ * window to have applied the three commands' action events. The DRO follows the machine's status
+ * push, which can come well before a command's event under load (1.7 s measured); the event bumps
+ * the window's project revision and re-renders it, so a check right after the zeroing (P7's
+ * `idleActivity`, P13) would see that render.
  */
 export async function zeroXyz(page: Page): Promise<void> {
   const dro = page
     .getByRole('complementary', { name: 'Inspector' })
     .getByRole('table', { name: 'Position' })
+  // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
+  const before = await page.evaluate(() => {
+    const g = globalThis as unknown as {
+      dfyomZeroEvents?: number
+      dfyom: { project: { onEvent(l: (e: { name?: string }) => void): () => void } }
+    }
+    if (g.dfyomZeroEvents === undefined) {
+      g.dfyomZeroEvents = 0
+      g.dfyom.project.onEvent((e) => {
+        if (e.name === 'run.workZero.set') g.dfyomZeroEvents = (g.dfyomZeroEvents ?? 0) + 1
+      })
+    }
+    return g.dfyomZeroEvents
+  })
   for (const axis of ['X', 'Y', 'Z']) {
     await dro.getByRole('button', { name: `Set ${axis} zero` }).click()
     await expect(dro.getByRole('cell', { name: `Work position ${axis}` })).toHaveText(/^-?0\.0+/)
   }
+  await expect
+    .poll(() =>
+      page.evaluate(() => (globalThis as unknown as { dfyomZeroEvents: number }).dfyomZeroEvents),
+    )
+    .toBe(before + 3)
 }
 
 /**
