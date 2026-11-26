@@ -129,6 +129,7 @@ export function shapeArgs(shape: OperationShapeDTO): Record<string, unknown> {
       center,
       ...rotation,
       ...(shape.mirror === true ? { mirror: true } : {}),
+      ...(shape.scale !== undefined ? { scale: shape.scale } : {}),
     }
   return shape.kind === 'rectangle'
     ? {

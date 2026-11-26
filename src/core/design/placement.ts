@@ -2,7 +2,7 @@
  * Placing an operation's shape on its face (step 4 of resolving a shape): the shape's definition
  * (a named shape's items, or a rotated rectangle as one item), mirrored and rotated, numbered from
  * its start points, and anchored by its placed bounding box. Cached per (definition, rotation,
- * mirror) beside `resolveShape`.
+ * mirror, scale) beside `resolveShape`.
  * Doc: docs/architecture/shapes.md#implementation-k3, docs/modes/design-v0.3.md#placing-a-shape-on-a-face
  *
  * Pure; the `Region2dPort` is passed in (`services.region2d` in commands, the host's port in the
@@ -115,10 +115,15 @@ export function shapeDefinition(
   }
 }
 
-/** The orientation of an operation's shape (rotation, mirror). */
+/**
+ * The orientation of an operation's shape (rotation, mirror and a named placement's `scale`:
+ * scaled about the shape frame's origin, so anchoring the scaled box keeps the anchor point,
+ * docs/modes/design-llm-first.md#placement-scale).
+ */
 export const shapeOrientation = (s: Shape): Orientation => ({
   rotation: shapeRotation(s),
   mirror: s.kind === 'named' && s.mirror,
+  ...(s.kind === 'named' && s.scale !== undefined && s.scale !== 1 ? { scale: s.scale } : {}),
 })
 
 /** A resolved shape oriented in the face frame's axes and numbered, with its exact bounds. */
@@ -172,7 +177,7 @@ export function orientedShape(
 ): AppResult<OrientedShape> {
   let cache = caches.get(port)
   if (cache === undefined) caches.set(port, (cache = new Map()))
-  const key = `${o.rotation}|${o.mirror ? 1 : 0}|${JSON.stringify(def)}`
+  const key = `${o.rotation}|${o.mirror ? 1 : 0}|${o.scale ?? 1}|${JSON.stringify(def)}`
   const hit = cache.get(key)
   if (hit !== undefined) {
     cache.delete(key)

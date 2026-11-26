@@ -22,11 +22,16 @@ import {
   type RegionPiece,
 } from './model'
 
-/** Mirror (x → −x in the shape frame) then a counter-clockwise rotation, about the origin. */
+/**
+ * Uniform scale, mirror (x → −x in the shape frame) then a counter-clockwise rotation, about the
+ * origin. Similarity only: arcs stay exact arcs (docs/modes/design-llm-first.md#placement-scale).
+ */
 export interface Orientation {
   /** Degrees, counter-clockwise. */
   readonly rotation: number
   readonly mirror: boolean
+  /** > 0; absent = 1. */
+  readonly scale?: number
 }
 
 /** cos and sin of a rotation in degrees, exact at multiples of 90° (no 6e-17 residues). */
@@ -58,7 +63,17 @@ const mapLoop = (l: Loop, m: PointMap): Loop => ({
 function orientationMap(o: Orientation): PointMap {
   const [c, s] = cosSin(o.rotation)
   const f = o.mirror ? -1 : 1
-  if (c === 1 && s === 0 && f === 1) return { at: (p) => p, keepsSense: true }
+  const k = o.scale ?? 1
+  if (c === 1 && s === 0 && f === 1 && k === 1) return { at: (p) => p, keepsSense: true }
+  if (k !== 1)
+    return {
+      at: (p) => {
+        const x = f * k * p[0]
+        const y = k * p[1]
+        return [c * x - s * y + 0, s * x + c * y + 0]
+      },
+      keepsSense: !o.mirror,
+    }
   return {
     at: (p) => {
       const x = f * p[0]

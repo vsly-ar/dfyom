@@ -924,6 +924,7 @@ export const designMessages = {
       rotation: 'Rotation',
       rotationNone: '0°',
       mirror: 'Mirror (flip x)',
+      scale: 'Scale',
       roundCorners: (r: string) => `Round corners to ≥ ${r}`,
       roundCornersFit: (r: string) => `Round corners to ${r} (largest that fits)`,
       roundFitSmaller: (fit: string, tool: string) =>

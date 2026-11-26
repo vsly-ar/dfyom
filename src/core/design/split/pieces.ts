@@ -447,25 +447,25 @@ function clippedShape(
   const u1 = rect.x1 + grow
   const v0 = dir === '+z' ? rect.y0 - grow : c.W - rect.y1 - grow
   const v1 = dir === '+z' ? rect.y1 + grow : c.W - rect.y0 + grow
-  const cs = unorient([(u0 + u1) / 2 - origin[0], (v0 + v1) / 2 - origin[1]], o.rotation, o.mirror)
+  // a scaled placement (D2): face-frame lengths are k times the shape frame's
+  const k = o.scale ?? 1
+  const toShape = (p: readonly [number, number]): [number, number] => {
+    const q = unorient([p[0] - origin[0], p[1] - origin[1]], o.rotation, o.mirror)
+    return k === 1 ? q : [q[0] / k, q[1] / k]
+  }
+  const cs = toShape([(u0 + u1) / 2, (v0 + v1) / 2])
   const rot = o.mirror ? o.rotation : -o.rotation
   const cut = {
     kind: 'rectangle' as const,
     op: 'intersect' as const,
     center: [cs[0], cs[1]] as [number, number],
-    length: u1 - u0,
-    width: v1 - v0,
+    length: (u1 - u0) / k,
+    width: (v1 - v0) / k,
     cornerRadius: 0,
     ...(Math.abs(rot) > 1e-9 ? { rotation: rot } : {}),
   }
   // key items (4b-2) from the face frame into the shape frame
-  const framed = extra.map((it) =>
-    framePath(
-      it,
-      (p) => unorient([p[0] - origin[0], p[1] - origin[1]], o.rotation, o.mirror),
-      o.mirror,
-    ),
-  )
+  const framed = extra.map((it) => framePath(it, toShape, o.mirror, k))
   const def2: ShapeDefinition = [...def.unwrap(), cut, ...framed]
   const clipped = orientedShape(c.port, def2, o)
   if (clipped.isErr()) return Ok(undefined)
@@ -521,21 +521,32 @@ function clippedShape(
     center: [L(centre[0]), L(centre[1])],
     ...(rotation === undefined ? {} : { rotation: literal(rotation, c.units) }),
     ...(s.kind === 'named' && s.mirror ? { mirror: true as const } : {}),
+    ...(s.kind === 'named' && s.scale !== undefined ? { scale: s.scale } : {}),
   })
 }
 
-/** A path item with its points mapped by `to` (arcs turn the other way when `mirror`). */
+/**
+ * A path item with its points mapped by `to` (arcs turn the other way when `mirror`); radii are
+ * divided by `scale` (a scaled placement's shape frame, D2).
+ */
 function framePath(
   it: PathItem,
   to: (p: readonly [number, number]) => [number, number],
   mirror: boolean,
+  scale = 1,
 ): PathItem {
+  const r = (x: number) => (scale === 1 ? x : x / scale)
   return {
     ...it,
     start: to(it.start),
     segments: it.segments.map((s) =>
-      s.kind === 'arc' ? { ...s, to: to(s.to), cw: mirror ? !s.cw : s.cw } : { ...s, to: to(s.to) },
+      s.kind === 'arc'
+        ? { ...s, to: to(s.to), radius: r(s.radius), cw: mirror ? !s.cw : s.cw }
+        : { ...s, to: to(s.to) },
     ),
+    ...(it.fillets === undefined || scale === 1
+      ? {}
+      : { fillets: it.fillets.map((f) => ({ ...f, radius: r(f.radius) })) }),
   }
 }
 

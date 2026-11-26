@@ -108,7 +108,7 @@ The module has no imports (ADR 0019), so one loader serves all hosts. The `.wasm
 1. Each item to loops in the shape frame: primitives analytically (exact arcs), paths by walking segments (`arc` from `to`, `radius`, `cw`, `large`; `tangentArc` from the previous element's end tangent), fillets as tangent arcs between neighbours.
 2. Fold the items with their `op` through the port, `normalise` the result.
 3. Validate: no crossings, area > ε (K2: the area rule replaces "every loop ≥ 3 elements or a circle", since a two-arc lens – the intersection of two circles – is a valid loop; normalise already drops lobes of < 2 elements).
-4. Place: shape frame → face frame by the operation's anchor, rotation and mirror; anchors use the placed bounding box of the exact elements (arc extremes included).
+4. Place: shape frame → face frame by the operation's anchor, scale ([D2](../modes/design-llm-first.md#placement-scale)), rotation and mirror; anchors use the placed bounding box of the exact elements (arc extremes included).
 
 Results are cached per (definition hash, placement): commands, the geometry mapper and the toolpath mapper call it many times per edit.
 
