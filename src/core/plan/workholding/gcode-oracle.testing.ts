@@ -1,8 +1,10 @@
 // Test-only: an independent G-code oracle for workholding (workholding.md § Testing). It parses
 // an exported GRBL program (G0/G1/G2/G3, G20/G21, absolute XYZ, I/J arcs), walks every move in
 // 0.05 mm steps along true lines and arcs, and returns the smallest XY gap between the tool
-// (radius `radius`) and any box while the tip is below the box's top + `margin`. It shares no
-// code with `checkWorkholding`. Not app code.
+// (radius `radius`) and any box while the tip is below the box's top + `margin`. A later tool's
+// own Z0 ("(Z0 for tool 2: Facing 1 floor, 1.00 below the stock top)", DF69) applies from its
+// tool change's M0, so every height is from the stock top. It shares no code with
+// `checkWorkholding`. Not app code.
 
 export interface OracleBox {
   readonly x: readonly [number, number]
@@ -34,11 +36,16 @@ export function gcodeClearance(
   let pos: [number, number, number] | undefined
   let z = Number.NaN
   let best = Infinity
+  // the current tool's Z0 below the stock top, and the next tool's (from its tool change's M0)
+  let z0 = 0
+  let nextZ0: number | undefined
   const visit = (x: number, y: number, zz: number) => {
     for (const b of boxes)
-      if (zz < b.top + margin - 1e-6) best = Math.min(best, boxDistance(b, x, y) - radius)
+      if (zz - z0 < b.top + margin - 1e-6) best = Math.min(best, boxDistance(b, x, y) - radius)
   }
   for (const raw of text.split('\n')) {
+    const below = /\(Z0 for tool \d+: .*, (-?[0-9.]+) below the stock top\)/.exec(raw)
+    if (below !== null) nextZ0 = Number(below[1]) * scale
     const line = raw
       .replace(/\(.*?\)/g, '')
       .replace(/;.*$/, '')
@@ -59,6 +66,8 @@ export function gcodeClearance(
     if (words.has('M') && (words.get('M') ?? []).includes(0)) {
       // a pause: X and Y unknown afterwards (the operator may jog)
       pos = undefined
+      if (nextZ0 !== undefined) z0 = nextZ0
+      nextZ0 = undefined
     }
     const val = (k: string) => (words.has(k) ? words.get(k)![0]! * scale : undefined)
     const X = val('X')

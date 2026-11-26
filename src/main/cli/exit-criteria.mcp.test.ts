@@ -7,10 +7,12 @@
 // the deviation check); and the v0.4 flow (exit-criteria.v04.fixture.ts: the enclosure lid with
 // holes, Clones and countersink chamfers); and the alignment phase 1 flow
 // (exit-criteria.alignment.fixture.ts, DF78); and the split parts 4a flow
-// (exit-criteria.split.fixture.ts, DF91). Also checks the CI criterion.
+// (exit-criteria.split.fixture.ts, DF91); and the v0.4-llm-first flow
+// (exit-criteria.llm-first.fixture.ts: the black-box test's enclosure base from its STL, toe
+// clamps, the G-code oracle and the deviation check). Also checks the CI criterion.
 // Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria,
 // docs/plans/v0.3.md#exit-criteria, docs/plans/v0.4.md#exit-criteria,
-// docs/architecture/llm-api.md#testing,
+// docs/plans/v0.4-llm-first.md#exit-criteria, docs/architecture/llm-api.md#testing,
 // docs/conventions/testing.md#end-to-end
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,13 +21,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Progress } from '@modelcontextprotocol/sdk/types.js'
 import { afterAll, describe, expect, inject, it } from 'vitest'
-import { toMcpName } from '../../core/agent/tools'
+import { toMcpName, TOOLS_LIST_BUDGET_CHARS } from '../../core/agent/tools'
 import { type CallResult, exitCriteriaFlow } from './exit-criteria.fixture'
 import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
 import { exitCriteriaV03Flow } from './exit-criteria.v03.fixture'
 import { CALL_BUDGET, exitCriteriaV04Flow } from './exit-criteria.v04.fixture'
 import { exitCriteriaAlignmentFlow } from './exit-criteria.alignment.fixture'
 import { exitCriteriaSplitFlow } from './exit-criteria.split.fixture'
+import { EXIT_NUMBERS, exitCriteriaLlmFirstFlow } from './exit-criteria.llm-first.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
 // the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
@@ -34,7 +37,9 @@ const dirV03 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v03-'))
 const dirV04 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v04-'))
 const dirAlign = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-align-'))
 const dirSplit = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-split-'))
+const dirLlm = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-llm-first-'))
 afterAll(() => {
+  rmSync(dirLlm, { recursive: true, force: true })
   rmSync(dirAlign, { recursive: true, force: true })
   rmSync(dirSplit, { recursive: true, force: true })
   rmSync(dir, { recursive: true, force: true })
@@ -189,6 +194,29 @@ describe('exit criteria headless: dfyom mcp, split parts 4a', { timeout: 300_000
     await client.close()
     expect(stderr.join('')).toBe('')
     expect(r.pieces).toBe(30)
+  })
+})
+
+// v0.4-llm-first X1: docs/plans/v0.4-llm-first.md#exit-criteria
+describe('exit criteria headless: dfyom mcp, v0.4-llm-first', { timeout: 180_000 }, () => {
+  it('rebuilds the enclosure base from its STL, held by toe clamps, within the exit numbers', async () => {
+    const { client, call, stderr } = await connect(dirLlm)
+    // tools/list within the budget (llm-api.md § Size budget)
+    const { tools } = await client.listTools()
+    expect(JSON.stringify({ tools }).length).toBeLessThan(TOOLS_LIST_BUDGET_CHARS)
+    expect(tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'design_reference_find',
+        'design_reference_compare',
+        'plan_workholding_set',
+      ]),
+    )
+    // the same golden programs as the batch run: byte-equal
+    const { stats } = await exitCriteriaLlmFirstFlow(call, dirLlm)
+    await client.close()
+    expect(stderr.join('')).toBe('')
+    expect(stats.calls).toBeLessThanOrEqual(EXIT_NUMBERS.calls)
+    expect(stats.largest.bytes, stats.largest.name).toBeLessThanOrEqual(EXIT_NUMBERS.resultBytes)
   })
 })
 
