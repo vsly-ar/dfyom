@@ -42,7 +42,13 @@ import type { Region2dPort } from '../geometry/2d/port'
 import { PartEvaluationSchema, PartGeometryInputSchema } from '../geometry/schemas'
 import type { Toolpath } from '../toolpath/model'
 import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from '../toolpath/request'
-import { ToolpathSchema } from '../toolpath/schemas'
+import { ToolpathSchema, ToolpathSpotSchema, ToolpathToolSchema } from '../toolpath/schemas'
+import {
+  simulateHeightmap,
+  SIMULATE_CELL_MIN,
+  type CutMap,
+  type SimulateInput,
+} from '../toolpath/simulate'
 
 /** Operations built by earlier evaluations in this worker (unchanged ones are not rebuilt). */
 const operationCache = new OperationCache()
@@ -535,6 +541,46 @@ export const referenceCompareView: WorkerTask<CompareViewInput, CompareViewOutpu
   },
 }
 
+/**
+ * The simulated cut (v0.4 follow-up V2, docs/modes/deviation.md#implementation-s9-v2): the cut
+ * map per setup direction from the plan's toolpaths (in their setups' WCS, machining order), on
+ * the reference map's face-frame grid. The maps are transferred to the host; the compare job
+ * reduces them to statistics and regions (DV-C). Toolpaths get the spot check: a plan's programs
+ * are tens of thousands of moves, and they come from the host's own cache.
+ */
+export const simulateHeightmapTask: WorkerTask<SimulateInput, CutMap[]> = {
+  name: 'simulate.heightmap',
+  lane: 'toolpath',
+  input: z.object({
+    stock: z.object({
+      length: z.number().positive(),
+      width: z.number().positive(),
+      thickness: z.number().positive(),
+    }),
+    cell: z.number().min(SIMULATE_CELL_MIN).optional(),
+    setups: z.array(
+      z.object({
+        direction: z.enum(DIRECTIONS),
+        rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+        zero: z.tuple([z.number(), z.number()]).readonly().optional(),
+        toolpaths: z.array(z.object({ tool: ToolpathToolSchema, toolpath: ToolpathSpotSchema })),
+      }),
+    ),
+  }),
+  output: z.array(
+    z.object({
+      direction: z.enum(DIRECTIONS),
+      cell: z.number(),
+      nu: z.number().int().positive(),
+      nv: z.number().int().positive(),
+      h: FLOAT32,
+    }),
+  ),
+  timeoutMs: 120_000,
+  transfer: (maps) => maps.map((m) => m.h),
+  run: (input, ctl) => simulateHeightmap(input, ctl.steps),
+}
+
 export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   geometryEvaluate,
   toolpathGenerate,
@@ -545,5 +591,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   referenceHoles,
   referenceCompare,
   referenceCompareView,
+  simulateHeightmapTask,
   svgImportTask,
 ]

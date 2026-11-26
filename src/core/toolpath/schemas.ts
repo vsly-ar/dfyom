@@ -109,7 +109,7 @@ export const ToolpathSpotSchema: z.ZodType<Toolpath> = z.object({
   stats: ToolpathStatsSchema,
 })
 
-const ToolpathToolSchema: z.ZodType<ToolpathTool> = z.object({
+export const ToolpathToolSchema: z.ZodType<ToolpathTool> = z.object({
   id: z.string(),
   type: z.enum(['flatEndMill', 'bullNoseEndMill', 'ballEndMill', 'drill', 'chamferMill']),
   diameter: z.number(),
