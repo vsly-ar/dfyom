@@ -168,8 +168,8 @@ test('setup inspector: toe clamps added and edited, the facing clears around the
   if (!(await inspector.getByRole('heading', { name: 'Setup', exact: true }).isVisible()))
     await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
   const checks = inspector.getByRole('region', { name: 'Setup checks' })
-  await expect(checks).toContainText('uncut under Toe clamp 1')
-  await expect(checks).toContainText('uncut under Toe clamp 2')
+  // design review R13: one grouped finding for the facing, naming both clamps
+  await expect(checks).toContainText(/uncut under Toe clamp 1 \(.*\) and Toe clamp 2 \(/)
   // the item stays open (its keep-out halo in the viewport)
   await expect(fields).toBeVisible()
   await page.getByRole('button', { name: 'Fit' }).click()
@@ -356,6 +356,12 @@ test('arrange automatically (W6): four toe clamps in the waste, clear of the too
   )
   await section.getByRole('textbox', { name: 'Name of Toe clamp 1' }).scrollIntoViewIfNeeded()
   await render(page, 'q131-open-clamp')
+  if (RENDERS) {
+    // design review R8: an operation selected, the clamps faint behind its toolpath
+    await navigator.getByRole('button', { name: /^Pocket 1/ }).click({ position: { x: 24, y: 12 } })
+    await page.getByRole('button', { name: 'Fit' }).click()
+    await render(page, 'r8-operation-selected')
+  }
   expect(dfyom.rendererErrors).toEqual([])
 })
 
@@ -490,6 +496,28 @@ test('toe clamp dragged in the viewport onto the profile: the collision in red, 
   await expect(row).toContainText('front X15')
   await expect(inspector).not.toContainText('hits Toe clamp 1')
   await expect(anchor).not.toHaveAttribute('data-colliding')
+
+  // design review R8 (D75): with an operation selected the clamps are faint ghosts that do not
+  // take the pointer: no anchor, no grab cursor over the clamp, a press there does not open it
+  const profileRow = navigator.getByRole('button', { name: /^Profile 1/ })
+  await profileRow.click({ position: { x: 24, y: 12 } })
+  await expect(profileRow).toHaveAttribute('aria-pressed', 'true')
+  await expect(anchor).toHaveCount(0)
+  const cursor = () =>
+    viewport
+      .locator('canvas')
+      .first()
+      .evaluate((c) => (c as unknown as { style: { cursor: string } }).style.cursor)
+  await page.mouse.move(x - 2, y - 2)
+  await page.mouse.move(x, y)
+  expect(await cursor()).not.toBe('grab')
+  await page.mouse.down()
+  await page.mouse.up()
+  await expect(section.getByRole('group', { name: 'Item Toe clamp 1' })).toHaveCount(0)
+  // the setup selected again: the clamp is drawn and draggable as before
+  await selectTop()
+  await expect(anchor).toHaveCount(1)
+  await expect(row).toContainText('front X15')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

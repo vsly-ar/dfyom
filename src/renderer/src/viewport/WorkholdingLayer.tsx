@@ -8,11 +8,26 @@
 // pressed at and reports the new `at` (WCS), the caller snaps and commits on release; a press
 // without moving selects it; Escape cancels; camera controls are off while held. Each clamp has a
 // focusable anchor (`data-workholding-clamp`): Arrow keys nudge it. Nothing else is pickable.
+// Design review R8 (D75): with `ghost` (an operation or an item is selected) every item but the
+// open one is drawn transparent without depth write (the stock and toolpaths show through) and is
+// not pickable (no handlers, no anchor: the pointer reaches what is behind); the open clamp stays
+// drawn as before and draggable; a colliding ghost keeps a stronger `--danger`. R9: a surface hold
+// as a thin layer under the stock, `--vp-grid-major` hatched in `--vp-edge`.
 // Doc: docs/modes/workholding.md#toe-clamp-drag-x2-6, docs/conventions/ui.md#workholding
 import { Html, Line, type CameraControlsImpl } from '@react-three/drei'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Color, ExtrudeGeometry, Matrix4, Shape, SRGBColorSpace, Vector2, type Group } from 'three'
+import {
+  CanvasTexture,
+  Color,
+  ExtrudeGeometry,
+  Matrix4,
+  RepeatWrapping,
+  Shape,
+  SRGBColorSpace,
+  Vector2,
+  type Group,
+} from 'three'
 import type { Palette, Rgb } from './colours'
 import styles from './Viewport.module.css'
 
@@ -37,6 +52,14 @@ export interface WorkholdingOverlay {
   readonly hits: readonly (readonly [number, number, number])[]
   /** Toe clamps that drag along their edge (X2-6); absent: nothing is pickable. */
   readonly clamps?: ClampDrag | undefined
+  /**
+   * An operation or an item is selected (design review R8): every item but `selected` is drawn
+   * transparent and is not pickable.
+   */
+  readonly ghost?: boolean | undefined
+  /** A surface hold (tape, vacuum, glue; R9): a thin hatched layer under the stock (WCS, mm). */
+  readonly surface?:
+    { readonly outline: readonly P[]; readonly zMin: number; readonly zMax: number } | undefined
 }
 
 export type ClampDragPhase = 'start' | 'move' | 'end' | 'cancel'
@@ -66,10 +89,85 @@ export interface ClampDrag {
   onNudge(itemId: string, mm: number): void
 }
 
+/** R8: item `id` is drawn faint and is not pickable (something else is selected). */
+export const isGhost = (o: WorkholdingOverlay, id: string): boolean =>
+  o.ghost === true && id !== o.selected
+
+/** The clamps that take the pointer and have an anchor: none of the ghosts (R8). */
+export const pickableClamps = (o: WorkholdingOverlay): readonly ClampHandle[] =>
+  o.clamps?.handles.filter((h) => !isGhost(o, h.itemId)) ?? []
+
 /** A press that moves less than this (px) is a click (ui.md). */
 const CLICK_PX = 4
 
 const noRaycast = (): void => {}
+
+/** A ghost item's fill opacity (R8): there, but the stock and toolpaths read through it. */
+const GHOST_OPACITY = 0.12
+
+/** The surface hold's hatching period (mm, R9). */
+const HATCH_MM = 3
+
+/** A tile of 45° hatching: `edge` lines on `fill` (sRGB CSS colours), repeating per `HATCH_MM`. */
+function hatchTexture(fill: Rgb, edge: Rgb): CanvasTexture | null {
+  if (typeof document === 'undefined') return null
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 32
+  const g = canvas.getContext('2d')
+  if (g === null) return null
+  const css = (c: Rgb) => `rgb(${c.map((v) => Math.round(v * 255)).join(' ')})`
+  g.fillStyle = css(fill)
+  g.fillRect(0, 0, 32, 32)
+  g.strokeStyle = css(edge)
+  g.lineWidth = 4
+  for (const o of [-32, 0, 32]) {
+    g.beginPath()
+    g.moveTo(o, 32)
+    g.lineTo(o + 32, 0)
+    g.stroke()
+  }
+  const t = new CanvasTexture(canvas)
+  t.colorSpace = SRGBColorSpace
+  t.wrapS = t.wrapT = RepeatWrapping
+  t.repeat.set(1 / HATCH_MM, 1 / HATCH_MM)
+  return t
+}
+
+/** R9: the surface hold's layer, a thin hatched slab (not pickable). */
+function SurfaceLayer({
+  outline,
+  zMin,
+  zMax,
+  palette,
+}: NonNullable<WorkholdingOverlay['surface']> & { palette: Palette }): React.JSX.Element | null {
+  const depth = zMax - zMin
+  const geometry = useMemo(() => {
+    if (outline.length < 3 || !(depth > 0)) return null
+    // world UVs (mm): the hatching keeps its period on the top and the thin sides
+    return new ExtrudeGeometry(new Shape(outline.map((p) => new Vector2(p[0], p[1]))), {
+      depth,
+      bevelEnabled: false,
+    })
+  }, [outline, depth])
+  const texture = useMemo(() => hatchTexture(palette.gridMajor, palette.edge), [palette])
+  useEffect(() => () => geometry?.dispose(), [geometry])
+  useEffect(() => () => texture?.dispose(), [texture])
+  const ring = useMemo(
+    () => [...outline, outline[0]!].map((p): [number, number, number] => [p[0], p[1], zMax]),
+    [outline, zMax],
+  )
+  if (geometry === null) return null
+  return (
+    <group>
+      <mesh geometry={geometry} position={[0, 0, zMin]} raycast={noRaycast}>
+        <meshBasicMaterial
+          {...(texture === null ? { color: colour(palette.gridMajor) } : { map: texture })}
+        />
+      </mesh>
+      <Line points={ring} color={colour(palette.edge)} lineWidth={1} raycast={noRaycast} />
+    </group>
+  )
+}
 
 interface SolidEvents {
   onPointerDown(e: ThreeEvent<PointerEvent>): void
@@ -88,6 +186,7 @@ function Solid({
   fill,
   edge,
   strong,
+  ghost,
   events,
 }: {
   outline: readonly P[]
@@ -96,6 +195,8 @@ function Solid({
   fill: Color
   edge: Color
   strong: boolean
+  /** Drawn faint, without depth write (R8); `colliding`: a stronger faint fill. */
+  ghost?: 'plain' | 'colliding' | undefined
   /** Pointer handlers of a draggable clamp; without them the solid is not pickable. */
   events?: SolidEvents | undefined
 }): React.JSX.Element | null {
@@ -124,7 +225,10 @@ function Solid({
           roughness={0.85}
           metalness={0.05}
           transparent
-          opacity={strong ? 0.95 : 0.8}
+          opacity={
+            ghost === 'plain' ? GHOST_OPACITY : ghost === 'colliding' ? 0.35 : strong ? 0.95 : 0.8
+          }
+          depthWrite={ghost === undefined}
         />
       </mesh>
       <Line
@@ -133,6 +237,7 @@ function Solid({
         lineWidth={strong ? 1.5 : 1}
         raycast={noRaycast}
         renderOrder={2}
+        {...(ghost === 'plain' ? { transparent: true, opacity: 0.4, depthWrite: false } : {})}
       />
     </group>
   )
@@ -164,7 +269,16 @@ export function WorkholdingLayer({
   const halo = useMemo(() => colour(palette.edge), [palette])
   const danger = useMemo(() => colour(palette.danger), [palette])
   const clamps = workholding.clamps
-  const handleOf = (id: string) => clamps?.handles.find((h) => h.itemId === id)
+  const ghosted = (id: string) => isGhost(workholding, id)
+  const handles = pickableClamps(workholding)
+  const handleOf = (id: string) => handles.find((h) => h.itemId === id)
+  // a hovered clamp that turns into a ghost gets no pointer-out: drop its hover (while
+  // rendering, React's adjust-on-change pattern) and its grab cursor
+  if (hovered !== null && ghosted(hovered)) setHovered(null)
+  const ghost = workholding.ghost === true
+  useEffect(() => {
+    if (ghost && drag.current === null) getState().gl.domElement.style.cursor = ''
+  }, [ghost, workholding.selected, getState])
 
   const setControls = (on: boolean) => {
     const c = getState().controls as CameraControlsImpl | null
@@ -278,11 +392,15 @@ export function WorkholdingLayer({
             strong={
               s.itemId === workholding.selected || s.itemId === hovered || h?.dragging === true
             }
+            ghost={ghosted(s.itemId) ? (s.colliding ? 'colliding' : 'plain') : undefined}
             events={h === undefined ? undefined : eventsOf(h)}
           />
         )
       })}
-      {clamps?.handles.map((h) => (
+      {workholding.surface === undefined ? null : (
+        <SurfaceLayer {...workholding.surface} palette={palette} />
+      )}
+      {handles.map((h) => (
         <Html
           key={`clamp-${h.itemId}`}
           position={[h.anchor[0], h.anchor[1], h.anchor[2]]}
@@ -305,12 +423,12 @@ export function WorkholdingLayer({
               if (dir === 0) return
               e.preventDefault()
               e.stopPropagation()
-              clamps.onNudge(h.itemId, dir * (e.shiftKey ? 10 : 1))
+              clamps?.onNudge(h.itemId, dir * (e.shiftKey ? 10 : 1))
             }}
           />
         </Html>
       ))}
-      {clamps?.handles
+      {handles
         .filter((h) => h.dragging || h.itemId === hovered)
         .map((h) => (
           <Html

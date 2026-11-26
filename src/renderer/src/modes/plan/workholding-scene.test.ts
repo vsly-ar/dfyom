@@ -8,11 +8,14 @@ import type { PlanWarning } from '../../../../core/plan/checks'
 import type { ResolvedItem } from '../../../../core/plan/workholding/items'
 import { obstacles } from '../../../../core/plan/workholding/obstacles'
 import type { SetupWorkholding } from '../../../../core/plan/workholding/setup'
+import { isGhost, pickableClamps, type ClampHandle } from '../../viewport/WorkholdingLayer'
 import {
   CLAMP_SNAP,
   clampAxis,
   moveClamp,
+  shiftOverlay,
   snapClampAt,
+  SURFACE_LAYER,
   workholdingOverlay,
 } from './workholding-scene'
 
@@ -45,6 +48,61 @@ describe('workholding overlay', () => {
     ])!
     expect(o.solids.filter((s) => s.colliding).map((s) => s.itemId)).toEqual(['wh1', 'wh1'])
     expect(o.hits).toEqual([[100, 5, -3]])
+  })
+})
+
+describe('selection ghosts (design review R8) and the surface hold (R9)', () => {
+  const handle = (itemId: string) => ({ itemId }) as unknown as ClampHandle
+  const clamps = {
+    handles: [handle('wh1'), handle('wh2')],
+    onSelect: () => {},
+    onDrag: () => {},
+    onNudge: () => {},
+  }
+
+  it('without focus every item is drawn and every clamp pickable', () => {
+    const o = { ...workholdingOverlay(holding, 'setup1', undefined, [])!, clamps }
+    expect(o.ghost).toBeUndefined()
+    expect(isGhost(o, 'wh1')).toBe(false)
+    expect(pickableClamps(o).map((h) => h.itemId)).toEqual(['wh1', 'wh2'])
+  })
+
+  it('with focus every item is a ghost, not pickable; an open clamp stays draggable', () => {
+    const o = { ...workholdingOverlay(holding, 'setup1', undefined, [], true)!, clamps }
+    expect(o.ghost).toBe(true)
+    expect(isGhost(o, 'wh1') && isGhost(o, 'wh2')).toBe(true)
+    expect(pickableClamps(o)).toEqual([])
+    const open = { ...workholdingOverlay(holding, 'setup1', 'wh2', [], true)!, clamps }
+    expect(isGhost(open, 'wh2')).toBe(false)
+    expect(isGhost(open, 'wh1')).toBe(true)
+    expect(pickableClamps(open).map((h) => h.itemId)).toEqual(['wh2'])
+  })
+
+  it('a ghost a collision names stays marked (drawn in --danger)', () => {
+    const o = workholdingOverlay(holding, 'setup1', undefined, [collision('wh1')], true)!
+    expect(o.solids.filter((s) => s.colliding).map((s) => s.itemId)).toEqual(['wh1', 'wh1'])
+    expect(o.hits).toHaveLength(1)
+  })
+
+  it('a surface hold is a 1 mm layer under the stock, past it by the rim, moved with the zero', () => {
+    const tape: ResolvedItem = { id: 'wh3', name: 'Tape', kind: 'surface', type: 'tape' }
+    const withTape = { ...holding, items: [tape], prisms: [] } as unknown as SetupWorkholding
+    const o = workholdingOverlay(withTape, 'setup1', undefined, [])!
+    const r = SURFACE_LAYER.rim
+    expect(o.solids).toEqual([])
+    expect(o.surface).toEqual({
+      outline: [
+        [-r, -r],
+        [250 + r, -r],
+        [250 + r, 100 + r],
+        [-r, 100 + r],
+      ],
+      zMin: -41,
+      zMax: -40,
+    })
+    expect(shiftOverlay(o, [10, 20])!.surface!.outline[0]).toEqual([-r - 10, -r - 20])
+    // without a surface item: no layer
+    expect(workholdingOverlay(holding, 'setup1', undefined, [])!.surface).toBeUndefined()
   })
 })
 
