@@ -16,6 +16,7 @@ import { maxOffsetError } from '../geometry/2d/testing/oracles'
 import { aborted } from '../workers/steps'
 import type { PocketStrategy, Toolpath, ToolpathTool } from './model'
 import { segLength, segPoint, type Seg } from './path'
+import { clipRing, restArea } from './region-rest'
 import {
   clearingStep,
   generateRegionPocket,
@@ -38,7 +39,7 @@ import {
 import { findRestMaterial } from '../geometry/2d/rest-material'
 import { arcSweep } from './stats'
 import { bullNose, cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
-import { placeLoops, regionCoverage } from './testing/region-coverage'
+import { airCut, heightDifference, placeLoops, regionCoverage } from './testing/region-coverage'
 import { steps as walk } from './testing/oracles'
 import { cuttingLevels, stepsWithin, violations } from './testing/rules'
 
@@ -586,5 +587,106 @@ describe('roughing and rest machining (DF108)', () => {
       )
     expect(small(pruned)).toBe(small(tree))
     expect(small(tree)).toBeGreaterThan(0)
+  })
+})
+
+describe('rest clipping (DF122 R3)', () => {
+  // S4's corpus with a Ø 3 owner after a Ø 8 roughing (wall 0.2, to the floor)
+  const D3 = endMill(3)
+  const D8 = endMill(8)
+  const reach = (depth: number) => ({ radius: 4, cornerRadius: 0, wall: 0.2, floorDepth: depth })
+  function rest(loops: Loop[], depth = 2, cell = 0.1) {
+    const { region, size } = placed(loops)
+    const at = (tool: ToolpathTool, extra: object): RegionPocketInput => {
+      const inp = input(region, { tool, depth })
+      return { ...inp, operation: { ...inp.operation, ...extra } }
+    }
+    const roughIn = at(D8, { roughing: true })
+    const restIn = at(D3, { restAfter: reach(depth) })
+    const plainIn = at(D3, {})
+    const rough = generateRegionPocket(roughIn, port).unwrap()
+    const tp = generateRegionPocket(restIn, port).unwrap()
+    const plain = generateRegionPocket(plainIn, port).unwrap()
+    const before = [{ tool: D8, tp: rough }]
+    const c0 = port.offset(region, 1.5).unwrap()
+    return {
+      tp,
+      plain,
+      rules: checkRules(restIn, tp),
+      cov: regionCoverage(region, c0, tp, D3, size, -depth, cell, 0.01, undefined, before),
+      diff: heightDifference(size, [...before, { tool: D3, tp }], [{ tool: D3, tp: plain }], cell),
+      air: airCut(tp, D3, size, before, cell),
+      plainAir: airCut(plain, D3, size, before, cell),
+    }
+  }
+  /**
+   * The oracles: path rules; nothing the Ø 3 reaches left, no gouge; roughing + rest leaves the
+   * same heights as the Ø 3 alone (within 0.02 mm); no plunge into material; the rest cuts at
+   * most `airShare` of the air the Ø 3 alone would cut after the roughing (what is left: links
+   * between runs, short bridges, overlaps of its own rings in narrow spots); less time.
+   */
+  const expectClean = (r: ReturnType<typeof rest>, airShare = 0.15) => {
+    expect(r.rules).toEqual([])
+    expect(r.cov.gouge).toBe(0)
+    expect(r.cov.belowFloor).toBe(0)
+    expect(r.cov.leftover).toBeLessThan(0.05)
+    expect(r.diff).toBeLessThan(0.05)
+    expect(r.air.plunges).toBe(0)
+    expect(r.air.air).toBeLessThanOrEqual(airShare * r.plainAir.air)
+    expect(r.tp.stats.estimatedSeconds).toBeLessThan(0.25 * r.plain.stats.estimatedSeconds)
+  }
+
+  it('corners: a rounded rectangle and an acute triangle keep only their corner runs', () => {
+    for (const loops of [[rect(0, 0, 60, 40, 1.5)], [triangle(40, 40)]]) {
+      const r = rest(loops)
+      expectClean(r)
+      // every rest level cuts runs only: nothing but the corners and links (≈ 10 % of the Ø 3)
+      expect(r.tp.stats.cutLength).toBeLessThan(0.2 * r.plain.stats.cutLength)
+    }
+  })
+
+  it('a neck the Ø 8 cannot pass: the Ø 3 clears it whole, entering as without roughing', () => {
+    const r = rest([dumbbell(3)])
+    expectClean(r)
+    // the neck's rings cut material all along: almost no air
+    expect(r.air.air).toBeLessThan(0.2 * r.air.cutting)
+  })
+
+  it('islands: a gap the Ø 8 cannot pass; a pocket it roughs wholly leaves only the finish', () => {
+    expectClean(
+      rest([rect(0, 0, 60, 40, 1.5), hole(rect(15, 10, 15, 15, 1)), hole(circle(48, 30, 5))]),
+    )
+    // S4's two islands: every corner within the Ø 8's reach, so no rest level at all
+    const all = rest(twoIslands(), 2, 0.2)
+    expectClean(all)
+    expect(all.tp.passes.map((p) => p.kind)).toEqual(['finish'])
+  })
+
+  it('clipRing: runs start where the ring leaves the roughed area, short gaps are bridged', () => {
+    const area = restArea(norm([circle(10, 0, 5)]))
+    const square = loopRing(norm([rect(0, 0, 20, 20)]).pieces[0]!.outer)
+    const c = clipRing(port, square, area, 1)
+    expect(c.kind).toBe('runs')
+    const runs = c.kind === 'runs' ? c.runs : []
+    expect(runs).toHaveLength(1)
+    const s = segPoint(runs[0]!.segs[0]!, 0)
+    expect(s[0]).toBeCloseTo(15, 9)
+    expect(s[1]).toBeCloseTo(0, 9)
+    // an arc ring through two roughed discs: two runs, joined when the gap is shorter than 8
+    const ring = loopRing(norm([circle(0, 0, 10)]).pieces[0]!.outer)
+    const two = restArea(norm([circle(10, 0, 2), circle(-10, 0, 2)]))
+    const split = clipRing(port, ring, two, 1)
+    expect(split.kind === 'runs' && split.runs.length).toBe(2)
+    expect(clipRing(port, ring, restArea(norm([circle(30, 0, 2)])), 1).kind).toBe('whole')
+    expect(clipRing(port, ring, restArea(norm([circle(0, 0, 20)])), 1)).toEqual({
+      kind: 'runs',
+      runs: [],
+    })
+    // every run point lies outside the roughed area
+    for (const run of split.kind === 'runs' ? split.runs : [])
+      for (const sg of run.segs) expect(port.contains(two.region, segPoint(sg, 0.5))).toBe(false)
+    // a bridge longer than the gaps (≈ 4 mm each) joins the two runs into one
+    const joined = clipRing(port, ring, two, 8)
+    expect(joined.kind === 'runs' && joined.runs.length).toBe(1)
   })
 })

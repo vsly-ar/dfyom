@@ -20,7 +20,7 @@ import { streamProgram } from '../run/grbl/sender.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import { endMill } from '../toolpath/testing/fixtures'
-import { regionCoverage } from '../toolpath/testing/region-coverage'
+import { airCut, heightDifference, regionCoverage } from '../toolpath/testing/region-coverage'
 import type { PlanWarning } from './checks'
 import { loadPlan } from './plan'
 import { flat6, opsOf, planSetup } from './plan.fixture'
@@ -111,8 +111,8 @@ describe('pocket roughing DF122 R1 exit', () => {
       rough.warnings.filter((w) => w.planOperationId !== undefined && w.code.startsWith('plan.r')),
     ).toEqual([])
     const [roughTp, restTp] = rough.paths as [Toolpath, Toolpath]
-    // the Ø 3 skips the rings the Ø 8 cleared, keeps its outer rings and the finishing pass
-    expect(restTp.stats.cutLength).toBeLessThan(0.5 * plain.paths[0]!.stats.cutLength)
+    // the Ø 3 cuts only the corner runs the Ø 8 left (R3 clipping) and the finishing pass
+    expect(restTp.stats.cutLength).toBeLessThan(0.12 * plain.paths[0]!.stats.cutLength)
     expect(restTp.passes.some((p) => p.kind === 'finish')).toBe(true)
     expect(roughTp.passes.every((p) => p.kind === 'rough')).toBe(true)
     // the plan takes less time with both tools than with the Ø 3 alone
@@ -135,9 +135,19 @@ describe('pocket roughing DF122 R1 exit', () => {
     expect(cov.gouge).toBe(0)
     expect(cov.belowFloor).toBe(0)
     expect(cov.leftover).toBeLessThan(0.05)
+    // R3: the same heights as the Ø 3 alone (within 0.02 mm), no plunge into material, and the
+    // Ø 3's air after the roughing is its links between the corner runs only
+    const size = { length: 80, width: 50 }
+    const before = [{ tool: endMill(8), tp: roughTp }]
+    const alone = [{ tool: endMill(3), tp: plain.paths[0]! }]
+    expect(heightDifference(size, [...before, { tool: endMill(3), tp: restTp }], alone)).toBe(0)
+    const air = airCut(restTp, endMill(3), size, before)
+    const plainAir = airCut(plain.paths[0]!, endMill(3), size, before)
+    expect(air.plunges).toBe(0)
+    expect(air.air).toBeLessThan(0.1 * plainAir.air)
     await expect(rough.lines.join('\n') + '\n').toMatchFileSnapshot('__golden__/pocket-roughing.nc')
-    // measured (docs/modes/roughing.md#implementation-r1): the Ø 3 alone 17,345 mm in 575 s;
-    // the Ø 8 2,571 mm in 38 s, then the Ø 3 2,527 mm in 88 s: 126 s
+    // measured (docs/modes/roughing.md#implementation-r3): the Ø 3 alone 17,345 mm in 575 s;
+    // the Ø 8 2,571 mm in 38 s, then the Ø 3 1,704 mm in 60 s: 98 s (R1's ring skipping: 126 s)
   })
 
   it('margins: the roughing strategy takes no finishing keys; a thin wall warns; a floor margin', async () => {
