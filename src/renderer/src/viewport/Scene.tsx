@@ -39,7 +39,8 @@ import { ClonePathLayer } from './ClonePath'
 import type { ClonePathOverlay } from './clone-path'
 import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
 import { ReferenceOverlay, type ReferenceOverlayView } from './ReferenceOverlay'
-import { DeviationLayer, useFadeIn } from './DeviationLayer'
+import { DeviationLayer, RegionMarker, useFadeIn, type RegionMarkerView } from './DeviationLayer'
+import { SlotDimension, type SlotDimensionView } from './SlotDimension'
 import { deviationColours, type DeviationView } from './deviation'
 import { RunLayer, type RunScene } from './RunLayer'
 import { SplitLayer, type SplitOverlay } from './SplitLayer'
@@ -78,6 +79,10 @@ export interface SceneProps {
   seeThrough?: boolean
   /** The compare overlay: the part's diverging map, missing volumes, chosen region (DF60 P5). */
   deviation?: DeviationView | null
+  /** The deviation panel's chosen region (Plan, U4 follow-up): its box in its swatch colour. */
+  regionMarker?: RegionMarkerView | null
+  /** A selected slotted hole's centre line and travel dimension (DF119 H3 follow-up). */
+  slotDimension?: SlotDimensionView | null
   reducedMotion?: boolean
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
@@ -150,6 +155,14 @@ export function Scene(props: SceneProps): React.JSX.Element {
           reducedMotion={props.reducedMotion ?? false}
         />
       ) : null}
+      {props.regionMarker ? (
+        <RegionMarker
+          marker={props.regionMarker}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
+      {props.slotDimension ? <SlotDimension slot={props.slotDimension} palette={palette} /> : null}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {props.construction && props.construction.length > 0 && !props.split ? (

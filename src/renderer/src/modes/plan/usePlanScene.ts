@@ -37,6 +37,8 @@ import {
   type ViewportMesh,
   type ZRefOverlay,
 } from '../../viewport'
+import { DIRECTION_LABEL, stockFaceDirection } from '../../../../core/geometry/face'
+import { deviationMessages } from '../../messages/deviation'
 import { lengthSource } from '../../messages/dfm'
 import { planMessages } from '../../messages/plan'
 import {
@@ -50,8 +52,9 @@ import {
   pointsWithAdded,
   setupPlacement,
   setupZeroOf,
+  lengthText,
 } from './model'
-import { usePlanCommand, usePlanData, usePlanState } from './plan-store'
+import { useDeviationBasis, usePlanCommand, usePlanData, usePlanState } from './plan-store'
 import { shiftOverlay, workholdingOverlay } from './workholding-scene'
 import { shownZRefRun, snapSpot } from './z-spot'
 import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
@@ -336,6 +339,40 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(workholding === undefined ? {} : { workholding }),
     }
   }, [data, plan, setup, doc, zRef, info, alignment, targets, flipAxes, aids, openItem])
+}
+
+/** The deviation panel's chosen region in the plan scene (U4 follow-up). */
+export interface PlanDeviationScene {
+  readonly regionMarker?: {
+    readonly box: Box
+    readonly sign: 'overcut' | 'undercut'
+    readonly label: string
+  }
+  readonly focus?: { readonly box: Box; readonly seq: number }
+}
+
+/**
+ * The deviation panel's chosen region marked and framed (docs/modes/deviation.md#region-marker-u4-follow-up):
+ * only for the plan the window shows, and only while its result is current (an edit, an Apply or
+ * a library change since the run drops the marker).
+ */
+export function usePlanDeviationScene(mode: AppMode): PlanDeviationScene {
+  const plan = useScenePlan(mode)
+  const replica = useReplica()
+  const doc = replica.status === 'open' ? replica.doc : undefined
+  const run = usePlanState((s) => s.deviation)
+  const basis = useDeviationBasis(plan?.id ?? '')
+  const marked = run?.marked
+  if (plan === undefined || run?.planId !== plan.id || marked === undefined) return {}
+  const region = run.chosen === undefined ? undefined : run.result?.regions[run.chosen]
+  if (run.basis !== basis || region === undefined) return {}
+  const units = doc?.unitSystem ?? 'mm'
+  const face = stockFaceDirection(region.face)
+  const label = deviationMessages.marked(
+    deviationMessages.region(region.sign, lengthText(region.maxDev, units), undefined),
+    face === undefined ? region.face : DIRECTION_LABEL[face],
+  )
+  return { regionMarker: { box: marked.box, sign: marked.sign, label }, focus: marked.focus }
 }
 
 /** The plan's part as the plan scene draws it. */

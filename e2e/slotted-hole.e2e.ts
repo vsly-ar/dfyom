@@ -2,10 +2,13 @@
 // Add → Bolt hole, Size M5, Type → Recessed, Slotted on, Slot length 10; the Sizes group shows
 // Slot length, Rotation and the read-only Overall, the section is drawn along the slot, Tools has
 // a Slot row, and after Apply the plan lists the recess and the slot (pockets) and the countersink
-// (chamfer mill) and generates their toolpaths. Windows stay hidden (fixture). With DFYOM_RENDERS=1
-// it writes h3-slotted-{inspector,sizes,plan}-dark.png to DFYOM_RENDERS_DIR (default
-// design/features/renders).
-// Docs: docs/modes/hole-slots-and-round-corners.md#implementation-h3, docs/conventions/ui.md#hole-inspector
+// (chamfer mill) and generates their toolpaths. While the hole is selected the Design viewport draws
+// its centre line and travel dimension (the chip reads the travel, the summary says it). Windows
+// stay hidden (fixture). With DFYOM_RENDERS=1 it writes
+// h3-slotted-{inspector,sizes,plan}-dark.png and h3-slot-dimension-dark.png to DFYOM_RENDERS_DIR
+// (default design/features/renders).
+// Docs: docs/modes/hole-slots-and-round-corners.md#implementation-h3,
+// docs/modes/hole-slots-and-round-corners.md#viewport-slot-dimension, docs/conventions/ui.md#hole-inspector
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
@@ -145,6 +148,16 @@ test('slotted hole: Add Bolt hole, M5, Recessed, Slotted 10, then the plan (H3)'
   await expect(tools.getByRole('combobox', { name: 'Slot' })).toBeVisible()
   await expect(tools.getByRole('combobox', { name: 'Slot' })).not.toHaveText('No tool yet')
   await expect(tools.getByRole('combobox', { name: 'Countersink' })).toBeVisible()
+  // the viewport: the slot's centre line and travel dimension while the hole is selected
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/Slot travel 10 mm\./)
+  await expect(viewport.getByTestId('slot-dimension-chip')).toHaveText('10 mm')
+  if (RENDERS) {
+    await viewport.focus()
+    await page.keyboard.press('1')
+    await render(page, 'h3-slot-dimension')
+    await page.keyboard.press('4')
+  }
   await inspector.getByRole('region', { name: 'Type' }).scrollIntoViewIfNeeded()
   await render(page, 'h3-slotted-inspector')
   if (RENDERS) {

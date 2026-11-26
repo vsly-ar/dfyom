@@ -16,6 +16,8 @@ import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useCall } from '../../shell/hooks'
 import { useLibraryVersion, usePending, useReplica, useShell } from '../../shell/ShellContext'
 import type { PlanOperationView, PlanStale, ToolpathEntry } from './model'
+import type { Box } from '../../viewport'
+import { focusBox } from './deviation-region'
 
 /** Progress poll of the toolpath job (`job.get`): progress ticks are not pushed (ui.md#jobs). */
 export const GENERATE_POLL_MS = 250
@@ -202,8 +204,17 @@ export interface DeviationRun {
   /** The plan inputs the result belongs to (revision, pending set, library): stale when changed. */
   readonly basis?: string
   readonly error?: AppErrorData
-  /** The region row chosen last (its operation was selected). */
+  /** The region row chosen last (its operation, if any, was selected). */
   readonly chosen?: number
+  /**
+   * The chosen region's marker in the Plan viewport and the framing request (U4 follow-up,
+   * docs/modes/deviation.md#region-marker-u4-follow-up): a new request per choice.
+   */
+  readonly marked?: {
+    readonly box: Box
+    readonly sign: DeviationRegionView['sign']
+    readonly focus: { readonly box: Box; readonly seq: number }
+  }
 }
 
 export interface JobProgress {
@@ -313,7 +324,7 @@ export interface PlanState {
   /** Aborts the running comparison; the previous result comes back. */
   cancelDeviation(): void
   /** A region row was chosen. */
-  chooseDeviationRegion(index: number): void
+  chooseDeviationRegion(index: number, box?: Box): void
   /**
    * Re-reads the plan: toolpaths changed without a revision (an apply job finished, P3). `seq`:
    * the action-log event that says so; each event reloads once, however many hooks see it.
@@ -464,6 +475,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
               result: was.result,
               ...(was.basis === undefined ? {} : { basis: was.basis }),
               ...(was.chosen === undefined ? {} : { chosen: was.chosen }),
+              ...(was.marked === undefined ? {} : { marked: was.marked }),
             }
           : {}),
       }
@@ -520,9 +532,27 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       cancelDeviation = true
       if (running.jobId !== undefined) void bridge.call('job.abort', { jobId: running.jobId })
     },
-    chooseDeviationRegion(chosen) {
+    chooseDeviationRegion(chosen, box) {
       const d = get().deviation
-      if (d !== undefined && d.chosen !== chosen) set({ deviation: { ...d, chosen } })
+      const region = d?.result?.regions[chosen]
+      if (d === undefined || region === undefined) return
+      // every choice is a new framing request, also of the row chosen already
+      const { marked: was, ...rest } = d
+      set({
+        deviation: {
+          ...rest,
+          chosen,
+          ...(box === undefined
+            ? {}
+            : {
+                marked: {
+                  box,
+                  sign: region.sign,
+                  focus: { box: focusBox(box), seq: (was?.focus.seq ?? 0) + 1 },
+                },
+              }),
+        },
+      })
     },
     reload(seq) {
       if (seq <= reloaded) return
@@ -626,3 +656,15 @@ export function usePlanData(planId: string | undefined): PlanData | undefined {
 
 /** Sends one command through the window's session (`useCall`: one gesture = one undo step). */
 export const usePlanCommand = useCall
+
+/**
+ * The plan inputs a deviation result depends on (U4): an edit, an Apply or a library write makes
+ * it outdated (the panel's note; the viewport drops the region marker).
+ */
+export function useDeviationBasis(planId: string): string {
+  const replica = useReplica()
+  const pending = usePending().version
+  const library = useLibraryVersion()
+  const revision = replica.status === 'open' ? `${replica.key}:${replica.revision}` : ''
+  return `${planId}:${revision}:${pending}:${library}`
+}

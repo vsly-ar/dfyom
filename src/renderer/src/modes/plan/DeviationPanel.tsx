@@ -1,14 +1,15 @@
 // The deviation panel (v0.4-llm-first U4): in the Plan inspector without a selection, the plan's
 // simulated cut against the part's reference (`design.reference.compare { source: plan }`, a job
 // the plan store runs and follows): a threshold, Compare / Cancel, the statistics and the regions
-// with their causes; choosing a region selects its plan operation. No colour map yet.
-// Doc: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4
+// with their causes; choosing a region marks and frames it in the Plan viewport (U4 follow-up,
+// `regionBox`) and selects its plan operation when it has one. No colour map yet.
+// Doc: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4,
+// docs/modes/deviation.md#region-marker-u4-follow-up
 import { useEffect, useRef, useState } from 'react'
 import { DIRECTION_LABEL, stockFaceDirection } from '../../../../core/geometry/face'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { deviationMessages as m } from '../../messages/deviation'
-import { useLibraryVersion, usePending, useReplica } from '../../shell/ShellContext'
 import {
   Button,
   ErrorMessage,
@@ -22,8 +23,10 @@ import {
 } from '../../ui'
 import { defaultUnit } from '../design/model'
 import { lengthQuantity } from '../design/reference-view'
-import { allPlanOperations, lengthText, planOperationName } from './model'
+import { regionBox } from './deviation-region'
+import { allPlanOperations, lengthText, planOperationName, planStockSize } from './model'
 import {
+  useDeviationBasis,
   usePlanState,
   usePlanStore,
   type DeviationRegionView,
@@ -50,15 +53,6 @@ const areaText = (mm2: number, units: UnitSystem): string =>
     ? `${Math.round(mm2).toLocaleString('en-US').replaceAll(',', ' ')} mm²`
     : `${(mm2 / 645.16).toFixed(2)} in²`
 
-/** The plan inputs a result depends on: an edit, an Apply or a library write makes it stale. */
-function useBasis(planId: string): string {
-  const replica = useReplica()
-  const pending = usePending().version
-  const library = useLibraryVersion()
-  const revision = replica.status === 'open' ? `${replica.key}:${replica.revision}` : ''
-  return `${planId}:${revision}:${pending}:${library}`
-}
-
 export function DeviationPanel({
   doc,
   plan,
@@ -71,7 +65,7 @@ export function DeviationPanel({
   const store = usePlanStore()
   const run = usePlanState((s) => (s.deviation?.planId === plan.id ? s.deviation : undefined))
   const [, select] = usePlanSelection()
-  const basis = useBasis(plan.id)
+  const basis = useDeviationBasis(plan.id)
   const partId = plan.design.partId
   const references = Object.values(doc.references)
     .filter((r) => r.partId === partId)
@@ -178,7 +172,10 @@ export function DeviationPanel({
           chosen={run?.chosen}
           L={L}
           onChoose={(i, r) => {
-            store.getState().chooseDeviationRegion(i)
+            const stock = planStockSize(doc, plan)
+            store
+              .getState()
+              .chooseDeviationRegion(i, stock === undefined ? undefined : regionBox(r, stock))
             if (r.operationId !== undefined) select(r.operationId)
           }}
         />
@@ -247,7 +244,7 @@ function DeviationResult({
               <>
                 <span className={styles['deviationKind']}>
                   <span className={styles['swatch']} data-sign={r.sign} aria-hidden="true" />
-                  <span>{row}</span>
+                  <span className={styles['deviationText']}>{row}</span>
                 </span>
                 <span
                   className={styles['deviationCause']}
@@ -257,23 +254,18 @@ function DeviationResult({
                 </span>
               </>
             )
+            // every row marks and frames its region; one with an operation also selects it
             return (
               <li key={i}>
-                {op === undefined ? (
-                  <div className={styles['deviationRow']} aria-label={name} role="group">
-                    {content}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={styles['deviationRow']}
-                    aria-pressed={chosen === i}
-                    aria-label={name}
-                    onClick={() => onChoose(i, r)}
-                  >
-                    {content}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={styles['deviationRow']}
+                  aria-pressed={chosen === i}
+                  aria-label={name}
+                  onClick={() => onChoose(i, r)}
+                >
+                  {content}
+                </button>
               </li>
             )
           })}

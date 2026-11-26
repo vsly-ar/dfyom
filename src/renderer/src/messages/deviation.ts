@@ -61,4 +61,6 @@ export const deviationMessages = {
   regionName: (row: string, face: string, area: string, cause: string) =>
     `${row}, ${face}, ${area}, ${cause}`,
   more: (n: number) => `${n} more regions not shown.`,
+  /** The Plan viewport's summary while a region is marked (U4 follow-up): "Marked: Over-cut 0.5 mm, top." */
+  marked: (row: string, face: string) => `Marked: ${row}, ${face}.`,
 } as const

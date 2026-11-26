@@ -24,9 +24,11 @@ const controls = vi.hoisted(() => ({
   getTarget: (v: { set: (x: number, y: number, z: number) => unknown }) => v.set(0, 0, 0),
   getPosition: (v: { set: (x: number, y: number, z: number) => unknown }) => v.set(100, -100, 100),
 }))
+const sceneProps = vi.hoisted(() => ({ last: {} as Record<string, unknown> }))
 vi.mock('./Scene', () => ({
-  Scene: ({ controlsRef }: { controlsRef: { current: unknown } }) => {
-    controlsRef.current = controls
+  Scene: (p: { controlsRef: { current: unknown } }) => {
+    p.controlsRef.current = controls
+    sceneProps.last = p
     return null
   },
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
@@ -304,5 +306,56 @@ describe('Viewport', () => {
     // a new pick clears the note, so the next cancel is announced again
     act(() => setPick(pick))
     expect(screen.queryByText('Pick cancelled.')).toBeNull()
+  })
+
+  it('frames a requested box once per request: the same request handed in again does not move the camera', () => {
+    const box = { min: [0, 0, -2] as const, max: [10, 10, 0] as const }
+    const a = { box, seq: 1 }
+    let setFocus: (f: typeof a | null) => void = () => {}
+    function Host(): React.JSX.Element {
+      const [f, set] = useState<typeof a | null>(a)
+      setFocus = set
+      return <Viewport mesh={mesh} focus={f} />
+    }
+    renderUi(<Host />)
+    expect(controls.setLookAt).toHaveBeenCalledTimes(1)
+    // another mode's scene without it, then back (the same store object)
+    act(() => setFocus(null))
+    act(() => setFocus(a))
+    expect(controls.setLookAt).toHaveBeenCalledTimes(1)
+    // a new request (the same row chosen again) frames again
+    act(() => setFocus({ box, seq: 2 }))
+    expect(controls.setLookAt).toHaveBeenCalledTimes(2)
+  })
+
+  it('hands the region marker and the slot dimension to the scene; a pick hides the dimension', () => {
+    const slot = {
+      centreLine: [
+        [0, 0, 0],
+        [20, 0, 0],
+      ] as const,
+      dimension: [
+        [5, 5, 0],
+        [15, 5, 0],
+      ] as const,
+      extensions: [],
+      travel: 10,
+      label: '10 mm',
+    }
+    const marker = {
+      box: { min: [0, 0, -1] as const, max: [1, 1, 0] as const },
+      sign: 'overcut' as const,
+    }
+    const pick = { eligible: SAMPLE_PICK_ELIGIBLE, field: 'Depth' }
+    let setPick: (p: typeof pick | null) => void = () => {}
+    function Host(): React.JSX.Element {
+      const [p, set] = useState<typeof pick | null>(null)
+      setPick = set
+      return <Viewport mesh={mesh} slotDimension={slot} regionMarker={marker} pick={p} />
+    }
+    renderUi(<Host />)
+    expect(sceneProps.last).toMatchObject({ slotDimension: slot, regionMarker: marker })
+    act(() => setPick(pick))
+    expect(sceneProps.last['slotDimension']).toBeNull()
   })
 })

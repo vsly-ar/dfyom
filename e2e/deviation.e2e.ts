@@ -2,10 +2,13 @@
 // end mill and a plain box STL of the stock as its reference are built and planned through the
 // bridge; then, through plan mode's UI only: the Plan inspector's "Compare with reference" runs
 // the simulated cut against the reference (the facing and the pockets come back as over-cut
-// regions), the statistics show, and a region selects its plan operation. With DFYOM_RENDERS=1
-// light and dark review renders of the panel go to design/features/renders/u4-deviation-panel-*.png.
+// regions), the statistics show, a region is marked in the Plan viewport (the summary names it) and
+// selects its plan operation. With DFYOM_RENDERS=1 light and dark review renders of the panel go to
+// DFYOM_RENDERS_DIR (default design/features/renders): u4-deviation-panel-*.png and
+// u4-deviation-marker-*.png.
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
-// Docs: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4
+// Docs: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4,
+// docs/modes/deviation.md#region-marker-u4-follow-up
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -23,7 +26,8 @@ async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promi
 }
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
-const rendersDir = resolve(__dirname, '../design/features/renders')
+const rendersDir =
+  process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
 
 async function render(page: Page, name: string): Promise<void> {
   if (!RENDERS) return
@@ -156,10 +160,18 @@ test('deviation panel (U4): compare the plan with the reference, regions, a regi
   await panel.scrollIntoViewIfNeeded()
   await render(page, 'u4-deviation-panel')
 
-  // a region selects its plan operation: the inspector shows it
+  // a region selects its plan operation: the inspector shows it; the viewport marks the region
   const name = (await rows.first().getAttribute('aria-label'))!
   const op = /· ([^,]+),/.exec(name)![1]!
+  const dev = /^Over-cut ([^ ]+ mm)/.exec(name)![1]!
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).not.toHaveAccessibleDescription(/Marked:/)
   await rows.first().click()
+  await expect(viewport).toHaveAccessibleDescription(
+    new RegExp(`Marked: Over-cut ${dev.replace('.', '\\.')}, top\\.`),
+  )
+  await page.waitForTimeout(400)
+  await render(page, 'u4-deviation-marker')
   await expect(panel).toBeHidden()
   await expect(inspector.getByRole('heading', { name: op })).toBeVisible()
   expect(dfyom.rendererErrors).toEqual([])

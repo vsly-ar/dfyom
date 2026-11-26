@@ -40,6 +40,7 @@ import { lengthSource } from './reference-view'
 import { countsAsWarning } from './feature-view'
 import { useClonesScene } from './useClonesScene'
 import { useSplitScene } from './useSplitScene'
+import { slotDimension } from './slot-dimension'
 import { constructionOverlays } from './construction-view'
 import { instanceId, instanceOfOperation } from './clones-view'
 import {
@@ -245,6 +246,14 @@ export function useDesignScene(): SceneProps {
       }),
     }
   }, [selectedOp, part, port, rotationGuide, pattern])
+  // DF119 H3 follow-up: a selected slotted Bolt hole's centre line and travel dimension
+  const hole = part?.dto.features?.find((f) => f.id === shown && f.kind === 'hole')
+  const slot = useMemo(() => {
+    if (hole === undefined || part?.loaded === undefined || part.table === undefined) return null
+    const on = (hole as { on?: string }).on ?? 'stock.top'
+    const d = slotDimension(hole.id, on, part.loaded.part.operations, part.loaded.stock, part.table)
+    return d === null ? null : { ...d, label: lengthSource(d.travel, part.units) }
+  }, [hole, part])
   // a selected face (DF22): its face frame axes, its name in the summary
   const face = selectedFace(part, selected)
   const faceId = face?.id
@@ -340,6 +349,7 @@ export function useDesignScene(): SceneProps {
     referenceOverlay,
     deviation,
     focus: viewportFocus,
+    slotDimension: slot,
     seeThrough: panel && seeThroughStock && ghosts.length > 0,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),
@@ -353,6 +363,7 @@ export function useDesignScene(): SceneProps {
               status,
             }),
             overlays?.describe,
+            slot === null ? undefined : designMessages.slotTravel(slot.label),
             constructionSummary,
             face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,
