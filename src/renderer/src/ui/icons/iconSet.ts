@@ -365,6 +365,13 @@ export const ICON_SET = {
       { circle: [13.5, 3.5, 0.9], fill: true },
     ],
   },
+  // v0.4-llm-first L1: the source outline (dashed) and the offset outline around it
+  'kind-offset': {
+    label: 'Offset',
+    group: 'shape',
+    src: 'b22',
+    parts: [{ rect: [4.5, 6, 7, 4, 0.5], dash: '1.4 1.1' }, { rect: [2, 3.5, 12, 9, 3] }],
+  },
   // ── modes (the mode switcher; the run mode shares the Run icon) ───────────────────────────
   design: {
     label: 'Design',
@@ -429,14 +436,74 @@ export const ICON_SET = {
       { d: 'M1.5 7.5L8 10.5l6.5-3', a: true },
     ],
   },
-  clamp: {
-    label: 'Workholding',
+  // ── workholding item kinds (front views; the holding element is the accent; v0.4-llm-first L1) ──
+  // the strap over the stock edge, the stud and the heel (the B22 "Workholding" drawing, renamed)
+  'toe-clamp': {
+    label: 'Toe clamp',
     group: 'cnc',
     src: 'b22',
     parts: [
       { rect: [1.5, 9.5, 7, 5, 0.5] },
       { d: 'M10.5 2.5v12M13.5 8.5v6' },
       { d: 'M5 6.5h9v2H5z', a: true },
+    ],
+  },
+  // the stock standing out of the fixed and the moving jaw
+  vise: {
+    label: 'Vise',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [5.5, 3.5, 5, 6.5, 0.5] },
+      { d: 'M1.5 14.5h13' },
+      { d: 'M1.5 14.5V7h4v7.5M14.5 14.5V7h-4v7.5', a: true },
+    ],
+  },
+  // section: a pan-head screw through the waste into the base
+  screw: {
+    label: 'Screw',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { d: 'M5 5.5H1.5v5h5M11 5.5h3.5v5h-5' },
+      {
+        d: 'M5 5.5V4a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v1.5zM6.5 5.5v7.5L8 14.5l1.5-1.5V5.5M6.5 10l3-1',
+        a: true,
+      },
+    ],
+  },
+  // a low fixture block (stop) against the stock's side
+  block: {
+    label: 'Block',
+    group: 'cnc',
+    src: 'b22',
+    parts: [{ rect: [1.5, 4.5, 8, 10, 0.5] }, { rect: [9.5, 9.5, 5, 5, 0.5], a: true }],
+  },
+  // the stock on a spoilboard or fixture plate
+  base: {
+    label: 'Base',
+    group: 'cnc',
+    src: 'b22',
+    parts: [{ rect: [4, 3.5, 8, 6, 0.5] }, { rect: [1.5, 9.5, 13, 4, 0.5], a: true }],
+  },
+  // tape, vacuum or glue: the stock's bottom face held to the table (the fixed-support hatching)
+  'surface-hold': {
+    label: 'Surface hold',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [3, 3.5, 10, 7.5, 0.5] },
+      { d: 'M1.5 11h13M3 14.5l3-3M7 14.5l3-3M11 14.5l3-3', a: true },
+    ],
+  },
+  // v0.4-llm-first L1: the tolerance band (dashed) and the compared profile leaving it
+  deviation: {
+    label: 'Deviation',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 5.5h13M1.5 10.5h13', dash: '1.4 1.1' },
+      { d: 'M1.5 8C4 8 4.5 6.5 6 6.5s2 7 4 7 2.5-5.5 4.5-5.5', a: true },
     ],
   },
   reference: {

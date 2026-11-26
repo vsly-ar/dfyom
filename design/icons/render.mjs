@@ -158,7 +158,13 @@ const L1 = [
   ['row-grid', 'row-offset', 'row-polar', 'row-arc', 'row-point', 'row-along'],
   ['groove', 'pick', 'drilling', 'disconnect', 'connect'],
 ]
-function l1Sheet(theme) {
+function l1Sheet(
+  theme,
+  groups = L1,
+  titles = ['Features', 'Clones row kinds', 'B22 follow-ups'],
+  heading = 'L1 icons',
+  note = 'redrawn icons also show the drawing they replace. Drilling and Connect are unchanged, shown for comparison.',
+) {
   const sizes = (i) =>
     [16, 20, 32]
       .map(
@@ -174,16 +180,36 @@ function l1Sheet(theme) {
     return `<div class="r"><span class="lab">${ic(id)}<span>${i.label}</span></span>
       <span class="lab sel">${ic(id, 'on')}<span>${i.label}</span></span>${sizes(i)}${before}<code>${id}</code></div>`
   }
-  const body = `<div class="sheet"><h1>L1 icons · contact sheet (${theme})</h1>
+  const body = `<div class="sheet"><h1>${heading} · contact sheet (${theme})</h1>
   <p>Each row: 16 px beside its label at rest and selected · then 16 / 20 / 32 px, each at rest and active ·
-  redrawn icons also show the drawing they replace. Drilling and Connect are unchanged, shown for comparison.</p>
-  ${L1.map((g, n) => `<h2>${['Features', 'Clones row kinds', 'B22 follow-ups'][n]}</h2>${g.map(row).join('')}`).join('')}</div>`
+  ${note}</p>
+  ${groups.map((g, n) => `<h2>${titles[n]}</h2>${g.map(row).join('')}`).join('')}</div>`
   const css = `.sheet{padding:20px 24px;width:900px}.r{display:flex;align-items:center;gap:12px;height:44px;border-bottom:1px solid var(--border)}
   .lab{display:flex;flex:none;align-items:center;gap:8px;width:170px;height:28px;padding:0 8px;border-radius:4px;color:var(--text)}
   .lab.sel{background:var(--accent-subtle)}.r>.ic{flex:none}.ic svg{display:block}.was{margin-left:12px;color:var(--text-faint);font-size:11px}
   code{margin-left:auto;color:var(--text-faint);font-size:11px}`
   return page(theme, body, css)
 }
+
+// ---------- llm-first L1 contact sheet (workholding kinds, offset item, deviation) ----------
+// plans/v0.4-llm-first.md L1; neighbours that share a row or a panel with them, for comparison.
+const LF_L1 = [
+  ['toe-clamp', 'vise', 'screw', 'block', 'base', 'surface-hold', 'stock', 'setups'],
+  ['kind-offset', 'kind-rectangle', 'kind-path', 'row-offset'],
+  ['deviation', 'reference', 'measure'],
+]
+const lfL1Sheet = (theme) =>
+  l1Sheet(
+    theme,
+    LF_L1,
+    [
+      'Workholding items (Stock and Setups for comparison)',
+      'Offset shape item (neighbours for comparison)',
+      'Deviation (Reference and Measure for comparison)',
+    ],
+    'v0.4-llm-first L1 icons',
+    'neighbours are unchanged, shown for comparison.',
+  )
 
 // ---------- DF11 stock size field illustrations ----------
 // From the app's single source (stockSize.ts); drawn like FieldIcon: 1 px grey, amber edge
@@ -247,7 +273,13 @@ const browser = await chromium.launch({
   // Optional: an already-installed Chromium when the bundled one is missing.
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
 })
-async function shot(html, file, { width, height, scale = 2, transparent = false, selector } = {}) {
+// RENDER_SCALE=1 renders the review sheets at 1× (default 2×).
+const SCALE = Number(process.env.RENDER_SCALE ?? 2)
+async function shot(
+  html,
+  file,
+  { width, height, scale = SCALE, transparent = false, selector } = {},
+) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale })
   const p = await ctx.newPage()
   const tmp = join(OUT, '.tmp.html')
@@ -292,6 +324,11 @@ for (const theme of ['light', 'dark']) {
     selector: '.app',
   })
   await shot(l1Sheet(theme), `l1-contact-${theme}.png`, {
+    width: 960,
+    height: 900,
+    selector: '.sheet',
+  })
+  await shot(lfL1Sheet(theme), `llm-first-l1-contact-${theme}.png`, {
     width: 960,
     height: 900,
     selector: '.sheet',
