@@ -15,7 +15,11 @@ const WINDOW = {
 describe('app state store', () => {
   it('starts empty without a file', async () => {
     const log = createTestLogger()
-    expect(await loadAppState(tmp.dir, log)).toEqual({ dialogFolders: {}, recentRunFiles: [] })
+    expect(await loadAppState(tmp.dir, log)).toEqual({
+      dialogFolders: {},
+      recentRunFiles: [],
+      recentProjects: [],
+    })
     expect(log.at('warn')).toEqual([])
   })
 
@@ -37,6 +41,7 @@ describe('app state store', () => {
       shapeEditorWindow: { ...WINDOW, fullScreen: true },
       dialogFolders: { project: '/work/parts', 'reference-import': '/work/models' },
       recentRunFiles: [],
+      recentProjects: [],
     })
   })
 
@@ -56,6 +61,39 @@ describe('app state store', () => {
       '/cam/4.nc',
       '/cam/3.nc',
     ])
+  })
+
+  it('keeps the recent projects, newest first, deduplicated, at most 8 (DF114)', async () => {
+    const log = createTestLogger()
+    const store = createAppStateStore({ appData: tmp.dir, initial: EMPTY_APP_STATE, log })
+    for (let i = 1; i <= 10; i++) store.rememberProject(`/work/${i}.dfyom`, i * 1000)
+    store.rememberProject('/work/5.dfyom', 20_000)
+    store.forgetProject('/work/9.dfyom')
+    store.forgetProject('/work/unknown.dfyom')
+    await store.flush()
+    expect((await loadAppState(tmp.dir, log)).recentProjects).toEqual([
+      { path: '/work/5.dfyom', openedAt: 20_000 },
+      { path: '/work/10.dfyom', openedAt: 10_000 },
+      { path: '/work/8.dfyom', openedAt: 8000 },
+      { path: '/work/7.dfyom', openedAt: 7000 },
+      { path: '/work/6.dfyom', openedAt: 6000 },
+      { path: '/work/4.dfyom', openedAt: 4000 },
+      { path: '/work/3.dfyom', openedAt: 3000 },
+    ])
+    store.clearProjects()
+    await store.flush()
+    expect((await loadAppState(tmp.dir, log)).recentProjects).toEqual([])
+  })
+
+  it('drops a damaged recent projects list alone (DF114)', async () => {
+    const log = createTestLogger()
+    await writeFile(
+      join(tmp.dir, APP_STATE_FILE),
+      JSON.stringify({ dialogFolders: { project: '/p' }, recentProjects: [{ path: 3 }] }),
+    )
+    const state = await loadAppState(tmp.dir, log)
+    expect(state.recentProjects).toEqual([])
+    expect(state.dialogFolders).toEqual({ project: '/p' })
   })
 
   it('writes once after changes settle', async () => {
@@ -83,6 +121,7 @@ describe('app state store', () => {
     expect(await loadAppState(tmp.dir, log)).toEqual({
       dialogFolders: { project: '/p' },
       recentRunFiles: [],
+      recentProjects: [],
     })
     await writeFile(file, '{ not json')
     expect(await loadAppState(tmp.dir, log)).toEqual(EMPTY_APP_STATE)

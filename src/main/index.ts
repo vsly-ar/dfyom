@@ -2,6 +2,7 @@
 // The app host (projects, library, dispatchers) is shared with the headless CLI/MCP entry
 // (src/main/cli); the GUI adds windows, project IPC and local HTTP (docs/architecture/llm-api.md).
 import { app, BrowserWindow, dialog, screen } from 'electron'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
 import { IPC, SETTINGS_ARG, WINDOW_KIND_ARG, type WindowKind } from '../shared/preload-api'
@@ -14,11 +15,12 @@ import { pushRunStatus, registerRunProgramIpc, utilityHostFactory } from './mach
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { libraryHandlesMenuAction } from './library-context'
-import { installAppMenu } from './menu'
+import { installAppMenu, type MenuHooks } from './menu'
 import { createFileQueue, fileRoute, projectFilesFromArgv, takesInstanceLock } from './open-file'
 import { createExportFiles } from './persistence/export-file'
 import { createGcodeFiles } from './persistence/gcode-file'
 import { openRunFile, registerRunFileIpc, type RunFileDeps } from './run-file'
+import { recentMenuLabels, registerRecentProjectsIpc } from './recent-projects'
 import { resolveAppData } from './persistence/paths'
 import {
   quitSteps,
@@ -406,7 +408,7 @@ void app.whenReady().then(async () => {
     if (!toolWindow(win)) lastProjectWindow = win
   })
   // New / Open without any window (macOS): an empty window, whose start panel offers both.
-  installAppMenu({
+  const menuHooks: MenuHooks = {
     noWindow: () => sessions.open(),
     openLicences: () => licences.open(),
     openRunFile: () => {
@@ -441,6 +443,38 @@ void app.whenReady().then(async () => {
           : BrowserWindow.getAllWindows().find((w) => !toolWindow(w))
       return project
     },
+  }
+  // DF114: recent projects (docs/conventions/ui.md#project-files): every project opened or saved
+  // with a file, by any source; File → Open Recent routes a file like one from Finder (below).
+  const home = homedir()
+  const installMenu = () => {
+    const paths = appState.get().recentProjects.map((p) => p.path)
+    const labels = recentMenuLabels(paths, home)
+    installAppMenu({
+      ...menuHooks,
+      recent: {
+        items: paths.map((path, i) => ({ path, label: labels[i] ?? path })),
+        open: (path) => fileQueue.push(path),
+        clear: () => {
+          appState.clearProjects()
+          if (app.isPackaged && !hideWindows) app.clearRecentDocuments()
+          installMenu()
+        },
+      },
+    })
+  }
+  installMenu()
+  host.onProjectFile((file) => {
+    appState.rememberProject(file, Date.now())
+    // the OS list (Dock menu, Finder's recent items) only for the installed app, never test runs
+    if (app.isPackaged && !hideWindows) app.addRecentDocument(file)
+    installMenu()
+  })
+  registerRecentProjectsIpc({
+    recent: appState,
+    home,
+    isProjectWindow: (id) => sessions.isProjectWindow(id),
+    changed: installMenu,
   })
   // A project an agent opens gets its own window, which stays open after the session ends; the
   // user's New / Open choose their window in ipc.ts (docs/conventions/ui.md#project-files).

@@ -23,6 +23,7 @@ import type {
   PartEvaluationView,
   PreloadApi,
   ProjectSnapshot,
+  RecentProjectView,
   ReferenceCompareViewReply,
   ReferenceCompareViewRequest,
   ReferenceMeshReply,
@@ -122,6 +123,10 @@ export interface FakeBridge extends PreloadApi {
     reference?: string | null
     svg?: string | null
   }): void
+  /** DF114: the recent projects `files.recent` answers. */
+  setRecentProjects(projects: readonly RecentProjectView[]): void
+  /** Paths passed to `files.forgetRecent` (DF114); they also leave the list. */
+  readonly forgottenRecent: string[]
   readonly saveDialogNames: string[]
   readonly exportDialogNames: string[]
   /** Paths passed to `files.showInFolder` (DF48). */
@@ -227,6 +232,8 @@ export function createFakeBridge(
   const runFileShows = channel<string>()
   let runFileChoice: string | null = null
   let recentRunFiles: string[] = []
+  let recentProjects: readonly RecentProjectView[] = []
+  const forgottenRecent: string[] = []
   const evaluationPush = channel<PartEvaluationView>()
   const menu = channel<MenuAction>()
   const openFiles = channel<string>()
@@ -402,6 +409,12 @@ export function createFakeBridge(
         shownInFolder.push(path)
         return Promise.resolve(true)
       },
+      recent: () => Promise.resolve(recentProjects),
+      forgetRecent: (path) => {
+        forgottenRecent.push(path)
+        recentProjects = recentProjects.filter((p) => p.path !== path)
+        return Promise.resolve()
+      },
     },
     reference: {
       mesh: (referenceId) => {
@@ -483,6 +496,10 @@ export function createFakeBridge(
     setConnectInfo(info) {
       connectInfo = info
     },
+    setRecentProjects(projects) {
+      recentProjects = projects
+    },
+    forgottenRecent,
     setFileChoice(choice) {
       fileChoice = { ...fileChoice, ...choice }
     },

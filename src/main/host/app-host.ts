@@ -159,6 +159,11 @@ export interface AppHost extends SessionHost, HostPort {
   /** Called after a project runtime started or stopped (windows re-follow their project). */
   onProjectsChanged(listener: () => void): () => void
   /**
+   * Called with a project's file after it was opened or restored from a file, or saved (Save as
+   * included), by any source: the recent projects (DF114, docs/conventions/ui.md#project-files).
+   */
+  onProjectFile(listener: (file: string) => void): () => void
+  /**
    * A part's evaluation in the project's current document, for the window mesh push (renderer
    * only, not an agent capability: docs/architecture/overview.md#ipc). Undefined without the project.
    */
@@ -248,6 +253,7 @@ class Host implements AppHost {
   private prewarmed = false
   private closing: Promise<readonly OpenProjectInfo[]> | undefined
   private readonly changeListeners = new Set<() => void>()
+  private readonly fileListeners = new Set<(file: string) => void>()
 
   constructor(
     private readonly o: AppHostOptions,
@@ -568,7 +574,9 @@ class Host implements AppHost {
       clean: session.dirty ? -1 : dispatcher.revision,
     }
     const stopSaves = dispatcher.log.subscribe({ names: ['project.save'] }, (e) => {
-      if (e.type === 'command' && e.outcome.ok) rt.clean = e.revision
+      if (e.type !== 'command' || !e.outcome.ok) return
+      rt.clean = e.revision
+      this.fileChanged(session.filePath)
     })
     scheduler.attach(dispatcher)
     if (!this.prewarmed) {
@@ -582,6 +590,7 @@ class Host implements AppHost {
     )
     for (const l of [...this.openListeners]) l(session.key, source)
     for (const l of [...this.changeListeners]) l()
+    this.fileChanged(session.filePath)
     return { key: session.key, revision: dispatcher.revision }
   }
 
@@ -739,5 +748,14 @@ class Host implements AppHost {
   onProjectsChanged(listener: () => void): () => void {
     this.changeListeners.add(listener)
     return () => void this.changeListeners.delete(listener)
+  }
+
+  onProjectFile(listener: (file: string) => void): () => void {
+    this.fileListeners.add(listener)
+    return () => void this.fileListeners.delete(listener)
+  }
+
+  private fileChanged(file: string | null): void {
+    if (file !== null) for (const l of [...this.fileListeners]) l(file)
   }
 }
