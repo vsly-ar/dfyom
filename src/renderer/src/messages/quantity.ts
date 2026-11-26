@@ -85,6 +85,14 @@ export const quantityText = {
   adjustKept: (): string =>
     'Kept the adjusted value: the project changed after it, so Escape could not revert it.',
   pick: (label: string): string => `Pick ${label} in the viewport`,
+  /** DF117: a refused value kept in its field (ui.md#quantity-and-expression-input). */
+  notApplied: (stored: string): string =>
+    stored === ''
+      ? 'Not applied: the part has no value here'
+      : `Not applied: the part still uses ${stored}`,
+  notAppliedTip: (stored: string): string =>
+    `${stored === '' ? 'Not applied.' : `Not applied: the part still uses ${stored}.`} Fix the error, press Enter to send it again, or Revert.`,
+  revert: (): string => 'Revert',
   references: (label: string): string => `References for ${label}`,
   step: (): string => 'Step',
   decrease: (): string => 'Decrease',

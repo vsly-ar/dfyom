@@ -15,12 +15,19 @@ import type {
 } from '../../../../core/design/part.dto'
 import { isExpression } from '../../../../core/design/anchor'
 import {
+  coordinate,
   coordinateName,
   STOCK_FACES,
   SurfaceTable,
   type SurfaceEntry,
 } from '../../../../core/design/surfaces'
-import { DIRECTIONS, type Direction } from '../../../../core/geometry/face'
+import {
+  DIRECTION,
+  DIRECTIONS,
+  oppositeDirection,
+  STOCK_FACE,
+  type Direction,
+} from '../../../../core/geometry/face'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
@@ -451,6 +458,56 @@ export function referenceChoices(
     .toSorted((a, b) => DIRECTIONS.indexOf(a.direction) - DIRECTIONS.indexOf(b.direction))
     .map((e) => ({ id: coordinateName(e), surface: e.id, label: surfaceLabel(part, e.id) }))
   return disambiguate(part, choices, (c) => c.surface)
+}
+
+/** What picking a surface for an operation's Depth gives (DF115, ui.md#depth-pick-df115). */
+export type DepthPick =
+  /** A depth formula from the operation's `on` down to the surface. */
+  | { readonly kind: 'level'; readonly source: string }
+  /** The far side of the part: the cut goes through (pocket Through, drilling Bottom Through). */
+  | { readonly kind: 'through' }
+
+/**
+ * The surfaces a Depth pick may take, by surface id (DF115): the surfaces before the operation
+ * on the axis of `on`'s normal that lie strictly beyond `on` in the cut direction. The opposite
+ * stock face and an opposite facing's floor are the far side of the part (`through`, only where
+ * the kind cuts through: pocket, drilling); every other one is a level, a formula measured from
+ * `on`: `<on> - <surface>` on a `+` face, `<surface> - <on>` on a `−` face.
+ */
+export function depthPickTargets(
+  part: PartDTO,
+  table: SurfaceTable,
+  index: number,
+  on: string,
+  kind: OperationDTO['kind'],
+): ReadonlyMap<string, DepthPick> {
+  const targets = new Map<string, DepthPick>()
+  const start = table.get(on)
+  if (start.isNone()) return targets
+  const from = start.unwrap()
+  const { axis, sign } = DIRECTION[from.direction]
+  const through = kind === 'pocket' || kind === 'drilling'
+  const far = oppositeDirection(from.direction)
+  const onName = coordinateName(from)
+  const onAt = coordinate(from).value
+  for (const e of table.before(index)) {
+    if (e.id === from.id || DIRECTION[e.direction].axis !== axis) continue
+    const depth = onAt.sub(coordinate(e).value)
+    if (depth.toNumber() * sign <= 0) continue
+    const farSide =
+      e.direction === far &&
+      (e.id === STOCK_FACE[far] || part.operations[e.owner]?.kind === 'facing')
+    if (farSide) {
+      if (through) targets.set(e.id, { kind: 'through' })
+      continue
+    }
+    const name = coordinateName(e)
+    targets.set(e.id, {
+      kind: 'level',
+      source: sign > 0 ? `${onName} - ${name}` : `${name} - ${onName}`,
+    })
+  }
+  return targets
 }
 
 /** The direction of a surface (the stock top when unknown). */

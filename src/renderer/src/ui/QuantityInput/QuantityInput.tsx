@@ -146,14 +146,23 @@ export interface QuantityInputBaseProps {
   onCancelGesture?: (gesture: string) => Promise<boolean>
   /**
    * Pick toggle in the adjust panel (and Alt+P): enter pick mode for a surface reference. Call
-   * `insert` with the picked reference; it goes in at the caret (replacing the selection) and
-   * focus returns.
+   * `insert` with the picked reference: it replaces the field's value (DF115), or a non-empty
+   * selection, or goes in at a caret that waits for an operand (after an operator or `(`);
+   * `'replace'` always replaces. Focus returns; nothing is committed.
    */
-  onPick?: (insert: (reference: string) => void) => void
+  onPick?: (insert: PickInsert) => void
   /** Pick mode is active for this field (pick toggle pressed). */
   picking?: boolean
   /** The pressed pick toggle (or Alt+P) again while `picking`: leave pick mode (DF10). */
   onPickCancel?: () => void
+  /**
+   * DF117: a value the owner's command refused, kept by the owner (across remounts): shown
+   * instead of the stored value while it differs, marked "Not applied" with a Revert; Enter or
+   * blur sends it again. Doc: docs/conventions/ui.md#quantity-and-expression-input
+   */
+  pending?: string | undefined
+  /** Revert of a `pending` value (the note's button, Escape): the owner drops it. */
+  onRevert?: () => void
   illustration?: ReactNode
   lock?: FieldProps['lock']
   /** Warnings, notes and recommendations from checks; parse errors are added by the field. */
@@ -165,6 +174,31 @@ export interface QuantityInputBaseProps {
    */
   dense?: boolean
   className?: string | undefined
+}
+
+/** Puts a picked reference in the field (see `onPick`). */
+export type PickInsert = (reference: string, mode?: 'replace') => void
+
+/**
+ * Where a pick goes (DF115): `[from, to]` of `text` to replace. The whole value, unless a
+ * non-empty selection is given or the caret sits where the formula waits for an operand: an
+ * operator or `(` (or the start) before it and an operator or `)` (or the end) after it.
+ */
+export function pickRange(
+  text: string,
+  selection: readonly [number, number] | null,
+  mode?: 'replace',
+): [number, number] {
+  if (mode === 'replace' || selection === null) return [0, text.length]
+  const [from, to] = selection
+  if (from !== to) return [from, to]
+  const before = text.slice(0, from).trimEnd()
+  const after = text.slice(to).trimStart()
+  const operandMissing =
+    (before === '' || /[-+*/×÷−(]$/.test(before)) &&
+    (after === '' || /^[-+*/×÷−)]/.test(after)) &&
+    before + after !== ''
+  return operandMissing ? [from, to] : [0, text.length]
 }
 
 interface ListState {
@@ -223,6 +257,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     onPick,
     picking = false,
     onPickCancel,
+    pending,
+    onRevert,
     illustration,
     lock,
     messages = [],
@@ -234,6 +270,10 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const applyOnEnter = useApplyOnEnter()
   const prec = precision ?? defaultPrecision(defaultUnit)
   const stored = value?.source ?? ''
+  /** DF117: a refused value the owner keeps, shown while it differs from the stored one. */
+  const pendingShown = pending !== undefined && pending !== stored
+  /** What the field shows when nothing is typed: the pending value, else the stored one. */
+  const resting = pendingShown ? pending : stored
   const baseId = useId()
   const listId = `${baseId}-references`
   const panelId = `${baseId}-adjust`
@@ -284,6 +324,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const pendingCaret = useRef<number | null>(null)
   const lastSelection = useRef<[number, number] | null>(null)
   const storedRef = useRef(stored)
+  const shownRef = useRef(resting)
   const session = useRef<AdjustSession | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   /** Focus the panel's first control once it renders (⌘↓ / Ctrl+↓ from the input). */
@@ -304,7 +345,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     }
   }
 
-  const text = draft ?? stored
+  const text = draft ?? resting
   /** Empty text of an optional field: unset, not an error. */
   const isUnset = (s: string): boolean => props.optional === true && s.trim() === ''
   const reads = (s: string): boolean => readSource(s, ctx, resolver, validate).isOk()
@@ -322,6 +363,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   useEffect(() => {
     storedRef.current = stored
+    shownRef.current = resting
   })
 
   useLayoutEffect(() => {
@@ -381,7 +423,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
    * Commit `source` if it reads and differs from what is stored; false if invalid. `gesture`:
    * a step of the adjust session with that id.
    */
-  function commitSource(source: string, gesture?: string): boolean {
+  function commitSource(source: string, gesture?: string, again = false): boolean {
     if (readOnly) return true
     // a step back to the stored value while a later step is still landing must still commit
     const landing = gesture !== undefined && committed !== null && committed !== stored
@@ -389,9 +431,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       setDraft(null)
       setCommitted(null)
       setErrorsShown(false)
+      // back to the applied value: a refused value is no longer pending (DF117)
+      if (pendingShown) onRevert?.()
       return true
     }
-    if (source === committed) return true
+    // Enter sends a refused value again (DF117); blur does not repeat it
+    if (source === committed && !(again && source === pending)) return true
     if (isUnset(source)) {
       if (value === undefined) {
         revert()
@@ -425,7 +470,20 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     if (gesture !== undefined && session.current?.id === gesture) session.current.stepped = true
   }
 
-  const commit = (): boolean => (draft === null ? true : commitSource(draft))
+  /** The "Not applied" note's Revert (DF117): back to the stored value, the owner drops its draft. */
+  function revertPending(): void {
+    revert()
+    onRevert?.()
+    inputRef.current?.focus()
+  }
+
+  /** Commit the typed text; `again` (Enter) also re-sends a refused pending value (DF117). */
+  const commit = (again = false): boolean =>
+    draft !== null
+      ? commitSource(draft, undefined, again)
+      : again && pendingShown
+        ? commitSource(pending, undefined, true)
+        : true
 
   function revert(): void {
     setDraft(null)
@@ -569,7 +627,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     controls[to]?.focus()
   }
 
-  function insert(reference: string): void {
+  function insert(reference: string, mode?: 'replace'): void {
     const input = inputRef.current
     // the field may never have lost focus (the pick toggle in the panel keeps it): its own caret
     const selection: [number, number] | null =
@@ -577,8 +635,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
         ? [input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length]
         : lastSelection.current
     setDraft((d) => {
-      const current = d ?? storedRef.current
-      const [from, to] = selection ?? [0, current.length]
+      const current = d ?? shownRef.current
+      const [from, to] = pickRange(current, selection, mode)
       pendingCaret.current = from + reference.length
       return current.slice(0, from) + reference + current.slice(to)
     })
@@ -633,7 +691,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       // (apply.md#field-rule); blur and Tab commit only. A valid Enter is done editing: the
       // adjust panel closes (keeping a live session's value), so it no longer covers what is below
       e.preventDefault()
-      if (commit()) {
+      if (commit(true)) {
         if (adjustOpen) closeAdjust()
         applyOnEnter?.()
       }
@@ -648,10 +706,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
         closeAdjust(true)
         return
       }
-      if (draft === null && !errorsShown) return
+      if (draft === null && !errorsShown && !pendingShown) return
       e.preventDefault()
       e.stopPropagation()
       revert()
+      // Escape goes back to the applied value: a refused value is dropped too (DF117)
+      if (pendingShown) onRevert?.()
       return
     }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !readOnly) {
@@ -874,6 +934,18 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       messages={[
         ...messages,
         ...(errorMessage ? [errorMessage] : []),
+        ...(pendingShown && !readOnly
+          ? [
+              {
+                id: 'quantity.notApplied',
+                severity: 'info' as const,
+                text: quantityText.notApplied(stored),
+                ...(onRevert
+                  ? { fix: { label: quantityText.revert(), onApply: revertPending, plain: true } }
+                  : {}),
+              },
+            ]
+          : []),
         ...(kept
           ? [
               {
@@ -885,6 +957,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
           : []),
       ]}
       readOnly={readOnly}
+      {...(pendingShown && !readOnly ? { pending: quantityText.notAppliedTip(stored) } : {})}
       popup={panel}
       className={className}
     >

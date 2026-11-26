@@ -125,7 +125,7 @@ export interface Pocket extends Common {
   readonly depth: Quantity
   readonly floorRadius: Quantity
   /**
-   * A through pocket (patterns P4, set only by a pattern's `through`): it clears its region down
+   * A through pocket (patterns P4, a pattern's `through`; since DF116 any pocket's, design.md#pocket): it clears its region down
    * through the opposite stock face (the plan adds `breakthrough`), so no slug is left; `depth`
    * is the material below `on` when the feature expanded (readers that matter read it fresh,
    * `throughPocketDepth`), and its floor is no face target. Absent = blind.

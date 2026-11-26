@@ -31,6 +31,17 @@ export interface PickRequestState {
   readonly onPick: (surface: string) => void
 }
 
+/**
+ * DF117: an operation inspector's refused field texts and the refusal's errors, kept while the
+ * user looks elsewhere (ui.md#quantity-and-expression-input "Not applied"). Window state only.
+ */
+export interface FieldDrafts {
+  /** Refused text by field path (`shape.length`). */
+  readonly values: Readonly<Record<string, string>>
+  /** The refusal's field errors, by path. */
+  readonly errors: readonly { readonly path: string; readonly text: string }[]
+}
+
 /** The Shape Editor's per-window state (task U1): the selected item of the selected shape. */
 export interface ShapeEditorState {
   readonly shapeId: string
@@ -113,6 +124,10 @@ export interface UiState {
    */
   readonly splitFocus: SplitFocus | null
   setSplitFocus(focus: SplitFocus | null): void
+  /** DF117: refused field texts per `<partId>:<operationId>` (never in the document). */
+  readonly fieldDrafts: Readonly<Record<string, FieldDrafts>>
+  /** Sets (null: drops) one operation's refused field texts. */
+  setFieldDrafts(key: string, drafts: FieldDrafts | null): void
   /** Active pick mode, or null. */
   readonly pick: PickRequestState | null
   setPick(pick: PickRequestState | null): void
@@ -125,7 +140,7 @@ export interface UiState {
   /** The import's own warnings (unit guess, open mesh, many triangles) per reference, this window. */
   readonly referenceNotes: Readonly<Record<string, readonly ReferenceWarning[]>>
   setReferenceNotes(id: string, notes: readonly ReferenceWarning[]): void
-  /** The window's project changed: every reference shows again, notes are dropped, Design shows the first part. */
+  /** The window's project changed: every reference shows again, notes and refused field texts (DF117) are dropped, Design shows the first part. */
   resetReferenceView(): void
   /** Shape Editor (task U1): selected item and segment, null outside the editor. */
   readonly shapeEditor: ShapeEditorState | null
@@ -345,6 +360,16 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
           ? {}
           : { splitFocus },
       ),
+    fieldDrafts: {},
+    setFieldDrafts: (key, drafts) =>
+      set((s) => {
+        if (drafts === null) {
+          if (!(key in s.fieldDrafts)) return {}
+          const { [key]: _dropped, ...rest } = s.fieldDrafts
+          return { fieldDrafts: rest }
+        }
+        return { fieldDrafts: { ...s.fieldDrafts, [key]: drafts } }
+      }),
     pick: null,
     setPick: (pick) => set({ pick }),
     hiddenReferences: new Set(),
@@ -360,7 +385,7 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setReferenceNotes: (id, notes) =>
       set((s) => ({ referenceNotes: { ...s.referenceNotes, [id]: notes } })),
     resetReferenceView: () =>
-      set({ hiddenReferences: new Set(), referenceNotes: {}, designPart: null }),
+      set({ hiddenReferences: new Set(), referenceNotes: {}, designPart: null, fieldDrafts: {} }),
     shapeEditor: null,
     selectShapeItem: (shapeId, item, segment = null) =>
       set({ shapeEditor: { shapeId, item, segment } }),

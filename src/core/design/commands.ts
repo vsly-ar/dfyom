@@ -178,6 +178,8 @@ const pocketParams = {
   anchor: AnchorArg.optional(),
   depth: Src,
   floorRadius: Src.optional().describe('Floor fillet radius; default 0'),
+  // DF116: user-settable through (docs/modes/design.md#pocket)
+  through: z.boolean().optional().describe('Cut through; depth kept, unused'),
 }
 const drillingParams = {
   on: OnArg.optional(),
@@ -800,6 +802,9 @@ const pocketSpec: KindSpec<typeof pocketParams, Extract<Operation, { kind: 'pock
     shape: f.placedShape(a.shape, a.anchor, prev?.shape),
     depth: f.val('depth', 'length', a.depth, prev?.depth),
     floorRadius: f.pick('floorRadius', 'length', a.floorRadius, prev?.floorRadius, 'floorRadius'),
+    // DF116: through (P4's through pocket, settable on any pocket); roughing stays a pattern's
+    ...((a.through ?? prev?.through) === true ? { through: true } : {}),
+    ...(prev?.roughing === true ? { roughing: true } : {}),
   }),
 }
 

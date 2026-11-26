@@ -9,7 +9,13 @@ import { Quantity, type ParseContext } from '../../../../core/quantity/quantity'
 import { Rational } from '../../../../core/quantity/rational'
 import { fail, None, Ok, Some } from '../../../../shared/result'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
-import { ECHO_DELAY_MS, QuantityInput, type QuantityInputBaseProps } from './QuantityInput'
+import {
+  ECHO_DELAY_MS,
+  pickRange,
+  QuantityInput,
+  type PickInsert,
+  type QuantityInputBaseProps,
+} from './QuantityInput'
 import { StepScaleProvider } from './StepContext'
 
 const MM: ParseContext = { kind: 'length', defaultUnit: 'mm' }
@@ -692,7 +698,7 @@ describe('QuantityInput: references and picking', () => {
     expect(input).toHaveValue('')
   })
 
-  it('hands the pick toggle an insert callback; the picked reference goes in at the caret', async () => {
+  it('hands the pick toggle an insert callback; a caret waiting for an operand takes the reference there', async () => {
     const onPick = vi.fn<(insert: (reference: string) => void) => void>()
     const { user, input } = setup({ onPick })
     await retype(user, input, ' / 2')
@@ -707,6 +713,30 @@ describe('QuantityInput: references and picking', () => {
     expect(input).toHaveValue('pocket1.floor.z / 2')
     expect(input).toHaveFocus()
     expect(input.selectionStart).toBe('pocket1.floor.z'.length)
+  })
+
+  it('a pick replaces the value (DF115: "8 mm" + pick read "8 mmfacing1.floor.z")', async () => {
+    const onPick = vi.fn<(insert: PickInsert) => void>()
+    const { user, input } = setup({ onPick })
+    await retype(user, input, '8 mm')
+    await user.click(screen.getByRole('button', { name: 'Pick Width in the viewport' }))
+    act(() => onPick.mock.calls[0]?.[0]('facing1.floor.z'))
+    expect(input).toHaveValue('facing1.floor.z')
+    // 'replace' always replaces, even where the formula waits for an operand
+    await retype(user, input, 'stock.top.z - ')
+    act(() => onPick.mock.calls[0]?.[0]('facing1.floor.z - pocket2.floor.z', 'replace'))
+    expect(input).toHaveValue('facing1.floor.z - pocket2.floor.z')
+  })
+
+  it('pickRange: the whole value, a selection, or a caret where an operand is missing', () => {
+    expect(pickRange('8 mm', [4, 4])).toEqual([0, 4])
+    expect(pickRange('8 mm', [0, 0])).toEqual([0, 4])
+    expect(pickRange('8 mm', [0, 1])).toEqual([0, 1])
+    expect(pickRange('a.z - ', [6, 6])).toEqual([6, 6])
+    expect(pickRange('(', [1, 1])).toEqual([1, 1])
+    expect(pickRange(' / 2', [0, 0])).toEqual([0, 0])
+    expect(pickRange('a.z - ', [6, 6], 'replace')).toEqual([0, 6])
+    expect(pickRange('', null)).toEqual([0, 0])
   })
 
   it('the pressed pick toggle cancels pick mode on a second press (DF10)', async () => {
@@ -1009,5 +1039,55 @@ describe('QuantityInput: title row and info (DF105, DF111)', () => {
     expect(input).toHaveAccessibleDescription('Empty = through the stock.')
     expect(screen.getByText('Empty = through the stock.')).not.toBeVisible()
     await expectNoAxeViolations()
+  })
+})
+
+describe('QuantityInput: a refused value kept as not applied (DF117)', () => {
+  /** The owner keeps the refused text until Revert, like the Design inspector's `fieldDrafts`. */
+  function Owner({ onCommit }: { onCommit: (v: Quantity | undefined) => void }) {
+    const [pending, setPending] = useState<string | undefined>('10')
+    return (
+      <QuantityInput
+        stepKind="xy"
+        label="Width"
+        kind="length"
+        defaultUnit="mm"
+        value={q('11.3 mm')}
+        onCommit={onCommit}
+        pending={pending}
+        onRevert={() => setPending(undefined)}
+      />
+    )
+  }
+
+  it('shows the kept text, marked and explained; Enter sends it again, blur does not; Revert goes back', async () => {
+    const onCommit = vi.fn<(v: Quantity | undefined) => void>()
+    const { user } = renderUi(<Owner onCommit={onCommit} />)
+    const input = screen.getByRole('combobox', { name: 'Width' })
+    expect(input).toHaveValue('10')
+    const field = input.closest('[data-pending]')
+    expect(field).not.toBeNull()
+    expect(screen.getByText('Not applied: the part still uses 11.3 mm')).toBeInTheDocument()
+    await expectNoAxeViolations()
+    input.focus()
+    await user.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+    input.focus()
+    await user.keyboard('{Enter}')
+    expect(onCommit.mock.calls.map(([v]) => v?.source)).toEqual(['10'])
+    await user.click(screen.getByRole('button', { name: 'Revert' }))
+    expect(input).toHaveValue('11.3 mm')
+    expect(input.closest('[data-pending]')).toBeNull()
+    expect(screen.queryByText(/Not applied/)).toBeNull()
+  })
+
+  it('Escape in the field drops the kept text', async () => {
+    const { user } = renderUi(<Owner onCommit={vi.fn()} />)
+    const input = screen.getByRole('combobox', { name: 'Width' })
+    input.focus()
+    await user.keyboard('{Escape}')
+    // the first Escape closes the adjust panel, the next reverts
+    await user.keyboard('{Escape}')
+    expect(input).toHaveValue('11.3 mm')
   })
 })
