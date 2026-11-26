@@ -83,7 +83,12 @@ export const planMessages = {
     libraryRemoved: (kind: string, name: string) => `Library ${kind} “${name}” was removed.`,
     libraryUnreadable: (kind: string, name: string) => `Library ${kind} “${name}” cannot be read.`,
     update: 'Update from library',
-    kinds: { stock: 'stock', tool: 'tool', machine: 'machine' } as Record<string, string>,
+    kinds: {
+      stock: 'stock',
+      tool: 'tool',
+      machine: 'machine',
+      workholding: 'workholding device',
+    } as Record<string, string>,
     rowChanged: 'Changed in design',
     rowRemoved: 'Removed from design',
     /** DF106 (c): a settled plan's row whose design item was switched off there. */
@@ -371,6 +376,25 @@ export const planMessages = {
     /** W5: the open surface item's note (workholding.md § Held pieces). */
     surfaceNote:
       'Holds the bottom face: pieces cut free stay held, so this setup has no loose-piece warnings.',
+    // DF121 WL4: devices from the library (workholding-library.md#implementation-wl4)
+    onePerSetup: 'One per setup',
+    /** A device in the Add menu's submenu: "Strap clamp M8 (default)", "Toe clamp (built-in)". */
+    deviceChoice: (name: string, builtIn: boolean, isDefault: boolean) => {
+      const tags = [...(isDefault ? ['default'] : []), ...(builtIn ? ['built-in'] : [])]
+      return tags.length === 0 ? name : `${name} (${tags.join(', ')})`
+    },
+    ownItem: 'Own item',
+    ownItemHint: 'Sizes typed here, not from the library',
+    fromLibrary: (device: string) => `${device} · from library`,
+    fromBuiltIn: (device: string) => `${device} · built-in`,
+    unnamedDevice: 'Unnamed device',
+    detached: (device: string) => `Edited here: no longer follows ${device}.`,
+    copyStatus: {
+      libraryChanged: 'Library changed',
+      libraryRemoved: 'Removed from the library: this plan keeps its copy.',
+      libraryUnreadable: 'The library item cannot be read: this plan keeps its copy.',
+    } as Record<string, string>,
+    updateFromLibrary: 'Update from library',
     clearanceAuto: 'Follow the workholding',
     clearanceAutoHint: 'Use the highest item + the margin, at least the default.',
   },

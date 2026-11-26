@@ -60,10 +60,23 @@ async function renderInspector(setup?: (s: PlanSetup, planId: string) => Promise
     within(inspector()).getByRole('region', { name: /^Workholding/ }) as HTMLElement
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   const setupId = s.plan(planId).setups[0]!.id
-  return { ...r, s, planId, setupId, inspector, section, callsOf }
+  return { ...r, s, bridge, planId, setupId, inspector, section, callsOf }
 }
 
 const clamp = { kind: 'toeClamp', edge: 'vMin', at: '30', top: '20' }
+
+// the user's toe clamp kit, marked the default (WL4)
+const strapClamp = {
+  type: 'toeClamp',
+  name: 'Strap clamp M8',
+  default: true,
+  width: '30',
+  length: '60',
+  top: '20',
+  gripMin: '5',
+  gripMax: '15',
+  stud: 'M8',
+}
 
 describe('Workholding in the setup inspector', () => {
   it('says nothing holds the stock, and adds a toe clamp from the Add menu, opened', async () => {
@@ -81,7 +94,11 @@ describe('Workholding in the setup inspector', () => {
     await t.user.click(await screen.findByRole('menuitem', { name: /^Toe clamp/ }))
     await waitFor(() =>
       expect(t.callsOf('plan.workholding.set')).toEqual([
-        { planId: t.planId, setupId: t.setupId, items: [{ kind: 'toeClamp', edge: 'vMin' }] },
+        {
+          planId: t.planId,
+          setupId: t.setupId,
+          items: [{ kind: 'toeClamp', edge: 'vMin', libraryItemId: 'builtin-toe-clamp' }],
+        },
       ]),
     )
     // the new item is listed with its summary and open
@@ -96,7 +113,133 @@ describe('Workholding in the setup inspector', () => {
     // the keep-out halo of the open item in the viewport
     await waitFor(() => expect(probe.scene?.workholding?.halo?.z).toBe(27))
     expect(probe.scene?.workholding?.solids.map((x) => x.itemId)).toEqual(['wh1', 'wh1'])
+    // WL4: placed from the built-in, which "Edit in library" opens
+    expect(within(fields).getByText('Toe clamp · built-in')).toBeInTheDocument()
+    await t.user.click(within(fields).getByRole('button', { name: 'Edit in library' }))
+    expect(t.bridge.libraryOpens.at(-1)).toEqual({
+      kind: 'workholding',
+      itemId: 'builtin-toe-clamp',
+    })
     await expectNoAxeViolations()
+  })
+
+  it('lists the library’s toe clamps in a submenu, the default first (WL4)', async () => {
+    const t = await renderInspector(async (s) => {
+      await s.run('library.workholding.add', { values: strapClamp })
+    })
+    await t.user.click(within(t.section()).getByRole('button', { name: 'Add' }))
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Toe clamp' }))
+    const sub = await screen.findByRole('menu', { name: 'Toe clamp' })
+    expect(
+      within(sub)
+        .getAllByRole('menuitem')
+        .map((i) => i.getAttribute('aria-label') ?? i.textContent),
+    ).toEqual(['Strap clamp M8 (default)', 'Toe clamp (built-in)', 'Own item'])
+    // a type with one device stays a plain entry that places it
+    expect(screen.getByRole('menuitem', { name: 'Vise' })).not.toHaveAttribute('aria-haspopup')
+    await expectNoAxeViolations()
+    // the keyboard path (jsdom has no layout for the pointer's way into a submenu)
+    within(sub).getByRole('menuitem', { name: 'Strap clamp M8 (default)' }).focus()
+    await t.user.keyboard('{Enter}')
+    const id = t.s.library.list('workholding').items[0]!.id
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toMatchObject({
+        items: [{ kind: 'toeClamp', edge: 'vMin', libraryItemId: id }],
+      }),
+    )
+    // the row adds the device, the open item names it
+    const row = await within(t.section()).findByRole('button', { name: /^Toe clamp 1/ })
+    expect(row).toHaveTextContent('front X50 grip 10 top Z20 · Strap clamp M8')
+    const fields = within(t.section()).getByRole('group', { name: 'Item Toe clamp 1' })
+    expect(within(fields).getByText('Strap clamp M8 · from library')).toBeInTheDocument()
+  })
+
+  it('detaches on a size edit with a note, Undo follows the device again (WL4, Q138)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      const { id } = (await s.run('library.workholding.add', { values: strapClamp })) as {
+        id: string
+      }
+      await s.run('plan.workholding.set', {
+        planId,
+        setupId,
+        items: [{ kind: 'toeClamp', edge: 'vMin', libraryItemId: id }],
+      })
+    })
+    await t.user.click(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ }))
+    const fields = () => within(t.section()).getByRole('group', { name: 'Item Toe clamp 1' })
+    // a placement edit keeps the device
+    const grip = within(fields()).getByLabelText('Grip on the stock', { selector: 'input' })
+    await t.user.clear(grip)
+    await t.user.type(grip, '12{Enter}')
+    await waitFor(() =>
+      expect(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ })).toHaveTextContent(
+        'grip 12',
+      ),
+    )
+    expect(within(fields()).getByText('Strap clamp M8 · from library')).toBeInTheDocument()
+    expect(within(fields()).queryByText(/no longer follows/)).toBeNull()
+    // a size edit makes it an own item, and says so
+    const width = within(fields()).getByLabelText('Width', { selector: 'input' })
+    await t.user.clear(width)
+    await t.user.type(width, '40{Enter}')
+    expect(
+      await within(fields()).findByText('Edited here: no longer follows Strap clamp M8.'),
+    ).toBeInTheDocument()
+    expect(within(fields()).queryByText('Strap clamp M8 · from library')).toBeNull()
+    expect(t.s.plan(t.planId).setups[0]!.workholding![0]!.copyId).toBeUndefined()
+    await expectNoAxeViolations()
+    // one undo step: the device is back, the note gone
+    await t.bridge.call('history.undo', {})
+    expect(await within(fields()).findByText('Strap clamp M8 · from library')).toBeInTheDocument()
+    expect(within(fields()).queryByText(/no longer follows/)).toBeNull()
+  })
+
+  it('shows a changed device as "Library changed" with Update from library (WL4)', async () => {
+    let id = ''
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      id = ((await s.run('library.workholding.add', { values: strapClamp })) as { id: string }).id
+      await s.run('plan.workholding.set', {
+        planId,
+        setupId,
+        items: [{ kind: 'toeClamp', edge: 'vMin', libraryItemId: id }],
+      })
+      await s.run('library.workholding.update', {
+        id,
+        revision: 1,
+        values: { ...strapClamp, top: '22' },
+      })
+    })
+    await t.user.click(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ }))
+    const fields = () => within(t.section()).getByRole('group', { name: 'Item Toe clamp 1' })
+    expect(await within(fields()).findByText('Library changed')).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await t.user.click(within(fields()).getByRole('button', { name: 'Update from library' }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.libraryItem.update').at(-1)).toMatchObject({ planId: t.planId }),
+    )
+    await waitFor(() => expect(within(fields()).queryByText('Library changed')).toBeNull())
+    expect(within(fields()).getByLabelText('Top above Z0', { selector: 'input' })).toHaveValue('22')
+  })
+
+  it('warns under the grip when it is outside the device’s range (WL4, outOfRange)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      const { id } = (await s.run('library.workholding.add', { values: strapClamp })) as {
+        id: string
+      }
+      await s.run('plan.workholding.set', {
+        planId,
+        setupId,
+        items: [{ kind: 'toeClamp', edge: 'vMin', libraryItemId: id, grip: '20' }],
+      })
+    })
+    await t.user.click(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ }))
+    const grip = within(t.section()).getByLabelText('Grip on the stock', { selector: 'input' })
+    await waitFor(() =>
+      expect(grip).toHaveAccessibleDescription(/outside the grip range of Strap clamp M8/),
+    )
   })
 
   it('keeps Margin in a closed More row after the buttons (design review R10)', async () => {

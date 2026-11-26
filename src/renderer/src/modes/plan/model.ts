@@ -438,7 +438,7 @@ export interface PlanStale {
   }[]
   readonly libraryCopies: readonly {
     snapshotId: string
-    kind: 'stock' | 'tool' | 'machine'
+    kind: 'stock' | 'tool' | 'machine' | 'workholding'
     libraryItemId: string
     status: 'libraryChanged' | 'libraryRemoved' | 'libraryUnreadable'
     blocked: string | null

@@ -142,4 +142,35 @@ describe('Menu', () => {
     await screen.findByRole('menu')
     await expectNoAxeViolations()
   })
+  it('opens a submenu with ArrowRight, runs its item and closes both (DF121 WL4)', async () => {
+    const strap = vi.fn()
+    const { user } = renderUi(
+      <Menu
+        label="Add workholding"
+        items={[
+          {
+            label: 'Toe clamp',
+            sub: [
+              { label: 'Strap clamp M8 (default)', onSelect: strap },
+              { label: 'Own item', onSelect: () => {} },
+            ],
+          },
+          { label: 'Vise', onSelect: () => {} },
+        ]}
+      >
+        <Button>Add</Button>
+      </Menu>,
+    )
+    await user.tab()
+    await user.keyboard('{Enter}')
+    const trigger = screen.getByRole('menuitem', { name: 'Toe clamp' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    await user.keyboard('{ArrowRight}')
+    const sub = await screen.findByRole('menu', { name: 'Toe clamp' })
+    expect(sub).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.keyboard('{Enter}')
+    expect(strap).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
 })

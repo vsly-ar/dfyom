@@ -111,3 +111,46 @@
     animation: none;
   }
 }
+
+/* DF121 WL4: the device an item follows, under its name: muted text and the "Edit in library"
+   link under it (the inspector is too narrow for one row), as the plan's machine; a stale copy's state and "Update from library" under it */
+.device {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.deviceRow {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+}
+
+.deviceName {
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.why {
+  flex-basis: 100%;
+  color: var(--text-muted);
+}
+
+/* the detach note (Q138): an info line, no box (design review R11: boxes are for findings) */
+.note {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
