@@ -1109,13 +1109,15 @@ const operationUpdate = defineCommand({
     )
     if (
       roughingKeys.length > 0 &&
-      evaluateOperation(plan, op).ops.some((o) => o.kind === 'pocket' && o.roughing === true)
+      evaluateOperation(plan, op).ops.some(
+        (o) => (o.kind === 'pocket' || o.kind === 'profile') && o.roughing === true,
+      )
     )
       return fail('input.malformed', 'a roughing pocket has no finishing pass', {
         issues: roughingKeys.map((k) => ({
           path: ['strategy', k],
           rule: 'notForRoughing',
-          message: "not for a roughing pass: set the pocket's roughing wall in the design",
+          message: "not for a roughing pass: set its owner's roughing wall in the design",
         })),
         where,
       })

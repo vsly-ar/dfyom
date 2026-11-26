@@ -190,6 +190,14 @@ export const ProfileDtoSchema = z.object({
     /** Distances along the loop from its start point; replace `count` when present (v0.3). */
     positions: z.array(length()).optional(),
   }),
+  /** DF122 R4: an `inside`/`outside` profile's roughing pass (as a pocket's `roughingPass`). */
+  roughingPass: RoughingMarginsDtoSchema.optional(),
+  /** DF122 R4: a roughing profile (no removal of its own, no finishing pass, no tabs). */
+  roughing: z.literal(true).optional(),
+  /** DF122 R4: the roughing profile's owner. */
+  roughingOf: OperationIdSchema.optional(),
+  /** DF122 R4: the roughing profile's stock to leave, copied from its owner. */
+  leave: RoughingMarginsDtoSchema.optional(),
 })
 
 /**

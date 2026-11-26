@@ -1,5 +1,6 @@
-// Roughing passes in the Design inspectors (hardening DF122, slice R2): the "Roughing" accordion
-// of the Pocket and Pattern inspectors (right after the tool; closed while off with the summary
+// Roughing passes in the Design inspectors (hardening DF122, slices R2, R4): the "Roughing"
+// accordion of the Pocket, Profile (inside/outside, R4: a through profile's floor margin is its
+// Skin) and Pattern inspectors (right after the tool; closed while off with the summary
 // "Off", open while on with "Ø 8 mm · walls auto · floor 0"): the Roughing switch, then the
 // roughing pocket's own tool field (Auto / lock, the fit list, `dfm.roughingNoGain` under it),
 // Leave on walls ("Auto · 0.5 mm": the finishing allowance) and Leave on floor. Every edit is one
@@ -7,6 +8,7 @@
 // pocket's short inspector: breadcrumb, "Edited through Pocket 1", its name, its tool, the
 // margins read-only with "Edit in Pocket 1".
 // Doc: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2,
+// docs/modes/roughing.md#implementation-r4,
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
@@ -33,7 +35,7 @@ import { warningPath } from './OperationFields'
 import { ToolField } from './ToolField'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
 import {
-  floorPlaceholder,
+  floorView,
   marginArg,
   roughingSummary,
   wallPlaceholder,
@@ -44,7 +46,7 @@ import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign
 const r = designMessages.roughing
 const f = designMessages.features
 
-/** The `roughing` arg of `design.pocket.update` / `design.pattern.update`. */
+/** The `roughing` arg of `design.pocket.update` / `.profile.update` / `design.pattern.update`. */
 export type RoughingArgValue = boolean | { wall?: string; floor?: string }
 
 /**
@@ -61,9 +63,12 @@ export function RoughingGroup({
   send,
   rememberKey,
   info,
+  owner,
   level = 3,
 }: {
   part: DesignPart
+  /** R4: the owning pocket or profile (a through profile's floor margin is its Skin). */
+  owner?: OperationDTO | undefined
   margins: RoughingMarginsView | undefined
   /** The owned roughing pocket (absent while off, or until the update lands). */
   roughingOp: OperationDTO | undefined
@@ -86,22 +91,23 @@ export function RoughingGroup({
     : own.some((m) => m.severity !== 'note') || toolWarnings.some(countsAsWarning)
       ? 'warning'
       : undefined
+  const floor = floorView(part, owner)
   const margin = (which: 'wall' | 'floor') => {
     const path = `roughing.${which}`
     const dto = margins?.[which]
     return (
       <div key={path} data-feature-field={path}>
         <QuantityInput
-          label={which === 'wall' ? r.wall : r.floor}
+          label={which === 'wall' ? r.wall : floor.label}
           kind="length"
           defaultUnit={defaultUnit('length', part.units)}
           value={dto === undefined ? undefined : quantityOf(dto)}
-          placeholder={which === 'wall' ? wallPlaceholder(part) : floorPlaceholder()}
+          placeholder={which === 'wall' ? wallPlaceholder(part) : floor.placeholder}
           optional
           stepKind="small"
           stepKey={`${rememberKey}.${path}`}
-          info={which === 'wall' ? r.wallInfo : r.floorInfo}
-          illustration={<FieldIcon name={which === 'wall' ? 'allowance' : 'thickness'} />}
+          info={which === 'wall' ? r.wallInfo : floor.info}
+          illustration={<FieldIcon name={which === 'wall' ? 'allowance' : 'floorAllowance'} />}
           onCommit={(q, gesture) => send(marginArg(margins, which, q?.source), path, gesture)}
           onCancelGesture={cancelGesture}
           messages={messagesAt(path)}
@@ -116,7 +122,7 @@ export function RoughingGroup({
       collapsible
       rememberKey={`${rememberKey}.roughing.${on ? 'on' : 'off'}`}
       defaultOpen={on}
-      summary={roughingSummary(part, margins, roughingOp)}
+      summary={roughingSummary(part, margins, roughingOp, owner)}
       severity={problem}
       forceOpen={problem !== undefined}
       info={info}
@@ -160,6 +166,10 @@ export function RoughingInspector({
   margins: RoughingMarginsView
   warnings: DesignWarnings
 }): React.JSX.Element {
+  const floor = floorView(
+    part,
+    part.dto.operations.find((o) => o.id === owner.id),
+  )
   const call = useCommand()
   const [, select] = useDesignSelection()
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
@@ -170,13 +180,13 @@ export function RoughingInspector({
     return (
       <QuantityInput
         key={which}
-        label={which === 'wall' ? r.wall : r.floor}
+        label={which === 'wall' ? r.wall : floor.label}
         kind="length"
         defaultUnit={defaultUnit('length', part.units)}
         value={dto === undefined ? undefined : quantityOf(dto)}
-        placeholder={which === 'wall' ? wallPlaceholder(part) : floorPlaceholder()}
+        placeholder={which === 'wall' ? wallPlaceholder(part) : floor.placeholder}
         stepKind="small"
-        illustration={<FieldIcon name={which === 'wall' ? 'allowance' : 'thickness'} />}
+        illustration={<FieldIcon name={which === 'wall' ? 'allowance' : 'floorAllowance'} />}
         readOnly
         onCommit={() => {}}
       />
@@ -251,12 +261,12 @@ export function RoughingInspector({
   )
 }
 
-/** The owner a roughing pocket's inspector links to, and the margins it shows. */
+/** The owner a roughing pocket's or profile's inspector links to, and the margins it shows. */
 export function roughingOwnerOf(
   part: DesignPart,
   op: OperationDTO,
 ): { owner: { id: string; name: string }; margins: RoughingMarginsView } | undefined {
-  if (op.kind !== 'pocket' || op.roughing !== true) return undefined
+  if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.roughing !== true) return undefined
   const margins: RoughingMarginsView = op.leave ?? {}
   if (op.roughingOf !== undefined) {
     const owner = part.dto.operations.find((o) => o.id === op.roughingOf)

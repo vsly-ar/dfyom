@@ -225,8 +225,10 @@ export class SurfaceTable {
             below(op.on, op.depth.unwrap(), 'bottom', false)
           break
         case 'profile':
-          // a blind `on` groove has a floor (G1, docs/architecture/shapes.md#implementation-g1)
-          if (op.depth.isSome()) below(op.on, op.depth.unwrap(), 'floor', true)
+          // a blind `on` groove has a floor (G1, docs/architecture/shapes.md#implementation-g1);
+          // DF122 R4: a roughing profile's floor and tabs are its owner's (no targets of its own)
+          if (op.depth.isSome()) below(op.on, op.depth.unwrap(), 'floor', op.roughing !== true)
+          if (op.roughing === true) break
           on(op.on).map((e) => {
             // measured up from the opposite stock face along the profile's normal
             const d = e.direction

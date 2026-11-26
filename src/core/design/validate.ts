@@ -12,7 +12,14 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import { bottomEdgeFace, chamferEdgeKind, type Operation, type Part, type Shape } from './operation'
+import {
+  bottomEdgeFace,
+  chamferEdgeKind,
+  type Operation,
+  type Part,
+  type RoughingMargins,
+  type Shape,
+} from './operation'
 import { roundRadiusHolds } from './round'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
@@ -178,6 +185,39 @@ function checkTabPositions(
 }
 
 /**
+ * DF122: a roughing pass's stock to leave: the wall ≥ 0, the floor ≥ 0 (> 0 for a through
+ * profile's skin, `skin`) and under `depth` (none for a through pocket).
+ * Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+ */
+function checkRoughingPass(
+  c: Checker,
+  pass: RoughingMargins | undefined,
+  depth: { readonly exact: Quantity['exact']; readonly canonical: number } | undefined,
+  skin = false,
+): void {
+  if (pass?.wall !== undefined)
+    c.check(pass.wall.canonical >= 0, 'roughing.wall', 'nonNegative', 'must be 0 or more', {
+      min: 0,
+      actual: pass.wall.canonical,
+    })
+  if (pass?.floor !== undefined)
+    c.check(
+      (skin ? pass.floor.canonical > 0 : pass.floor.canonical >= 0) &&
+        (depth === undefined || pass.floor.exact.compare(depth.exact) < 0),
+      'roughing.floor',
+      'floorRange',
+      skin
+        ? 'must be more than 0 (the skin holds the part) and less than the thickness'
+        : 'must be 0 or more and less than the depth',
+      {
+        min: 0,
+        ...(depth === undefined ? {} : { max: depth.canonical }),
+        actual: pass.floor.canonical,
+      },
+    )
+}
+
+/**
  * Constraint issues of the operation at `index` (its `on` must be a valid target of the stock or
  * an earlier operation).
  */
@@ -230,21 +270,7 @@ export function operationIssues(
       if (depthOk && on !== undefined && op.through !== true)
         checkAboveBottom(c, 'depth', on, op.depth, T.exact)
       // DF122: a roughing pass's stock to leave: ≥ 0, the floor's under the depth (roughing.md)
-      const pass = op.roughingPass
-      if (pass?.wall !== undefined)
-        c.check(pass.wall.canonical >= 0, 'roughing.wall', 'nonNegative', 'must be 0 or more', {
-          min: 0,
-          actual: pass.wall.canonical,
-        })
-      if (pass?.floor !== undefined)
-        c.check(
-          pass.floor.canonical >= 0 &&
-            (op.through === true || pass.floor.exact.compare(op.depth.exact) < 0),
-          'roughing.floor',
-          'floorRange',
-          'must be 0 or more and less than the depth',
-          { min: 0, max: op.depth.canonical, actual: pass.floor.canonical },
-        )
+      checkRoughingPass(c, op.roughingPass, op.through === true ? undefined : op.depth)
       const f = op.floorRadius.exact
       if (op.shape.kind === 'named') {
         // a named shape's corners are its own: the floor fillet waits for G1 (design-v0.3.md)
@@ -341,6 +367,19 @@ export function operationIssues(
           )
       }
       checkTabPositions(c, op.tabs, facts, blind, op.tabs.width.canonical)
+      // DF122 R4: roughing for inside/outside profiles (a groove is the tool's width); a through
+      // profile's floor margin (its skin) under the stock extent
+      if (op.roughingPass !== undefined) {
+        c.check(!on, 'roughing', 'notForGroove', 'roughing is for inside and outside profiles', {
+          allowed: ['inside', 'outside'],
+        })
+        checkRoughingPass(
+          c,
+          op.roughingPass,
+          op.depth.isSome() ? op.depth.unwrap() : T,
+          op.depth.isNone(),
+        )
+      }
       const count = op.tabs.count
       const integer = count.exact.den === 1n
       c.check(integer, 'tabs.count', 'integer', 'must be a whole number', {

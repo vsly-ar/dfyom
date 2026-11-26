@@ -54,7 +54,12 @@ import { useOpenShape } from './useOpenShape'
 import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
 import { ToolField } from './ToolField'
 import { RoughingGroup, RoughingInspector, roughingOwnerOf } from './RoughingGroup'
-import { pocketRoughing, roughingOperationOf } from './roughing-view'
+import {
+  pocketRoughing,
+  profileRoughing,
+  roughingOperationOf,
+  takesRoughing,
+} from './roughing-view'
 import {
   defaultUnit,
   pendingApply,
@@ -617,10 +622,11 @@ function OperationInspector({
           ctx={ctx}
           tool={<ToolField part={part} op={op} warnings={opWarnings} />}
           roughing={
-            op.kind === 'pocket' ? (
+            takesRoughing(op) ? (
               <RoughingGroup
                 part={part}
-                margins={pocketRoughing(op)}
+                owner={op}
+                margins={op.kind === 'pocket' ? pocketRoughing(op) : profileRoughing(op)}
                 roughingOp={roughingOperationOf(part, op)}
                 warnings={warnings.warnings}
                 messagesAt={(path) =>
@@ -633,7 +639,7 @@ function OperationInspector({
                     }))
                 }
                 send={(roughing, path, gesture) => void send({ roughing }, path, gesture)}
-                rememberKey="pocket"
+                rememberKey={op.kind}
                 info={designMessages.roughing.groupInfo}
               />
             ) : undefined

@@ -165,6 +165,20 @@ export function nearestNeighbourOrder<T extends { readonly center: readonly [num
 }
 
 /**
+ * DF122 R4: the slot a roughing profile cuts: its owner's, a through profile's widened to the
+ * roughing tool's Ø + wall (its passes run from R + wall outward; the extra width is offcut or
+ * slug). A step keeps the owner's slot (beyond it stands the part), the wall margin shrinking when
+ * the tool is wider than the slot less the wall. Doc: docs/modes/roughing.md#implementation-r4
+ */
+export function roughingSlot(
+  owner: Pick<RegionProfileOperation, 'slotWidth' | 'through'>,
+  diameter: number,
+  wall: number,
+): number {
+  return owner.through ? Math.max(owner.slotWidth, diameter + wall) : owner.slotWidth
+}
+
+/**
  * A general profile (v0.3 T2 wiring) as `generateRegionProfile` takes it, in the face frame: K3's
  * chain from its start point, through cuts from the stock face (Z 0) down `throughDepth` (DF50) or
  * `thickness`, blind `on`
@@ -565,12 +579,40 @@ export function toGeneratorInputs(
             finishStepdown: s.finishStepdown,
             direction: s.direction,
           }
-          if (isAnalyticOperation(op))
+          // DF122 R4: a roughing profile and its owner's rest machining take the general
+          // generator (clipping); profiles without roughing keep theirs (goldens byte-equal)
+          const after = input.restAfter
+          const roughing = op.roughing === true
+          if (isAnalyticOperation(op) && !roughing && after === undefined)
             return {
               kind: 'profile',
               ...turned,
               inputs: [{ ...base, ...material, cutting: c, operation: op, strategy }],
             }
+          const plain = regionProfileOperation(op, stock)
+          const operation = roughing
+            ? {
+                // the owner's slot (a through profile's at least its own tool's width + wall, into
+                // the offcut), above its skin, no tabs (docs/modes/roughing.md#implementation-r4)
+                ...plain,
+                slotWidth: roughingSlot(plain, tool.diameter, s.finishAllowance),
+                depth: plain.depth - (input.roughingFloor ?? 0),
+                through: plain.through && input.roughingFloor === undefined,
+                tabs: { ...plain.tabs, positions: [] },
+                roughing: true as const,
+              }
+            : after === undefined
+              ? plain
+              : {
+                  ...plain,
+                  restAfter: {
+                    radius: after.radius,
+                    cornerRadius: after.cornerRadius,
+                    wall: after.wall,
+                    floorDepth: plain.depth - after.floor,
+                    slotWidth: roughingSlot(plain, 2 * after.radius, after.wall),
+                  },
+                }
           return {
             kind: 'regionProfile',
             ...turned,
@@ -579,7 +621,7 @@ export function toGeneratorInputs(
                 ...base,
                 ...material,
                 cutting: c,
-                operation: regionProfileOperation(op, stock),
+                operation,
                 // no plan parameter yet: the documented default 0.5 D (plan-v0.3.md § Profile)
                 strategy: { ...strategy, leadRadius: tool.diameter / 2 },
               },

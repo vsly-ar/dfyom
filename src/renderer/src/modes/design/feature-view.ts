@@ -52,10 +52,11 @@ export interface FeatureUnit {
   readonly end: number
 }
 
-/** DF122: `op` is the roughing pocket of the plain pocket `owner`. */
+/** DF122: `op` is the roughing pocket (R4: profile) of the plain pocket (profile) `owner`. */
 function isRoughingOf(op: OperationDTO, owner: OperationDTO | undefined): owner is OperationDTO {
   return (
-    op.kind === 'pocket' &&
+    (op.kind === 'pocket' || op.kind === 'profile') &&
+    op.kind === owner?.kind &&
     op.roughing === true &&
     owner !== undefined &&
     op.roughingOf === owner.id &&

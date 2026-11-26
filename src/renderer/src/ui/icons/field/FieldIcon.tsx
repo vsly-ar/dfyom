@@ -321,6 +321,14 @@ const ICONS = {
       <path data-accent="" d="M4 9H7" />
     </>
   ),
+  // DF122 R4: the allowance's drawing with the amber margin on the floor (vertical), for a
+  // roughing pass's Leave on floor / Skin (allowance is the wall's, horizontal)
+  floorAllowance: (
+    <>
+      <path d="M4 3V17H17M7 3V14H17" />
+      <path data-accent="" d="M12 14V17" />
+    </>
+  ),
   finishStepdown: (
     <>
       <path d="M2 5H8V12H13V14H18" />

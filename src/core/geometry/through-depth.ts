@@ -54,9 +54,10 @@ export const OPPOSITE: Readonly<Record<Direction, Direction>> = {
   '-y': '+y',
 }
 
-/** A profile that cuts through: no blind `on` depth. */
+/** A profile that cuts through: no blind `on` depth (a roughing profile never does). */
 export const isThroughGeometry = (op: OperationGeometry): op is Profile =>
-  op.kind === 'profile' && op.depth === undefined
+  // DF122 R4: a roughing profile stops above its skin (docs/modes/roughing.md#implementation-r4)
+  op.kind === 'profile' && op.depth === undefined && op.roughing !== true
 
 /** A pattern's through pocket (patterns P4). */
 const isThroughPocket = (op: OperationGeometry): op is Pocket =>
@@ -247,7 +248,7 @@ function clearsOf(
         return p.floorRadius > 0 ? port.offset(r, p.floorRadius).mapOr(undefined, (x) => x) : r
       }
       out.push({ id: o.id, top: -o.onZ, bottom: o.depth - o.onZ, region: placed(direction, own) })
-    } else if (o.kind === 'profile' && o.depth !== undefined) {
+    } else if (o.kind === 'profile' && o.depth !== undefined && o.roughing !== true) {
       const p = o
       const own = () => slotRegion(p, stock, port)
       out.push({ id: o.id, top: 0, bottom: o.depth, region: placed(direction, own) })

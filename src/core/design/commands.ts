@@ -68,11 +68,11 @@ import {
   type LinePath,
   type Operation,
   type Part,
-  type Pocket,
   type Shape,
 } from './operation'
 import {
   isOwnedRoughing,
+  type Roughable,
   ROUGHING_DESCRIPTION,
   RoughingArg,
   roughingFromArg,
@@ -223,6 +223,8 @@ const profileParams = {
       'Blind depth below on: a groove (side on) or a step/rebate (outside/inside); null = through',
     ),
   tabs: TabsArg.optional(),
+  // DF122 R4: inside/outside only (docs/modes/roughing.md#agent-api)
+  roughing: RoughingArg.optional().describe('As design.pocket.add roughing; not side on'),
 }
 
 /** A Line's paths and depth (engraved-patterns.md § Agent API, budget ≈ 1.4 K with update). */
@@ -839,9 +841,9 @@ export function refuseOwned(
         },
       )
   }
-  // DF122: a pocket's roughing pocket is edited through its owner
+  // DF122: a roughing pocket or profile (R4) is edited through its owner
   if (isOwnedRoughing(op)) {
-    const p = op as Pocket
+    const p = op as Roughable
     const ownerName =
       loaded.part.operations.find((o) => o.id === p.roughingOf)?.name ?? p.roughingOf!
     return roughingOwnedError(p, ownerName, where)
@@ -982,9 +984,19 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
   kind: 'profile',
   params: profileParams,
   required: ['shape'],
-  updateListed: { shape: listedAs('object', 'design.profile.add shape') },
+  updateListed: {
+    shape: listedAs('object', 'design.profile.add shape'),
+    roughing: z.unknown().describe('As design.pocket.add roughing'),
+  },
   build: (a, prev, { f, id, name }) => {
     const shape = f.placedShape(a.shape, a.anchor, prev?.shape)
+    // DF122 R4: the roughing setting (a roughing profile itself keeps its owner and margins); a
+    // switch to `on` without a roughing arg turns it off (a groove takes none)
+    const side = a.side ?? prev?.side ?? 'outside'
+    const pass =
+      side === 'on' && a.roughing === undefined
+        ? undefined
+        : roughingFromArg(a.roughing, prev?.roughingPass, (path, src) => f.q(path, 'length', src))
     return {
       kind: 'profile',
       id,
@@ -992,7 +1004,7 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
       generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
       on: a.on ?? prev?.on ?? STOCK_TOP,
       shape,
-      side: a.side ?? prev?.side ?? 'outside',
+      side,
       slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),
       depth: f.opt('depth', 'length', a.depth, prev?.depth),
       tabs: {
@@ -1012,6 +1024,10 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
               ? None
               : Some(a.tabs.positions.map((p, i) => f.q(`tabs.positions.${i}`, 'length', p))),
       },
+      ...(pass === undefined || prev?.roughing === true ? {} : { roughingPass: pass }),
+      ...(prev?.roughing === true ? { roughing: true as const } : {}),
+      ...(prev?.roughingOf === undefined ? {} : { roughingOf: prev.roughingOf }),
+      ...(prev?.leave === undefined ? {} : { leave: prev.leave }),
     }
   },
 }

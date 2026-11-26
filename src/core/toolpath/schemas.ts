@@ -252,6 +252,17 @@ export const RegionProfileInputSchema: z.ZodType<RegionProfileInput> = z.object(
       width: z.number(),
       thickness: z.number(),
     }),
+    // DF122 R4: a roughing profile; rest machining after it
+    roughing: z.literal(true).optional(),
+    restAfter: z
+      .object({
+        radius: z.number(),
+        cornerRadius: z.number(),
+        wall: z.number(),
+        floorDepth: z.number(),
+        slotWidth: z.number(),
+      })
+      .optional(),
   }),
   strategy: ProfileStrategySchema.extend({ leadRadius: z.number() }),
 })

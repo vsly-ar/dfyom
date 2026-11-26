@@ -31,7 +31,8 @@ import {
   type Seg3,
 } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
-import { tangentAt } from './region-pocket'
+import { REST_TOLERANCE, tangentAt, type RestAfter } from './region-pocket'
+import { clipRing, restArea, restLinkClear, type RestArea } from './region-rest'
 import { elementSeg, linkInside, loopRing, ringClosest, ringFrom, ringStart } from './region-rings'
 import { diskHitsGeneralBands, generalTabBands, type GeneralTabBand } from '../geometry/tab-bands'
 import { liftOverTabs } from './tabs'
@@ -67,6 +68,24 @@ export interface RegionProfileOperation {
     /** Up from the bottom of the cut (`onZ − depth`). */
     readonly thickness: number
   }
+  /**
+   * DF122 R4: a roughing profile (`inside`/`outside`): its level passes only, from the part side
+   * at R + `finishAllowance` (its wall margin) out to the slot's far side; no finishing pass. The
+   * caller gives it no tabs and stops it above its skin (`depth`).
+   */
+  readonly roughing?: true | undefined
+  /**
+   * DF122 R4: rest machining after a roughing profile of the same loop and slot: its tool radius,
+   * corner radius, wall margin and floor depth. At levels at or above its floor each level pass is
+   * clipped to what the roughing left (R3's `clipRing`); below it, and the finishing pass, are
+   * cut whole. Doc: docs/modes/roughing.md#implementation-r4
+   */
+  readonly restAfter?: ProfileRestAfter | undefined
+}
+
+/** DF122 R4: what a roughing profile cleared: `RestAfter` and the slot it cut (`roughingSlot`). */
+export interface ProfileRestAfter extends RestAfter {
+  readonly slotWidth: number
 }
 
 export interface RegionProfileStrategy extends ProfileStrategy {
@@ -253,7 +272,16 @@ export function generateRegionProfile(
       : sidePasses(port, L, op.side === 'outside', wallD, R, sw, a, spacing, climb)
   if (plan.isErr())
     return Err(plan.unwrapErr().withContext(where, { planOperationId: input.planOperationId }))
-  const passes = plan.unwrap()
+  // DF122 R4: a roughing profile has no finishing pass
+  const passes = op.roughing === true ? { ...plan.unwrap(), finish: [] } : plan.unwrap()
+  // DF122 R4: what an earlier roughing profile cleared, as tool-centre positions of this tool
+  let rest: RestArea | undefined
+  if (op.restAfter !== undefined && op.closed && !on) {
+    const r = profileRestInside(port, L, op.side === 'outside', op.restAfter, R)
+    if (r.isErr())
+      return Err(r.unwrapErr().withContext(where, { planOperationId: input.planOperationId }))
+    if (r.unwrap().pieces.length > 0) rest = restArea(r.unwrap())
+  }
 
   // tabs: bands across the slot at the given positions (none when the slot covers an opening)
   let bands: GeneralTabBand[] = []
@@ -393,6 +421,60 @@ export function generateRegionProfile(
       } else b.line(at(e0, z), cutting.plungeRate)
       emit(flat(path, z))
       fromStart = !fromStart
+    } else if (rest !== undefined && z >= op.onZ - op.restAfter!.floorDepth - 1e-9) {
+      // DF122 R4: a rest level: each pass clipped to what the roughing left, pass by pass from
+      // the offcut side; runs start in roughed air (a feed link through air, else a plunge)
+      for (const group of groups) {
+        const items: { segs: Seg[]; run: boolean }[] = []
+        for (const ring of group) {
+          const c = clipRing(port, ring.segs, rest, R)
+          if (c.kind === 'whole') items.push({ segs: ring.segs, run: false })
+          else for (const r of c.runs) items.push({ segs: [...r.segs], run: true })
+        }
+        while (items.length > 0) {
+          const here = b.position === undefined ? P0 : xy()
+          const dist = (it: { segs: Seg[]; run: boolean }) => {
+            if (!it.run) return ringClosest(it.segs, here)!.distance
+            const s = ringStart(it.segs)
+            return Math.hypot(s[0] - here[0], s[1] - here[1])
+          }
+          let bi = 0
+          items.forEach((it, i) => {
+            if (dist(it) < dist(items[bi]!)) bi = i
+          })
+          const it = items.splice(bi, 1)[0]!
+          const level = b.position !== undefined && Math.abs(b.position[2] - z) <= 1e-9
+          if (it.run) {
+            const s0 = ringStart(it.segs)
+            if (level && restLinkClear(port, rest, [], xy(), s0)) emit(lift(lineTo(s0, z)))
+            else {
+              goTo(s0)
+              b.line(at(s0, liftZ(s0, z)), cutting.plungeRate)
+            }
+            emit(lift(flat(it.segs, z)))
+            continue
+          }
+          const c = ringClosest(it.segs, here)!
+          const ring = ringFrom(it.segs, c.index, c.u)
+          const p0 = ringStart(ring)
+          if (level && canLink(xy(), p0, z)) emit(lift(lineTo(p0, z)))
+          else {
+            goTo(p0)
+            if (canRamp(ring, previous - z)) {
+              b.line(at(p0, liftZ(p0, previous)), cutting.plungeRate)
+              const { walked, lap } = walkRing(ring, (previous - z) / tan)
+              emit(lift(slope(walked, previous, z)))
+              emit(lift(flat(lap, z)))
+              continue
+            }
+            b.line(at(p0, liftZ(p0, z)), cutting.plungeRate)
+          }
+          emit(lift(flat(ring, z)))
+        }
+      }
+      if (b.position !== undefined) b.rapid(at(xy(), retract))
+      previous = z
+      continue
     } else {
       // closed: the first ring from the start point, entered by ramp along it or plunge
       const first = Math.max(
@@ -544,6 +626,44 @@ function sidePasses(
     straight: first - wallD,
     covers: !outside && slug.unwrap().pieces.length === 0,
   })
+}
+
+/**
+ * DF122 R4: the tool-centre positions (radius `R`) whose disc lies wholly in what a roughing
+ * profile of loop `L` cleared: its tool centres run from R' + wall to its slot's far side
+ * max(R', slot − R') (as `sidePasses` roughs it, the wall clamped to the slot), so it cleared that
+ * band grown by its flat radius on both sides; that region shrunk by `R` − `REST_TOLERANCE` (as
+ * the pocket's `restInside`). Empty when its tool does not fit (an inside opening too small).
+ */
+export function profileRestInside(
+  port: Region2dPort,
+  L: Region,
+  outside: boolean,
+  rough: ProfileRestAfter,
+  R: number,
+): AppResult<Region> {
+  const far = Math.max(rough.radius, rough.slotWidth - rough.radius)
+  const near = Math.min(rough.radius + rough.wall, far)
+  const flatR = rough.radius - rough.cornerRadius
+  const a = port.offset(L, outside ? -near : near)
+  if (a.isErr()) return a
+  const b = port.offset(L, outside ? -far : far)
+  if (b.isErr()) return b
+  // the band's outer and inner tool-centre boundaries
+  const [outer, inner] = outside ? [b.unwrap(), a.unwrap()] : [a.unwrap(), b.unwrap()]
+  if (outer.pieces.length === 0) return Ok(EMPTY)
+  const grown = port.offset(outer, -flatR)
+  if (grown.isErr()) return grown
+  const cut = inner.pieces.length === 0 ? Ok(EMPTY) : port.offset(inner, flatR)
+  if (cut.isErr()) return cut
+  const cleared =
+    cut.unwrap().pieces.length === 0
+      ? Ok(grown.unwrap())
+      : port.difference(grown.unwrap(), cut.unwrap())
+  if (cleared.isErr()) return cleared
+  return cleared.unwrap().pieces.length === 0
+    ? Ok(EMPTY)
+    : port.offset(cleared.unwrap(), R - REST_TOLERANCE)
 }
 
 /** Half-width of tool-centre travel in an `on` slot; slightly negative within the fit tolerance. */

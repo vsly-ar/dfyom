@@ -1206,6 +1206,11 @@ export const designMessages = {
     floor: 'Leave on floor',
     floorInfo:
       'Stock the roughing leaves on the floor. Empty = 0: the roughing’s flat end mill cuts the floor to size.',
+    /** R4: a through profile's floor margin. */
+    skin: 'Skin',
+    skinInfo:
+      'Material the roughing leaves above the bottom of the cut, so nothing comes loose before this profile cuts it with its tabs. Empty = 0.5 mm (0.02″), or the tabs’ thickness when that is more.',
+    skinSummary: (skin: string) => `skin ${skin}`,
     off: 'Off',
     auto: 'Auto',
     autoShort: 'auto',

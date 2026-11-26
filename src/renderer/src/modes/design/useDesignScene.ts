@@ -287,14 +287,18 @@ export function useDesignScene(): SceneProps {
   // roughing pocket has no faces of its own; roughing.md § UI, "Design viewport: nothing new")
   const roughingAlso = useMemo(() => {
     const op = part?.dto.operations.find((o) => o.id === shown)
-    if (op?.kind !== 'pocket') return null
+    // R4: a profile and its roughing profile likewise
+    if (op?.kind !== 'pocket' && op?.kind !== 'profile') return null
     const owner =
       op.roughing === true
         ? (op.roughingOf ?? (op.featureId === undefined ? undefined : `${op.featureId}_pocket`))
         : op.id
     const rough = part?.dto.operations.find(
       (o) =>
-        o.kind === 'pocket' && o.roughing === true && (o.id === op.id || o.roughingOf === op.id),
+        (o.kind === 'pocket' || o.kind === 'profile') &&
+        o.kind === op.kind &&
+        o.roughing === true &&
+        (o.id === op.id || o.roughingOf === op.id),
     )
     if (owner === undefined || rough === undefined) return null
     return new Set([owner, rough.id, ...(clones.selectedAlso ?? [])])

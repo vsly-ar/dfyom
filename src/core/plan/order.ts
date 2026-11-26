@@ -447,9 +447,12 @@ function centerOf(op: Operation, part: Part, port: Region2dPort | undefined): Ve
 
 type Profile = Extract<Operation, { kind: 'profile' }>
 
-/** A profile that cuts through the stock: any side without a depth (a step, DF53, is blind). */
+/**
+ * A profile that cuts through the stock: any side without a depth (a step, DF53, is blind; a
+ * roughing profile, DF122 R4, leaves a skin and frees nothing).
+ */
 export function isThroughProfile(op: Operation): op is Profile {
-  return op.kind === 'profile' && op.depth.isNone()
+  return op.kind === 'profile' && op.depth.isNone() && op.roughing !== true
 }
 
 const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])

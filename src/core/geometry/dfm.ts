@@ -255,7 +255,8 @@ export function parameterChecks(
     // `dfm.shapeHeavy`: a general shape's chords over the evaluation budget (G1, D29)
     // DF108: a pattern's roughing pocket leaves rest on purpose; the pattern's pocket reports the
     // shape's corners, width and size
-    const roughing = op.kind === 'pocket' && op.roughing === true
+    // DF122 R4: a roughing profile likewise (its owner reports corners, slot and tabs)
+    const roughing = (op.kind === 'pocket' || op.kind === 'profile') && op.roughing === true
     const heavy =
       (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op) && !roughing
         ? shapeHeavy(op)
@@ -290,11 +291,13 @@ export function parameterChecks(
         return [...lineChecks(op, own), ...tool]
       case 'profile':
         return [
-          ...(isAnalyticOperation(op)
-            ? profile(op, stock, lib, options.unitSystem, waste)
-            : options.region2d === undefined
-              ? []
-              : shapeProfile(op, stock, lib, options.unitSystem, measure, waste)),
+          ...(roughing
+            ? []
+            : isAnalyticOperation(op)
+              ? profile(op, stock, lib, options.unitSystem, waste)
+              : options.region2d === undefined
+                ? []
+                : shapeProfile(op, stock, lib, options.unitSystem, measure, waste)),
           ...reach(op, stock, lib, own, options.unitSystem),
           ...heavy,
           ...tool,
@@ -437,7 +440,7 @@ function ownTool(
       ),
     )
   // rest material needs a tool of the right type that enters the region (corners are their rule's)
-  const roughing = op.kind === 'pocket' && op.roughing === true
+  const roughing = (op.kind === 'pocket' || op.kind === 'profile') && op.roughing === true
   if (measure !== undefined && !roughing && (unfit === undefined || !NO_REST_RULES.has(unfit.rule)))
     out.push(...restMaterial(op, own, measure, waste))
   if (own.generalized && matching(own.tool, lib).length === 0) {
@@ -472,7 +475,12 @@ function roughingNoGain(
   own: OperationTool | undefined,
   tools: Readonly<Record<string, OperationTool>>,
 ): DfmWarning[] {
-  if (op.kind !== 'pocket' || op.roughing !== true || op.roughingOf === undefined) return []
+  if (
+    (op.kind !== 'pocket' && op.kind !== 'profile') ||
+    op.roughing !== true ||
+    op.roughingOf === undefined
+  )
+    return []
   const of = Object.hasOwn(tools, op.roughingOf) ? tools[op.roughingOf] : undefined
   if (own === undefined || of === undefined) return []
   if (own.tool.diameter > of.tool.diameter + TOOL_MATCH_TOLERANCE) return []
@@ -481,7 +489,7 @@ function roughingNoGain(
       'dfm.roughingNoGain',
       op,
       'tool',
-      `the roughing tool (${own.label}) is not larger than the pocket's (${of.label}): the pocket still cuts everything`,
+      `the roughing tool (${own.label}) is not larger than the ${op.kind}'s (${of.label}): the ${op.kind} still cuts everything`,
       {
         tool: own.label,
         toolDiameter: own.tool.diameter,
