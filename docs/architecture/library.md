@@ -2,7 +2,7 @@
 
 Status: implemented · Storage rule: [persistence.md](persistence.md#library-references) · Values: [quantities.md](quantities.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Terms: [glossary.md](../glossary.md) · UI: [ui-library-window.md](../conventions/ui-library-window.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.7 (models: 2.4)
 
-The library holds the user's **stock**, **tools** and **machines**. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding joins the library later. Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
+The library holds the user's **stock**, **tools** and **machines**. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding joins the library later ([workholding-library.md](../modes/workholding-library.md), draft). Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
 
 ## Common fields
 
