@@ -823,15 +823,17 @@
   gap: var(--space-2);
 }
 
+/* the On field: its select and notes full width like every other control, the pick toggle at
+   the end of its title row (design review R16: a grid column for the button left the select and
+   its note box about 26 px short) */
 .onRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1);
-  align-items: start;
+  position: relative;
 }
 
 .pickButton {
-  margin-top: var(--space-0-5);
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .statusSlot {
