@@ -254,7 +254,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await render(page, 'custom-size', 'u2')
   await inspector.getByRole('button', { name: 'Use 6.5 mm' }).click()
   await expect(inspector.getByRole('button', { name: 'Use 6.5 mm' })).toBeHidden()
-  await inspector.getByRole('radio', { name: 'Countersink' }).click()
+  await inspector.getByRole('radio', { name: 'Countersink', exact: true }).click()
   await expect(section).toHaveAccessibleName(/countersink Ø 7\.12 mm, 90°/)
   await expect(tools.getByRole('combobox', { name: 'Countersink' })).toBeVisible()
   await inspector

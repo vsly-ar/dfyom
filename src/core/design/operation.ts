@@ -378,6 +378,10 @@ export const DEFAULTS = {
   // hole feature (design-v0.4.md#parameters)
   holeDiameter: { mm: '6 mm', inch: '1/4"' },
   headSink: { mm: '0.2 mm', inch: '0.008"' },
+  // recessed countersink (hole-slots-and-round-corners.md#recessed-countersink-type): the recess
+  // is csDiameter + the ledge wide and this deep by default
+  recessLedge: { mm: '1 mm', inch: '0.04"' },
+  recessDepth: { mm: '2 mm', inch: '0.08"' },
   // stepped countersink terrace height (design-v0.4.md#stepped-countersink-f7-d41)
   csStepdown: { mm: '1 mm', inch: '1/32"' },
   // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): width (D45)

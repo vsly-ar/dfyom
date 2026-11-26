@@ -58,6 +58,12 @@ describe('hole view', () => {
       cbDepth: '3 mm',
     })
     expect(headDefaults(custom, 'countersink', 'mm', 4)).toEqual({ csDiameter: '10 mm' })
+    // H1: the core's 2 mm recess where it fits; in a 4 mm board half of the half, the cone in it
+    expect(headDefaults(custom, 'recessedCountersink', 'mm')).toEqual({ csDiameter: '12 mm' })
+    expect(headDefaults(custom, 'recessedCountersink', 'mm', 4)).toEqual({
+      csDiameter: '8 mm',
+      cbDepth: '1 mm',
+    })
   })
 
   it('lists the size fields of a type and bottom', () => {
@@ -70,6 +76,13 @@ describe('hole view', () => {
     ])
     expect(sizeFields({ type: 'countersink', bottom: 'through' })).toEqual([
       'diameter',
+      'csDiameter',
+      'csAngle',
+    ])
+    expect(sizeFields({ type: 'recessedCountersink', bottom: 'through' })).toEqual([
+      'diameter',
+      'cbDiameter',
+      'cbDepth',
       'csDiameter',
       'csAngle',
     ])

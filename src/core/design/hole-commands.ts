@@ -17,6 +17,7 @@ import {
   HOLE_TYPES,
   holeSpec,
   holeTableSizes,
+  recessDiameter,
   type Hole,
   type HoleHead,
   type HoleTableSizes,
@@ -38,8 +39,8 @@ const params = {
   diameter: Src.describe('Default from fastener, else 6 mm / 1/4"'),
   bottom: z.enum(DRILL_BOTTOMS).describe('Default through'),
   depth: Src.describe('From the face; not for through'),
-  cbDiameter: Src.describe('counterbore; default from fastener'),
-  cbDepth: Src.describe('counterbore; default head height + headSink'),
+  cbDiameter: Src.describe('counterbore, recess; default from fastener'),
+  cbDepth: Src.describe('counterbore, recess; default head height + headSink (recess 2 mm)'),
   csDiameter: Src.describe('countersink; default head Ø + 2 × headSink'),
   csAngle: Src.describe('countersink; default 90°'),
   csMethod: z
@@ -116,7 +117,7 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
           f.issue(
             k,
             'notForType',
-            `is only used with type ${k.startsWith('cb') ? 'counterbore' : 'countersink'}`,
+            `is only used with type ${k.startsWith('cb') ? 'counterbore' : 'countersink'}${k === 'csMethod' || k === 'csStepdown' ? '' : ' or recessedCountersink'}`,
           )
     }
     let head: HoleHead
@@ -149,6 +150,41 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
                   ? f.q('csStepdown', 'length', a.csStepdown)
                   : (oldStep ?? f.q('csStepdown', 'length', DEFAULTS.csStepdown[units])),
               ),
+      }
+    } else if (type === 'recessedCountersink') {
+      // H1 (hole-slots-and-round-corners.md § Recessed countersink type): the cone from the
+      // table; the recess is csDiameter + the ledge wide (refilled with the cone, and following
+      // it while it still has that default width) and 2 mm deep unless entered (never refilled:
+      // it is the user's)
+      const old = prevHead?.type === 'recessedCountersink' ? prevHead : undefined
+      if (a.csMethod === 'stepped' || a.csStepdown !== undefined)
+        f.issue(
+          a.csStepdown !== undefined ? 'csStepdown' : 'csMethod',
+          'notForType',
+          'a recessed countersink is cut with a chamfer mill (stepped: type countersink only)',
+        )
+      const csDiameter = size('csDiameter', old?.csDiameter)
+      const recessOf = (cs: Quantity | undefined): Quantity | undefined => {
+        // a size that failed to parse is undefined here; its own issue is reported
+        const r = cs === undefined ? undefined : recessDiameter(cs, units)
+        return r?.isOk() ? r.unwrap() : undefined
+      }
+      const oldRecess = old === undefined ? undefined : recessOf(old.csDiameter)
+      const oldDefault = oldRecess !== undefined && old!.cbDiameter.equals(oldRecess)
+      head = {
+        type,
+        cbDiameter:
+          a.cbDiameter !== undefined
+            ? f.q('cbDiameter', 'length', a.cbDiameter)
+            : old === undefined || oldDefault || (refill && table !== undefined)
+              ? (recessOf(csDiameter) ?? csDiameter)
+              : old.cbDiameter,
+        cbDepth:
+          a.cbDepth !== undefined
+            ? f.q('cbDepth', 'length', a.cbDepth)
+            : (old?.cbDepth ?? f.q('cbDepth', 'length', DEFAULTS.recessDepth[units])),
+        csDiameter,
+        csAngle: size('csAngle', old?.csAngle, DEFAULTS.chamferAngle[units]),
       }
     } else {
       notFor(['cbDiameter', 'cbDepth', 'csDiameter', 'csAngle', 'csMethod', 'csStepdown'])

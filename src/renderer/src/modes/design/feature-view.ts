@@ -314,6 +314,7 @@ const HOLE_TYPES: Readonly<Record<string, string>> = {
   simple: 'simple',
   counterbore: 'counterbore',
   countersink: 'countersink',
+  recessedCountersink: 'recessed countersink',
 }
 
 /**

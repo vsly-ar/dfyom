@@ -190,6 +190,45 @@ describe('hole inspector (U2)', () => {
     )
   })
 
+  it('recessed countersink: Recess labels, the cone on the recess floor, the Recess tool (H1)', async () => {
+    const { user, radio, hole1, setField } = await renderHole({ fastener: 'M5' })
+    await user.click(radio('Type', 'Recessed countersink'))
+    await waitFor(() => expect(hole1()['type']).toBe('recessedCountersink'))
+    // S1–S6: the recess fields first, then the countersink's, in the Sizes group
+    const sizes = within(insp()).getByRole('region', { name: 'Sizes' })
+    const order = ['Recess Ø', 'Recess depth', 'Countersink Ø', 'Countersink angle'].map((l) =>
+      within(sizes).getByLabelText(l, { selector: 'input' }),
+    )
+    const shown = within(sizes)
+      .getAllByRole('combobox')
+      .filter((el) => order.includes(el as HTMLInputElement))
+      .map(
+        (el) =>
+          ['Recess Ø', 'Recess depth', 'Countersink Ø', 'Countersink angle'][
+            order.indexOf(el as HTMLInputElement)
+          ],
+      )
+    expect(shown).toEqual(['Recess Ø', 'Recess depth', 'Countersink Ø', 'Countersink angle'])
+    expect(within(sizes).getByLabelText('Recess Ø', { selector: 'input' })).toHaveValue('12.6 mm')
+    expect(within(sizes).getByLabelText('Recess depth', { selector: 'input' })).toHaveValue('2 mm')
+    expect(within(sizes).queryByLabelText('Counterbore Ø', { selector: 'input' })).toBeNull()
+    expect(within(insp()).queryByRole('radiogroup', { name: 'Countersink method' })).toBeNull()
+    await waitFor(() =>
+      expect(section()).toHaveAccessibleName(
+        'Section: Ø 5.5 mm through; recess Ø 12.6 mm, 2 mm deep; countersink Ø 11.6 mm, 90°; M5 head 2.2 mm below the face.',
+      ),
+    )
+    const tools = within(insp()).getByRole('region', { name: 'Tools' })
+    await waitFor(() =>
+      expect(within(tools).getByRole('combobox', { name: 'Recess' })).toBeInTheDocument(),
+    )
+    expect(within(tools).getByRole('combobox', { name: 'Countersink' })).toBeInTheDocument()
+    // the recess may be as wide as the countersink (DF118: its floor is a construction surface)
+    await setField('Recess Ø', '11.6')
+    await waitFor(() => expect(src(hole1()['cbDiameter'])).toBe('11.6'))
+    await expectNoAxeViolations()
+  })
+
   it('stepped countersink: method, stepdown, the note, terraces in the section, shared tool (F7)', async () => {
     const { user, radio, hole1, field, setField } = await renderHole({
       fastener: 'M3',

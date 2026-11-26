@@ -12,6 +12,11 @@ export interface SegmentedOption<V extends string> {
   disabled?: boolean
   /** A small icon before the label (decorative: the label names the option; hole types, v0.4). */
   icon?: ReactNode
+  /**
+   * The full name when `label` is a shortened one (a fourth hole type, H1): the option's
+   * accessible name and its native tip.
+   */
+  fullLabel?: string
 }
 
 export interface SegmentedControlProps<V extends string> {
@@ -72,6 +77,7 @@ export function SegmentedControl<V extends string>({
           value={o.value}
           disabled={o.disabled ?? false}
           {...(tabbable ? {} : { tabIndex: -1 })}
+          {...(o.fullLabel === undefined ? {} : { 'aria-label': o.fullLabel, title: o.fullLabel })}
           className={styles['item']}
         >
           {o.icon !== undefined ? (

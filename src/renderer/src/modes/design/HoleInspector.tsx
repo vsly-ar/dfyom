@@ -1,5 +1,5 @@
 // The hole inspector (v0.4 U2): name, On and Position as a drilling's, Type (Simple / Counterbore
-// / Countersink), Fastener (size, purpose, fit, the sources of the filled sizes), Sizes with the
+// / Countersink / Recessed countersink, H1: its cb* fields read "Recess …"), Fastener (size, purpose, fit, the sources of the filled sizes), Sizes with the
 // section illustration drawn from the entered values (SketchView over the pure holeSection),
 // Tools (one tool field per owned operation, each with its lock) and a closed Defaults accordion
 // (head sink, a stepped countersink's stepdown). DF110 S4: Type and Fastener are one Type group. A countersink has a Method (Chamfer mill / Stepped, F7) and, stepped, a Stepdown;
@@ -79,12 +79,21 @@ const m = designMessages
 const t = m.inspector
 const h = m.features.hole
 
-const TYPES: readonly HoleType[] = ['simple', 'counterbore', 'countersink']
+const TYPES: readonly HoleType[] = ['simple', 'counterbore', 'countersink', 'recessedCountersink']
 const TYPE_ICON = {
   simple: 'hole-simple',
   counterbore: 'hole-counterbore',
   countersink: 'hole-countersink',
+  recessedCountersink: 'hole-recessed-countersink',
 } as const
+
+/** A size field's label; a recessed countersink's cb* fields are its recess (H1). */
+const fieldLabel = (field: HoleSizeField, type: HoleType): string =>
+  type === 'recessedCountersink' && field === 'cbDiameter'
+    ? h.recessDiameter
+    : type === 'recessedCountersink' && field === 'cbDepth'
+      ? h.recessDepth
+      : FIELD_LABEL[field]
 
 const FIELD_LABEL: Record<HoleSizeField, string> = {
   diameter: h.diameter,
@@ -318,7 +327,7 @@ export function HoleInspector({
     return (
       <div key={field} className={styles['holeField']} {...track(field)}>
         <QuantityInput
-          label={FIELD_LABEL[field]}
+          label={fieldLabel(field, hole.type)}
           kind={angle ? 'angle' : 'length'}
           defaultUnit={defaultUnit(angle ? 'angle' : 'length', units)}
           value={dto === undefined ? undefined : quantityOf(dto)}
@@ -477,7 +486,8 @@ export function HoleInspector({
                 label={h.type}
                 options={TYPES.map((type) => ({
                   value: type,
-                  label: h.types[type] ?? type,
+                  label: h.typesShort[type] ?? h.types[type] ?? type,
+                  ...(h.typesShort[type] === undefined ? {} : { fullLabel: h.types[type] ?? type }),
                   icon: <Icon name={TYPE_ICON[type]} size="sm" />,
                 }))}
                 value={hole.type}
@@ -584,7 +594,11 @@ export function HoleInspector({
                   part={part}
                   op={op}
                   warnings={opWarnings(op.id)}
-                  label={h.roleLabel(op.featureRole ?? op.kind)}
+                  label={h.roleLabel(
+                    hole.type === 'recessedCountersink' && op.featureRole === 'counterbore'
+                      ? 'recess'
+                      : (op.featureRole ?? op.kind),
+                  )}
                 />
                 {toolNote !== undefined && op.featureRole === 'countersink' ? (
                   <p className={styles['muted']} data-shared-tool={toolNote}>

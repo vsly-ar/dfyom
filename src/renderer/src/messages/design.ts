@@ -39,7 +39,7 @@ export const designMessages = {
     profile: 'Cuts along a shape’s outline: around it, inside it or on the line.',
     chamfer: 'Bevels the top edge of a drilling or round pocket.',
     line: 'Engraves grooves along shapes with a V-bit, at a constant or changing depth.',
-    hole: 'A hole for a screw or bolt: simple, counterbored or countersunk, sized from the fastener.',
+    hole: 'A hole for a screw or bolt: simple, counterbored or countersunk (also in a recess), sized from the fastener.',
     pattern: 'Many copies of a cell laid on a lattice over a face, cut as one pocket.',
     engraving: 'A decorative motif of V-bit grooves over a face, from a preset or your shapes.',
   } satisfies Record<OperationKind | 'hole' | 'pattern' | 'engraving', string>,
@@ -397,10 +397,14 @@ export const designMessages = {
     hole: {
       group: 'Hole',
       type: 'Type',
-      types: { simple: 'Simple', counterbore: 'Counterbore', countersink: 'Countersink' } as Record<
-        string,
-        string
-      >,
+      types: {
+        simple: 'Simple',
+        counterbore: 'Counterbore',
+        countersink: 'Countersink',
+        recessedCountersink: 'Recessed countersink',
+      } as Record<string, string>,
+      /** Short segment labels where four do not fit the inspector's width (the full name is the tip). */
+      typesShort: { recessedCountersink: 'Recessed' } as Record<string, string>,
       fastener: 'Fastener',
       custom: 'Custom',
       purpose: 'Purpose',
@@ -412,6 +416,9 @@ export const designMessages = {
       through: 'Through',
       cbDiameter: 'Counterbore Ø',
       cbDepth: 'Counterbore depth',
+      // a recessed countersink's cb* fields (hole-slots-and-round-corners.md § Inspector layout)
+      recessDiameter: 'Recess Ø',
+      recessDepth: 'Recess depth',
       csDiameter: 'Countersink Ø',
       csAngle: 'Countersink angle',
       headSink: 'Head sink',
@@ -456,8 +463,14 @@ export const designMessages = {
         `Sizes set from ${size} (${n === 1 ? '1 entered size' : `${n} entered sizes`} replaced)`,
       useTable: (source: string) => `Use ${source}`,
       roleLabel: (role: string) =>
-        ({ drill: 'Drill', counterbore: 'Counterbore', countersink: 'Countersink' })[role] ??
-        role[0]!.toUpperCase() + role.slice(1),
+        (
+          ({
+            drill: 'Drill',
+            counterbore: 'Counterbore',
+            countersink: 'Countersink',
+            recess: 'Recess',
+          }) as Record<string, string>
+        )[role] ?? role[0]!.toUpperCase() + role.slice(1),
     },
   },
 
