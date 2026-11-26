@@ -3,7 +3,7 @@
 // the plan store runs and follows): a threshold, Compare / Cancel, the statistics and the regions
 // with their causes; choosing a region selects its plan operation. No colour map yet.
 // Doc: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DIRECTION_LABEL, stockFaceDirection } from '../../../../core/geometry/face'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -18,6 +18,7 @@ import {
   Progress,
   QuantityInput,
   Select,
+  useReducedMotion,
 } from '../../ui'
 import { defaultUnit } from '../design/model'
 import { lengthQuantity } from '../design/reference-view'
@@ -81,6 +82,17 @@ export function DeviationPanel({
   const ref = references.find((r) => r.id === referenceId) ?? references[0]
   const running = run?.running
   const result = run?.result
+  // a result that arrives scrolls the group into view (design review R7: under the plan's Checks
+  // the regions were below the fold); a result already there when the panel mounts does not
+  const groupRef = useRef<HTMLElement>(null)
+  const shownResult = useRef(result)
+  const reduced = useReducedMotion()
+  useEffect(() => {
+    if (result === shownResult.current) return
+    shownResult.current = result
+    if (result === undefined) return
+    groupRef.current?.scrollIntoView?.({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
+  }, [result, reduced])
   const heading = (
     <span className={styles['deviationHeading']}>
       <Icon name="deviation" />
@@ -106,6 +118,7 @@ export function DeviationPanel({
 
   return (
     <InspectorGroup
+      ref={groupRef}
       title={m.title}
       heading={heading}
       info={m.info}
@@ -216,21 +229,6 @@ function DeviationResult({
           : m.summary(n, L(result.threshold), result.unexplained)}
       </p>
       {stale ? <p className={styles['muted']}>{m.outdated}</p> : null}
-      <dl className={styles['deviationStats']}>
-        {stats.map(([term, value]) => (
-          <div key={term} className={styles['calcRow']}>
-            <dt>{term}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {result.faces.length > 1
-        ? result.faces.map((f) => (
-            <p key={f.face} className={styles['deviationFace']}>
-              {m.face(faceName(f.face), L(f.p99), L(f.max))}
-            </p>
-          ))
-        : null}
       {result.regions.length > 0 ? (
         <ul className={styles['deviationList']} aria-label={m.regions}>
           {result.regions.map((r, i) => {
@@ -282,6 +280,30 @@ function DeviationResult({
         </ul>
       ) : null}
       {result.more ? <p className={styles['muted']}>{m.more(result.more)}</p> : null}
+      {/* R7: the numbers after the regions the user acts on, closed by default */}
+      <InspectorGroup
+        title={m.statistics}
+        level={4}
+        collapsible
+        rememberKey="deviation.statistics"
+        summary={m.statisticsSummary(L(s.max), L(s.p95))}
+      >
+        <dl className={styles['deviationStats']}>
+          {stats.map(([term, value]) => (
+            <div key={term} className={styles['calcRow']}>
+              <dt>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {result.faces.length > 1
+          ? result.faces.map((f) => (
+              <p key={f.face} className={styles['deviationFace']}>
+                {m.face(faceName(f.face), L(f.p99), L(f.max))}
+              </p>
+            ))
+          : null}
+      </InspectorGroup>
     </div>
   )
 }

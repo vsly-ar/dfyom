@@ -228,13 +228,35 @@ describe('deviation panel (U4)', () => {
   it('shows the statistics and the regions with causes; a region selects its operation', async () => {
     const t = await renderPlan()
     t.job.reply = { state: 'finished', outcome: { ok: true, value: resultOf(t.planId, t.ops) } }
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
     await t.user.click(within(t.panel()).getByRole('button', { name: 'Compare' }))
     const panel = within(t.panel())
+    // R7: a result that arrives scrolls the group into view
+    await waitFor(() => expect(scrolled.mock.contexts).toContain(t.panel()))
+    scrolled.mockClear()
     await waitFor(() =>
       expect(panel.getByRole('status')).toHaveTextContent(
         '5 regions over 0.1 mm · 1 without a known cause',
       ),
     )
+    // R7: summary, then the regions, then the statistics in a closed accordion
+    const statistics = panel.getByRole('region', { name: 'Statistics' })
+    const toggle = within(statistics).getByRole('button', { name: /^Statistics/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent('Statistics· max 0.8 mm · 95 % 0.005 mm')
+    expect(
+      panel.getByRole('list', { name: 'Regions' }).compareDocumentPosition(statistics) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      panel
+        .getByRole('status')
+        .compareDocumentPosition(panel.getByRole('list', { name: 'Regions' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(within(statistics).getByText('Mean')).not.toBeVisible()
+    await t.user.click(toggle)
+    expect(within(statistics).getByText('Mean')).toBeVisible()
     const statList = t.panel().querySelector('dl')!
     expect(statList).toHaveTextContent('Mean0.012 mm')
     expect(statList).toHaveTextContent('99 %0.04 mm')
@@ -275,6 +297,9 @@ describe('deviation panel (U4)', () => {
       within(within(t.panel()).getByRole('list', { name: 'Regions' })).getAllByRole('button'),
     )
     expect(again[0]).toHaveAttribute('aria-pressed', 'true')
+    // the kept result does not scroll again when the panel comes back
+    expect(scrolled.mock.contexts).not.toContain(t.panel())
+    scrolled.mockRestore()
     expect(within(t.panel()).queryByText(/^The plan changed since/)).toBeNull()
 
     // an edit makes the numbers outdated; they stay

@@ -25,6 +25,9 @@ export const deviationMessages = {
   /** "3 regions over 0.1 mm · 1 without a known cause" (design review R5). */
   summary: (n: number, threshold: string, unexplained: number) =>
     `${n === 1 ? '1 region' : `${n} regions`} over ${threshold}${unexplained > 0 ? ` · ${unexplained} without a known cause` : ''}`,
+  /** The closed accordion after the regions (design review R7) and its summary. */
+  statistics: 'Statistics',
+  statisticsSummary: (max: string, p95: string) => `max ${max} · 95 % ${p95}`,
   stat: {
     mean: 'Mean',
     p95: '95 %',
