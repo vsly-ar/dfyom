@@ -424,7 +424,7 @@ export function HoleInspector({
         {slotField('rotation')}
         <Field
           label={h.overall}
-          illustration={<FieldIcon name="length" />}
+          illustration={<FieldIcon name="slotLength" />}
           readOnly
           info={h.overallInfo}
         >

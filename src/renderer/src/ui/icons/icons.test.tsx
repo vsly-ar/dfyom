@@ -8,10 +8,20 @@ import type { IconPart } from './iconSet'
 describe('field illustrations', () => {
   it('has the shapes of the design system', () => {
     expect(FIELD_ICON_NAMES).toEqual([
+      // Q131: generic dimension glyphs (length, width and height … opening); slotLength is the
+      // slotted hole's Overall, the former length drawing
       'length',
+      'slotLength',
       // H3: a slotted hole's travel between its end centres
       'slotTravel',
       'width',
+      'height',
+      'topZ',
+      'depthBelow',
+      'thickness',
+      'overlap',
+      'overhang',
+      'opening',
       'depth',
       'stepdown',
       'corner',

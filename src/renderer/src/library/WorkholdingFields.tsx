@@ -4,6 +4,7 @@
 // clamp grip, vise max opening; closed with its summary while empty) and **Details** (stud or
 // thread, notes; closed). Steps follow inspector-layout.md S1: lengths `xy`, heights `depth`,
 // head Ø `small`. A built-in shows every field read-only (duplicate it to change the sizes).
+// Q131: each size takes the generic dimension illustration of what it measures (ui.md § Field).
 // Docs: docs/modes/workholding-library.md#library-window-tab, docs/conventions/inspector-layout.md
 import { useId, useState } from 'react'
 import { BASE_TYPES, SURFACE_TYPES } from '../../../core/library/workholding.dto'
@@ -149,13 +150,13 @@ export function WorkholdingFields({
         return [
           size('width', m.width, 'width'),
           size('length', m.length, 'length'),
-          size('top', m.top, 'clearance', { info: m.topInfo }),
+          size('top', m.top, 'topZ', { info: m.topInfo }),
         ]
       case 'vise':
         return [
           size('jawWidth', m.jawWidth, 'width'),
-          size('jawThickness', m.jawThickness, 'slotWidth'),
-          size('jawHeight', m.jawHeight, 'depth', { optional: true, info: m.jawHeightInfo }),
+          size('jawThickness', m.jawThickness, 'thickness'),
+          size('jawHeight', m.jawHeight, 'height', { optional: true, info: m.jawHeightInfo }),
           <Checkbox
             key="soft"
             label={m.soft}
@@ -167,13 +168,13 @@ export function WorkholdingFields({
       case 'screw':
         return [
           size('headDiameter', m.headDiameter, 'diameter'),
-          size('headHeight', m.headHeight, 'headSink', { info: m.headHeightInfo }),
+          size('headHeight', m.headHeight, 'height', { info: m.headHeightInfo }),
         ]
       case 'block':
         return [
           size('length', m.blockLength, 'length'),
           size('width', m.blockWidth, 'width'),
-          size('height', m.blockHeight, 'depth'),
+          size('height', m.blockHeight, 'height'),
         ]
       case 'base':
         return [
@@ -197,7 +198,7 @@ export function WorkholdingFields({
               {m.sacrificialHint}
             </span>
           </div>,
-          size('thickness', m.thickness, 'stock-thickness', {
+          size('thickness', m.thickness, 'thickness', {
             optional: true,
             info: m.thicknessInfo,
           }),
@@ -220,12 +221,12 @@ export function WorkholdingFields({
   const rangeFields =
     type === 'toeClamp'
       ? [
-          size('gripMin', m.gripMin, 'width', { optional: true, info: m.gripInfo }),
-          size('gripMax', m.gripMax, 'width', { optional: true }),
+          size('gripMin', m.gripMin, 'overlap', { optional: true, info: m.gripInfo }),
+          size('gripMax', m.gripMax, 'overlap', { optional: true }),
         ]
       : type === 'vise'
         ? [
-            size('maxOpening', m.maxOpening, 'slotWidth', {
+            size('maxOpening', m.maxOpening, 'opening', {
               optional: true,
               info: m.maxOpeningInfo,
             }),

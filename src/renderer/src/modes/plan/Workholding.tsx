@@ -6,8 +6,12 @@
 // devices (the default first, built-ins included; a submenu when a type has several), an item placed
 // from the library shows its device with "Edit in library", the detach note after a device edit,
 // "Library changed · Update from library" for a stale copy and the range warning under its field.
+// Q131 (design review, decided by the user): the generic dimension illustrations on every size
+// field, an open toe clamp's front view (`clampSection`) highlighting the focused size, the open
+// item renamed in place in its row (R12), a kind mark per base and surface type (R2), a text-only
+// "Arrange automatically" (R4) and its result line under the buttons (R13).
 // Doc: docs/conventions/ui.md#workholding, docs/modes/workholding-library.md#implementation-wl4
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   builtinWorkholding,
   isBuiltinWorkholding,
@@ -19,10 +23,12 @@ import {
   EDGES,
   itemSummary,
   nextItemId,
+  type ResolvedItem,
   type WorkholdingItemDTO,
 } from '../../../../core/plan/workholding/items'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { PlanWarning } from '../../../../core/plan/checks'
+import { planOpLabel } from '../../../../core/plan/labels'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
@@ -35,22 +41,26 @@ import {
   Button,
   ErrorMessage,
   Field,
+  FieldIcon,
   Icon,
   Menu,
   QuantityInput,
   SegmentedControl,
   Select,
   Switch,
+  type FieldIconName,
   type FieldMessage,
   type IconName,
   type MenuEntry,
   type MenuItem,
   InspectorGroup,
+  useApplyOnEnter,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { allows, planPart, snapshotName, type PlanStale } from './model'
+import { SketchView } from '../../viewport/SketchView'
+import { clampSection, type ClampSectionPart } from './clamp-section'
 import { usePlanCommand, usePlanState, usePlanStore } from './plan-store'
-import { NameField } from './PlanInspector'
 import styles from './Workholding.module.css'
 
 const m = planMessages.workholding
@@ -161,26 +171,25 @@ function allowed(kind: AddKind, items: readonly Item[]): boolean {
   return true
 }
 
-/** Each item kind's icon (v0.4-llm-first L1, ui.md § Icons (workholding)). */
-const KIND_ICON = {
-  toeClamp: 'toe-clamp',
-  vise: 'vise',
-  screw: 'screw',
-  block: 'block',
-  base: 'base',
-  surface: 'surface-hold',
-} as const satisfies Record<Item['kind'], IconName>
+/**
+ * Each Add entry's icon (v0.4-llm-first L1, ui.md § Icons (workholding)); the base and surface
+ * types with their kind mark (design review R2, Q131), the spoilboard the plain base.
+ */
 const ADD_ICON = {
   toeClamp: 'toe-clamp',
   vise: 'vise',
   screw: 'screw',
   block: 'block',
   spoilboard: 'base',
-  fixturePlate: 'base',
-  tape: 'surface-hold',
-  vacuum: 'surface-hold',
-  glue: 'surface-hold',
+  fixturePlate: 'fixture-plate',
+  tape: 'tape',
+  vacuum: 'vacuum',
+  glue: 'glue',
 } as const satisfies Record<AddKind, IconName>
+
+/** An item row's icon: its kind's, a base or surface by its type (as the Add menu). */
+const itemIcon = (item: Item): IconName =>
+  item.kind === 'base' || item.kind === 'surface' ? ADD_ICON[item.type] : ADD_ICON[item.kind]
 
 export function Workholding({
   doc,
@@ -203,6 +212,8 @@ export function Workholding({
   const [errors, setErrors] = useState<readonly Issue[]>([])
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
   const [arrangeError, setArrangeError] = useState<string | undefined>(undefined)
+  /** R13: the toe clamps the last "Arrange automatically" placed (cleared by the next edit). */
+  const [arranged, setArranged] = useState<number | undefined>(undefined)
   const units = doc.unitSystem
   const readOnly = !allows(plan, 'plan.workholding.set')
   const items = setup.workholding ?? []
@@ -225,6 +236,7 @@ export function Workholding({
       gesture === undefined ? undefined : { gesture },
     )
     setArrangeError(undefined)
+    setArranged(undefined)
     setErrors(r.ok ? [] : r.error.issues)
     setFailed(r.ok || r.error.issues.length > 0 ? undefined : r.error)
     return r
@@ -278,6 +290,12 @@ export function Workholding({
     })
     setErrors([])
     setFailed(undefined)
+    setArranged(
+      r.ok
+        ? (r.value as { items?: { kind: string }[] }).items?.filter((i) => i.kind === 'toeClamp')
+            .length
+        : undefined,
+    )
     // the core names the agent tool; the UI names its own button
     setArrangeError(
       r.ok
@@ -296,6 +314,7 @@ export function Workholding({
     })
     setErrors([])
     setFailed(undefined)
+    setArranged(undefined)
     setArrangeError(r.ok ? undefined : r.error.message)
   }
   const others = plan.setups.filter((s) => s.id !== setup.id)
@@ -359,6 +378,28 @@ export function Workholding({
       )
       .map((w) => ({ id: w.code, severity: 'soft' as const, text: sentence(w.message) }))
 
+  /** An item row's one-line summary, with the device of the user's library. */
+  const summaryOf = (n: number, item: Item) => {
+    const resolved = holding?.items[n]
+    return resolved === undefined
+      ? ''
+      : withDevice(itemSummary(resolved, summaryUnits), deviceLabel(plan.snapshots, item))
+  }
+  /** R13: what Arrange automatically did, and what the facing leaves under the clamps. */
+  const arrangedLine = () => {
+    if (arranged === undefined) return undefined
+    const uncut = new Set(
+      warnings
+        .filter((w) => w.code === 'plan.workholding.unmachined' && w.planOperationId !== undefined)
+        .map((w) => w.planOperationId!),
+    )
+    const names = setup.operations
+      .filter((o) => uncut.has(o.id))
+      .map((o) => planOpLabel(plan.design.part, { designOperationIds: o.designOperationIds }))
+    return m.arranged(arranged, names)
+  }
+  const arrangedText = arrangedLine()
+
   return (
     <InspectorGroup title={m.title} meta={m.count(items.length)} className={styles['section']}>
       {failed ? (
@@ -374,34 +415,51 @@ export function Workholding({
       ) : (
         <ul className={styles['items']} aria-label={m.listLabel(setup.name)}>
           {items.map((item, n) => {
-            const resolved = holding?.items[n]
             const expanded = open === item.id
             return (
               <li key={item.id} className={styles['item']} data-open={expanded || undefined}>
-                <button
-                  type="button"
-                  className={styles['row']}
-                  aria-expanded={expanded}
-                  aria-controls={`wh-${setup.id}-${item.id}`}
-                  onClick={() =>
-                    store
-                      .getState()
-                      .selectWorkholding(
-                        expanded ? undefined : { setupId: setup.id, itemId: item.id },
-                      )
-                  }
-                >
-                  <Icon name={KIND_ICON[item.kind]} className={styles['icon']} />
-                  <span className={styles['name']}>{item.name}</span>
-                  <span className={styles['summary']}>
-                    {resolved === undefined
-                      ? ''
-                      : withDevice(
-                          itemSummary(resolved, summaryUnits),
-                          deviceLabel(plan.snapshots, item),
-                        )}
-                  </span>
-                </button>
+                {expanded ? (
+                  // R12 (Q131): the open item is renamed in place in its row; the row stays the
+                  // toggle (a button under the row, its text the name and summary for assistive
+                  // tech), the name field sits over it
+                  <div className={styles['row']} data-open="">
+                    <button
+                      type="button"
+                      className={styles['rowToggle']}
+                      aria-expanded
+                      aria-controls={`wh-${setup.id}-${item.id}`}
+                      onClick={() => store.getState().selectWorkholding(undefined)}
+                    >
+                      <span className={styles['srOnly']}>
+                        {item.name} {summaryOf(n, item)}
+                      </span>
+                    </button>
+                    <Icon name={itemIcon(item)} className={styles['icon']} />
+                    <RowName
+                      name={item.name}
+                      label={m.rename(item.name)}
+                      readOnly={readOnly}
+                      onCommit={(name) => void edit(item.id, { name })}
+                    />
+                    <span className={styles['summary']} aria-hidden="true">
+                      {summaryOf(n, item)}
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles['row']}
+                    aria-expanded={false}
+                    aria-controls={`wh-${setup.id}-${item.id}`}
+                    onClick={() =>
+                      store.getState().selectWorkholding({ setupId: setup.id, itemId: item.id })
+                    }
+                  >
+                    <Icon name={itemIcon(item)} className={styles['icon']} />
+                    <span className={styles['name']}>{item.name}</span>
+                    <span className={styles['summary']}>{summaryOf(n, item)}</span>
+                  </button>
+                )}
                 {expanded ? (
                   <div
                     id={`wh-${setup.id}-${item.id}`}
@@ -409,12 +467,6 @@ export function Workholding({
                     aria-label={m.item(item.name)}
                     className={styles['fields']}
                   >
-                    <NameField
-                      label={m.name}
-                      name={item.name}
-                      readOnly={readOnly}
-                      onCommit={(name) => void edit(item.id, { name })}
-                    />
                     <DeviceLine
                       plan={plan}
                       item={item}
@@ -427,6 +479,8 @@ export function Workholding({
                     />
                     <ItemFields
                       item={item}
+                      resolved={holding?.items[n]}
+                      stockThickness={holding?.stock.thickness}
                       units={units}
                       readOnly={readOnly}
                       messages={(param) => [...issueAt(n, param), ...findingsAt(item, param)]}
@@ -462,8 +516,8 @@ export function Workholding({
           </Menu>
         )}
         {readOnly ? null : (
+          // R4 (Q131): text only, so it does not read as another item row
           <Button size="sm" variant="ghost" title={m.arrangeHint} onClick={() => void arrange()}>
-            <Icon name="toe-clamp" />
             {m.arrange}
           </Button>
         )}
@@ -479,6 +533,12 @@ export function Workholding({
       {arrangeError === undefined ? null : (
         <p role="alert" className={styles['error']} data-arrange-error>
           {sentence(arrangeError)}
+        </p>
+      )}
+      {arrangedText === undefined ? null : (
+        // R13 (Q131): what the action did, so the expected uncut findings do not read as a failure
+        <p role="status" className={styles['result']} data-arrange-result>
+          {arrangedText}
         </p>
       )}
       {items.length > 0 ? (
@@ -515,9 +575,29 @@ export function Workholding({
   )
 }
 
+/**
+ * Each size's illustration (Q131: the generic dimension glyphs, ui.md § Field): no two sizes of
+ * one kind share one; Top above Z0 and the vise's Stock above the jaws are both a top above a
+ * reference (never in one item).
+ */
+const SIZE_ICON: Partial<Record<string, FieldIconName>> = {
+  at: 'positionX',
+  width: 'width',
+  grip: 'overlap',
+  reach: 'overhang',
+  top: 'topZ',
+  protrusion: 'topZ',
+  jawLength: 'length',
+  jawThickness: 'thickness',
+  headDiameter: 'diameter',
+  length: 'length',
+}
+
 /** The open item's own fields by kind. */
 function ItemFields({
   item,
+  resolved,
+  stockThickness,
   units,
   readOnly,
   messages,
@@ -525,27 +605,49 @@ function ItemFields({
   onCancelGesture,
 }: {
   item: Item
+  /** The item in mm (the toe clamp's front view), undefined while the stock does not load. */
+  resolved: ResolvedItem | undefined
+  stockThickness: number | undefined
   units: UnitSystem
   readOnly: boolean
   messages: (param: string) => FieldMessage[]
   onCommit: (patch: object, gesture?: string) => void
   onCancelGesture: (gesture: string) => Promise<boolean>
 }): React.JSX.Element {
-  const length = (param: string, label: string, dto: Parameters<typeof quantityOf>[0]) => (
-    <QuantityInput
-      key={param}
-      label={label}
-      kind="length"
-      dense
-      stepKind="xy"
-      defaultUnit={defaultUnit('length', units)}
-      value={quantityOf(dto)}
-      readOnly={readOnly}
-      messages={messages(param)}
-      onCommit={(q, gesture) => onCommit({ [param]: q.source }, gesture)}
-      onCancelGesture={onCancelGesture}
-    />
-  )
+  // R12: the focused toe clamp size is the amber part of the front view
+  const [focused, setFocused] = useState<ClampSectionPart | undefined>(undefined)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const track = (param: string) =>
+    param === 'grip' || param === 'reach' || param === 'top'
+      ? {
+          'data-clamp-field': param,
+          onFocus: () => setFocused(param),
+          onBlur: (e: React.FocusEvent<HTMLElement>) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setFocused((f) => (f === param ? undefined : f))
+          },
+        }
+      : {}
+  const length = (param: string, label: string, dto: Parameters<typeof quantityOf>[0]) => {
+    const icon = SIZE_ICON[param]
+    return (
+      <div key={param} className={styles['size']} {...track(param)}>
+        <QuantityInput
+          label={label}
+          kind="length"
+          dense
+          stepKind="xy"
+          defaultUnit={defaultUnit('length', units)}
+          value={quantityOf(dto)}
+          readOnly={readOnly}
+          illustration={icon === undefined ? undefined : <FieldIcon name={icon} />}
+          messages={messages(param)}
+          onCommit={(q, gesture) => onCommit({ [param]: q.source }, gesture)}
+          onCancelGesture={onCancelGesture}
+        />
+      </div>
+    )
+  }
   const centre = (
     c: readonly [Parameters<typeof quantityOf>[0], Parameters<typeof quantityOf>[0]],
   ) => (
@@ -558,6 +660,7 @@ function ItemFields({
         defaultUnit={defaultUnit('length', units)}
         value={quantityOf(c[0])}
         readOnly={readOnly}
+        illustration={<FieldIcon name="positionX" />}
         messages={messages('center')}
         onCommit={(q, gesture) => onCommit({ center: [q.source, c[1].source] }, gesture)}
         onCancelGesture={onCancelGesture}
@@ -570,6 +673,7 @@ function ItemFields({
         defaultUnit={defaultUnit('length', units)}
         value={quantityOf(c[1])}
         readOnly={readOnly}
+        illustration={<FieldIcon name="positionY" />}
         messages={[]}
         onCommit={(q, gesture) => onCommit({ center: [c[0].source, q.source] }, gesture)}
         onCancelGesture={onCancelGesture}
@@ -577,9 +681,33 @@ function ItemFields({
     </>
   )
   switch (item.kind) {
-    case 'toeClamp':
+    case 'toeClamp': {
+      const clamp = resolved?.kind === 'toeClamp' ? resolved : undefined
       return (
-        <>
+        <div ref={rootRef} className={styles['kindFields']}>
+          {clamp === undefined || stockThickness === undefined ? null : (
+            <SketchView
+              sketch={clampSection(
+                {
+                  grip: clamp.grip,
+                  reach: clamp.reach,
+                  top: clamp.top,
+                  stockThickness,
+                  invalid: (['grip', 'reach', 'top'] as const).filter((p) =>
+                    messages(p).some((x) => x.severity === 'error'),
+                  ),
+                },
+                units,
+              )}
+              highlighted={focused}
+              onPartClick={(part) =>
+                rootRef.current
+                  ?.querySelector<HTMLElement>(`[data-clamp-field="${part}"] input`)
+                  ?.focus()
+              }
+              className={styles['sketch']}
+            />
+          )}
           <Field label={m.edge} readOnly={readOnly}>
             <Select
               options={EDGES.map((e) => ({ value: e, label: m.edges[e] }))}
@@ -595,8 +723,9 @@ function ItemFields({
           {length('grip', m.grip, item.grip)}
           {length('reach', m.reach, item.reach)}
           {length('top', m.top, item.top)}
-        </>
+        </div>
       )
+    }
     case 'vise':
       return (
         <>
@@ -748,5 +877,61 @@ function DeviceLine({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * R12 (Q131): the open item's name, renamed in place in its row (it was a Name field over the
+ * item's fields). A borderless text field that shows its box on hover and focus; Enter or leaving
+ * it commits (Enter also applies, as every field), Escape and an empty name put the name back.
+ * Read-only plans show the name as text.
+ */
+function RowName({
+  name,
+  label,
+  readOnly,
+  onCommit,
+}: {
+  name: string
+  label: string
+  readOnly: boolean
+  onCommit: (name: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(name)
+  const [seen, setSeen] = useState(name)
+  if (name !== seen) {
+    setSeen(name)
+    setDraft(name)
+  }
+  const applyOnEnter = useApplyOnEnter()
+  if (readOnly) return <span className={styles['name']}>{name}</span>
+  const commit = () => {
+    const v = draft.trim()
+    if (v.length > 0 && v !== name) onCommit(v)
+    else setDraft(name)
+  }
+  return (
+    <input
+      type="text"
+      className={styles['nameInput']}
+      aria-label={label}
+      value={draft}
+      maxLength={60}
+      spellCheck={false}
+      style={{ width: `${Math.max(draft.length, 6)}ch` }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          // commit and apply (apply.md#field-rule)
+          e.preventDefault()
+          commit()
+          applyOnEnter?.()
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          setDraft(name)
+        }
+      }}
+    />
   )
 }

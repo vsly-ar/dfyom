@@ -25,6 +25,7 @@ import {
   isDefaultRow,
   sizeText,
   WORKHOLDING_TYPE_ICON,
+  workholdingIcon,
 } from './workholding-view'
 import { NEW, type Listing } from './library-store'
 import styles from './LibraryWindow.module.css'
@@ -471,7 +472,7 @@ export function ItemTable({
                     >
                       {n === 0 && v !== undefined ? (
                         <span className={styles['typeIcon']} title={wh.types[v.type]}>
-                          <Icon name={WORKHOLDING_TYPE_ICON[v.type]} />
+                          <Icon name={workholdingIcon(v)} />
                         </span>
                       ) : null}
                       {n === 0 && i.kind === 'tool' ? (

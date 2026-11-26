@@ -496,6 +496,55 @@ export const ICON_SET = {
       { d: 'M1.5 11h13M3 14.5l3-3M7 14.5l3-3M11 14.5l3-3', a: true },
     ],
   },
+  // Q131 (design review R2, decided by the user): the shared base and surface-hold drawings with
+  // a small kind mark each, so the Add menu's rows differ; the spoilboard keeps the plain `base`.
+  // The fixture plate: two bolt holes in the plate
+  'fixture-plate': {
+    label: 'Fixture plate',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [4, 3.5, 8, 6, 0.5] },
+      { rect: [1.5, 9.5, 13, 4, 0.5], a: true },
+      { circle: [3.6, 11.5, 0.8], fill: true },
+      { circle: [12.4, 11.5, 0.8], fill: true },
+    ],
+  },
+  // tape: a strip under the stock's bottom face, on the table
+  tape: {
+    label: 'Tape',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [3, 3.5, 10, 7.5, 0.5] },
+      { d: 'M5 11V8.6h6V11' },
+      { d: 'M1.5 11h13M3 14.5l3-3M7 14.5l3-3M11 14.5l3-3', a: true },
+    ],
+  },
+  // vacuum: three suction holes through the stock's bottom face
+  vacuum: {
+    label: 'Vacuum',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [3, 3.5, 10, 7.5, 0.5] },
+      { circle: [5.5, 8.6, 0.8], fill: true },
+      { circle: [8, 8.6, 0.8], fill: true },
+      { circle: [10.5, 8.6, 0.8], fill: true },
+      { d: 'M1.5 11h13M3 14.5l3-3M7 14.5l3-3M11 14.5l3-3', a: true },
+    ],
+  },
+  // glue: a drop on the stock
+  glue: {
+    label: 'Glue',
+    group: 'cnc',
+    src: 'b22',
+    parts: [
+      { rect: [3, 3.5, 10, 7.5, 0.5] },
+      { d: 'M8 5.3c1 1.2 1.6 2 1.6 2.7a1.6 1.6 0 0 1-3.2 0c0-.7.6-1.5 1.6-2.7z' },
+      { d: 'M1.5 11h13M3 14.5l3-3M7 14.5l3-3M11 14.5l3-3', a: true },
+    ],
+  },
   // v0.4-llm-first L1: the tolerance band (dashed) and the compared profile leaving it
   deviation: {
     label: 'Deviation',

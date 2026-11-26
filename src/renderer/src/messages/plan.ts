@@ -314,6 +314,15 @@ export const planMessages = {
       `Generate the toolpaths of ${setup} first: the clamps go where no toolpath passes.`,
     arrangeHint:
       'Four toe clamps in the waste, clear of the generated toolpaths; replaces the toe clamps, keeps the other items.',
+    /**
+     * R13 (Q131): the result line after Arrange automatically, with the operations whose uncut
+     * findings the clamps caused: "4 toe clamps placed; Facing 1 leaves the area under them uncut."
+     */
+    arranged: (n: number, uncut: readonly string[]) =>
+      `${plural(n, 'toe clamp', 'toe clamps')} placed` +
+      (uncut.length === 0
+        ? '.'
+        : `; ${uncut.join(' and ')} ${uncut.length === 1 ? 'leaves' : 'leave'} the area under them uncut.`),
     // v0.4-llm-first X2-5: the agent's `copyFrom` (workholding.md#ui-summary)
     copyFrom: 'Copy from…',
     copyFromMenu: 'Copy workholding from',
@@ -350,6 +359,8 @@ export const planMessages = {
     remove: 'Remove',
     removeItem: (name: string) => `Remove ${name}`,
     name: 'Name',
+    /** R12 (Q131): the open item's name field in its row. */
+    rename: (name: string) => `Name of ${name}`,
     edge: 'Edge',
     edges: { uMin: 'Left', uMax: 'Right', vMin: 'Front', vMax: 'Back' },
     at: 'Position along the edge',

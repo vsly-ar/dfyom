@@ -62,6 +62,79 @@
   background: var(--bg-hover);
 }
 
+/* R12 (Q131): the open row is a box holding the toggle (under everything, the whole row), the
+   icon and summary (clicks pass through to the toggle) and the name field over it */
+div.row {
+  position: relative;
+  align-items: center;
+  cursor: default;
+}
+
+.rowToggle {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rowToggle:focus-visible {
+  outline-offset: -2px;
+}
+
+div.row > .icon,
+div.row > .summary {
+  position: relative;
+  pointer-events: none;
+}
+
+div.row > .name {
+  position: relative;
+}
+
+.nameInput {
+  position: relative;
+  /* as wide as the name (the width is set from it), so the summary keeps its room */
+  box-sizing: content-box;
+  max-width: 100%;
+  margin: -3px calc(-1 * var(--space-1));
+  padding: 2px var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.nameInput:hover {
+  border-color: var(--border-control);
+}
+
+.nameInput:focus {
+  border-color: var(--border-control);
+  background: var(--bg-field);
+}
+
+.nameInput:focus-visible {
+  outline-offset: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .icon {
   align-self: center;
   color: var(--text-muted);
@@ -91,6 +164,19 @@
 
 .remove {
   justify-self: start;
+}
+
+/* the open item's fields keep the group's grid (a wrapper only tracks focus for the front view) */
+.kindFields,
+.size {
+  display: contents;
+}
+
+/* R12 (Q131): the open toe clamp's front view, as the hole's section */
+.sketch {
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
 }
 
 .footer {
@@ -144,6 +230,14 @@
 
 .why {
   flex-basis: 100%;
+  color: var(--text-muted);
+}
+
+/* R13 (Q131): what Arrange automatically did; neutral, muted, gone with the next edit */
+.result {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
   color: var(--text-muted);
 }
 
