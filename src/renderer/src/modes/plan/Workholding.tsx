@@ -126,6 +126,7 @@ export function Workholding({
   )
   const [errors, setErrors] = useState<readonly Issue[]>([])
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
+  const [arrangeError, setArrangeError] = useState<string | undefined>(undefined)
   const units = doc.unitSystem
   const readOnly = !allows(plan, 'plan.workholding.set')
   const items = setup.workholding ?? []
@@ -139,6 +140,7 @@ export function Workholding({
       { planId: plan.id, setupId: setup.id, ...args },
       gesture === undefined ? undefined : { gesture },
     )
+    setArrangeError(undefined)
     setErrors(r.ok ? [] : r.error.issues)
     setFailed(r.ok || r.error.issues.length > 0 ? undefined : r.error)
     return r.ok
@@ -168,6 +170,24 @@ export function Workholding({
   const remove = (id: string) => {
     if (open === id) store.getState().selectWorkholding(undefined)
     void set({ items: items.filter((i) => i.id !== id).map((i) => ({ id: i.id, kind: i.kind })) })
+  }
+  /** W6: four toe clamps placed by the core; a refusal names every edge's room in one line. */
+  const arrange = async () => {
+    const r = await call('plan.workholding.set', {
+      planId: plan.id,
+      setupId: setup.id,
+      auto: 'toeClamps',
+    })
+    setErrors([])
+    setFailed(undefined)
+    // the core names the agent tool; the UI names its own button
+    setArrangeError(
+      r.ok
+        ? undefined
+        : r.error.issues[0]?.rule === 'noToolpaths'
+          ? m.arrangeNeedsToolpaths(setup.name)
+          : r.error.message,
+    )
   }
   const issueAt = (n: number, param: string): FieldMessage[] =>
     errors
@@ -286,7 +306,18 @@ export function Workholding({
             </Button>
           </Menu>
         )}
+        {readOnly ? null : (
+          <Button size="sm" variant="ghost" title={m.arrangeHint} onClick={() => void arrange()}>
+            <Icon name="toe-clamp" />
+            {m.arrange}
+          </Button>
+        )}
       </div>
+      {arrangeError === undefined ? null : (
+        <p role="alert" className={styles['error']} data-arrange-error>
+          {sentence(arrangeError)}
+        </p>
+      )}
       {items.length > 0 ? (
         <QuantityInput
           label={m.margin}

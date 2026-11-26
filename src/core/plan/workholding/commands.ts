@@ -5,7 +5,7 @@
  */
 import { z } from 'zod'
 import { issueSummary, type Issue } from '../../../shared/errors/app-error'
-import { fail, Ok } from '../../../shared/result'
+import { fail, Ok, type AppResult } from '../../../shared/result'
 import { defineCommand } from '../../commands/define'
 import { fieldContext } from '../../design/operation'
 import { NAME_MAX } from '../../library/item'
@@ -13,7 +13,7 @@ import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Quantity } from '../../quantity/quantity'
 import { PlanWarningSchema, type PlanWarning } from '../checks'
 import type { Services } from '../../commands/context'
-import { findPlanDTO, loadPlanDTO } from '../plan'
+import { findPlanDTO, loadPlanDTO, type LoadedPlan } from '../plan'
 import {
   lengthDTO,
   PlanIdSchema,
@@ -24,12 +24,14 @@ import {
 import { unknownSetup } from '../setups'
 import { checkAllowed } from '../status'
 import { baseOf } from '../../design/frozen-memo'
-import { planOperationInputs } from '../inputs'
+import { planOperationInputs, type PlanOperationInput } from '../inputs'
+import type { Toolpath } from '../../toolpath/model'
 import { planOpLabel } from '../labels'
-import { checkedWorkholdingFindings } from './findings'
+import { checkedWorkholdingFindings, checkOperations } from './findings'
 import {
   BASE_TYPES,
   defaultItemName,
+  EDGE_WORD,
   EDGES,
   edgeLength,
   ITEM_DEFAULTS,
@@ -44,8 +46,11 @@ import {
   type WorkholdingItemDTO,
   type WorkholdingKind,
 } from './items'
-import { footprintBounds } from './obstacles'
+import { footprintBounds, obstacles } from './obstacles'
 import { setupStock, setupWorkholding } from './setup'
+import { arrangeToeClamps, type EdgeRoom } from './arrange'
+import { wasteTest } from './held'
+import { setupZero } from '../alignment'
 
 const Src = z.string().min(1).max(256)
 
@@ -289,6 +294,9 @@ function projectLength(v: number, units: UnitSystem): string {
 
 const Vec2 = z.tuple([z.number(), z.number()])
 
+/** Automatic arrangements (W6); one for now. */
+const AUTO_KINDS = ['toeClamps'] as const
+
 export const workholdingSet = defineCommand({
   kind: 'document',
   name: 'plan.workholding.set',
@@ -301,6 +309,12 @@ export const workholdingSet = defineCommand({
     setupId: PlanRecordIdSchema,
     items: z.array(WorkholdingItemArgSchema).max(64).optional().describe(ITEMS_HELP),
     copyFrom: PlanRecordIdSchema.optional().describe("Instead of items: copy another setup's"),
+    auto: z
+      .enum(AUTO_KINDS)
+      .optional()
+      .describe(
+        'Instead of items: 4 toe clamps in the waste clear of the generated toolpaths (other items stay)',
+      ),
     margin: Src.optional().describe('Kept around every item; default 2 mm'),
   }),
   result: z.object({
@@ -333,10 +347,15 @@ export const workholdingSet = defineCommand({
     const planDto = found.unwrap()
     const setup = planDto.setups.find((s) => s.id === args.setupId)
     if (setup === undefined) return unknownSetup(args.setupId, 'setupId', where)
-    if (args.items !== undefined && args.copyFrom !== undefined)
-      return fail('input.malformed', 'items and copyFrom are exclusive', {
+    const given = (['items', 'copyFrom', 'auto'] as const).filter((k) => args[k] !== undefined)
+    if (given.length > 1)
+      return fail('input.malformed', `${given.join(' and ')} are exclusive`, {
         issues: [
-          { path: ['copyFrom'], rule: 'exclusive', message: 'give items or copyFrom, not both' },
+          {
+            path: [given[1]!],
+            rule: 'exclusive',
+            message: 'give one of items, copyFrom and auto',
+          },
         ],
         where,
       })
@@ -399,6 +418,18 @@ export const workholdingSet = defineCommand({
       else margin = lengthDTO(q.unwrap())
     }
     if (issues.length > 0) return fail('input.malformed', issueSummary(issues), { issues, where })
+    if (args.auto !== undefined) {
+      const auto = autoItems(baseOf(draft as ProjectDoc), loaded.unwrap(), setup, {
+        units,
+        services: ctx.services,
+        fresh,
+        ...(margin === undefined
+          ? {}
+          : { margin: Quantity.fromDTO(margin).mapOr(0, (q) => q.canonical) }),
+      })
+      if (auto.isErr()) return auto
+      items = auto.unwrap()
+    }
     if (items !== undefined) {
       const invariant = itemIssues(items.map(resolveItem), size).map((i) => ({
         ...i,
@@ -473,4 +504,121 @@ function setFindings(
       }),
     ),
   }
+}
+
+/** "front 0 (centres X20–60)" for the refusal message. */
+function roomText(r: EdgeRoom, units: UnitSystem): string {
+  const axis = r.edge === 'uMin' || r.edge === 'uMax' ? 'Y' : 'X'
+  const v = (x: number) => lengthText(x, units === 'mm' ? 'mm' : 'in')
+  const free =
+    r.free.length === 0
+      ? 'no room'
+      : `centres ${r.free.map(([a, b]) => (a === b ? `${axis}${v(a)}` : `${axis}${v(a)}–${v(b)}`)).join(', ')}`
+  return `${EDGE_WORD[r.edge]} ${r.fits} (${free})`
+}
+
+type Length = ReturnType<typeof lengthDTO>
+
+/**
+ * W6 `auto: 'toeClamps'`: the setup's items with its toe clamps replaced by four placed in the
+ * waste clear of its toolpaths (the current ones, else each operation's last). Refused with
+ * `plan.workholding`: a vise holds the setup (`vise`), an operation was never generated
+ * (`noToolpaths`), or no pair of opposite edges takes two clamps each (`noRoom`, every edge's
+ * room in the message).
+ * Doc: docs/modes/workholding.md#automatic-arrangement-w6
+ */
+function autoItems(
+  doc: ProjectDoc,
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  o: { units: UnitSystem; services: Services; fresh: () => string; margin?: number },
+): AppResult<WorkholdingItemDTO[]> {
+  const where = 'plan.workholding.set'
+  const { units, services } = o
+  const kept = (setup.workholding ?? []).filter((i) => i.kind !== 'toeClamp')
+  if (kept.some((i) => i.kind === 'vise'))
+    return fail(
+      'plan.workholding',
+      `${setup.name} is held by a vise: remove it first to arrange toe clamps`,
+      { issues: [{ path: ['auto'], rule: 'vise', message: 'the setup has a vise' }], where },
+    )
+  const port = services.region2d
+  const inputs = planOperationInputs(doc, plan.dto.id, undefined, port)
+  if (inputs.isErr()) return inputs
+  const cache = services.toolpaths
+  const pairs: { input: PlanOperationInput; toolpath: Toolpath }[] = []
+  const missing: string[] = []
+  for (const input of inputs.unwrap()) {
+    if (input.setup.id !== setup.id) continue
+    const toolpath =
+      cache?.get(input.inputHash) ?? cache?.last(input.planId, input.planOperationId)?.toolpath
+    if (toolpath !== undefined) pairs.push({ input, toolpath })
+    else
+      missing.push(
+        planOpLabel(plan.dto.design.part, {
+          designOperationIds: input.operations.map((x) => x.id),
+        }),
+      )
+  }
+  if (missing.length > 0)
+    return fail(
+      'plan.workholding',
+      `Generate the toolpaths of ${setup.name} first (plan_toolpath_generate): the clamps go where no toolpath passes; not generated: ${missing.join(', ')}`,
+      { issues: [{ path: ['auto'], rule: 'noToolpaths', message: missing.join(', ') }], where },
+    )
+  const h = setupWorkholding(setup, plan.stock)
+  const margin = o.margin ?? h.margin
+  const ctxL = fieldContext('length', units)
+  const parse = (src: string): Length | undefined =>
+    Quantity.parse(src, ctxL).mapOr(undefined, (q: Quantity) => lengthDTO(q))
+  const dto = {
+    width: parse(ITEM_DEFAULTS.width[units])!,
+    grip: parse(ITEM_DEFAULTS.grip[units])!,
+    reach: parse(ITEM_DEFAULTS.reach[units])!,
+    top: parse(ITEM_DEFAULTS.top[units])!,
+  }
+  const mm = (l: Length) => Quantity.fromDTO(l).mapOr(0, (q) => q.canonical)
+  const clamp = { width: mm(dto.width), grip: mm(dto.grip), reach: mm(dto.reach), top: mm(dto.top) }
+  const waste = wasteTest(plan, setup, port, margin)
+  // with waste on this face the grip stays in it, where a facing goes round the clamps (WH-D)
+  const cutting = waste === undefined ? pairs : pairs.filter((p) => p.input.kind !== 'facing')
+  const arrangement = arrangeToeClamps({
+    stock: h.stock,
+    operations: checkOperations(cutting, setupZero(plan, setup, port)),
+    clearanceZ: h.clearance,
+    margin,
+    clamp,
+    others: obstacles(kept.map(resolveItem), h.stock),
+    ...(waste === undefined ? {} : { inWaste: waste }),
+    step: units === 'mm' ? 1 : 25.4 / 16,
+  })
+  if (!('clamps' in arrangement))
+    return fail(
+      'plan.workholding',
+      `Four toe clamps do not fit in ${setup.name} clear of the toolpaths${waste === undefined ? '' : ' and in the waste'} (two on each of two opposite edges; clamps per edge: ${arrangement.edges.map((r) => roomText(r, units)).join('; ')}): place them by hand (items), or hold the stock with a vise, screws or tape`,
+      {
+        issues: arrangement.edges.map((r) => ({
+          path: ['auto'],
+          rule: 'noRoom',
+          message: roomText(r, units),
+        })),
+        where,
+      },
+    )
+  const taken = kept.map((i) => i.name)
+  const at = (v: number): Length | undefined =>
+    parse(
+      units === 'mm'
+        ? `${Math.round(v * 1000) / 1000} mm`
+        : `${Math.round((v / 25.4) * 10000) / 10000}"`,
+    )
+  const clamps: WorkholdingItemDTO[] = []
+  for (const c of arrangement.clamps) {
+    const name = defaultItemName('toeClamp', taken)
+    taken.push(name)
+    const a = at(c.at)
+    if (a === undefined) continue
+    clamps.push({ id: o.fresh(), name, kind: 'toeClamp', edge: c.edge, at: a, ...dto })
+  }
+  return Ok([...kept.map((i) => plainCopy(i)), ...clamps])
 }

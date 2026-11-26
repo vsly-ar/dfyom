@@ -226,6 +226,13 @@ export const ERROR_CODES = {
     userMessage: 'The tool or the cutting values do not fit this operation.',
     retryable: false,
   },
+  // Automatic workholding arrangement (v0.4-llm-first W6): docs/modes/workholding.md#automatic-arrangement-w6
+  'plan.workholding': {
+    severity: 'warn',
+    userMessage:
+      'The clamps cannot be arranged automatically here: place them by hand or hold the stock another way.',
+    retryable: false,
+  },
   // Safe links (hardening DF64): docs/modes/safe-links.md#verification-on-the-virtual-machine
   'plan.links.collision': {
     severity: 'error',

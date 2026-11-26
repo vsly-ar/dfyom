@@ -62,6 +62,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'plan.alignment': EXIT.other,
   'plan.aid': EXIT.other,
   'plan.check': EXIT.other,
+  'plan.workholding': EXIT.other,
   'post.noMachine': EXIT.other,
   'plan.links.collision': EXIT.other,
 }

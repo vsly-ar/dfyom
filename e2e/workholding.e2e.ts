@@ -236,3 +236,95 @@ test('held pieces (W5): an outline without tabs comes loose under clamps, tape h
   await render(page, 'w5-held-pieces')
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+test('arrange automatically (W6): four toe clamps in the waste, clear of the toolpaths', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  // the user's case: a pocket and an outline 200 × 80 with tabs, a 6 mm flat long enough
+  await hardwoodPlan(page, async (partId) => {
+    await bridgeCall(page, 'library.tool.add', {
+      values: {
+        name: 'Long flat 6',
+        type: 'flatEndMill',
+        diameter: '6',
+        fluteLength: '45',
+        overallLength: '80',
+        fluteCount: '2',
+        toolMaterial: 'carbide',
+        presets: [
+          {
+            name: 'Hardwood',
+            materialClass: 'hardwood',
+            spindleSpeed: '18000',
+            feedRate: '1500',
+            plungeRate: '300',
+            stepdown: '2',
+            stepover: '3',
+          },
+        ],
+      },
+    })
+    await bridgeCall(page, 'design.pocket.add', {
+      partId,
+      on: 'facing1.floor',
+      shape: { kind: 'rectangle', center: ['125', '50'], length: '150', width: '50' },
+      depth: '10',
+    })
+    await bridgeCall(page, 'design.profile.add', {
+      partId,
+      shape: { kind: 'rectangle', center: ['125', '50'], length: '200', width: '80' },
+      tabs: { count: '4', width: '8', thickness: '3' },
+    })
+  })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const selectTop = async () => {
+    if (!(await inspector.getByRole('heading', { name: 'Setup', exact: true }).isVisible()))
+      await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  }
+  await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const section = inspector.getByRole('region', { name: /^Workholding/ })
+  const arrange = section.getByRole('button', { name: 'Arrange automatically' })
+
+  // without toolpaths the core says what to do first
+  await arrange.click()
+  await expect(section.getByRole('alert')).toContainText('Generate the toolpaths of Top first')
+  await arrange.scrollIntoViewIfNeeded()
+  await render(page, 'w6-arrange-refused')
+
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
+  await selectTop()
+  await arrange.click()
+  await expect(section).toContainText('4 items')
+  await expect(section.getByRole('alert')).toHaveCount(0)
+  const rows = [
+    [1, 'left Y25 grip 10 top Z25'],
+    [2, 'left Y75 grip 10 top Z25'],
+    [3, 'right Y25 grip 10 top Z25'],
+    [4, 'right Y75 grip 10 top Z25'],
+  ] as const
+  for (const [n, summary] of rows)
+    await expect(
+      section.getByRole('button', { name: new RegExp(`^Toe clamp ${n}`) }),
+    ).toContainText(summary)
+  await expect(inspector.getByLabel('Clearance height', { exact: true })).toHaveValue('27 mm')
+
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
+  await selectTop()
+  const checks = inspector.getByRole('region', { name: 'Setup checks' })
+  await expect(checks).not.toContainText('hits Toe clamp')
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await arrange.scrollIntoViewIfNeeded()
+  await render(page, 'w6-arrange')
+  expect(dfyom.rendererErrors).toEqual([])
+})
