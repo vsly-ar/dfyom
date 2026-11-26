@@ -307,7 +307,7 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await createShape(wallBand, 'Outlines')
 
   // ── Top: the cavity pocket and the outline profile with tabs, at the sections' corners ───
-  /** Picks shape `name` (the `nth` of that name: two sections at one depth share it). */
+  /** Picks shape `name` (the `nth` of that name: the steps' offsets share theirs). */
   const pickShape = async (name: string, nth = 0) => {
     const picker = inspector.getByRole('combobox', { name: 'Shape', exact: true })
     await picker.click()
@@ -333,19 +333,19 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
     await navigator.getByRole('button', { name: 'Add', exact: true }).click()
     await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
   }
+  // the loop kind names the section's shape (X2-4: the outline and the cavity read apart)
   const topName = `Section ${topBand} mm`
-  const bottomName = `Section ${wallBand} mm`
+  const bottomName = `Section ${wallBand} mm outline`
 
   await addFromMenu('Pocket')
   await expect(heading('Pocket 1')).toBeVisible()
-  // the cavity: the second shape of that name (X2 finding: both sections are named alike)
-  await pickShape(topName, 1)
+  await pickShape(`${topName} cavity`)
   await anchorAt('Front left', ...X1_VALUES.cavityAt)
   await setField(inspector, 'Depth', String(cavityFloor))
 
   await addFromMenu('Profile')
   await expect(heading('Profile 1')).toBeVisible()
-  await pickShape(topName)
+  await pickShape(`${topName} outline`)
   await anchorAt('Front left', ...X1_VALUES.outlineAt)
   await inspector
     .getByRole('radiogroup', { name: 'Side' })
