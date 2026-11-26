@@ -455,6 +455,9 @@ export const planMessages = {
     /** With several setups, one list per setup. */
     setupListLabel: (setup: string) => `Plan operations of ${setup} in machining order`,
     noTool: 'No tool',
+    /** DF122: the owner's "rest" chip after its roughing (roughing.md § UI) and its tip. */
+    restChip: 'rest',
+    restTip: (roughing: string) => `Cuts only what ${roughing} left`,
     moveUpItem: 'Move up',
     moveDownItem: 'Move down',
     actions: (name: string) => `Actions for ${name}`,

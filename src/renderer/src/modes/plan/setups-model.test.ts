@@ -9,6 +9,7 @@ import {
   isError,
   isWarning,
   operationStep,
+  roughingBefore,
   setupCorner,
   setupExportBlocked,
 } from './model'
@@ -93,5 +94,36 @@ describe('finding severity', () => {
     const f = (severity: PlanWarning['severity']) => ({ severity }) as PlanWarning
     expect([f('error'), f('warning'), f('info')].map(isWarning)).toEqual([false, true, false])
     expect([f('error'), f('warning'), f('info')].map(isError)).toEqual([true, false, false])
+  })
+})
+
+describe('roughingBefore (DF122 R2: the "rest" chip)', () => {
+  const part = {
+    operations: [
+      { id: 'pocket1_roughing', kind: 'pocket', roughing: true, roughingOf: 'pocket1' },
+      { id: 'pocket1', kind: 'pocket', roughingPass: {} },
+      { id: 'p_roughing', kind: 'pocket', roughing: true, featureId: 'p', featureRole: 'roughing' },
+      { id: 'p_pocket', kind: 'pocket', featureId: 'p', featureRole: 'pocket' },
+      { id: 'pocket2', kind: 'pocket' },
+    ],
+  }
+  const withPart = (setups: SetupDTO[]) => ({ setups, design: { part } }) as unknown as PlanDTO
+  const op = (p: PlanDTO, id: string) =>
+    p.setups.flatMap((x) => x.operations).find((o) => o.id === id)!
+
+  it('names the roughing that comes earlier in the machining order, a pocket’s or a pattern’s', () => {
+    const p = withPart([
+      setup('a', ['pocket1_roughing', 'p_roughing']),
+      setup('b', ['pocket1', 'p_pocket', 'pocket2']),
+    ])
+    expect(roughingBefore(p, op(p, 'pocket1'))?.id).toBe('pocket1_roughing')
+    expect(roughingBefore(p, op(p, 'p_pocket'))?.id).toBe('p_roughing')
+    expect(roughingBefore(p, op(p, 'pocket2'))).toBeUndefined()
+    expect(roughingBefore(p, op(p, 'pocket1_roughing'))).toBeUndefined()
+  })
+
+  it('none when the owner was moved before its roughing (it then cuts everything)', () => {
+    const p = withPart([setup('a', ['pocket1', 'pocket1_roughing'])])
+    expect(roughingBefore(p, op(p, 'pocket1'))).toBeUndefined()
   })
 })

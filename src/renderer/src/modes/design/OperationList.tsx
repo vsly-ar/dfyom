@@ -42,12 +42,14 @@ import {
   featureRemoveBlocked,
   operationUnits,
   moveRefusal,
+  operationMoveIndex,
   rolledUpCount,
   roleLabel,
   unitDropIndex,
   unitDropRefusal,
   type CloneInstanceRow,
   type FeatureUnit,
+  type OperationRowUnit,
   type OperationUnit,
 } from './feature-view'
 import { axisNames, disabledOf, surfaceDirection, type DesignPart } from './model'
@@ -56,6 +58,7 @@ import { useRowActions } from './row-actions'
 import { useSkipToggle } from './ClonesInspector'
 import { instanceId } from './clones-view'
 import { featureIcon, partOperationIconProps } from './operation-icon'
+import { roughingToolText } from './roughing-view'
 
 export { featureIcon, operationIcon } from './operation-icon'
 
@@ -86,7 +89,13 @@ function visibleRows(
   outer: string = unit.id,
   parent?: string,
 ): VisibleRow[] {
-  if (unit.kind === 'operation') return [{ id: unit.id, unit: outer, parent }]
+  if (unit.kind === 'operation') {
+    // DF122: a pocket's roughing row nests under it (roughing.md § UI)
+    if (unit.roughing === undefined) return [{ id: unit.id, unit: outer, parent }]
+    const self: VisibleRow = { id: unit.id, unit: outer, parent, expands: unit.id }
+    if (!expanded.has(unit.id)) return [self]
+    return [self, { id: unit.roughing.id, unit: outer, parent: unit.id }]
+  }
   const instanceNumbers = unit.feature.kind === 'clones' ? instancesOf(unit.id) : []
   const self: VisibleRow = { id: unit.id, unit: outer, parent, expands: unit.id }
   if (!expanded.has(unit.id)) return [self]
@@ -161,8 +170,9 @@ export function OperationList({
   // a selected owned or nested operation (viewport click, breadcrumb, undo) shows inside its open
   // feature(s)
   const openFor = units
-    .filter((u): u is FeatureUnit => u.kind === 'feature')
     .flatMap((u) => {
+      // DF122: a selected roughing pocket shows inside its open pocket row
+      if (u.kind === 'operation') return u.roughing?.id === selected ? [u.id] : []
       const inner = u.nested.find(
         (n) => n.id === selected || (n.kind === 'feature' && n.ops.some((o) => o.id === selected)),
       )
@@ -194,7 +204,11 @@ export function OperationList({
     const res =
       unit.kind === 'feature'
         ? await call('design.feature.move', { partId, featureId: unit.id, toIndex })
-        : await call('design.operation.move', { partId, operationId: unit.id, toIndex })
+        : await call('design.operation.move', {
+            partId,
+            operationId: unit.id,
+            toIndex: operationMoveIndex(unit, toIndex),
+          })
     if (!res.ok) {
       const why = moveRefusal(part, res.error)
       setRefusal(why)
@@ -334,7 +348,13 @@ export function OperationList({
                 menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
               }
           return unit.kind === 'operation' ? (
-            <OperationRow key={unit.id} ctx={ctx} op={unit.op} actions={actions} />
+            <OperationRow
+              key={unit.id}
+              ctx={ctx}
+              op={unit.op}
+              actions={actions}
+              roughing={unit.roughing}
+            />
           ) : (
             <FeatureRow key={unit.id} ctx={ctx} unit={unit} actions={actions} />
           )
@@ -458,11 +478,16 @@ function OperationRow({
   ctx,
   op,
   actions,
+  roughing,
 }: {
   ctx: ListContext
   op: OperationDTO
   actions?: RowActions
+  /** DF122: the pocket's roughing pocket, nested under the row. */
+  roughing?: OperationDTO | undefined
 }): React.JSX.Element {
+  if (roughing !== undefined)
+    return <RoughingOwnerRow ctx={ctx} op={op} roughing={roughing} actions={actions} />
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
   const menu = actions?.menu ?? ctx.rowMenu(op.id)
   return (
@@ -494,6 +519,84 @@ function OperationRow({
         </button>
       </li>
     </RowMenu>
+  )
+}
+
+/**
+ * DF122: a pocket with a roughing pass, as a feature row (roughing.md § UI): chevron, its own icon
+ * and name, the rolled-up badge (its own and its roughing pocket's findings); open, the roughing
+ * row one indent step in ("roughing", the roughing mark and its tool). It moves and removes as one
+ * operation (the roughing pocket follows it).
+ */
+function RoughingOwnerRow({
+  ctx,
+  op,
+  roughing,
+  actions,
+}: {
+  ctx: ListContext
+  op: OperationDTO
+  roughing: OperationDTO
+  actions?: RowActions | undefined
+}): React.JSX.Element {
+  const unit: OperationRowUnit = { kind: 'operation', id: op.id, op, roughing, start: 0, end: 2 }
+  const count = rolledUpCount(unit, ctx.warnings)
+  const open = ctx.expanded.has(op.id)
+  const menu = actions?.menu ?? ctx.rowMenu(op.id)
+  const childrenId = `${op.id}-children`
+  const failed = ctx.failedAt === op.id || ctx.failedAt === roughing.id
+  const off = isDisabled(ctx.off, op.id)
+  return (
+    <li
+      {...actions?.item}
+      className={styles['featureItem']}
+      data-nested={actions === undefined ? '' : undefined}
+      data-open={open || undefined}
+    >
+      <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
+        <div
+          className={styles['op']}
+          data-off={off ? '' : undefined}
+          data-row-menu={menu.length > 0 ? '' : undefined}
+          data-selected={ctx.selected === op.id ? '' : undefined}
+        >
+          <RowGrip actions={actions} />
+          <button
+            type="button"
+            ref={ctx.rowRef(op.id)}
+            className={`${styles['opSelect']} ${styles['featureSelect']}`}
+            aria-pressed={ctx.selected === op.id}
+            aria-expanded={open}
+            aria-controls={childrenId}
+            {...rowKeys(
+              ctx,
+              'Alt+ArrowUp Alt+ArrowDown ArrowRight ArrowLeft',
+              menu,
+              actions !== undefined,
+            )}
+            aria-label={`${m.navigator.withRoughing(op.name)}${off ? `, ${m.navigator.off}` : ''}`}
+            onClick={() => ctx.select(op.id)}
+            onKeyDown={(e) => ctx.key(e, op.id)}
+          >
+            <Chevron open={open} name={op.name} onToggle={() => ctx.toggle(op.id)} />
+            <Icon {...partOperationIconProps(ctx.part.dto, op)} />
+            <span className={styles['opName']} title={op.name}>
+              {op.name}
+            </span>
+            <OffMarker ctx={ctx} id={op.id} />
+            <RowMarkers failed={failed} count={count} />
+          </button>
+        </div>
+      </RowMenu>
+      {/* closed: inert (out of the tab order and the accessibility tree) while it slides shut */}
+      <div className={styles['ownedWrap']} data-open={open || undefined} inert={!open}>
+        <div id={childrenId} className={styles['owned']}>
+          <ol className={styles['ownedList']} aria-label={op.name}>
+            <OwnedRow ctx={ctx} op={roughing} featureName={op.name} roughing />
+          </ol>
+        </div>
+      </div>
+    </li>
   )
 }
 
@@ -633,13 +736,19 @@ function OwnedRow({
   ctx,
   op,
   featureName,
+  roughing = false,
 }: {
   ctx: ListContext
   op: OperationDTO
   featureName: string
+  /** DF122: a pocket's roughing pocket (no row menu: it is edited through its pocket). */
+  roughing?: boolean
 }): React.JSX.Element {
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
-  const menu = ctx.rowMenu(op.id)
+  const menu = roughing ? [] : ctx.rowMenu(op.id)
+  // DF122: a roughing row carries its tool ("Ø 8 mm", roughing.md § UI)
+  const tool =
+    op.kind === 'pocket' && op.roughing === true ? roughingToolText(ctx.part, op) : undefined
   return (
     <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
       <li
@@ -660,9 +769,18 @@ function OwnedRow({
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
           <Icon {...partOperationIconProps(ctx.part.dto, op)} />
-          <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
-            {roleLabel(featureName, op.name)}
-          </span>
+          {tool === undefined ? (
+            <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
+              {roleLabel(featureName, op.name)}
+            </span>
+          ) : (
+            <span className={styles['featureText']}>
+              <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
+                {roleLabel(featureName, op.name)}
+              </span>
+              <span className={styles['featureReadout']}>{tool}</span>
+            </span>
+          )}
           <OffMarker ctx={ctx} id={op.id} />
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>

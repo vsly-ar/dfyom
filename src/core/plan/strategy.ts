@@ -229,6 +229,14 @@ export type ResolvedStrategy =
 export const WOOD_CLASSES: ReadonlySet<MaterialClass> = new Set(['softwood', 'hardwood'])
 
 /**
+ * The default finishing allowance in mm (0.2 mm / 0.008″, wood 0.5 mm / 0.02″, DF76): what an
+ * unset `finishAllowance` resolves to, and the default wall margin of a roughing pass (DF122,
+ * shown as "Auto · 0.5 mm" in the design inspector). Doc: docs/modes/plan-v0.1.md#pass-strategies-v01
+ */
+export const defaultFinishAllowance = (material: MaterialClass, units: UnitSystem): number =>
+  (WOOD_CLASSES.has(material) ? DEF.woodFinishAllowance : DEF.finishAllowance)[units]
+
+/**
  * Default finish stepdown (DF75, DF76): the cut depth, at most the flute length and, in wood,
  * at most 2 × D; without a tool the depth. The levels split the depth equally (`levels`).
  */
@@ -284,7 +292,7 @@ export function resolveStrategy(
   const rampAngle = mm(s.rampAngle).unwrapOr(RAMP_ANGLE)
   const wood = WOOD_CLASSES.has(c.stock.material.class)
   const finishAllowance = mm(s.finishAllowance).unwrapOr(
-    (wood ? DEF.woodFinishAllowance : DEF.finishAllowance)[u],
+    defaultFinishAllowance(c.stock.material.class, u),
   )
   const breakthrough = mm(s.breakthrough).unwrapOr(DEF.breakthrough[u])
   switch (kind) {

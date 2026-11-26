@@ -456,6 +456,16 @@
   min-width: 0;
 }
 
+/* DF122: "rest" after the tool on an operation that follows its roughing (roughing.md § UI):
+   a quiet outlined chip, neutral like the tool text, never the accent */
+.restChip {
+  flex: none;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+}
+
 .opState svg,
 .opStale svg {
   width: var(--icon-sm);

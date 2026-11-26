@@ -175,11 +175,6 @@ export const designMessages = {
         gap: 'gap',
         flip: 'flipped',
       },
-      /** DF108: the roughing pass and its tool (Cut group). */
-      roughing: 'Roughing',
-      roughingNote:
-        'A bigger tool clears the cells first; the pocket’s tool then cuts only what it left (corners, small cells) and the walls.',
-      roughingTool: 'Roughing tool',
       depth: 'Depth',
       through: 'Through',
       throughNote:
@@ -770,6 +765,8 @@ export const designMessages = {
 
   navigator: {
     operations: 'Operations',
+    /** DF122: a pocket row with its roughing row nested (roughing.md § UI). */
+    withRoughing: (name: string) => `${name}, with roughing`,
     /**
      * The Operations header count's tooltip (DF44): the count is the list's rows, as shown; the
      * tooltip adds the operations in all when features hold more.
@@ -1189,5 +1186,34 @@ export const designMessages = {
     const state =
       p.status === 'pending' ? ', updating' : p.status === 'failed' ? ', evaluation failed' : ''
     return `Part with ${ops}${warns}${state}.`
+  },
+  /**
+   * DF122 roughing passes (roughing.md § UI): the Roughing accordion of the Pocket and Pattern
+   * inspectors and the roughing pocket's short inspector.
+   */
+  roughing: {
+    group: 'Roughing',
+    groupInfo:
+      'A bigger tool clears the bulk first, leaving this much on the walls and floor; this operation’s tool then cuts only what it left (corners, narrow spots, the margin) and finishes the walls.',
+    patternGroupInfo:
+      'A bigger tool clears the cells first, leaving this much on the walls and floor; the pocket’s tool then cuts only what it left (corners, small cells, the margin) and finishes the walls.',
+    switch: 'Roughing',
+    tool: (diameter: string) => `Ø ${diameter}`,
+    toolLabel: 'Roughing tool',
+    wall: 'Leave on walls',
+    wallInfo:
+      'Stock the roughing leaves on the walls. Empty = the finishing allowance, so the finishing pass takes it.',
+    floor: 'Leave on floor',
+    floorInfo:
+      'Stock the roughing leaves on the floor. Empty = 0: the roughing’s flat end mill cuts the floor to size.',
+    off: 'Off',
+    auto: 'Auto',
+    autoShort: 'auto',
+    autoValue: (value: string) => `Auto · ${value}`,
+    wallsSummary: (wall: string) => `walls ${wall}`,
+    floorSummary: (floor: string) => `floor ${floor}`,
+    /** The roughing pocket's short inspector. */
+    stockToLeave: 'Stock to leave',
+    editIn: (owner: string) => `Edit in ${owner}`,
   },
 } as const

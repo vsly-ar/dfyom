@@ -2,17 +2,18 @@
 // and Presets, then the groups Cell (kind with thumbnails, its sizes, rotation), Layout (lattice
 // incl. Polar, gap or pitch, angle, origin: empty = the area's centre), Area (On, the boundary:
 // Whole face or a closed shape with its centre and rotation, margin, Whole/Clip, Invert), Cut
-// (P4: Through, else depth; the pocket's tool; DF108: Roughing and its tool), Chamfer (P3: a
+// (P4: Through, else depth; the pocket's tool), Roughing (DF108; DF122 R2: the accordion shared
+// with the Pocket inspector, RoughingGroup.tsx: switch, roughing tool, margins), Chamfer (P3: a
 // switch, then width, angle and the chamfer's tool). P4: on another pattern's floor the
 // Boundary's face option names its cells. DF107: Presets… opens the Presets dialog.
 // Every edit is one `design.pattern.update` (one undo step); errors
 // and findings show at their field, the rest under Findings. DF110 S4: rarely used fields (cell
-// Rotation; Origin U/V and Flip; Boundary cells and Invert; Roughing) sit behind their group's More
+// Rotation; Origin U/V and Flip; Boundary cells and Invert) sit behind their group's More
 // row, shown open while one holds a non-default value or a problem; Chamfer is an accordion,
 // closed unless on.
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1,
 // docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#implementation-df107df109,
-// docs/conventions/inspector-layout.md#s4-implementation-notes
+// docs/conventions/inspector-layout.md#s4-implementation-notes, docs/modes/roughing.md#implementation-r2
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
@@ -47,6 +48,8 @@ import { MiniOutline, shapeLoops } from './ShapePicker'
 import { PatternPresetsDialog } from './PatternPresetsDialog'
 import { adjustedNote, RoundField } from './RoundField'
 import { ToolField } from './ToolField'
+import { RoughingGroup } from './RoughingGroup'
+import { patternRoughing } from './roughing-view'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
@@ -219,6 +222,16 @@ export function PatternInspector({
       })),
   ]
 
+  /** Messages of exactly this field (the Roughing switch must not repeat its margins' errors). */
+  const exactMessagesAt = (path: string): FieldMessage[] =>
+    messagesAt(path)
+      .filter((m) => !m.id.startsWith('error-'))
+      .concat(
+        errors
+          .filter((e) => e.path === path)
+          .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+      )
+
   /** A field's standing note, in its support area as the other inspectors' notes (design review U9). */
   const note = (id: string, text: string | undefined): FieldMessage[] =>
     text === undefined ? [] : [{ id: `note-${id}`, severity: 'note', text }]
@@ -305,7 +318,7 @@ export function PatternInspector({
     { width: QuantityDTO; angle: QuantityDTO; side?: 'bottom' | 'both' } | undefined
   const pocketOp = owned.find((o) => o.id === `${feature.id}_pocket`)
   // DF108: the bigger tool's pass before the pocket
-  const roughing = feature['roughing'] === true
+  const roughing = patternRoughing(feature)
   const roughingOp = owned.find((o) => o.id === `${feature.id}_roughing`)
   const chamferOp = owned.find((o) => o.id === `${feature.id}_chamfer`)
   // P5: the through cells' bottom edges, from a flipped setup
@@ -670,42 +683,19 @@ export function PatternInspector({
               />
             </div>
           )}
-          {more(
-            'cut',
-            [p.roughing],
-            ['roughing'],
-            roughing,
-            <>
-              <div data-feature-field="roughing">
-                <Field
-                  label={p.roughing}
-                  kind="toggle"
-                  messages={[
-                    ...messagesAt('roughing'),
-                    ...note('roughing', roughing ? p.roughingNote : undefined),
-                  ]}
-                >
-                  <Switch
-                    label={p.roughing}
-                    hideLabel
-                    checked={roughing}
-                    onCheckedChange={(on) => void update({ roughing: on }, 'roughing')}
-                  />
-                </Field>
-              </div>
-              {roughingOp === undefined ? null : (
-                <div data-feature-field="roughing.tool">
-                  <ToolField
-                    part={part}
-                    op={roughingOp}
-                    warnings={warnings.warnings.filter((w) => w.operation === roughingOp.id)}
-                    label={p.roughingTool}
-                  />
-                </div>
-              )}
-            </>,
-          )}
         </InspectorGroup>
+
+        {/* DF122 R2: the same Roughing accordion as the Pocket inspector (roughing.md § UI) */}
+        <RoughingGroup
+          part={part}
+          margins={roughing}
+          roughingOp={roughingOp}
+          warnings={warnings.warnings}
+          messagesAt={exactMessagesAt}
+          send={(arg, path, gesture) => void update({ roughing: arg }, path, gesture)}
+          rememberKey="pattern"
+          info={designMessages.roughing.patternGroupInfo}
+        />
 
         {/* closed unless on: its open state is remembered apart for on and off (DF110) */}
         <InspectorGroup

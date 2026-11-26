@@ -214,12 +214,15 @@ export function OperationFields({
   ctx,
   level = 3,
   tool,
+  roughing,
 }: {
   ctx: OperationFieldsContext
   /** Heading level of the group titles (4 when nested in another group). */
   level?: 3 | 4
   /** The tool field (Design inspector only), placed as the first group after `on`'s. */
   tool?: React.ReactNode
+  /** DF122: a pocket's Roughing accordion (Design inspector only), right after Tool. */
+  roughing?: React.ReactNode
 }): React.JSX.Element | null {
   const op = ctx.op
   const g = (title: string, children: React.ReactNode) => (
@@ -271,6 +274,7 @@ export function OperationFields({
             </>,
           )}
           {toolGroup}
+          {roughing}
           <CornersGroup ctx={ctx} level={level} />
         </>
       )

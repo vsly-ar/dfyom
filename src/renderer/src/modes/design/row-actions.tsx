@@ -97,7 +97,10 @@ export function useRowActions(part: DesignPart): RowActions {
     // written until "Make clones"; its first row puts one clone beside the source, a tool
     // diameter apart
     const choice = clonesSource(part, id)
-    if (choice.ok)
+    // DF122: a pocket with roughing is no Clones source until R5 (the core's `roughingNested`)
+    const roughing =
+      op?.kind === 'pocket' && (op.roughingPass !== undefined || op.roughing === true)
+    if (choice.ok && !roughing)
       items.push({
         label: f.makeClones,
         icon: <Icon name="clones" />,
