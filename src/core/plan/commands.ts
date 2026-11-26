@@ -21,6 +21,7 @@ import {
   type QueryDef,
 } from '../commands/define'
 import type { PlanApply } from '../commands/apply'
+import { listedAs } from '../commands/json-schema'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
 import { checkDisabledList } from '../design/disabled'
 import { fieldContext, partFromDTO } from '../design/operation'
@@ -567,6 +568,8 @@ const designOperationUpdate = defineCommand({
   title: () => 'Edit operation in plan',
   machine: false,
   args: z.object({ ...PlanArg, operationId: OperationIdSchema, ...OPERATION_UPDATE_ARGS }),
+  // the same shape as on the pocket and profile add tools (llm-api.md#schemas, listed sketches)
+  listedArgs: { shape: listedAs('object', 'design.pocket.add shape') },
   result: Empty,
   run(draft, rawArgs, ctx) {
     const where = 'plan.design.operation.update'

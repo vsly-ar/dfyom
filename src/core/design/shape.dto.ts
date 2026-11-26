@@ -13,7 +13,8 @@ import type { QuantityDTO } from '../quantity/quantity.dto'
 
 /** `shape1`, `shape2`, …: immutable (design.md § Implementation). */
 export const SHAPE_ID_PATTERN = /^shape[1-9][0-9]{0,5}$/
-export const ShapeIdSchema = z.string().regex(SHAPE_ID_PATTERN).describe('Shape id, e.g. shape1')
+// No description: ids come from results (primer, tools/list budget).
+export const ShapeIdSchema = z.string().regex(SHAPE_ID_PATTERN)
 /**
  * A feature's owned shape (patterns P1, docs/modes/patterns.md#owned-shape-and-operations):
  * `<featureId>_cells`; an engraved pattern's (engraved-patterns.md E3) `<featureId>_lines`.
