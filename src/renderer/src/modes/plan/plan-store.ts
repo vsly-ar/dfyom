@@ -1,8 +1,10 @@
 // Plan-mode state of one window (task 3.7): the chosen plan and setup (F6), the plan queries of the current
 // revision (operations with resolved feeds, checks, stale list, toolpaths) shared by navigator,
 // inspector, status bar and viewport, toolpath generation (a job, followed with `job.get`) and
-// the gCode export. Every change is a command over the bridge. One store per bridge.
-// Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.1.md#commands-and-queries-v01
+// the gCode export, and the deviation panel's comparison (U4, a job like generation). Every change
+// is a command over the bridge. One store per bridge.
+// Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.1.md#commands-and-queries-v01,
+// docs/modes/deviation.md#implementation-u4
 import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
@@ -145,6 +147,82 @@ export interface PlanExportResult {
   readonly linksNote?: string
 }
 
+/** A region of the plan's simulated cut (`design.reference.compare`, source plan; V3). */
+export interface DeviationRegionView {
+  /** The stock face looked from (`stock.top`). */
+  readonly face: string
+  readonly bounds: readonly [readonly [number, number], readonly [number, number]]
+  readonly area: number
+  readonly volume: number
+  readonly maxDev: number
+  readonly sign: 'overcut' | 'undercut'
+  readonly depthRange: readonly [number, number]
+  readonly cause?: 'toolRadius' | 'workholding' | 'holeMouth' | 'drillPoint' | 'tab'
+  /** The plan operation that cut most of it. */
+  readonly operationId?: string
+}
+
+/** |dev| statistics (mm, areas mm²): docs/modes/deviation.md#implementation-v3. */
+export interface DeviationStatsView {
+  readonly cells: number
+  readonly mean: number
+  readonly p50: number
+  readonly p95: number
+  readonly p99: number
+  readonly max: number
+  readonly overcutMax: number
+  readonly undercutMax: number
+  readonly areaOver: number
+}
+
+/** The job's result for `source: plan` (V3). */
+export interface DeviationResultView {
+  readonly source: 'plan'
+  readonly method: 'heightmap'
+  readonly cell: number
+  readonly threshold: number
+  readonly stats: DeviationStatsView
+  readonly faces: readonly (DeviationStatsView & { readonly face: string })[]
+  readonly excluded: { readonly outsidePart: number; readonly edgeBand: number }
+  readonly regions: readonly DeviationRegionView[]
+  readonly more?: number
+  readonly unexplained: number
+  readonly planId: string
+}
+
+/**
+ * The deviation panel's run of one plan (U4, docs/modes/deviation.md#implementation-u4): the job
+ * under way, the last result and what it was computed from (`basis`), the chosen region.
+ */
+export interface DeviationRun {
+  readonly planId: string
+  /** A job is under way (its id once started). */
+  readonly running?: { readonly jobId?: string; readonly progress?: JobProgress }
+  readonly result?: DeviationResultView
+  /** The plan inputs the result belongs to (revision, pending set, library): stale when changed. */
+  readonly basis?: string
+  readonly error?: AppErrorData
+  /** The region row chosen last (its operation was selected). */
+  readonly chosen?: number
+}
+
+export interface JobProgress {
+  readonly done: number
+  readonly total?: number | undefined
+}
+
+/** Regions the deviation panel asks for (the command's cap). */
+export const DEVIATION_REGIONS = 20
+
+export interface DeviationRequest {
+  readonly planId: string
+  readonly partId: string
+  readonly referenceId?: string | undefined
+  /** mm */
+  readonly threshold: number
+  readonly basis: string
+}
+
 export interface PlanState {
   /** The plan the window shows (picker); undefined = the first one. */
   readonly planId: string | undefined
@@ -189,6 +267,8 @@ export interface PlanState {
    * shows its keep-out zone.
    */
   readonly workholdingItem: { readonly setupId: string; readonly itemId: string } | undefined
+  /** The deviation panel's last run (U4), of the plan it names. */
+  readonly deviation: DeviationRun | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -226,6 +306,15 @@ export interface PlanState {
   ): Promise<void>
   closeExport(): void
   /**
+   * Compares the plan's simulated cut with the part's reference (U4): a job, followed with
+   * `job.get`; a running one is not started twice.
+   */
+  compareDeviation(request: DeviationRequest): Promise<void>
+  /** Aborts the running comparison; the previous result comes back. */
+  cancelDeviation(): void
+  /** A region row was chosen. */
+  chooseDeviationRegion(index: number): void
+  /**
    * Re-reads the plan: toolpaths changed without a revision (an apply job finished, P3). `seq`:
    * the action-log event that says so; each event reloads once, however many hooks see it.
    */
@@ -236,7 +325,7 @@ export type PlanStore = StoreApi<PlanState>
 
 interface JobInfo {
   readonly state: string
-  readonly progress?: { done: number; total?: number }
+  readonly progress?: JobProgress
   readonly outcome?: { ok: true; value: unknown } | { ok: false; error: AppErrorData }
 }
 
@@ -246,6 +335,8 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
   let round = 0
   /** The last event `reload` acted on. */
   let reloaded = -1
+  /** Cancel was pressed before the comparison's job id came back. */
+  let cancelDeviation = false
   const store = createStore<PlanState>()((set, get) => ({
     planId: undefined,
     lastSelection: undefined,
@@ -262,6 +353,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     pickingAlignment: undefined,
     workholdingItem: undefined,
     exported: undefined,
+    deviation: undefined,
     choose: (planId) =>
       set({
         planId,
@@ -361,6 +453,77 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       refresh()
     },
     closeExport: () => set({ exported: undefined }),
+    async compareDeviation({ planId, partId, referenceId, threshold, basis }) {
+      const was = get().deviation
+      if (was?.running !== undefined) return
+      // the last result of this plan stays on screen while the new one runs, and after a cancel
+      const kept: DeviationRun = {
+        planId,
+        ...(was?.planId === planId && was.result !== undefined
+          ? {
+              result: was.result,
+              ...(was.basis === undefined ? {} : { basis: was.basis }),
+              ...(was.chosen === undefined ? {} : { chosen: was.chosen }),
+            }
+          : {}),
+      }
+      cancelDeviation = false
+      set({ deviation: { ...kept, running: {} } })
+      const r = await bridge.call('design.reference.compare', {
+        partId,
+        ...(referenceId === undefined ? {} : { referenceId }),
+        source: { kind: 'plan', planId },
+        threshold,
+        limit: DEVIATION_REGIONS,
+      })
+      // the current run without its job (a row chosen meanwhile is kept)
+      const settled = (): DeviationRun => {
+        const { running: _, error: __, ...rest } = get().deviation ?? kept
+        return rest
+      }
+      if (!r.ok) {
+        set({ deviation: { ...settled(), error: r.error } })
+        return
+      }
+      const { jobId } = r.value as { jobId: string }
+      set({ deviation: { ...settled(), running: { jobId } } })
+      if (cancelDeviation) void bridge.call('job.abort', { jobId })
+      for (;;) {
+        const info = await bridge.call('job.get', { jobId })
+        if (!info.ok) {
+          set({ deviation: { ...settled(), error: info.error } })
+          return
+        }
+        const job = info.value as JobInfo
+        if (job.state === 'finished' && job.outcome !== undefined) {
+          const o = job.outcome
+          // the comparison generated the missing toolpaths into the cache: re-read them
+          round++
+          refresh()
+          set({
+            deviation: o.ok
+              ? { planId, result: o.value as DeviationResultView, basis }
+              : o.error.code === 'op.aborted'
+                ? settled()
+                : { ...settled(), error: o.error },
+          })
+          return
+        }
+        if (job.progress !== undefined)
+          set({ deviation: { ...settled(), running: { jobId, progress: job.progress } } })
+        await new Promise((resolve) => setTimeout(resolve, GENERATE_POLL_MS))
+      }
+    },
+    cancelDeviation() {
+      const running = get().deviation?.running
+      if (running === undefined) return
+      cancelDeviation = true
+      if (running.jobId !== undefined) void bridge.call('job.abort', { jobId: running.jobId })
+    },
+    chooseDeviationRegion(chosen) {
+      const d = get().deviation
+      if (d !== undefined && d.chosen !== chosen) set({ deviation: { ...d, chosen } })
+    },
     reload(seq) {
       if (seq <= reloaded) return
       reloaded = seq
