@@ -11,6 +11,7 @@
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import { elementLength, type Element } from '../../geometry/2d/model'
 import { importSvg, type SvgImportWarning } from '../../import/svg/import'
+import type { PatternLattice } from '../shape.dto'
 import { PRESET_SVGS } from './preset-svgs'
 
 /** `tile`: made to repeat on a lattice (E4); `single`: one motif; `round`: one round motif. */
@@ -22,20 +23,22 @@ export interface EngravingPreset {
   /** The SVG's size (mm): its `width` × `height`. */
   readonly size: readonly [number, number]
   readonly svg: string
+  /** A tile's default lattice (E4; gap 0, the tiles join at their frames' edges). */
+  readonly lattice?: PatternLattice
 }
 
 const svg = (id: string): string => PRESET_SVGS[id] ?? ''
 
 /** In the Presets dialog's order: tiles, motifs, round. */
 export const ENGRAVING_PRESETS: readonly EngravingPreset[] = [
-  { id: 'waves', kind: 'tile', size: [20, 10], svg: svg('waves') },
-  { id: 'chevrons', kind: 'tile', size: [20, 10], svg: svg('chevrons') },
-  { id: 'crosshatch', kind: 'tile', size: [10, 10], svg: svg('crosshatch') },
-  { id: 'scales', kind: 'tile', size: [12, 6], svg: svg('scales') },
-  { id: 'seigaiha', kind: 'tile', size: [20, 10], svg: svg('seigaiha') },
-  { id: 'basket-weave', kind: 'tile', size: [16, 16], svg: svg('basket-weave') },
-  { id: 'greek-key', kind: 'tile', size: [20, 12], svg: svg('greek-key') },
-  { id: 'wood-grain', kind: 'tile', size: [40, 20], svg: svg('wood-grain') },
+  { id: 'waves', kind: 'tile', size: [20, 10], svg: svg('waves'), lattice: 'square' },
+  { id: 'chevrons', kind: 'tile', size: [20, 10], svg: svg('chevrons'), lattice: 'square' },
+  { id: 'crosshatch', kind: 'tile', size: [10, 10], svg: svg('crosshatch'), lattice: 'square' },
+  { id: 'scales', kind: 'tile', size: [12, 6], svg: svg('scales'), lattice: 'staggered' },
+  { id: 'seigaiha', kind: 'tile', size: [20, 10], svg: svg('seigaiha'), lattice: 'staggered' },
+  { id: 'basket-weave', kind: 'tile', size: [16, 16], svg: svg('basket-weave'), lattice: 'square' },
+  { id: 'greek-key', kind: 'tile', size: [20, 12], svg: svg('greek-key'), lattice: 'square' },
+  { id: 'wood-grain', kind: 'tile', size: [40, 20], svg: svg('wood-grain'), lattice: 'square' },
   { id: 'vine', kind: 'single', size: [60, 26], svg: svg('vine') },
   { id: 'rosette', kind: 'round', size: [80, 80], svg: svg('rosette') },
   { id: 'sunburst', kind: 'round', size: [80, 80], svg: svg('sunburst') },

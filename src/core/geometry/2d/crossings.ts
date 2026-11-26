@@ -37,7 +37,7 @@ const dot = (a: Vec2, b: Vec2): number => a[0] * b[0] + a[1] * b[1]
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a[0] - b[0], a[1] - b[1])
 
 /** An intersection point with the parameters (0..1) on both elements. */
-interface Hit {
+export interface Hit {
   readonly p: Vec2
   readonly s: number
   readonly t: number
@@ -106,8 +106,11 @@ function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): Vec2[] | unde
   ]
 }
 
-/** Intersections of two elements, or 'overlap' when they share a stretch longer than ε. */
-function intersect(e: Element, f: Element): Hit[] | 'overlap' {
+/**
+ * Intersections of two elements, or 'overlap' when they share a stretch longer than ε. Also used
+ * to clip open lines at a region's boundary (clip-lines.ts, engraved-patterns.md E4).
+ */
+export function intersect(e: Element, f: Element): Hit[] | 'overlap' {
   const hits: Hit[] = []
   const add = (p: Vec2) => {
     const s = e.kind === 'line' ? lineParam(e.a, e.b, p) : arcParam(e, p)

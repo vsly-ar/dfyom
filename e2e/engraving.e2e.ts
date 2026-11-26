@@ -1,5 +1,5 @@
-// Engraved patterns E3 in the built app: Add → Features → Engraved pattern adds the Rosette fitted
-// to the top face, the Presets dialog picks Sunburst (one card click), the inspector's read-out
+// Engraved patterns E3 in the built app: Add → Features → Engraved pattern adds the default motif
+// (Waves, tiled since E4) on the top face, the Presets dialog picks Sunburst (one card click), the inspector's read-out
 // and motif follow, and the owned Line is planned as its own operation in Plan. Windows stay hidden
 // (app.fixture.ts). With DFYOM_E3_SHOTS=<dir> it writes dark captures of the inspector and the
 // Presets dialog there (the UI review).
@@ -45,7 +45,7 @@ test('engraving: add an engraved pattern, pick a preset, see it in Plan (E3)', a
     .click()
   if (SHOTS !== undefined) await dark(page)
 
-  // ── Add → Features → Engraved pattern: the Rosette, fitted ──────────────────────────────────
+  // ── Add → Features → Engraved pattern: the Waves, tiled ────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page
     .getByRole('menu')
@@ -53,15 +53,15 @@ test('engraving: add an engraved pattern, pick a preset, see it in Plan (E3)', a
     .getByRole('menuitem', { name: 'Engraved pattern' })
     .click()
   await expect(inspector.getByRole('heading', { name: 'Engraved pattern 1' })).toBeVisible()
-  await expect(inspector.locator('[data-engraving-preset]')).toHaveText('Rosette')
-  await expect(inspector.locator('[data-engraving-readout]')).toContainText('14 lines')
-  await expect(inspector.getByRole('radio', { name: 'Fit to boundary' })).toBeChecked()
+  await expect(inspector.locator('[data-engraving-preset]')).toHaveText('Waves')
+  await expect(inspector.locator('[data-engraving-readout]')).toContainText('tiles')
+  await expect(inspector.getByRole('radio', { name: 'Clip' })).toBeChecked()
 
   // ── Presets…: Sunburst ─────────────────────────────────────────────────────────────────────
   await inspector.getByRole('button', { name: 'Presets…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Engraving presets' })
   await expect(dialog.getByRole('radio')).toHaveCount(13)
-  await expect(dialog.getByRole('radio', { name: 'Rosette' })).toBeFocused()
+  await expect(dialog.getByRole('radio', { name: 'Waves' })).toBeFocused()
   if (SHOTS !== undefined) {
     await page.waitForTimeout(300)
     await page.screenshot({ path: `${SHOTS}/e3-presets-dialog-dark.png` })

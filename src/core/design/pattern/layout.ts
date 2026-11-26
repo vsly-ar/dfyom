@@ -495,14 +495,15 @@ export interface LatticeNode {
 /**
  * Row lattices (square, staggered, hex): nodes over the area's box, one pitch beyond. With
  * `flip` (P5), the node in column i of row j is flipped when i + j is odd (the origin's is not).
+ * Exported for the engraved pattern's tiles (engraved-patterns.md E4: the same lattice code).
  */
-function rowNodes(
+export function rowNodes(
   origin: Vec2,
   lo: Vec2,
   hi: Vec2,
   a: number,
   b: number,
-  p: PatternDefinition,
+  p: { readonly lattice: PatternDefinition['lattice']; readonly angle: number },
   flip: boolean,
 ): LatticeNode[] {
   const shifted = p.lattice !== 'square'

@@ -26,6 +26,7 @@ import { shapeRotation, type Operation, type Part, type Shape } from './operatio
 import type { PatternDefinition } from './pattern/layout'
 import type { ShapeDefinition } from './shape'
 import { definitionOf, resolveShape, type AnyShapeDefinition, type ResolvedShape } from './shape'
+import { resolveEngraving } from './engraving/resolve'
 import { isOpenShape } from './surfaces'
 import type { ShapeFacts, ShapeFactsTable } from './validate'
 
@@ -243,6 +244,16 @@ export function shapeFacts(
 ): AppResult<ShapeFactsTable> {
   const out = new Map<string, ShapeFacts>()
   for (const op of ops) {
+    // E4: an engraved pattern's owned lines resolve here, so their issues (`engravingTooMany`)
+    // reach the feature's fields as a pattern's cells' do
+    if (op.kind === 'line' && port !== undefined)
+      for (const p of op.paths) {
+        const rec = shapes?.get(p.shapeId)?.engraving
+        if (rec === undefined) continue
+        const r = resolveEngraving(rec, shapes, port)
+        if (r.isErr())
+          return Err(r.unwrapErr().prefixIssues('operations', op.id, 'shapes', p.shapeId))
+      }
     if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') continue
     const open = isOpenShape(op.shape, shapes)
     if (port === undefined) {

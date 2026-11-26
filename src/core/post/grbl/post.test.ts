@@ -26,6 +26,9 @@ import { definitionOf } from '../../design/shape'
 import { svgShapeItems } from '../../design/shape-import'
 import { pathLevelProfile } from '../../design/shape-items'
 import { resolveEngraving } from '../../design/engraving/resolve'
+import { shapeFromDTO } from '../../design/shape'
+import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
+import { Quantity } from '../../quantity/quantity'
 import type { Move, Toolpath, Vec3 } from '../../toolpath/model'
 import { generatePocket } from '../../toolpath/pocket'
 import { generateProfile } from '../../toolpath/profile'
@@ -227,6 +230,83 @@ const engravingRosetteOps = (): ExportOperation[] => {
       tool,
     ),
   ]
+}
+
+/** An engraved pattern's resolved lines as its owned Line, cut with a 60° V-bit (E3, E4). */
+const engravingOps = (
+  rec: Parameters<typeof resolveEngraving>[0],
+  shapes: Parameters<typeof resolveEngraving>[1],
+  stock: { length: number; width: number; thickness: number },
+  depth: { min: number; max: number },
+): ExportOperation[] => {
+  const r = expectOk(resolveEngraving(rec, shapes, nodeRegion2d()))
+  const tool = chamferMill(6, 60)
+  const op = {
+    kind: 'line',
+    id: 'engraving1_line',
+    onZ: 0,
+    paths: r.lines.map((l) => l.shape),
+    depth,
+    levels: r.lines.map((l) => l.levels),
+    cutter: { kind: 'vBit', diameter: 6, angle: 60, tipDiameter: 0 },
+  } as const
+  return [
+    operation(
+      generateLine(lineInput(stock, op, tool, {}, { stepdown: 0.5, feedRate: 1500 })).unwrap(),
+      tool,
+    ),
+  ]
+}
+
+/**
+ * Tiles (engraved-patterns.md E4): the Waves preset on its square lattice over a 60 × 40 face less
+ * 3 mm, clipped; the tiles' waves chained into one line per row, 0.6 mm deep.
+ */
+const engravingWavesOps = (): ExportOperation[] =>
+  engravingOps(
+    {
+      motif: { preset: 'waves' },
+      boundary: { min: [0, 0], max: [60, 40] },
+      margin: 3,
+      rotation: 0,
+      fit: 'clip',
+      layout: { lattice: 'square', angle: 0, spacing: { gap: 0 } },
+    },
+    new Map(),
+    { length: 60, width: 40, thickness: 6 },
+    { min: 0.2, max: 0.6 },
+  )
+
+/**
+ * A polar layout (E4): Scales 8 mm wide on rings round a Ø 60 coaster less 3 mm, each turned
+ * radially to face out, clipped at the circle; 0.5 mm deep.
+ */
+const engravingPolarOps = (): ExportOperation[] => {
+  const mm = (v: string) =>
+    Quantity.parse(v, { kind: 'length', defaultUnit: 'mm' }).unwrap().toDTO()
+  const coaster = expectOk(
+    shapeFromDTO({
+      id: 'shape1',
+      name: 'Coaster',
+      items: [{ kind: 'circle', op: 'add', center: [mm('0'), mm('0')], diameter: mm('60') }],
+    } as never),
+  )
+  return engravingOps(
+    {
+      motif: { preset: 'scales' },
+      boundary: { min: [0, 0], max: [70, 70] },
+      area: { shapeId: 'shape1', center: [35, 35], rotation: 0 },
+      margin: 3,
+      rotation: 0,
+      size: 8,
+      fit: 'clip',
+      layout: { lattice: 'polar', angle: 0, spacing: { gap: 2 } },
+      radial: true,
+    },
+    new Map([['shape1', coaster]]),
+    { length: 70, width: 70, thickness: 6 },
+    { min: 0.2, max: 0.5 },
+  )
 }
 
 /** Lines (engraved-patterns.md E1): a 60° V-bit fluting an open curve 0.2 → 1.5 mm. */
@@ -628,6 +708,8 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['line-vgroove-closed', lineClosedOps],
     ['line-levels', lineLevelsOps],
     ['engraving-rosette', engravingRosetteOps],
+    ['engraving-waves-tiled', engravingWavesOps],
+    ['engraving-scales-polar', engravingPolarOps],
     [
       'multi-tool-inch-manual-spindle',
       facedMultiToolOps,
