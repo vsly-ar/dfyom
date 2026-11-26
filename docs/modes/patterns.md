@@ -315,7 +315,7 @@ Built 2026-11-25 (provisional, on a branch). User TG #349: a Presets dialog with
 
 `plan/pattern-toolpaths.test.ts`, golden `pattern-honeycomb-roughing.nc` (setup program): a honeycomb of hexagons 10 mm across flats (R 1, gap 2) on the 80 × 50 × 12 walnut lid, 3 mm deep, the pocket's tool Ø 2 and the roughing tool Ø 6: the roughing precedes the pocket in the plan with a tool change between them, the removed volume is the cells' area × depth, the program exports for GRBL and streams through the virtual machine to Idle, and the plan's time is lower than the same pattern without roughing. The earlier pattern goldens are byte-equal.
 
-**Measured** (17 cells): without roughing the Ø 2 cuts 8,535 mm in 328 s (4,565 program lines); with roughing the Ø 6 cuts 1,421 mm in 48 s and the Ø 2 then 4,965 mm (58 %) in 213 s: **261 s, −20 %** (2,823 lines). The Ø 2 keeps its outer rings round each cell (the allowance band and the R 1 corners) and the finishing ring, so the saving grows with the cell: in 10 mm cells about a fifth, more in larger ones.
+**Measured** (17 cells): without roughing the Ø 2 cuts 8,535 mm in 328 s (4,565 program lines); with roughing the Ø 6 cuts 1,421 mm in 48 s and the Ø 2 then 4,965 mm (58 %) in 213 s: **261 s, −20 %** (2,823 lines). The Ø 2 keeps its outer rings round each cell (the allowance band and the R 1 corners) and the finishing ring, so the saving grows with the cell: in 10 mm cells about a fifth, more in larger ones. Since DF122 R3 the rings are clipped to the corners: the Ø 2 cuts 2,812 mm in 140 s, **188 s, −43 %** (2,908 lines, [roughing.md § Implementation (R3)](roughing.md#implementation-r3)).
 
 ### Icon (DF109)
 

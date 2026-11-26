@@ -148,6 +148,29 @@ export class Heightmap {
     }
   }
 
+  /** How far (mm) the tool at `p` would lower the cell it lowers most (0: air); changes nothing. */
+  probe(tool: ToolpathTool, p: Vec3): number {
+    const R = tool.diameter / 2
+    const { cell, nx, z } = this
+    const surface = surfaceOf(tool)
+    let most = 0
+    for (
+      let j = Math.max(0, Math.floor((p[1] - R) / cell));
+      j <= Math.min(this.ny - 1, Math.ceil((p[1] + R) / cell));
+      j++
+    )
+      for (
+        let i = Math.max(0, Math.floor((p[0] - R) / cell));
+        i <= Math.min(nx - 1, Math.ceil((p[0] + R) / cell));
+        i++
+      ) {
+        const h = p[2] + surface(Math.hypot((i + 0.5) * cell - p[0], (j + 0.5) * cell - p[1]))
+        const k = j * nx + i
+        if (h < z[k]!) most = Math.max(most, z[k]! - h)
+      }
+    return most
+  }
+
   /** Sweep every feed move of a toolpath (rapids are checked separately: they never cut). */
   sweep(tool: ToolpathTool, tp: Toolpath, step = 0.1): void {
     for (const s of steps(tp))

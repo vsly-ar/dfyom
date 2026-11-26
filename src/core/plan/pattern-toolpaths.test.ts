@@ -624,8 +624,9 @@ describe('patterns DF108 exit', () => {
     ])
     expect(rough.diameters).toEqual(['6', '2'])
     expect(plain.diameters).toEqual(['2'])
-    // rest machining: the Ø 2 keeps its outer ring and finishing pass (58 % of its cut alone)
-    expect(rough.paths[1]!.stats.cutLength).toBeLessThan(0.65 * plain.paths[0]!.stats.cutLength)
+    // rest machining (R3 clipping): the Ø 2 cuts its corner runs and finishing pass (≈ 33 % of its
+    // cut alone; 140 s instead of R1’s 213 s, docs/modes/roughing.md#implementation-r3)
+    expect(rough.paths[1]!.stats.cutLength).toBeLessThan(0.4 * plain.paths[0]!.stats.cutLength)
     // and the plan takes less time with both tools than with the Ø 2 alone
     expect(rough.seconds).toBeLessThan(plain.seconds)
     await expect(rough.lines.join('\n') + '\n').toMatchFileSnapshot(

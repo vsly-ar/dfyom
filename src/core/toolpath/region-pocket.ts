@@ -16,13 +16,23 @@ import {
   regionLoops,
   type Bounds2,
   type Region,
+  type RegionPiece,
 } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import type { GeneratorInput, PocketStrategy, Toolpath, ToolpathTool } from './model'
-import { flat, MoveBuilder, segLength, segsLength, slope, walkRing, type Seg } from './path'
+import {
+  flat,
+  MoveBuilder,
+  segLength,
+  segPoint,
+  segsLength,
+  slope,
+  walkRing,
+  type Seg,
+} from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
 import {
   deepestPoint,
@@ -33,8 +43,10 @@ import {
   ringFrom,
   ringStart,
   ringTree,
+  walkTree,
   type RingNode,
 } from './region-rings'
+import { clipRing, restArea, restLinkClear, type RestArea, type Run } from './region-rest'
 
 /** A pocket of any region, placed in the setup's work plane (WCS XY, mm). */
 export interface RegionPocketOperation {
@@ -52,7 +64,8 @@ export interface RegionPocketOperation {
    * Rest machining after a roughing pocket of the same region (DF108, DF122): that pocket's tool
    * radius, corner radius, wall margin and floor depth. At levels at or above its floor, ring-tree
    * nodes whose tool-centre region lies where the roughing cleared (`restInside`) are skipped
-   * with their children; below it every node is cut.
+   * with their children and the rest of each ring is clipped to what the roughing left (R3,
+   * `restItems`); below it every node is cut whole.
    */
   readonly restAfter?: RestAfter | undefined
 }
@@ -69,8 +82,12 @@ export interface RestAfter {
   readonly floorDepth: number
 }
 
-/** The skip test keeps this much (mm) off the roughed area's edge (2D library epsilons). */
-const REST_MARGIN = 0.01
+/**
+ * Air tolerance of rest machining (mm, DF122 R3): a tool position counts as roughed when its disc
+ * lies within this of what the roughing cleared, so a ring that only grazes the roughed edge (the
+ * owner's ring at the wall margin) is skipped. The coverage oracle's tolerance.
+ */
+export const REST_TOLERANCE = 0.01
 /** A node left over by less than this (mm²) counts as wholly in the roughed area. */
 const REST_AREA = 1e-6
 
@@ -174,10 +191,12 @@ export function generateRegionPocket(
   if (treeR.isErr()) return Err(treeR.unwrapErr())
   const fullTree = treeR.unwrap()
   let tree = fullTree
+  let restInsideRegion: Region | undefined
   if (op.restAfter !== undefined) {
     const inside = restInside(port, op.region, op.restAfter, R)
     if (inside.isErr()) return Err(inside.unwrapErr())
-    const pruned = pruneCleared(port, tree, inside.unwrap())
+    restInsideRegion = inside.unwrap()
+    const pruned = pruneCleared(port, tree, restInsideRegion)
     if (pruned.isErr()) return Err(pruned.unwrapErr())
     tree = pruned.unwrap()
   }
@@ -369,6 +388,111 @@ export function generateRegionPocket(
     cutNode(n, z)
   }
 
+  // DF122 R3: the kept rings clipped to the rest, cut per rest component from the inside out
+  let clipped: RestItems | undefined
+  if (restInsideRegion !== undefined && restInsideRegion.pieces.length > 0) {
+    const got = restItems(port, tree, fullTree, roots, restInsideRegion, rings, R, steps)
+    if (got.isErr()) return Err(got.unwrapErr())
+    clipped = got.unwrap()
+  }
+
+  // an air point of a node whose inner rings the roughing made unnecessary (on first use)
+  const airPoints = new Map<RingNode, Vec2 | undefined>()
+  const airOf = (n: RingNode): Vec2 | undefined => {
+    if (!airPoints.has(n)) {
+      let p: Vec2 | undefined
+      if (clipped !== undefined && clipped.hadChildren(n)) {
+        const deep = deepestPoint(port, n.region, step)
+        if (deep.isOk() && port.contains(clipped.area.region, deep.unwrap().point))
+          p = deep.unwrap().point
+      }
+      airPoints.set(n, p)
+    }
+    return airPoints.get(n)
+  }
+
+  /** One rest level: each component's items innermost first, linked through air or cut rings. */
+  const cutRestLevel = (ri: RestItems, z: number, top: number): AppResult<void> => {
+    const left = ri.components.map((c) => [...c])
+    let done = 0
+    let down = false
+    while (left.some((c) => c.length > 0)) {
+      const here = xy()
+      // the component whose first (innermost) item starts nearest
+      let ci = -1
+      let best = Infinity
+      for (const [k, c] of left.entries()) {
+        if (c.length === 0) continue
+        const d = here === undefined ? 0 : itemDistance(c[0]!, here)
+        if (d < best) {
+          best = d
+          ci = k
+        }
+      }
+      const comp = left[ci]!
+      while (comp.length > 0) {
+        if (++done % PIECES_PER_STEP === 0) {
+          const g = steps.step()
+          if (g.isErr()) return Err(g.unwrapErr())
+        }
+        // innermost offset first, nearest first within it
+        const pos = xy()
+        const o = comp[0]!.node.offset
+        let k = 0
+        if (pos !== undefined)
+          for (let i = 1; i < comp.length && comp[i]!.node.offset === o; i++)
+            if (itemDistance(comp[i]!, pos) < itemDistance(comp[k]!, pos)) k = i
+        const item = comp.splice(k, 1)[0]!
+        const cut = [ri.componentAreas[item.component]!, ri.levelArea(item.node.offset)]
+        const clear = (p: Vec2) =>
+          down && pos !== undefined && restLinkClear(port, ri.area, cut, pos, p)
+        if (item.run !== undefined) {
+          // a run starts where the ring leaves the roughed area: a link or a plunge into air
+          const s0 = ringStart(item.run.segs)
+          if (clear(s0)) b.line(at(s0, z), feed)
+          else {
+            goTo(s0)
+            b.line(at(s0, z), cutting.plungeRate)
+          }
+          cutRing(item.run.segs, z)
+          down = true
+          continue
+        }
+        const ring = item.ring!
+        const p = pos === undefined ? undefined : ringClosest(ring, pos)
+        const from = p === undefined ? ring : ringFrom(ring, p.index, p.u)
+        const s0 = ringStart(from)
+        if (p !== undefined && clear(s0)) {
+          b.line(at(s0, z), feed)
+          cutRing(from, z)
+        } else if (item.leaf) {
+          // a leaf the roughing never touched: the pocket's own entry (helix, ramp or plunge),
+          // then its other rings linked as without roughing
+          for (let i = comp.length - 1; i >= 0; i--)
+            if (comp[i]!.node === item.node) comp.splice(i, 1)
+          cutNode(item.node, z, enter(item.node, z, top))
+        } else {
+          // the roughing cleared its inside: plunge there in air and feed onto the ring
+          const air = airOf(item.node)
+          const q = air === undefined ? undefined : ringClosest(ring, air)
+          if (air !== undefined && q !== undefined) {
+            goTo(air)
+            b.line(at(air, z), cutting.plungeRate)
+            const r = ringFrom(ring, q.index, q.u)
+            b.line(at(ringStart(r), z), feed)
+            cutRing(r, z)
+          } else {
+            goTo(s0)
+            b.line(at(s0, z), cutting.plungeRate)
+            cutRing(from, z)
+          }
+        }
+        down = true
+      }
+    }
+    return Ok(undefined)
+  }
+
   let top = cutTop(op.onZ, floor, input.material)
   // DF122: below the roughing's floor (its floor margin) the roughing cleared nothing
   const rest = op.restAfter
@@ -390,6 +514,21 @@ export function generateRegionPocket(
     const s = pass(k)
     if (s.isErr()) return Err(s.unwrapErr())
     b.pass('rough')
+    if (clipped !== undefined && nodes === tree) {
+      if (clipped.components.length === 0) continue
+      if (fullLeaves === undefined) {
+        const got = leafMap(fullTree)
+        if (got.isErr()) return Err(got.unwrapErr())
+        fullLeaves = got.unwrap()
+      }
+      leaves = fullLeaves
+      const r = cutRestLevel(clipped, z, top)
+      if (r.isErr()) return Err(r.unwrapErr())
+      const pos = b.position!
+      b.rapid([pos[0], pos[1], retract])
+      top = z
+      continue
+    }
     const left = [...nodes]
     let visited = 0
     while (left.length > 0) {
@@ -427,14 +566,17 @@ export function generateRegionPocket(
         const g = steps.step()
         if (g.isErr()) return Err(g.unwrapErr())
       }
-      const here = xy()!
+      // DF122: after a roughing that left no rest the finishing pass is the first cut
+      const here = xy()
       const bi = Math.max(
         0,
-        nearestIndex(
-          loops.length,
-          (i) => boxDistance(ringBoxOf(loops[i]!), here),
-          (i) => ringClosest(loops[i]!, here)!.distance,
-        ),
+        here === undefined
+          ? 0
+          : nearestIndex(
+              loops.length,
+              (i) => boxDistance(ringBoxOf(loops[i]!), here),
+              (i) => ringClosest(loops[i]!, here)!.distance,
+            ),
       )
       const ring0 = loops.splice(bi, 1)[0]!
       const lead = finishLead(port, ring0, wall, roots, R, a, cw)
@@ -461,7 +603,7 @@ export function generateRegionPocket(
  * The tool-centre positions (radius `R`) whose disc lies wholly in what a roughing pocket of
  * `region` cleared (DF108): the region shrunk by the roughing tool's radius + allowance (its
  * tool-centre region, as `generateRegionPocket` roughs it) grown back by its flat radius, then
- * shrunk by `R` + `REST_MARGIN`. Pieces the roughing tool does not fit add nothing.
+ * shrunk by `R` − `REST_TOLERANCE` (DF122 R3; DF108 kept 0.01 mm more instead). Pieces the roughing tool does not fit add nothing.
  */
 export function restInside(
   port: Region2dPort,
@@ -477,7 +619,7 @@ export function restInside(
         : port.offset(centres, -(rough.radius - rough.cornerRadius)),
     )
     .andThen((cleared) =>
-      cleared.pieces.length === 0 ? Ok(cleared) : port.offset(cleared, R + REST_MARGIN),
+      cleared.pieces.length === 0 ? Ok(cleared) : port.offset(cleared, R - REST_TOLERANCE),
     )
 }
 
@@ -529,6 +671,123 @@ export function pruneCleared(
     if (k.unwrap() !== undefined) out.push(k.unwrap()!)
   }
   return Ok(out)
+}
+
+/** One piece of rest work at a level (DF122 R3): a clipped run or a whole ring of a kept node. */
+export interface RestItem {
+  readonly node: RingNode
+  readonly loop: number
+  /** A run of the ring (it starts where the ring leaves the roughed area). */
+  readonly run?: Run
+  /** The whole ring (nothing of it roughed). */
+  readonly ring?: readonly Seg[]
+  /** A leaf of the whole tree with every ring whole: entered as without roughing. */
+  readonly leaf: boolean
+  /** Index of its rest component. */
+  readonly component: number
+}
+
+/** The rest work of every level at or above the roughing's floor (DF122 R3). */
+export interface RestItems {
+  /** The roughed tool-centre region (`restInside`). */
+  readonly area: RestArea
+  /** Items per rest component (a piece of roots − area), innermost offset first. */
+  readonly components: readonly (readonly RestItem[])[]
+  readonly componentAreas: readonly RestArea[]
+  /** The tool-centre region at offset ≥ `offset` (the whole tree's nodes at that offset). */
+  readonly levelArea: (offset: number) => RestArea
+  /** Whether the node had inner rings before pruning. */
+  readonly hadChildren: (n: RingNode) => boolean
+}
+
+/** Distance from `p` to where an item starts (a run's start, a ring's closest point). */
+function itemDistance(item: RestItem, p: Vec2): number {
+  if (item.run !== undefined) {
+    const s = ringStart(item.run.segs)
+    return Math.hypot(s[0] - p[0], s[1] - p[1])
+  }
+  return ringClosest(item.ring!, p)?.distance ?? Infinity
+}
+
+/**
+ * The rest items of the pruned `tree` (DF122 R3): every ring clipped to where the roughing left
+ * material (`clipRing`, short roughed gaps bridged up to the tool radius), grouped by the piece of
+ * `roots` − `inside` each lies in, innermost offset first. `steps.step()` per node.
+ */
+export function restItems(
+  port: Region2dPort,
+  tree: readonly RingNode[],
+  fullTree: readonly RingNode[],
+  roots: Region,
+  inside: Region,
+  rings: (n: RingNode) => Seg[][],
+  R: number,
+  steps: Steps = noSteps,
+): AppResult<RestItems> {
+  const area = restArea(inside)
+  const restR = port.difference(roots, inside)
+  if (restR.isErr()) return Err(restR.unwrapErr())
+  const comps = restR.unwrap().pieces.map((piece) => restArea({ pieces: [piece] }))
+  const fullOf = new Map<RegionPiece, RingNode>()
+  const byOffset = new Map<number, RegionPiece[]>()
+  for (const n of walkTree(fullTree)) {
+    fullOf.set(n.piece, n)
+    const at = byOffset.get(n.offset)
+    if (at === undefined) byOffset.set(n.offset, [n.piece])
+    else at.push(n.piece)
+  }
+  const componentOf = (p: Vec2): number => {
+    let best = 0
+    let bd = Infinity
+    for (const [i, c] of comps.entries()) {
+      const b = c.pieces[0]!.box
+      if (b !== undefined && boxDistance(b, p) > bd) continue
+      const d = regionDistance(port, c.region, p)
+      if (d === 0) return i
+      if (d < bd) {
+        bd = d
+        best = i
+      }
+    }
+    return best
+  }
+  const groups: RestItem[][] = comps.map(() => [])
+  for (const n of walkTree(tree)) {
+    const s = steps.step()
+    if (s.isErr()) return Err(s.unwrapErr())
+    const all = rings(n)
+    const cuts = all.map((ring) => clipRing(port, ring, area, R))
+    const whole = cuts.every((c) => c.kind === 'whole')
+    const leaf = whole && (fullOf.get(n.piece)?.children.length ?? 0) === 0
+    for (const [loop, c] of cuts.entries()) {
+      if (comps.length === 0) break
+      if (c.kind === 'whole') {
+        const ring = all[loop]!
+        const component = componentOf(segPoint(ring[0]!, 0.5))
+        groups[component]!.push({ node: n, loop, ring, leaf, component })
+      } else
+        for (const run of c.runs) {
+          const component = componentOf(run.probe)
+          groups[component]!.push({ node: n, loop, run, leaf: false, component })
+        }
+    }
+  }
+  const levelAreas = new Map<number, RestArea>()
+  const kept = groups.map((g, i) => ({ g, i })).filter((x) => x.g.length > 0)
+  return Ok({
+    area,
+    components: kept.map(({ g }) => [...g].sort((a, b) => b.node.offset - a.node.offset)),
+    componentAreas: comps,
+    levelArea: (offset) => {
+      let a = levelAreas.get(offset)
+      if (a === undefined) {
+        a = restArea({ pieces: byOffset.get(offset) ?? [] })
+        levelAreas.set(offset, a)
+      }
+      return a
+    },
+    hadChildren: (n) => (fullOf.get(n.piece)?.children.length ?? 0) > 0,
+  })
 }
 
 /** Pieces (ring tree roots, finishing loops) cut between two abort points within a level. */

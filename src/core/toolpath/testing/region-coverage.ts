@@ -10,7 +10,7 @@ import type { Vec2 } from '../../geometry/model'
 import { chainBounds, regionLoops, type Loop, type Region } from '../../geometry/2d/model'
 import { flattenLoop, segmentGrid } from '../../geometry/2d/testing/oracles'
 import type { Toolpath, ToolpathTool } from '../model'
-import { Heightmap } from './oracles'
+import { Heightmap, samples, steps } from './oracles'
 
 export interface Coverage {
   /** Reachable cells left above the floor (mm²). */
@@ -120,6 +120,86 @@ export function regionCoverage(
     }
   }
   return { leftover, rest, gouge, belowFloor, tabCut, tabKept }
+}
+
+/** Feed moves that cut air (DF122 R3), lengths in mm. */
+export interface AirCut {
+  /** Horizontal feed length that removes more than `tol` somewhere. */
+  readonly cutting: number
+  /** Horizontal feed length that removes nothing (links, bridges, rings in air the roughing or the tool's own earlier rings cleared). */
+  readonly air: number
+  /** Vertical feed plunges that remove more than `tol` (into uncut material). */
+  readonly plunges: number
+}
+
+/**
+ * Area (mm²) where two cut sequences leave heights more than `tol` apart (DF122 R3: roughing +
+ * rest against the pocket's tool alone). Test-only.
+ */
+export function heightDifference(
+  size: { length: number; width: number },
+  a: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[],
+  b: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[],
+  cell = 0.1,
+  tol = 0.02,
+): number {
+  const ha = new Heightmap(size.length, size.width, cell)
+  const hb = new Heightmap(size.length, size.width, cell)
+  for (const x of a) ha.sweep(x.tool, x.tp, cell)
+  for (const x of b) hb.sweep(x.tool, x.tp, cell)
+  let n = 0
+  for (let i = 0; i < ha.z.length; i++) if (Math.abs(ha.z[i]! - hb.z[i]!) > tol) n++
+  return n * cell * cell
+}
+
+/**
+ * Sweeps `before` (the roughing), then the rough passes of `tp` move by move, sorting their
+ * horizontal feed moves into cutting and air by whether any cell drops more than `tol` under the
+ * tool shrunk by `radial` (a sliver at the disc's edge is the rest tolerance, not material).
+ * Test-only.
+ */
+export function airCut(
+  tp: Toolpath,
+  tool: ToolpathTool,
+  size: { length: number; width: number },
+  before: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[],
+  cell = 0.1,
+  tol = 0.02,
+  radial = 0.02,
+): AirCut {
+  // a material sliver thinner than `radial` at the disc's edge counts as air (the rest tolerance)
+  const slim = { ...tool, diameter: tool.diameter - 2 * radial }
+  const hm = new Heightmap(size.length, size.width, cell)
+  for (const b of before) hm.sweep(b.tool, b.tp, cell)
+  let cutting = 0
+  let air = 0
+  let plunges = 0
+  const rough = new Set(tp.passes.filter((p) => p.kind === 'rough').flatMap((p) => p.moves))
+  for (const s of steps(tp)) {
+    if (s.move.kind === 'rapid') continue
+    const pts = samples(s, cell)
+    let most = 0
+    for (const p of pts) {
+      most = Math.max(most, hm.probe(slim, p))
+      hm.stamp(tool, p)
+    }
+    if (!rough.has(s.move)) continue
+    const a = pts[0]!
+    const b = pts.at(-1)!
+    if (Math.abs(a[2] - b[2]) > 1e-9 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9) {
+      if (b[2] < a[2] && most > tol) plunges++
+      continue
+    }
+    let length = 0
+    for (let i = 1; i < pts.length; i++)
+      length += Math.hypot(pts[i]![0] - pts[i - 1]![0], pts[i]![1] - pts[i - 1]![1])
+    if (most > tol) {
+      cutting += length
+      continue
+    }
+    air += length
+  }
+  return { cutting, air, plunges }
 }
 
 /** Loops moved so their bounding box starts at (margin, margin), and the heightmap size. */
