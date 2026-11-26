@@ -3,8 +3,10 @@
 // into an in-memory asset store); the comparison job itself (`design.reference.compare`,
 // `job.get`, `job.abort`) is answered by the test: no reference, the run with its progress and
 // Cancel, the statistics and regions with causes, a region selecting its plan operation, the
-// outdated note after an edit, the "within" state.
-// Doc: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4
+// outdated note after an edit, the "within" state; a chosen region marked in the Plan viewport
+// (its box in the part frame, the sign) and cleared when the result goes outdated.
+// Doc: docs/conventions/ui.md#deviation-panel, docs/modes/deviation.md#implementation-u4,
+// docs/modes/deviation.md#region-marker-u4-follow-up
 import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,12 +22,22 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { planStockSize } from './model'
 import type { DeviationResultView } from './plan-store'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
     <div data-testid={rest['data-testid']} />
   ),
+}))
+// the Viewport's props, to read the plan scene's region marker and framing request (U4 follow-up)
+const scene = vi.hoisted(() => ({ last: {} as Record<string, unknown> }))
+vi.mock('../../viewport/Viewport', async (original) => ({
+  ...(await original<object>()),
+  Viewport: (p: Record<string, unknown>) => {
+    scene.last = p
+    return null
+  },
 }))
 vi.mock('../../viewport/Scene', () => ({
   Scene: () => null,
@@ -276,9 +288,8 @@ describe('deviation panel (U4)', () => {
     expect(within(rows[1]!).getByRole('button')).toHaveAccessibleName(
       /^Under-cut 0\.3 mm · .+, top, 1 mm², tool radius$/,
     )
-    // no operation: a plain row
-    expect(within(rows[2]!).queryByRole('button')).toBeNull()
-    expect(within(rows[2]!).getByRole('group')).toHaveAccessibleName(
+    // no operation: a button too (it marks and frames its region)
+    expect(within(rows[2]!).getByRole('button')).toHaveAccessibleName(
       'Under-cut 0.2 mm, bottom, 19 mm², tab',
     )
     expect(panel.getByText('2 more regions not shown.')).toBeVisible()
@@ -308,6 +319,46 @@ describe('deviation panel (U4)', () => {
       expect(within(t.panel()).getByText(/^The plan changed since this comparison/)).toBeVisible(),
     )
     expect(within(t.panel()).getByRole('button', { name: 'Compare again' })).toBeVisible()
+  })
+
+  it('a chosen region is marked in the Plan viewport; a row without an operation only marks', async () => {
+    const t = await renderPlan()
+    t.job.reply = { state: 'finished', outcome: { ok: true, value: resultOf(t.planId, t.ops) } }
+    await t.user.click(within(t.panel()).getByRole('button', { name: 'Compare' }))
+    const rows = await waitFor(() =>
+      within(within(t.panel()).getByRole('list', { name: 'Regions' })).getAllByRole('button'),
+    )
+    expect(scene.last['regionMarker']).toBeUndefined()
+    // the tab region on the bottom: no operation to select, the panel stays
+    await t.user.click(rows[2]!)
+    expect(t.shell.ui.getState().selection.plan ?? null).toBeNull()
+    expect(rows[2]).toHaveAttribute('aria-pressed', 'true')
+    const thickness = planStockSize(t.s.d.doc, t.plan())!.thickness
+    await waitFor(() =>
+      expect(scene.last['regionMarker']).toMatchObject({
+        sign: 'undercut',
+        label: 'Marked: Under-cut 0.2 mm, bottom.',
+      }),
+    )
+    type B = { min: [number, number, number]; max: [number, number, number] }
+    const marker = scene.last['regionMarker'] as { box: B }
+    // seen from below: the depths 0–1 mm run up from the stock bottom
+    expect(marker.box.min[2]).toBeCloseTo(-thickness)
+    expect(marker.box.max[2]).toBeCloseTo(-thickness + 1)
+    expect(marker.box.max[0] - marker.box.min[0]).toBeCloseTo(8)
+    expect(marker.box.max[1] - marker.box.min[1]).toBeCloseTo(4)
+    // the framing request: the box grown to 10 mm; a second choice is a new request
+    const focus = scene.last['focus'] as { box: B; seq: number }
+    expect(focus.box.max[0] - focus.box.min[0]).toBeCloseTo(10)
+    await t.user.click(rows[2]!)
+    await waitFor(() => expect((scene.last['focus'] as { seq: number }).seq).toBe(focus.seq + 1))
+    // another region replaces it
+    await t.user.click(rows[1]!)
+    await waitFor(() => expect(scene.last['regionMarker']).toMatchObject({ sign: 'undercut' }))
+    expect((scene.last['regionMarker'] as typeof marker).box.max[0]).not.toBe(marker.box.max[0])
+    // an edit makes the result outdated: the marker goes
+    await t.s.run('plan.update', { planId: t.planId, name: 'Renamed' })
+    await waitFor(() => expect(scene.last['regionMarker']).toBeUndefined())
   })
 
   it('a result within the threshold says so, without a regions list', async () => {

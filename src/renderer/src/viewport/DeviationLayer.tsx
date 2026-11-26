@@ -1,8 +1,9 @@
 // The compare overlay's 3D parts besides the part's colours (DF60 P5): the missing pieces as
 // translucent `--danger` volumes (no depth writes, never pickable), fading in over `--motion-base`
 // (instant with reduced motion), and the chosen region's box as `--vp-selected` lines over
-// everything. The part's diverging map is drawn by `PartMesh` (`deviation.ts`).
-// Doc: docs/conventions/ui.md#reference-tools-df60
+// everything. The part's diverging map is drawn by `PartMesh` (`deviation.ts`). The Plan deviation
+// panel's chosen region is `RegionMarker` (U4 follow-up).
+// Doc: docs/conventions/ui.md#reference-tools-df60, docs/conventions/ui.md#deviation-panel
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -11,6 +12,7 @@ import {
   Color,
   DoubleSide,
   SRGBColorSpace,
+  type LineBasicMaterial,
   type MeshBasicMaterial,
 } from 'three'
 import type { Palette, Rgb } from './colours'
@@ -123,6 +125,60 @@ function RegionBox({ box, palette }: { box: Box; palette: Palette }) {
   return (
     <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={6}>
       <lineBasicMaterial color={tint} depthTest={false} transparent />
+    </lineSegments>
+  )
+}
+
+/** The deviation panel's chosen region (Plan, U4 follow-up): its box (part frame) and sign. */
+export interface RegionMarkerView {
+  readonly box: Box
+  readonly sign: 'overcut' | 'undercut'
+  /** Added to the viewport's text summary ("Marked: Over-cut 0.5 mm, top."). */
+  readonly label?: string
+}
+
+/**
+ * The chosen region of the plan's comparison (docs/modes/deviation.md#region-marker-u4-follow-up):
+ * its box's edges over everything in the row's swatch colour (`--danger` over-cut, `--info`
+ * under-cut), fading in over `--motion-base`; never pickable.
+ */
+export function RegionMarker({
+  marker,
+  palette,
+  reducedMotion,
+}: {
+  marker: RegionMarkerView
+  palette: Palette
+  reducedMotion: boolean
+}): React.JSX.Element {
+  const geometry = useMemo(() => {
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(boxEdges(marker.box), 3))
+    return g
+  }, [marker.box])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  const tint = useMemo(
+    () => colour(marker.sign === 'overcut' ? palette.danger : palette.info),
+    [palette, marker.sign],
+  )
+  const material = useRef<LineBasicMaterial>(null)
+  useFadeIn(geometry, reducedMotion, (t) => {
+    if (material.current) material.current.opacity = t
+  })
+  return (
+    <lineSegments
+      geometry={geometry}
+      raycast={noRaycast}
+      renderOrder={6}
+      userData={{ deviationRegion: marker.sign }}
+    >
+      <lineBasicMaterial
+        ref={material}
+        color={tint}
+        depthTest={false}
+        transparent
+        opacity={reducedMotion ? 1 : 0}
+      />
     </lineSegments>
   )
 }

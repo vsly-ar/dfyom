@@ -124,7 +124,7 @@ Bolt hole target layout ([inspector-layout.md § Per-inspector target layout](..
 | H2    | **Slotted holes, core** (needs R1). `slotLength`, `rotation`, the slot expansion to Round pockets and an edge chamfer, `notForSlot` / `notForRound`, role kind switch, `tools/list` measured                                                              | Core test: the clamps_40 hole as one feature (M5, slot 19.5 for a 25 mm slot, recess, countersink) gives the user's geometry within the chord bound and plans with an end mill ≤ 5.5 mm and a chamfer mill. Switching round ↔ slotted keeps the drill lock where it fits |
 | H3    | **Bolt hole inspector.** Type option, Slotted switch, Slot length, Rotation, Overall read-out, recess labels, slot dimension in the viewport, inspector-layout.md row                                                                                     | UI test: make the clamps hole from the inspector (M5, Recessed countersink, Slotted 19.5); a hidden e2e capture reviewed                                                                                                                                                 |
 
-**R1 done** ([§ Implementation (R1)](#implementation-r1)), **R2 done** ([§ Implementation (R2)](#implementation-r2)), **H1 done** ([§ Implementation (H1)](#implementation-h1)), **H2 done** ([§ Implementation (H2)](#implementation-h2)), **H3 done** except the viewport's slot dimension ([§ Implementation (H3)](#implementation-h3)).
+**R1 done** ([§ Implementation (R1)](#implementation-r1)), **R2 done** ([§ Implementation (R2)](#implementation-r2)), **H1 done** ([§ Implementation (H1)](#implementation-h1)), **H2 done** ([§ Implementation (H2)](#implementation-h2)), **H3 done** ([§ Implementation (H3)](#implementation-h3), the viewport's slot dimension after it: [§ Viewport slot dimension](#viewport-slot-dimension)).
 
 Order: R1 → (R2 ∥ H1) → H2 → H3. H1 does not need R1, and V1 of DF118 is independent; H1's equal-width case is tested once V1 is in.
 
@@ -183,7 +183,15 @@ Done 2026-11-26. Code: [`HoleInspector.tsx`](../../src/renderer/src/modes/design
 - **Switch:** on sends `slotLength` = 2 × the diameter (M5: 11 mm), off sends `slotLength: 0`; one undo step each. A refusal (a slot too long for the face) shows at Slot length (or at the switch).
 - **Section:** drawn along the slot: the walls half the travel out, the screw at mid-travel, the diameters measured across the right end, the travel as the measured part `slotLength` between the end centres, dimensioned above the drawing with extension lines (design review R15); label "Section along the slot: Ø 5.5 mm through, slotted: 19.5 mm travel, 25 mm overall; …".
 - **Tools** names the slotted hole's `drill` role "Slot"; the navigator read-out reads "M5 · recessed countersink, slot 19.5".
-- **Not built:** the viewport's slot centre line and travel dimension while the hole is selected (the selection outline shows the slot); a known issue in [hardening.md](../plans/hardening.md) DF119.
+- **Viewport:** the slot centre line and travel dimension while the hole is selected came after H3 ([§ Viewport slot dimension](#viewport-slot-dimension)).
+
+## Viewport slot dimension
+
+Done 2026-11-26 (the H3 known issue; UI rules in [ui.md § Section illustration](../conventions/ui.md#section-illustration)). Code: `slotDimension` in [`slot-dimension.ts`](../../src/renderer/src/modes/design/slot-dimension.ts) (pure), drawn by [`SlotDimension.tsx`](../../src/renderer/src/viewport/SlotDimension.tsx), wired in `useDesignScene.ts`. Tests: `slot-dimension.test.ts`, the viewport's `SlotDimension` case in `Viewport.test.tsx`, [`e2e/slotted-hole.e2e.ts`](../../e2e/slotted-hole.e2e.ts) (dark capture `h3-slot-dimension-dark.png`).
+
+- **Source:** the hole's owned slot pocket (`<id>_drill`: a Round rectangle about the hole centre, `length` = travel + diameter, `rotation`), read from the loaded part, so the drawing is the slot the part has (the last evaluated values, as the selection outline). The widest owned pocket (the recess or counterbore, else the slot) sets how far out the dimension sits.
+- **Placement:** on the hole's face (`on`, its level), so a recess does not hide it: the end centres are the centre ± half the travel along the slot's direction (`rotation`, CCW in the face frame). The centre line runs past each end centre by the radius + 1.5 mm; the dimension line sits on the face-frame side of +v (turned with the slot) at half the widest outline + 3 mm, extension lines from 0.5 mm off the end centres to 1.5 mm past it.
+- **Shown** only while the hole itself is selected (not an owned operation, not a round hole, not while a pick runs); the summary adds "Slot travel 19.5 mm."
 
 ## Flagged for the user
 

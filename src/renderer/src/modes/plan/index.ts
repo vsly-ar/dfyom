@@ -2,5 +2,5 @@
 export { PlanInspector } from './PlanInspector'
 export { PlanNavigator } from './PlanNavigator'
 export { PlanStatus } from './PlanStatus'
-export { usePlanPartScene, usePlanScene } from './usePlanScene'
+export { usePlanDeviationScene, usePlanPartScene, usePlanScene } from './usePlanScene'
 export { PlanStartOverlay } from './PlanStart'

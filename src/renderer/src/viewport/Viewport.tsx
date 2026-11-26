@@ -79,6 +79,8 @@ import {
 } from './mesh'
 import type { AnchorOverlay, FrameOverlay } from './Overlays'
 import type { DeviationView } from './deviation'
+import type { RegionMarkerView } from './DeviationLayer'
+import type { SlotDimensionView } from './SlotDimension'
 import type { TabOverlay } from './TabMarkers'
 import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
@@ -158,6 +160,13 @@ export interface ViewportProps {
    * compare region chosen in the Reference panel, DF60 P5).
    */
   focus?: { readonly box: Box; readonly seq: number } | null
+  /**
+   * The Plan deviation panel's chosen region (U4 follow-up, ui.md#deviation-panel): its box drawn
+   * in its swatch colour over everything; framing it is `focus`.
+   */
+  regionMarker?: RegionMarkerView | null
+  /** A selected slotted Bolt hole's centre line and travel dimension (DF119 H3 follow-up). */
+  slotDimension?: SlotDimensionView | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
@@ -298,6 +307,8 @@ export function Viewport({
   referenceOverlay = null,
   deviation = null,
   focus = null,
+  regionMarker = null,
+  slotDimension = null,
   tinted = null,
   selectedAlso = null,
   outlineOnly = null,
@@ -464,11 +475,14 @@ export function Viewport({
     const tgt = c.getTarget(new Vector3(), true)
     lookFrom(normalize([pos.x - tgt.x, pos.y - tgt.y, pos.z - tgt.z]))
   }, [lookFrom])
-  // a requested box (a compare region, DF60 P5): fitted from the current view direction
+  // a requested box (a compare region, DF60 P5; a deviation region, U4): fitted from the current
+  // view direction, once per request (a mode switch back hands the same request in again)
+  const framed = useRef(new WeakSet<object>())
   useEffect(() => {
     const c = controls.current
     const f = focus
-    if (!c || f == null) return
+    if (!c || f == null || framed.current.has(f)) return
+    framed.current.add(f)
     const camera = c.camera as PerspectiveCamera
     const pos = c.getPosition(new Vector3(), true)
     const tgt = c.getTarget(new Vector3(), true)
@@ -737,7 +751,12 @@ export function Viewport({
   }
 
   const operations = mesh ? meshOperations(mesh).filter((o) => o !== 'stock').length : 0
-  const text = summary ?? msg.summary({ operations, status: mesh ? status : 'empty' })
+  const text = [
+    summary ?? msg.summary({ operations, status: mesh ? status : 'empty' }),
+    regionMarker?.label,
+  ]
+    .filter(Boolean)
+    .join(' ')
   const measured =
     measurePoints.a !== null && measurePoints.b !== null
       ? measureBetween(measurePoints.a, measurePoints.b)
@@ -815,6 +834,8 @@ export function Viewport({
           ghosts={ghosts}
           referenceOverlay={pick ? null : referenceOverlay}
           deviation={deviation}
+          regionMarker={regionMarker}
+          slotDimension={pick ? null : slotDimension}
           seeThrough={seeThrough}
           reducedMotion={reducedMotion}
           controlsRef={controls}

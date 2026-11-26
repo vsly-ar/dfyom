@@ -14,7 +14,14 @@ import { PartSetupDialogs, PartSetupTools } from './design/PartSetupDialogs'
 import { useDesignPartOf } from './design/useDesign'
 import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
-import { PlanInspector, PlanNavigator, PlanStatus, usePlanPartScene, usePlanScene } from './plan'
+import {
+  PlanInspector,
+  PlanNavigator,
+  PlanStatus,
+  usePlanDeviationScene,
+  usePlanPartScene,
+  usePlanScene,
+} from './plan'
 import { JogHotkeys, RunInspector, RunNavigator, useRunScene } from './run'
 
 const m = shellMessages.empty
@@ -139,9 +146,11 @@ export function useModeScene(mode: AppMode): SceneProps {
   const run = useRunScene(mode)
   const plan = usePlanScene(mode)
   const planPart = usePlanPartScene(mode)
+  const deviation = usePlanDeviationScene(mode)
   if (mode === 'design') return design
   const base = { mesh: design.mesh, stock: design.stock ?? null, status: design.status ?? 'done' }
   if (mode === 'run') return { ...base, run }
-  // snapshot scene (E3b): the plan's own part on its stock copy, edited operations tinted
-  return planPart === null ? { ...base, run: plan } : { ...planPart, run: plan }
+  // snapshot scene (E3b): the plan's own part on its stock copy, edited operations tinted; the
+  // deviation panel's chosen region marked and framed (U4 follow-up)
+  return { ...(planPart ?? base), run: plan, ...deviation }
 }

@@ -121,18 +121,30 @@ The two saved programs (`enclosure-{top,bottom}.nc.gz`, setups +z and −z, no t
 - **Decisions (by delegation, D70):**
   - **Run on demand, not after each edit.** The job takes seconds and generates missing toolpaths; unlike the design overlay ([reference-tools.md § Overlay](reference-tools.md#overlay-ui)) it runs only on "Compare". A result whose plan inputs changed since (revision, pending set, library) stays on screen with an "outdated" note.
   - **Held by the window's plan store** (`plan-store.ts` `deviation`, one run per window, of one plan), so choosing a region (which selects its operation and replaces the inspector) and coming back keeps the result, the chosen row and a running job. The run's end re-reads the plan's toolpaths (the job generated them into the cache).
-  - **No framing or marking of the region** in the viewport: the bounds are in the region's face frame and the plan scene has no colour map or region layer yet; a region selects its plan operation only. A region without an operation (a tab, the frame) is a plain row.
+  - **No framing or marking of the region** in the viewport as first built (U4); added after it, see [§ Region marker (U4 follow-up)](#region-marker-u4-follow-up).
   - **What is shown:** the summary (regions counted with `more`, `unexplained`), the regions (sign, max deviation, operation, cause; "check: no known cause" for one over 0.5 mm without a cause, as Q44 counts, design review R5), then a closed Statistics accordion (design review R7): the overall statistics (mean, 95 %, 99 %, max, worst over- and under-cut, area over the threshold, the edge band's area) and one line per face when there are several. A result that arrives scrolls the group into view. `p50`, `cells`, `depthRange`, `volume` and `excluded.outsidePart` stay in the result for agents.
 - **Code:** `modes/plan/DeviationPanel.tsx`, the run in `plan-store.ts` (`compareDeviation`, `cancelDeviation`, `chooseDeviationRegion`), strings in `messages/deviation.ts`.
 - **Tests:** `Deviation.test.tsx` (no reference; the job's arguments, progress, Cancel; the scroll into view on a result; the order summary → regions → closed Statistics; the statistics and regions with causes, a region selecting its operation and staying chosen, the outdated note after an edit; the within state; a failed job; axe); `e2e/deviation.e2e.ts` (a faced block with two pockets against a box STL of the stock: over-cut regions, a region selects its operation; renders `design/features/renders/u4-deviation-panel-{light,dark}.png`).
 
+## Region marker (U4 follow-up)
+
+**As built (2026-11-26).** Choosing a region row marks and frames the region in the Plan viewport; UI rules in [ui.md § Deviation panel](../conventions/ui.md#deviation-panel). No command or schema change.
+
+- **Box:** the region's `bounds` (face frame `[u, v]`, cell edges) and `depthRange` (depths below the face) give a box in the face frame (`w` from −max depth to −min depth); its eight corners go to the part frame through `faceFrame(direction of face, plan stock)` (the frame the result's maps use: origin at the stock face's lower-left corner, `w` = 0 on the stock face). Stock faces are axis-aligned, so the corners' bounds are the box. Pure: `regionBox` in `modes/plan/deviation-region.ts`.
+- **Marker:** the box's 12 edges, drawn over everything (no depth test, never pickable) in the row's swatch colour (`--danger` over-cut, `--info` under-cut), fading in over `--motion-base` (at once with reduced motion). A region a cell thin in depth draws as its outline at that depth.
+- **Framing:** from the current view direction (the camera does not turn), the box grown to at least 10 mm on each side, so a one-cell region is not filled edge to edge. Choosing the same row again frames again. A frame is requested once per choice: switching modes and back does not frame again.
+- **Every row is a button now:** a region without an operation (a tab, the frame) marks and frames only; a row with one also selects its operation as before. The plan scene draws the part in the part frame whichever setup is shown, so the marker does not depend on the setup.
+- **Cleared:** when another region is chosen (replaced), when a new result arrives (its rows are new), and while the result is outdated (an edit, an Apply or a library change since the run, the same test as the panel's note).
+- **Held:** the chosen row, its box and the framing request are in the window's plan store with the run (`chooseDeviationRegion(index, box)`), so the marker survives an operation selection.
+- **Tests:** `deviation-region.test.ts` (boxes for top, bottom and side faces, the minimum framing size), `Deviation.test.tsx` (a row without an operation is a button that marks without selecting; the marker clears when the result goes outdated), `e2e/deviation.e2e.ts` (a chosen region draws the marker layer and moves the camera; dark capture `u4-deviation-marker-dark.png`).
+
 ## Not yet
 
-| Item                                                  | Where                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| Viewport colour map, region markers and framing       | [Display (later)](#display-later); the panel is built (U4)               |
-| `setupIds`, `method.sections`, `cell` and `strict`    | [Implementation (V3)](#implementation-v3): fixed 0.5 mm height map       |
-| 3D comparison (walls, undercuts, voxels / tri-dexels) | With simulation ([plan.md § Simulation](plan.md#simulation--prediction)) |
-| In-process stock across setups                        | Roadmap Later list; reuses the cut map                                   |
-| Surface finish, scallop and wall-taper estimates      | With 3D finishing                                                        |
-| Tolerances on the reference (per-face limits)         | When parts carry tolerances on surfaces                                  |
+| Item                                                  | Where                                                                      |
+| ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| Viewport colour map                                   | [Display (later)](#display-later); the panel, marker and framing are built |
+| `setupIds`, `method.sections`, `cell` and `strict`    | [Implementation (V3)](#implementation-v3): fixed 0.5 mm height map         |
+| 3D comparison (walls, undercuts, voxels / tri-dexels) | With simulation ([plan.md § Simulation](plan.md#simulation--prediction))   |
+| In-process stock across setups                        | Roadmap Later list; reuses the cut map                                     |
+| Surface finish, scallop and wall-taper estimates      | With 3D finishing                                                          |
+| Tolerances on the reference (per-face limits)         | When parts carry tolerances on surfaces                                    |
