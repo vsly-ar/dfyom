@@ -1,5 +1,5 @@
 // Plan inspector (task 3.7): without a selection the plan (name, status, machine, all checks with a
-// link to their operation); a selected setup: SetupInspector.tsx (v0.2 F6); a selected plan operation: the tool picker (library tools that pass
+// link to their operation, the deviation panel: DeviationPanel.tsx, U4); a selected setup: SetupInspector.tsx (v0.2 F6); a selected plan operation: the tool picker (library tools that pass
 // the checks, ranked, with their reasons: `plan.tool.suggest`), stickout and cutting preset, and
 // "Part (plan copy)" (PlanCopyGroup.tsx, plan-only edits, v0.2), the strategy group
 // (StrategyGroup.tsx, v0.2), the feeds-and-speeds card: one QuantityInput per
@@ -75,6 +75,7 @@ import styles from './Plan.module.css'
 import { StrategyGroup } from './StrategyGroup'
 import { ZRefFields } from './ZRefFields'
 import { AidFields } from './AidFields'
+import { DeviationPanel } from './DeviationPanel'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
 
 const m = planMessages
@@ -173,6 +174,7 @@ function PlanInspectorBody({ doc }: { doc: ProjectDoc }): React.JSX.Element {
     )
   return op === undefined ? (
     <PlanSummary
+      doc={doc}
       plan={plan}
       blank={pieceBlank(doc, plan)}
       units={doc.unitSystem}
@@ -201,6 +203,7 @@ function PlanInspectorBody({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 // ── plan ──────────────────────────────────────────────────────────────────────────────────
 
 function PlanSummary({
+  doc,
   plan,
   blank,
   units,
@@ -208,6 +211,7 @@ function PlanSummary({
   error,
   outdated,
 }: {
+  doc: ProjectDoc
   plan: PlanDTO
   /** A split piece's blank (split parts 4c). */
   blank: ReturnType<typeof pieceBlank>
@@ -282,6 +286,7 @@ function PlanSummary({
             outdated={outdated ? applyMessages.checksOutdated : undefined}
           />
         </InspectorGroup>
+        <DeviationPanel doc={doc} plan={plan} units={units} />
       </div>
     </div>
   )

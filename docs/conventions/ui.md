@@ -724,6 +724,24 @@ Plan task 1.6 of [v0.4-llm-first.md](../plans/v0.4-llm-first.md), [workholding.m
 - Not yet: dragging a toe clamp along its edge, the items in the Run scene and the setup-change picture ([workholding.md § Deferred](../modes/workholding.md#deferred)).
 - Renders: `design/features/renders/workholding-inspector-{light,dark}.png` (`e2e/workholding.e2e.ts` with `DFYOM_RENDERS=1`: the user's two toe clamps, the facing cleared around them, the first clamp open with its halo).
 
+### Deviation panel
+
+Plan task 1.6 of [v0.4-llm-first.md](../plans/v0.4-llm-first.md) (U4), [deviation.md § Display](../modes/deviation.md#display-later): the numbers of `design.reference.compare { source: { kind: 'plan', planId } }` in the Plan inspector, **without the colour map** (decided in U4 by delegation, D70; [deviation.md § Implementation (U4)](../modes/deviation.md#implementation-u4)). Built in `DeviationPanel.tsx`, the job in the plan store (`plan-store.ts`), strings in `messages/deviation.ts`. Existing tokens and components only.
+
+- **Where:** the Plan inspector without a selection, a group "Compare with reference" after the plan's Checks (a check of the finished plan: findings stay above it). The heading carries the [`deviation` icon](#icons-workholding-offset-deviation) before the title; the group's (i): "Simulates the cut of every toolpath in machining order and measures it against the reference model, column by column from each setup's up face."
+- **Without a reference** on the plan's part: one muted note, "Import a reference model in Design to compare the programs with it." and nothing else. With several: a "Reference" `Select` first (default the first by name).
+- **Fields:** "Threshold" (`QuantityInput`, length, default 0.1 mm, 0.001–10 mm; the next run takes it, it never re-runs by itself). Then a "Compare" button (default variant, `deviation` icon; "Compare again" once a result is shown). A muted hint under it while there is no result: "Toolpaths are generated where missing. Takes a few seconds."
+- **Running** (a job, followed with `job.get` like toolpath generation): the button becomes a ghost "Cancel" (`job.abort`; the previous result, if any, comes back); a polite status "Comparing with the reference…" and a `Progress` bar ("Comparing", determinate while the job reports a total: the toolpaths); `aria-busy` on the group. Selecting an operation and coming back keeps the run (the store owns it, one per window).
+- **Result** (the store keeps the last one per plan, across selections):
+  - **Summary** (`role="status"`): "3 regions over 0.1 mm · 1 unexplained" or "The programs make the reference within 0.1 mm." (no region listed or counted), tabular numerals.
+  - **Statistics:** a two-column facts list (label muted, value right-aligned, tabular numerals, project units): "Mean", "95 %", "99 %", "Max", "Worst over-cut", "Worst under-cut" (|dev| over the compared cells), "Area over threshold", "Edge band (not compared)". With more than one face, one muted line per face under it: "Top: 99 % 0.005 mm · max 0.42 mm".
+  - **Regions list** (up to 20, ranked as the result, `Regions`): each row a full-width button in the Reference Compare rows' style: an 8 px swatch (`--danger` over-cut: material the reference has is cut away; `--info` under-cut: material left; colour never alone, the row says it), "Over-cut 0.5 mm · Facing 1" and at the end, muted, the cause in words ("tool radius", "workholding", "hole mouth", "drill point", "tab") or "no cause". A region over 0.5 mm without a cause (the result's `unexplained`) says "unexplained" in `--text` medium weight instead: the only emphasis, no accent colour. The row's accessible name adds the face and the area: "Over-cut 0.5 mm · Facing 1, top, 120 mm², no cause". Choosing a row selects its plan operation (the inspector then shows that operation; the chosen row stays `aria-pressed` when the plan is shown again); a region without an operation is a plain row, not a button. "N more regions not shown." past the limit.
+  - **Outdated:** after an edit, an Apply or a library change since the run, a muted note "The plan changed since this comparison. Compare again to update it."; the numbers stay.
+  - **Errors** with `ErrorMessage` ("The plan could not be compared."), the core's message under it (a plan finding, no operations).
+- **Not here (later):** the colour map on the part, region markers and framing the camera on a region ([deviation.md § Display](../modes/deviation.md#display-later)); the region's bounds are in its face frame, which the plan scene does not draw yet.
+- **Motion:** none beyond the shared hover and focus transitions and the progress bar.
+- Renders: `design/features/renders/u4-deviation-panel-{light,dark}.png` (`e2e/deviation.e2e.ts` with `DFYOM_RENDERS=1`).
+
 ### Reference ghost (v0.2)
 
 [reference-model.md § Display](../modes/reference-model.md#display) (task R3):
@@ -1092,16 +1110,16 @@ Each new or redrawn icon is reviewed at 16 px and 20 px in light and dark beside
 
 Drawn in [v0.4-llm-first L1](../plans/v0.4-llm-first.md#8-ui) to the [icon rules](#icons) (group `cnc`, `kind-offset` in `shape`; provenance `b22`). Contact sheet: `design/icons/renders/llm-first-l1-contact-{light,dark}.png`, each icon beside its unchanged neighbours ([design/icons/](../../design/icons/README.md#v04-llm-first-l1-workholding-offset-deviation)). Reviewed with the rest in L2.
 
-| Icon           | Drawing (view) and accent part                                                                                                   | Shown                                                                    |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `toe-clamp`    | Front: the strap over the stock edge, the stud and the heel; accent: the strap. The B22 "Workholding" (`clamp`) drawing, renamed | Workholding rows and Add menu                                            |
-| `vise`         | Front: the stock standing out of the fixed and the moving jaw; accent: the jaws                                                  | Workholding rows and Add menu                                            |
-| `screw`        | Section: a pan-head screw through the stock into the base, one thread tick; accent: the screw                                    | Workholding rows and Add menu                                            |
-| `block`        | Front: a low block against the stock's side; accent: the block                                                                   | Workholding rows and Add menu                                            |
-| `base`         | Front: the stock on a plate; accent: the plate (spoilboard, fixture plate)                                                       | Workholding rows and Add menu                                            |
-| `surface-hold` | Front: the stock on the fixed-support hatching (tape, vacuum, glue); accent: the hatching                                        | Workholding rows and Add menu                                            |
-| `kind-offset`  | Top: the source outline dashed inside the rounded offset outline; no accent, like the other shape kinds                          | Shape Editor item list (the offset item)                                 |
-| `deviation`    | The tolerance band (dashed) and the compared profile leaving it; accent: the profile                                             | Compare legend over the viewport; U4's results panel takes it when built |
+| Icon           | Drawing (view) and accent part                                                                                                   | Shown                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `toe-clamp`    | Front: the strap over the stock edge, the stud and the heel; accent: the strap. The B22 "Workholding" (`clamp`) drawing, renamed | Workholding rows and Add menu                                                    |
+| `vise`         | Front: the stock standing out of the fixed and the moving jaw; accent: the jaws                                                  | Workholding rows and Add menu                                                    |
+| `screw`        | Section: a pan-head screw through the stock into the base, one thread tick; accent: the screw                                    | Workholding rows and Add menu                                                    |
+| `block`        | Front: a low block against the stock's side; accent: the block                                                                   | Workholding rows and Add menu                                                    |
+| `base`         | Front: the stock on a plate; accent: the plate (spoilboard, fixture plate)                                                       | Workholding rows and Add menu                                                    |
+| `surface-hold` | Front: the stock on the fixed-support hatching (tape, vacuum, glue); accent: the hatching                                        | Workholding rows and Add menu                                                    |
+| `kind-offset`  | Top: the source outline dashed inside the rounded offset outline; no accent, like the other shape kinds                          | Shape Editor item list (the offset item)                                         |
+| `deviation`    | The tolerance band (dashed) and the compared profile leaving it; accent: the profile                                             | Compare legend over the viewport; the deviation panel's heading and Compare (U4) |
 
 #### Accessibility (feature UI)
 

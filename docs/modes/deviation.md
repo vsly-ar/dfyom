@@ -1,6 +1,6 @@
 # Deviation check: the simulated cut against the reference
 
-Status: accepted by delegation (D70, 2026-11-26; the user can veto: [readiness review](../plans/v0.4-llm-first.md#readiness-review-2026-11-26); proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F4, [Q43–Q44](../plans/v0.4-llm-first.md#questions-for-the-user); milestone: the v0.4 follow-up, after v0.4 and before v0.5) · Built: the cut map (S9, V2: [Implementation](#implementation-s9-v2)) and the `source: plan` compare (V3: [Implementation](#implementation-v3)) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Reference: [reference-model.md](reference-model.md), [reference-tools.md](reference-tools.md) · The design against the reference (the evaluated part): [reference-tools.md § Compare](reference-tools.md#3-compare) (hardening DF60, Q71) · Toolpaths: [plan-v0.1.md § Toolpath data model](plan-v0.1.md#toolpath-data-model) · Workholding causes: [workholding.md](workholding.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted by delegation (D70, 2026-11-26; the user can veto: [readiness review](../plans/v0.4-llm-first.md#readiness-review-2026-11-26); proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F4, [Q43–Q44](../plans/v0.4-llm-first.md#questions-for-the-user); milestone: the v0.4 follow-up, after v0.4 and before v0.5) · Built: the cut map (S9, V2: [Implementation](#implementation-s9-v2)) and the `source: plan` compare (V3: [Implementation](#implementation-v3)), the results panel without the colour map (U4: [Implementation](#implementation-u4)) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Reference: [reference-model.md](reference-model.md), [reference-tools.md](reference-tools.md) · The design against the reference (the evaluated part): [reference-tools.md § Compare](reference-tools.md#3-compare) (hardening DF60, Q71) · Toolpaths: [plan-v0.1.md § Toolpath data model](plan-v0.1.md#toolpath-data-model) · Workholding causes: [workholding.md](workholding.md) · Terms: [glossary.md](../glossary.md)
 
 Nothing in the app tells whether the programs make the reference. The v0.3 exit test checks the design in test code only (the evaluated part's mid-wall section against the STL's, ≤ 0.2 mm; [testing.md § v0.3 headless golden path](../conventions/testing.md)), and the black-box agent wrote its own Z-map of both programs against the STL. Since hardening DF60 (Q71) the **design** source (does the evaluated part match?) is owned by [reference-tools.md § Compare](reference-tools.md#3-compare) (3D booleans, height-map fallback); this doc keeps only the **simulated cut** of a plan's toolpaths (do the programs make it?): headless first (agents, CLI, exit tests), a view in the viewport later.
 
@@ -63,7 +63,7 @@ Targets on the enclosure (two setups, 250 × 200 mm, 0.5 mm cells: 200 K cells p
 
 ## Display (later)
 
-A diverging colour map on the part in Design and Plan (over-cut and under-cut colours from the [ui.md](../conventions/ui.md) palette, neutral within the threshold), region markers with their cause, and the statistics in a panel. Specified with the UI amendment after the headless command proves out; this milestone ships the command and the numbers (plan task U4: a results panel without the colour map, first to cut).
+A diverging colour map on the part in Design and Plan (over-cut and under-cut colours from the [ui.md](../conventions/ui.md) palette, neutral within the threshold), region markers with their cause, and the statistics in a panel. Specified with the UI amendment after the headless command proves out; this milestone ships the command and the numbers (plan task U4: a results panel without the colour map, built: [Implementation (U4)](#implementation-u4)).
 
 ## Testing
 
@@ -113,11 +113,23 @@ The two saved programs (`enclosure-{top,bottom}.nc.gz`, setups +z and −z, no t
 - **Explained:** the eight tab regions (four from each face: 8 mm tabs; from the bottom the step program leaves them) as `tab`, the cavity's two sharp corners (34.8 mm high, 0.75 mm² each) as `toolRadius`. The hole mouths (countersinks, 4.86 mm) lie in the edge band at both cell sizes (their slopes step more than 0.1 mm per cell), so no `holeMouth` region appears; the band is 39.9 cm² at 0.5 mm, 21.6 cm² at 0.25 mm.
 - **No threshold changed;** Q44 stays as accepted. X1's own programs (the app's drilling at the detected depth) are what the exit test checks; this fixture keeps the black-box numbers as a regression record.
 
+## Implementation (U4)
+
+**As built (2026-11-26).** The results panel in the Plan inspector without a selection, a group "Compare with reference" after the plan's Checks; UI rules in [ui.md § Deviation panel](../conventions/ui.md#deviation-panel). No command or schema change: the window calls `design.reference.compare { partId, referenceId? (only with several references), source: { kind: 'plan', planId }, threshold, limit: 20 }` and follows the job with `job.get` (as toolpath generation), Cancel is `job.abort`.
+
+- **Decisions (by delegation, D70):**
+  - **Run on demand, not after each edit.** The job takes seconds and generates missing toolpaths; unlike the design overlay ([reference-tools.md § Overlay](reference-tools.md#overlay-ui)) it runs only on "Compare". A result whose plan inputs changed since (revision, pending set, library) stays on screen with an "outdated" note.
+  - **Held by the window's plan store** (`plan-store.ts` `deviation`, one run per window, of one plan), so choosing a region (which selects its operation and replaces the inspector) and coming back keeps the result, the chosen row and a running job. The run's end re-reads the plan's toolpaths (the job generated them into the cache).
+  - **No framing or marking of the region** in the viewport: the bounds are in the region's face frame and the plan scene has no colour map or region layer yet; a region selects its plan operation only. A region without an operation (a tab, the frame) is a plain row.
+  - **What is shown:** the summary (regions counted with `more`, `unexplained`), the overall statistics (mean, 95 %, 99 %, max, worst over- and under-cut, area over the threshold, the edge band's area), one line per face when there are several, and the regions (sign, max deviation, operation, cause; "unexplained" for one over 0.5 mm without a cause, as Q44 counts). `p50`, `cells`, `depthRange`, `volume` and `excluded.outsidePart` stay in the result for agents.
+- **Code:** `modes/plan/DeviationPanel.tsx`, the run in `plan-store.ts` (`compareDeviation`, `cancelDeviation`, `chooseDeviationRegion`), strings in `messages/deviation.ts`.
+- **Tests:** `Deviation.test.tsx` (no reference; the job's arguments, progress, Cancel; the statistics and regions with causes, a region selecting its operation and staying chosen, the outdated note after an edit; the within state; a failed job; axe); `e2e/deviation.e2e.ts` (a faced block with two pockets against a box STL of the stock: over-cut regions, a region selects its operation; renders `design/features/renders/u4-deviation-panel-{light,dark}.png`).
+
 ## Not yet
 
 | Item                                                  | Where                                                                    |
 | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| Viewport colour map                                   | [Display (later)](#display-later)                                        |
+| Viewport colour map, region markers and framing       | [Display (later)](#display-later); the panel is built (U4)               |
 | 3D comparison (walls, undercuts, voxels / tri-dexels) | With simulation ([plan.md § Simulation](plan.md#simulation--prediction)) |
 | In-process stock across setups                        | Roadmap Later list; reuses the cut map                                   |
 | Surface finish, scallop and wall-taper estimates      | With 3D finishing                                                        |
