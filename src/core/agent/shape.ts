@@ -9,6 +9,7 @@
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
+import { withoutOperationName } from '../plan/labels'
 import { runLinkSavings, setupToolChanges, toolRuns } from '../plan/tool-runs'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
@@ -691,21 +692,28 @@ function stableJson(v: unknown): string {
  */
 function findingGroups(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
-  const groups = new Map<string, { finding: Obj; count: number; ids: string[] }>()
+  const groups = new Map<string, { finding: Obj; bare: Obj; count: number; ids: string[] }>()
   const counts: Record<string, number> = {}
   for (const f of value['warnings'] as unknown[]) {
     if (!isObj(f)) continue
     const { planOperationId, ...finding } = f
     const severity = String(finding['severity'])
     counts[severity] = (counts[severity] ?? 0) + 1
-    const key = stableJson(finding)
-    const g = groups.get(key) ?? { finding, count: 0, ids: [] }
+    // D4 names the operation in each message: group on the text without that head, show the
+    // named text only when the group holds one finding
+    const bare =
+      typeof finding['message'] === 'string' && typeof planOperationId === 'string'
+        ? { ...finding, message: withoutOperationName(finding['message'], planOperationId) }
+        : finding
+    const key = stableJson(bare)
+    const g = groups.get(key) ?? { finding, bare, count: 0, ids: [] }
     groups.set(key, g)
     g.count++
     if (typeof planOperationId === 'string') g.ids.push(planOperationId)
   }
   const all = [...groups.values()]
-  const shown = all.slice(0, MAX_FINDING_GROUPS).map(({ finding, count, ids }) => {
+  const shown = all.slice(0, MAX_FINDING_GROUPS).map(({ finding: one, bare, count, ids }) => {
+    const finding = count === 1 ? one : bare
     const { code, severity, rule, field, message, params, ...rest } = finding
     const next = findingNext(finding)
     return {
