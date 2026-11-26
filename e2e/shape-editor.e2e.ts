@@ -275,12 +275,12 @@ test('shapes dialog: "Offset…" on a row → the offset item in the Shape Edito
     .click()
   const offset = page.getByRole('dialog', { name: 'Offset Shape 1' })
   await expect(offset).toBeVisible()
-  // in a modal dialog a blur comes back to the field (focus trap): Tab leaves it instead
+  // R20: the focus trap's return no longer reopens the adjust panel, so a click moves on
   const distance = input(offset, 'Distance')
   await distance.fill('3')
   await distance.press('Enter')
-  await distance.press('Tab')
   await offset.getByRole('radio', { name: 'Inward' }).click()
+  await expect(page.getByRole('dialog', { name: 'Adjust Distance' })).toHaveCount(0)
   await renderDark(page, 'offset-dialog')
   await offset.getByRole('button', { name: 'Create offset' }).click()
   await expect(offset).toBeHidden()

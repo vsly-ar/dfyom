@@ -372,8 +372,8 @@ test('U3: Offset dialog, adjust panel after a click in the dialog, offset item, 
   const distance = input(offset, 'Distance')
   await distance.fill('3')
   await distance.press('Enter')
-  // the known issue: a click elsewhere in the modal dialog blurs the field, the focus trap
-  // brings the focus back and the adjust panel opens again
+  // R20 (fixed): a click elsewhere in the modal dialog blurs the field; a focus trap's return
+  // does not open the adjust panel again
   await offset.getByText(/^A new shape at this distance/).click()
   await shoot(page, 'u3-offset-dialog-blur')
   await distance.press('Tab')

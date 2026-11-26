@@ -95,6 +95,9 @@ export type QuantityCommitProps =
       onCommit: (value: Quantity | undefined, gesture?: string) => void
     }
 
+/** A focus this soon after the input's own blur, from nowhere, is a focus trap's return (R20). */
+const BOUNCE_MS = 50
+
 export type QuantityInputProps = QuantityInputBaseProps & QuantityCommitProps
 
 export interface QuantityInputBaseProps {
@@ -337,6 +340,13 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const focusPanel = useRef(false)
   /** The next focus of the input comes back from the panel: do not reopen it. */
   const returning = useRef(false)
+  /**
+   * When the input last lost focus (ms, `performance.now()`). A focus with no previous element
+   * that comes back within a frame of it is a focus trap returning it (a modal dialog's
+   * FocusScope after the focus left the dialog), not the user arriving: it does not open the
+   * panel (design review R20). A click on the input still does.
+   */
+  const blurredAt = useRef(-Infinity)
 
   // The stored value changed (commit landed, undo, agent edit): follow it unless the user is
   // typing something else. During an adjust session (and its cancel) earlier steps land while a
@@ -994,9 +1004,11 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
                 const from = e.relatedTarget
                 const inside = from instanceof Node && (panelRef.current?.contains(from) ?? false)
                 if (!inside && session.current === null) setStepSize(ladder.initial)
-                if (!returning.current) openAdjust()
+                const trapped = from === null && performance.now() - blurredAt.current < BOUNCE_MS
+                if (!returning.current && !trapped) openAdjust()
               }}
               onBlur={(e) => {
+                blurredAt.current = performance.now()
                 lastSelection.current = [
                   e.currentTarget.selectionStart ?? text.length,
                   e.currentTarget.selectionEnd ?? text.length,
