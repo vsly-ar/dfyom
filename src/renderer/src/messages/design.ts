@@ -808,8 +808,10 @@ export const designMessages = {
      * nothing hides silently.
      */
     summaries: {
-      corners: (corner: string | undefined, floor: string) =>
-        corner === undefined ? `Floor r ${floor}` : `r ${corner} · Floor r ${floor}`,
+      corners: (corner: string | undefined, floor: string, round = false) =>
+        corner === undefined
+          ? `Floor r ${floor}`
+          : `r ${corner}${round ? ' (Round)' : ''} · Floor r ${floor}`,
       tabs: (count: string, entered: number | undefined) =>
         entered !== undefined ? `${entered} entered` : count === '1' ? '1 tab' : `${count} tabs`,
     },
@@ -847,6 +849,10 @@ export const designMessages = {
     anchorFormula: 'Remove the formula to change the anchor.',
     diameter: 'Diameter',
     cornerRadius: 'Corner radius',
+    /** DF120 R2: a rectangle's Round switch (hole-slots-and-round-corners.md#round-corners-df120). */
+    round: 'Round',
+    roundInfo:
+      'Radius = half the narrowest side, follows size edits. Off: keeps the current radius.',
     depth: 'Depth',
     floorRadius: 'Floor fillet radius',
     /** A facing's recommended depth (DF4): "0.48 mm, down to the top of Enclosure". */

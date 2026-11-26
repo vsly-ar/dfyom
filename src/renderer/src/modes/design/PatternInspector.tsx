@@ -23,7 +23,7 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
-import { useRegion2d } from '../../shell/ShellContext'
+import { useRegion2d, useShell } from '../../shell/ShellContext'
 import {
   ErrorMessage,
   Field,
@@ -45,6 +45,7 @@ import { NameField } from './NameField'
 import { placeErrors, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
 import { PatternPresetsDialog } from './PatternPresetsDialog'
+import { adjustedNote, RoundField } from './RoundField'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -106,6 +107,7 @@ export function PatternInspector({
   const port = useRegion2d()
   const [, select] = useDesignSelection()
   const cancelGesture = useCancelGesture()
+  const { ui } = useShell()
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const [errors, setErrors] = useState<FieldError[]>([])
   const units = part.units
@@ -193,6 +195,9 @@ export function PatternInspector({
     if (r.ok) {
       setErrors([])
       setSummary(undefined)
+      // DF120: a radius too large for the cell applied as Round; say so, with Undo
+      const note = adjustedNote(r)
+      if (note !== undefined) ui.getState().setRemovedToast(note, { edit: true })
       return
     }
     const placed = placeErrors(r.error, path)
@@ -253,6 +258,8 @@ export function PatternInspector({
     commit: (source: string) => Record<string, unknown>,
     /** Shown while the value is unset (a cell's rotation: none means 0°). */
     placeholder?: string,
+    /** The value follows other fields (a Round cell's corner radius, DF120): read-only. */
+    derived = false,
   ) => (
     <div key={path} data-feature-field={path}>
       <QuantityInput
@@ -264,6 +271,7 @@ export function PatternInspector({
         stepKey={`pattern.${path}`}
         {...(path === 'cell.sides' ? { stepMax: 12 } : {})}
         {...(placeholder === undefined ? {} : { placeholder })}
+        {...(derived ? { readOnly: true } : {})}
         onCommit={(q, gesture) => void update(commit(q.source), path, gesture)}
         onCancelGesture={cancelGesture}
         messages={messagesAt(path)}
@@ -283,6 +291,8 @@ export function PatternInspector({
   const cellLabel = (k: string) =>
     k === 'sides' ? p.sides : k === 'cornerRadius' ? p.cornerRadius : (p[k as 'length'] ?? k)
 
+  // DF120: a Round cell's radius is half its narrowest side
+  const roundCell = cell.kind === 'rectangle' && cell['round'] === true
   const gap = spacing.gap !== undefined
   const through = feature['through'] === true
   // P4: on another pattern's floor the face is that pattern's cells (stacked)
@@ -368,8 +378,20 @@ export function PatternInspector({
               k === 'sides' ? 'scalar' : 'length',
               cell[k],
               (source) => ({ cell: cellArgs(cell, { [k]: source }) }),
+              undefined,
+              k === 'cornerRadius' && roundCell,
             ),
           )}
+          {cell.kind === 'rectangle' ? (
+            <div data-feature-field="cell.round">
+              <RoundField
+                checked={roundCell}
+                onChange={(round) =>
+                  void update({ cell: { ...cellArgs(cell, {}), round } }, 'cell')
+                }
+              />
+            </div>
+          ) : null}
           {cell.kind === 'polygon' ? (
             <Field label={p.across} kind="toggle">
               <SegmentedControl<string>

@@ -44,6 +44,7 @@ import { ChamferInspector } from './ChamferInspector'
 import { LineInspector } from './LineInspector'
 import { isOpenNamed } from './operation-shape'
 import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
+import { RoundField } from './RoundField'
 import { TabPositions } from './TabsFields'
 import { profileTabs } from './tabs-model'
 import styles from './Design.module.css'
@@ -481,14 +482,7 @@ function ShapeGroup({
         />
       ) : null}
       {op.kind === 'profile' && shape.kind === 'rectangle' ? (
-        <ParamField
-          ctx={ctx}
-          path="shape.cornerRadius"
-          stepKind="small"
-          label={t.cornerRadius}
-          kind="length"
-          icon="corner"
-        />
+        <CornerRadiusFields ctx={ctx} />
       ) : null}
       {shape.kind === 'named' ? (
         // a toggle Field as every inspector switch: label and switch on one row (U9 Q130)
@@ -514,6 +508,35 @@ function ShapeGroup({
         {rotates ? <RotationField ctx={ctx} /> : null}
       </InspectorGroup.More>
     </InspectorGroup>
+  )
+}
+
+/**
+ * A rectangle's Corner radius and its Round switch (DF120 R2): while Round is on the radius is
+ * derived (half the narrowest side) and read-only; switching it off keeps the current radius.
+ */
+function CornerRadiusFields({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (!('shape' in op) || op.shape.kind !== 'rectangle') return null
+  const shape = op.shape
+  const round = shape.round === true
+  return (
+    <>
+      <ParamField
+        ctx={ctx}
+        path="shape.cornerRadius"
+        stepKind="small"
+        label={t.cornerRadius}
+        kind="length"
+        icon="corner"
+        derived={round}
+      />
+      <RoundField
+        checked={round}
+        readOnly={ctx.readOnly}
+        onChange={(on) => ctx.send({ shape: { ...shapeArgs(shape), round: on } }, 'shape.round')}
+      />
+    </>
   )
 }
 
@@ -549,20 +572,17 @@ function CornersGroup({
       collapsible
       defaultOpen
       rememberKey="pocket.corners"
-      summary={t.summaries.corners(corner?.source, op.floorRadius.source)}
+      summary={t.summaries.corners(
+        corner?.source,
+        op.floorRadius.source,
+        op.shape.kind === 'rectangle' && op.shape.round === true,
+      )}
       severity={problem}
       forceOpen={problem !== undefined}
     >
       {corner !== undefined ? (
         <>
-          <ParamField
-            ctx={ctx}
-            path="shape.cornerRadius"
-            stepKind="small"
-            label={t.cornerRadius}
-            kind="length"
-            icon="corner"
-          />
+          <CornerRadiusFields ctx={ctx} />
           <InspectorGroup.More
             fields={[t.floorRadius]}
             rememberKey="pocket.corners.more"
@@ -802,6 +822,7 @@ export function ParamField({
   placeholder,
   stepKind,
   info,
+  derived = false,
 }: {
   ctx: OperationFieldsContext
   path: string
@@ -813,11 +834,14 @@ export function ParamField({
   stepKind: StepKind
   /** Static explanation: the (i) tip (inspector-layout.md § Info tips). */
   info?: string
+  /** The value follows other fields (a Round corner radius, DF120): shown read-only. */
+  derived?: boolean
 }): React.JSX.Element {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
   const { ui } = useShell()
   const { part, op } = ctx
+  const readOnly = ctx.readOnly || derived
   const index = indexOf(ctx)
   const table = part.table
   const choices = table ? referenceChoices(part.dto, table, index) : []
@@ -834,7 +858,7 @@ export function ParamField({
           id: `${w.code}:${w.parameter ?? ''}`,
           severity: dfmMessages.tier(w),
           text: dfmMessages.text(w, part.units, dfmNames(part.dto)),
-          ...(source !== undefined && w.suggestion && w.parameter === path && !ctx.readOnly
+          ...(source !== undefined && w.suggestion && w.parameter === path && !readOnly
             ? {
                 fix: {
                   label: dfmMessages.useValue(w.suggestion.relation, source),
@@ -897,11 +921,11 @@ export function ParamField({
       messages={messages}
       {...(placeholder !== undefined ? { placeholder } : {})}
       references={references}
-      readOnly={ctx.readOnly}
-      {...(recommended !== undefined && !ctx.readOnly ? { recommended } : {})}
+      readOnly={readOnly}
+      {...(recommended !== undefined && !readOnly ? { recommended } : {})}
       picking={ctx.pickable && pick?.owner === fieldId}
       {...(table ? { resolver: table.resolver(index) } : {})}
-      {...(table && kind === 'length' && ctx.pickable && !ctx.readOnly
+      {...(table && kind === 'length' && ctx.pickable && !readOnly
         ? {
             onPick: (insert: PickInsert) => {
               if (depthTargets !== undefined) return pickDepth(insert)

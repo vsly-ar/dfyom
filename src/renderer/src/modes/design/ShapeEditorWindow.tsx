@@ -11,7 +11,7 @@ import type { ShapeEditorTarget } from '../../../../shared/preload-api'
 import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { shellMessages } from '../../messages/shell'
-import { useHistorySteps } from '../../shell/hooks'
+import { undoEdit, useHistorySteps } from '../../shell/hooks'
 import { isKeyEcho, noteKeyAction } from '../../shell/key-echo'
 import { useReplica, useShell, useUi } from '../../shell/ShellContext'
 import {
@@ -116,12 +116,13 @@ function useShapeEditorKeys(onUndo: () => void, onRedo: () => void): void {
 }
 
 export function ShapeEditorWindow(): React.JSX.Element {
-  const { pending } = useShell()
+  const { pending, bridge } = useShell()
   const replica = useReplica()
   const part = useDesignPart()
   const [selected] = useDesignSelection()
   const history = useHistorySteps()
   const removed = useUi((s) => s.removedToast)
+  const removedEdit = useUi((s) => s.removedToastEdit)
   const setRemovedToast = useUi((s) => s.setRemovedToast)
   const partId = useUi((s) => s.designPart)
   useShapeEditorTarget()
@@ -210,7 +211,8 @@ export function ShapeEditorWindow(): React.JSX.Element {
                 label: designMessages.navigator.undo,
                 altText: designMessages.navigator.undoAlt,
                 onClick: () => {
-                  history.step('undo')
+                  if (removedEdit) void undoEdit(bridge)
+                  else history.step('undo')
                   setRemovedToast(null)
                 },
               }}

@@ -65,6 +65,7 @@ import {
 import { newItemArgs } from './shape-model'
 import type { ShapeActions } from './ShapePicker'
 import { useSvgImport } from './ShapeList'
+import { adjustedNote } from './RoundField'
 import { isOpenNamed, shapeChoiceArgs } from './operation-shape'
 import type { ShapeDTO } from '../../../../core/design/shape.dto'
 import {
@@ -407,6 +408,9 @@ function OperationInspector({
     const placed = r.ok ? undefined : placeErrors(r.error, path)
     setErrors(placed?.errors ?? [])
     setSummary(placed?.summary)
+    // DF120: a radius too large for the rectangle applied as Round; say so, with Undo
+    const note = adjustedNote(r)
+    if (note !== undefined) ui.getState().setRemovedToast(note, { edit: true })
     // DF117: a typed value the command refused stays as "not applied"; an accepted one ends it
     if (path !== undefined && draft !== undefined && gesture === undefined)
       keepDraft(path, r.ok ? undefined : draft, placed?.errors ?? [])

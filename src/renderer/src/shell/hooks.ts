@@ -24,6 +24,18 @@ export interface HistorySteps {
   step(which: 'undo' | 'redo'): void
 }
 
+/**
+ * A toast's Undo of the edit it reports (DF120 R2): Enter commits and applies, and the Apply is
+ * its own undo entry on top of the edit (apply.md § Baseline and undo), so an Apply on top is
+ * undone first and then the edit; otherwise one step.
+ */
+export async function undoEdit(bridge: Pick<PreloadApi, 'call'>): Promise<void> {
+  const list = await bridge.call('history.list', { limit: 1 })
+  const top = list.ok ? (list.value as { undo?: { command?: string }[] }).undo?.[0] : undefined
+  if (top?.command === 'project.apply') await bridge.call('history.undo', {})
+  await bridge.call('history.undo', {})
+}
+
 /** The top undo/redo steps of the bound project (`history.list`), re-read after every change. */
 export function useHistorySteps(): HistorySteps {
   const { bridge } = useShell()

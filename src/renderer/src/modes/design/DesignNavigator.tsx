@@ -11,6 +11,7 @@
 // #confirmations, #undo-and-redo, #part-menu-split-parts-s0; docs/modes/design.md#ordering-and-composition
 import { useEffect, useRef, useState } from 'react'
 import { designMessages } from '../../messages/design'
+import { undoEdit } from '../../shell/hooks'
 import { usePending, useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
@@ -180,6 +181,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const evaluation = useDesignEvaluation(part)
   // the undo toast lives in the ui store: the inspector's segment table removes rows too
   const removed = useUi((st) => st.removedToast)
+  const removedEdit = useUi((st) => st.removedToastEdit)
   const setRemovedToast = useUi((st) => st.setRemovedToast)
   useRechosenToast(part, setRemovedToast)
   const ops = part.dto.operations
@@ -311,7 +313,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
               label: m.navigator.undo,
               altText: m.navigator.undoAlt,
               onClick: () => {
-                void bridge.call('history.undo', {})
+                void (removedEdit ? undoEdit(bridge) : bridge.call('history.undo', {}))
                 setRemovedToast(null)
               },
             }}
