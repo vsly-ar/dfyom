@@ -207,7 +207,13 @@ export interface LibraryCloseRequest {
 export type EvaluationMesh = Pick<
   PartEvaluation,
   'positions' | 'indices' | 'triangleSurface' | 'surfaces'
->
+> & {
+  /**
+   * The construction surfaces with their patches (DF118 V3): drawn as dashed outlines and
+   * pickable in pick mode (docs/modes/construction-surfaces.md#ui). Absent: none.
+   */
+  readonly construction?: PartEvaluation['construction']
+}
 
 /**
  * A part's evaluation as a window shows it (docs/architecture/workers.md#evaluation-status):

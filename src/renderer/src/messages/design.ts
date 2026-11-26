@@ -5,6 +5,12 @@ import type { AnchorDTO, OperationKind } from '../../../core/design/part.dto'
 import type { Direction } from '../../../core/geometry/face'
 import type { MaterialClass } from '../../../core/library/item'
 
+/** "A", "A and B", "A, B and C". */
+const nameList = (items: readonly string[]): string =>
+  items.length <= 1
+    ? (items[0] ?? '')
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+
 export const designMessages = {
   kinds: {
     facing: 'Facing',
@@ -1108,6 +1114,29 @@ export const designMessages = {
     `Selected: ${p.name} on ${p.on}, face axes u and v shown${
       p.anchor === undefined ? '' : `, anchor ${p.anchor}`
     }.`,
+
+  /**
+   * Construction surfaces (DF118 V3, docs/modes/construction-surfaces.md#ui): a referenced surface
+   * later cuts removed; its level still holds.
+   */
+  construction: {
+    /** The `On` field's note: what cut it away (other than the operation itself). */
+    note: (by: readonly string[]) =>
+      by.length === 0
+        ? 'Cut away by this operation · still measured from its level'
+        : `Cut away by ${nameList(by)} · still measured from its level`,
+    /** A formula field's note names the surface. */
+    noteOf: (surface: string, by: readonly string[]) =>
+      by.length === 0
+        ? `${surface} is cut away by this operation · still measured from its level`
+        : `${surface} is cut away by ${nameList(by)} · still measured from its level`,
+    info: 'A construction surface: later cuts remove it from the finished part, but its level still holds, so this operation is still measured from it.',
+    /** The `On` list's muted suffix. */
+    suffix: '(construction)',
+    /** The viewport's text summary. */
+    summary: (surface: string, by: readonly string[]) =>
+      `${surface}, cut away by ${by.length === 0 ? 'a later operation' : nameList(by)}, shown as an outline.`,
+  },
 
   viewportSummary: (p: { operations: number; warnings: number; status: EvaluationStatus }) => {
     const ops = p.operations === 1 ? '1 operation' : `${p.operations} operations`

@@ -43,6 +43,7 @@ import { DeviationLayer, useFadeIn } from './DeviationLayer'
 import { deviationColours, type DeviationView } from './deviation'
 import { RunLayer, type RunScene } from './RunLayer'
 import { SplitLayer, type SplitOverlay } from './SplitLayer'
+import { ConstructionLayer, type ConstructionOverlay } from './ConstructionLayer'
 
 export interface SceneProps {
   mesh: ViewportMesh | null
@@ -57,6 +58,8 @@ export interface SceneProps {
   /** Pick mode's normal glyphs and the hovered eligible surface (task F1). */
   glyphs?: readonly SurfaceGlyph[] | null
   hovered?: string | null
+  /** Construction surfaces' dashed outlines, pickable in pick mode (DF118 V3). */
+  construction?: readonly ConstructionOverlay[] | null
   /** Face-frame axes of the selected operation's face (task F1). */
   frame?: FrameOverlay | null
   /** Anchor marker of the selected feature (task F2). */
@@ -149,6 +152,16 @@ export function Scene(props: SceneProps): React.JSX.Element {
       ) : null}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
+      {props.construction && props.construction.length > 0 && !props.split ? (
+        <ConstructionLayer
+          overlays={props.construction}
+          hovered={props.hovered ?? null}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+          onHover={props.onHover}
+          onClick={props.onClick}
+        />
+      ) : null}
       {glyphs && glyphs.length > 0 ? (
         <PickGlyphs
           glyphs={glyphs}
@@ -299,6 +312,10 @@ function PartMesh({
   }, [outlinedKey, mesh, geometry])
   useEffect(() => () => outline?.dispose(), [outline])
 
+  const eligible = surfaceState.pickEligible
+  const passes = (t: SurfaceTarget | undefined): boolean =>
+    eligible != null && (t === undefined || !eligible.has(t.surface))
+
   const edgeColour = useMemo(() => colour(palette.edge), [palette])
   const selectedColour = useMemo(() => colour(palette.selected), [palette])
 
@@ -308,13 +325,18 @@ function PartMesh({
         geometry={geometry}
         userData={{ measure: 'part' }}
         onPointerMove={(e) => {
+          const target = surfaceAtFace(mesh, e.faceIndex)
+          // pick mode: a dimmed surface lets the pointer through to a construction surface's
+          // outline behind it (DF118 V3); nothing else behind the part takes it
+          if (passes(target)) return onHover(undefined)
           e.stopPropagation()
-          onHover(surfaceAtFace(mesh, e.faceIndex))
+          onHover(target)
         }}
         onPointerOut={() => onHover(undefined)}
         onClick={(e) => {
-          e.stopPropagation()
           const target = surfaceAtFace(mesh, e.faceIndex)
+          if (passes(target)) return
+          e.stopPropagation()
           if (target) onClick(target, e)
         }}
       >

@@ -91,6 +91,7 @@ import { checkReferences, recalculate, STOCK_TOP, SurfaceTable } from './surface
 import { checkOperations, operationIssues } from './validate'
 import { knownIssues, withoutKnown } from './known-issues'
 import {
+  ConstructionSchema,
   EvaluationErrorSchema,
   EvaluationStatusSchema,
   partEvaluate,
@@ -1761,6 +1762,7 @@ const warningList = defineQuery({
         ),
       )
       .describe('In design order; geometry ones only when done'),
+    construction: ConstructionSchema,
     evaluation: EvaluationStatusSchema,
     error: EvaluationErrorSchema.optional(),
   }),

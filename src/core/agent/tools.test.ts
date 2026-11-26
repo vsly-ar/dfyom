@@ -165,6 +165,17 @@ describe('agent tools', () => {
     expect(size).toBeLessThan(TOOLS_LIST_BUDGET_CHARS)
   })
 
+  it('construction surfaces are in the output schemas only (DF118 V2, construction-surfaces.md#agent-api)', () => {
+    const tools = allTools()
+    for (const name of ['design.warning.list', 'design.part.evaluate']) {
+      const t = tool(tools, name)
+      expect(JSON.stringify(t.outputSchema)).toContain('"construction"')
+      expect(JSON.stringify(t.inputSchema)).not.toContain('construction')
+    }
+    expect(JSON.stringify({ tools: mcpToolList(tools) })).not.toContain('consumedBy')
+    expect(PRIMER).toContain('construction surface')
+  })
+
   it('tools/list has no output schema, no title and no safe-integer bounds', () => {
     const list = mcpToolList(allTools())
     expect(JSON.stringify(list)).not.toContain(String(Number.MAX_SAFE_INTEGER))

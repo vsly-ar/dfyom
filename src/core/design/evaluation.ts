@@ -616,6 +616,25 @@ export const EvaluationStatusSchema = z
     'done: geometry warnings included; pending: debouncing or running, parameter warnings only; failed: see error',
   )
 
+/**
+ * A construction surface as results list it (DF118 V2): a referenced surface later cuts removed,
+ * still resolving at its level; the patch is window plumbing (the mesh push), not listed.
+ * Doc: docs/modes/construction-surfaces.md#agent-api
+ */
+export const ConstructionSchema = z
+  .array(
+    z.object({
+      surface: z.string(),
+      consumedBy: z.array(z.string()).readonly().describe('Later operations that cut it away'),
+      referencedBy: z.array(z.object({ operationId: z.string(), param: z.string() })).readonly(),
+    }),
+  )
+  .describe(
+    'Referenced surfaces later cuts removed (construction surfaces): they still resolve at their level; done only, else empty',
+  )
+
+export type ConstructionEntry = z.infer<typeof ConstructionSchema>[number]
+
 /** The design.warning.list result for a part, given its parameter warnings. */
 export function warningsWithEvaluation(
   doc: ProjectDoc,
@@ -624,6 +643,7 @@ export function warningsWithEvaluation(
   state: PartEvaluationState,
 ): {
   warnings: DfmWarning[]
+  construction: ConstructionEntry[]
   evaluation: EvaluationStatus
   error?: AppErrorData
 } {
@@ -633,8 +653,17 @@ export function warningsWithEvaluation(
     operations,
     state.status === 'done' ? (state.evaluation?.warnings ?? []) : [],
   )
+  const construction =
+    state.status === 'done'
+      ? (state.evaluation?.construction ?? []).map((c) => ({
+          surface: c.surface,
+          consumedBy: c.consumedBy,
+          referencedBy: c.referencedBy,
+        }))
+      : []
   return {
     warnings: mergeWarnings(parameter, geometry, ids),
+    construction,
     evaluation: state.status,
     ...(state.error === undefined ? {} : { error: state.error.toWireData() }),
   }
@@ -651,6 +680,7 @@ export const partEvaluate = defineCommand({
   result: z.object({
     evaluation: EvaluationStatusSchema,
     warnings: z.array(DfmWarningSchema),
+    construction: ConstructionSchema,
     error: EvaluationErrorSchema.optional(),
   }),
   async run(doc, args, ctx) {

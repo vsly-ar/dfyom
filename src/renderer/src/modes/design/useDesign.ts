@@ -4,7 +4,7 @@
 // (task R3).
 // Doc: docs/modes/design.md#dfm-checks, docs/conventions/ui.md#evaluation-status-pending-outdated-failed
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import type { EvaluationStatus } from '../../../../core/design/evaluation'
+import type { ConstructionEntry, EvaluationStatus } from '../../../../core/design/evaluation'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { PreloadApi } from '../../../../shared/preload-api'
@@ -41,6 +41,8 @@ export function useDesignPartOf(doc: ProjectDoc | undefined): DesignPart | undef
 
 export interface DesignWarnings {
   readonly warnings: readonly DfmWarning[]
+  /** Construction surfaces of a done evaluation (DF118 V3); absent before the first result. */
+  readonly construction?: readonly ConstructionEntry[]
   /** Whether the geometry warnings are in (`done`); pending and failed have parameter ones only. */
   readonly evaluation: EvaluationStatus
   readonly error?: AppErrorData
