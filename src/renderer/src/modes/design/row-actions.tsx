@@ -96,13 +96,10 @@ export function useRowActions(part: DesignPart): RowActions {
     // Make Clones… opens the draft in the inspector for this row (ui.md § Clones): nothing is
     // written until "Make clones"; its first row puts one clone beside the source, a tool
     // diameter apart
+    // (DF122 R5: a pocket or profile with roughing is a source like any other; its roughing
+    // comes with it, and the roughing row offers its owner)
     const choice = clonesSource(part, id)
-    // DF122: a pocket or profile (R4) with roughing is no Clones source until R5 (the core's
-    // `roughingNested`)
-    const roughing =
-      (op?.kind === 'pocket' || op?.kind === 'profile') &&
-      (op.roughingPass !== undefined || op.roughing === true)
-    if (choice.ok && !roughing)
+    if (choice.ok)
       items.push({
         label: f.makeClones,
         icon: <Icon name="clones" />,

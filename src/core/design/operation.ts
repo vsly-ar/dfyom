@@ -187,10 +187,14 @@ export function roughingIdOf(op: Operation): string | undefined {
       ? undefined
       : roughingOperationId(op.id)
   if (op.kind !== 'pocket' || op.roughing === true) return undefined
-  if (op.owner.isNone())
-    return op.roughingPass === undefined ? undefined : roughingOperationId(op.id)
+  // R5: a Clones instance keeps its source's `roughingPass`
+  if (op.roughingPass !== undefined) return roughingOperationId(op.id)
+  if (op.owner.isNone()) return undefined
   const { featureId, role } = op.owner.unwrap()
-  return role === 'pocket' ? `${featureId}_roughing` : undefined
+  if (role === 'pocket') return `${featureId}_roughing`
+  // R5: a Clones instance (role `<n>_<id>`) of a pattern's pocket `<pattern>_pocket` is roughed
+  // by the instance of `<pattern>_roughing` (at both Clones levels)
+  return /^\d+_.+_pocket$/.test(role) ? op.id.replace(/_pocket$/, '_roughing') : undefined
 }
 
 /** The owner id of a roughing pocket (DF122 `roughingOf`, else a pattern's `<feature>_pocket`). */

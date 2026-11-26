@@ -101,6 +101,21 @@ describe('feature view', () => {
     expect(ids()).toEqual(['pocket1_roughing', 'pocket1', 'drill1', 'drill2'])
     await move(1)
     expect(ids()).toEqual(['drill1', 'pocket1_roughing', 'pocket1', 'drill2'])
+    // R5: the pocket is a Clones source; its roughing row clones the pocket, its roughing with it
+    expect(clonesSource(designPart(dispatcher!.doc)!, 'pocket1_roughing')).toMatchObject({
+      ok: true,
+      source: { operationIds: ['pocket1'] },
+    })
+    await ok(dispatcher!, 'design.clones.add', {
+      partId: id,
+      source: { operationIds: ['pocket1'] },
+      rows: [{ kind: 'offset', count: 1, du: '0', dv: '20' }],
+    })
+    const clones = operationUnits(designPart(dispatcher!.doc)!).find((u) => u.id === 'clones1')
+    expect(clones?.kind === 'feature' ? clones.nested.map((n) => n.id) : []).toEqual(['pocket1'])
+    expect(
+      clones?.kind === 'feature' ? (clones.nested[0] as OperationRowUnit).roughing?.id : undefined,
+    ).toBe('pocket1_roughing')
   })
 
   it('counts errors and hard warnings, never notes or what Apply may change (ui.md § Severity)', () => {

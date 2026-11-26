@@ -39,7 +39,14 @@ import type {
 } from '../feature'
 import type { FeatureDTO } from '../feature.dto'
 import { NAME_MAX } from '../../library/item'
-import { quantityParams, withParam, type FieldKind, type Operation } from '../operation'
+import {
+  quantityParams,
+  roughingOwnerId,
+  withParam,
+  type FieldKind,
+  type Operation,
+} from '../operation'
+import { isOwnedRoughing } from '../roughing'
 import type { ShapeDTO } from '../shape.dto'
 import { definitionOf, shapeFromDTO } from '../shape'
 import { itemChain } from '../shape-items'
@@ -319,13 +326,23 @@ function rowFromDTO(dto: Record<string, unknown>, i: number): AppResult<CloneRow
 
 // ── source ─────────────────────────────────────────────────────────────────────────────────
 
-/** The source operations in `ops`, in design order (missing ids are left out). */
+/**
+ * The source operations in `ops`, in design order (missing ids are left out). A listed pocket's or
+ * profile's roughing operation (`<id>_roughing`, DF122 R5) is a source operation with it: it sits
+ * right before its owner, so the span stays contiguous and every instance repeats it.
+ * Doc: docs/modes/roughing.md#implementation-r5
+ */
 export function sourceOperations(source: ClonesSource, ops: readonly Operation[]): Operation[] {
   if ('featureId' in source) return ops.filter((o) => ownerOf(o) === source.featureId)
   const m = sourceMembers(source)
   const ids = new Set(m.operationIds)
   const features = new Set(m.featureIds)
-  return ops.filter((o) => ids.has(o.id) || features.has(ownerOf(o) ?? ''))
+  return ops.filter(
+    (o) =>
+      ids.has(o.id) ||
+      features.has(ownerOf(o) ?? '') ||
+      (isOwnedRoughing(o) && ids.has(roughingOwnerId(o) ?? '')),
+  )
 }
 
 /** The surface owner of a face target: `pocket2.floor` → `pocket2`. */
@@ -441,6 +458,13 @@ export function sourceIssues(
   m.operationIds.forEach((id, k) => {
     const op = ops.find((o) => o.id === id)
     if (op === undefined) at(['operationIds', k], 'unknownOperation', 'no such operation')
+    // DF122 R5: a roughing operation comes with its owner (sourceOperations), never alone
+    else if (isOwnedRoughing(op) && !m.operationIds.includes(roughingOwnerId(op) ?? ''))
+      at(
+        ['operationIds', k],
+        'clonesRoughingOwner',
+        `${id} is the roughing pass of ${roughingOwnerId(op)}: clone ${roughingOwnerId(op)} instead`,
+      )
     else if (
       op.owner.isSome() &&
       ownerOf(op) !== feature.id &&
@@ -534,6 +558,12 @@ function instanceOf(
   // a chamfer bevels its edge's instance (sourceIssues keeps the edge in the source)
   if (moved.kind === 'chamfer' && inSource.has(moved.edgeOf))
     moved = { ...moved, edgeOf: ctx.ownedId(`${n}_${moved.edgeOf}`) }
+  // DF122 R5: a roughing operation roughs its owner's instance; its `roughingOf` is stored (a
+  // pattern's roughing pocket derives its owner from its role, which is `<n>_<id>` here). The
+  // owner's instance keeps `roughingPass`, so `roughingIdOf` names `<clones>_<n>_<id>_roughing`
+  const roughs = roughingOwnerId(op)
+  if ((moved.kind === 'pocket' || moved.kind === 'profile') && roughs !== undefined)
+    if (inSource.has(roughs)) moved = { ...moved, roughingOf: ctx.ownedId(`${n}_${roughs}`) }
   const { id: _i, name, generalTolerance, tool, toolLocked, owner: _o, ...body } = { ...moved, on }
   const suffix = ` · ${n}`
   return Ok({

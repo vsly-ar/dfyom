@@ -53,6 +53,7 @@ import {
 import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import { operationUnits, unitOperations } from './feature-view'
+import { roughingOperationOf, roughingSummary } from './roughing-view'
 import { NameField } from './NameField'
 import { OperationFields, placeErrors, refusalText, type FieldError } from './OperationFields'
 import { axisNames, surfaceDirection, type DesignPart } from './model'
@@ -549,8 +550,9 @@ export function CloneInstanceInspector({
   const duplicate = point?.kind === 'duplicate'
   const unit = operationUnits(part).find((u) => u.id === feature.id)
   const nested = unit?.kind === 'feature' ? unit.nested : []
-  // the source operations in design order (a feature source: its owned operations)
-  const sourceOps: OperationDTO[] = nested.flatMap(unitOperations)
+  // the source operations in design order (a feature source: its owned operations); a roughing
+  // operation shows in its owner's group (DF122 R5), not as a group of its own
+  const sourceOps: OperationDTO[] = nested.flatMap(unitOperations).filter((o) => !isRoughingPass(o))
   const instanceOp = (src: OperationDTO) =>
     part.dto.operations.find((o) => o.id === `${instanceId(feature.id, n)}_${src.id}`)
   const units = part.units
@@ -625,6 +627,7 @@ export function CloneInstanceInspector({
                     </button>
                   </p>
                   <p className={styles['muted']}>{c.followsTool(src.name)}</p>
+                  {op !== undefined ? <InstanceRoughing part={part} op={op} /> : null}
                   {op !== undefined ? (
                     <OperationFields
                       level={4}
@@ -648,5 +651,37 @@ export function CloneInstanceInspector({
         ) : null}
       </div>
     </div>
+  )
+}
+
+/** A roughing operation (a plain pair's `roughingOf`, or a pattern's roughing pocket). */
+const isRoughingPass = (o: OperationDTO): boolean =>
+  (o.kind === 'pocket' || o.kind === 'profile') && o.roughing === true
+
+/**
+ * DF122 R5: a clone instance's roughing in its owner's group, read-only: "Roughing: Ø 8 mm ·
+ * walls auto · floor 0" (the instance repeats its source's roughing with the source roughing's
+ * tool). Doc: docs/modes/roughing.md#implementation-r5
+ */
+function InstanceRoughing({
+  part,
+  op,
+}: {
+  part: DesignPart
+  op: OperationDTO
+}): React.JSX.Element | null {
+  if (op.kind !== 'pocket' && op.kind !== 'profile') return null
+  // the instance of the source's roughing (`roughingOf` is stored on it, a pattern's too)
+  const roughing = roughingOperationOf(part, op)
+  if (roughing === undefined) return null
+  const margins =
+    op.roughingPass ??
+    (roughing.kind === 'pocket' || roughing.kind === 'profile' ? roughing.leave : undefined) ??
+    {}
+  const summary = roughingSummary(part, margins, roughing, op)
+  return (
+    <p className={styles['muted']} data-testid="instance-roughing">
+      {c.instanceRoughing(summary)}
+    </p>
   )
 }

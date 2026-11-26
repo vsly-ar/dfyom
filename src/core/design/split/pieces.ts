@@ -21,7 +21,13 @@ import { clipWithin, grooveWidth, lineChains, lineMaxDepth } from '../../geometr
 import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
-import { fieldContext, lineDeepest, type Operation } from '../operation'
+import {
+  fieldContext,
+  lineDeepest,
+  roughingOperationId,
+  roughingOwnerId,
+  type Operation,
+} from '../operation'
 import type { OperationDTO, OperationShapeDTO, PartDTO, SplitDTO } from '../part.dto'
 import { orientedShape, shapeDefinition, shapeOrientation } from '../placement'
 import type { ShapeDefinition } from '../shape'
@@ -1036,6 +1042,76 @@ function mapOperation(
   return Ok(out)
 }
 
+/**
+ * DF122 R5: the roughing operations of the source in a piece. A piece that keeps an operation with
+ * roughing keeps its roughing, right before it, as `syncRoughing` writes it: the owner's mapped
+ * geometry (its clipped shape, capped depth, a pocket turned through profile), the roughing's own
+ * name, tool, tolerance and stock to leave. A pattern's pair (the piece has no features) becomes a
+ * plain pair: the pocket gets `roughingPass` (the roughing's margins) and the roughing
+ * `<pocket>_roughing` with `roughingOf`. A roughing whose owner the piece leaves out is left out.
+ * Doc: docs/modes/roughing.md#implementation-r5
+ */
+function pieceRoughing(loaded: LoadedPart, ops: OperationDTO[]): void {
+  loaded.part.operations.forEach((op, i) => {
+    const ownerId = roughingOwnerId(op)
+    if (ownerId === undefined) return
+    const at = ops.findIndex((o) => o.id === ownerId)
+    const owner = ops[at]
+    if (owner === undefined || (owner.kind !== 'pocket' && owner.kind !== 'profile')) return
+    const src = literal(loaded.dto.operations[i]!, loaded.units) as Record<string, unknown>
+    const leave = src['leave'] as Record<string, unknown> | undefined
+    let margins = owner.roughingPass ?? leave ?? {}
+    // a pocket turned through profile (a level caps it): its skin must be > 0, so a floor margin
+    // of 0 falls back to the default skin
+    if (
+      owner.kind === 'profile' &&
+      owner.depth === undefined &&
+      margins['floor'] !== undefined &&
+      mmOf(margins['floor'] as QuantityDTO) <= 0
+    ) {
+      const { floor: _f, ...rest } = margins
+      margins = rest
+    }
+    const withPass = { ...owner, roughingPass: margins } as OperationDTO
+    const identity = {
+      id: roughingOperationId(ownerId),
+      name: src['name'],
+      ...(src['generalTolerance'] === undefined
+        ? {}
+        : { generalTolerance: src['generalTolerance'] }),
+      ...(src['tool'] === undefined ? {} : { tool: src['tool'] }),
+      ...(src['toolLocked'] === undefined ? {} : { toolLocked: src['toolLocked'] }),
+      roughing: true,
+      roughingOf: ownerId,
+      ...(Object.keys(margins).length === 0 ? {} : { leave: margins }),
+    }
+    const g = owner as Record<string, unknown>
+    const geometry =
+      owner.kind === 'pocket'
+        ? {
+            kind: 'pocket',
+            on: g['on'],
+            shape: g['shape'],
+            depth: g['depth'],
+            floorRadius: g['floorRadius'],
+            ...(g['through'] === true ? { through: true } : {}),
+          }
+        : {
+            kind: 'profile',
+            on: g['on'],
+            shape: g['shape'],
+            ...(g['depth'] === undefined ? {} : { depth: g['depth'] }),
+            side: g['side'],
+            slotWidth: g['slotWidth'],
+            tabs: g['tabs'],
+          }
+    const roughing = Object.fromEntries(
+      Object.entries({ ...geometry, ...identity }).filter(([, v]) => v !== undefined),
+    )
+    ops.splice(at, 1, roughing as unknown as OperationDTO, withPass)
+  })
+}
+
 function shapeBounds(
   g: Extract<OperationGeometry, { kind: 'pocket' | 'profile' }>,
 ): Bounds2 | undefined {
@@ -1325,10 +1401,13 @@ export function planPieces(
         b.ops.push(o.unwrap())
         continue
       }
+      // DF122 R5: a roughing operation follows its owner into the piece (below)
+      if (roughingOwnerId(loaded.part.operations[i]!) !== undefined) continue
       const mapped = mapOperation(c, i, cell, offset, blank.width, b, surplus)
       if (mapped.isErr()) return Err(mapped.unwrapErr().withContext(where, { piece: cell.n }))
       if (mapped.unwrap() !== undefined) b.ops.push(mapped.unwrap()!)
     }
+    pieceRoughing(loaded, b.ops)
     if (outlineAt === undefined) {
       const o = outlineOperation(c, cell, offset, b, undefined, undefined, undefined, items, lap)
       if (o.isErr()) return Err(o.unwrapErr())

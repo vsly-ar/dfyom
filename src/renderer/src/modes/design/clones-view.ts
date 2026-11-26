@@ -446,6 +446,8 @@ export function draftSourceOptions(
   const owner = (on: string) => on.slice(0, on.indexOf('.') < 0 ? on.length : on.indexOf('.'))
   for (const op of ops) {
     if (inSource.has(op.id) || op.featureId !== undefined || taken.has(op.id)) continue
+    // DF122 R5: a roughing operation comes with its owner (core `sourceOperations`)
+    if ((op.kind === 'pocket' || op.kind === 'profile') && op.roughingOf !== undefined) continue
     if (op.kind === 'facing' || (op.kind === 'profile' && op.side === 'outside')) continue
     if (!inSource.has(owner(op.on ?? 'stock.top'))) continue
     inSource.add(op.id)

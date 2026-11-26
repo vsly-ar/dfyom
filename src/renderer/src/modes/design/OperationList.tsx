@@ -174,10 +174,16 @@ export function OperationList({
       // DF122: a selected roughing pocket shows inside its open pocket row
       if (u.kind === 'operation') return u.roughing?.id === selected ? [u.id] : []
       const inner = u.nested.find(
-        (n) => n.id === selected || (n.kind === 'feature' && n.ops.some((o) => o.id === selected)),
+        (n) =>
+          n.id === selected ||
+          (n.kind === 'feature' && n.ops.some((o) => o.id === selected)) ||
+          (n.kind === 'operation' && n.roughing?.id === selected),
       )
       if (inner !== undefined)
-        return inner.kind === 'feature' && inner.id !== selected ? [u.id, inner.id] : [u.id]
+        // DF122 R5: a Clones source's roughing row opens its owner's row too
+        return inner.id !== selected && (inner.kind === 'feature' || inner.roughing !== undefined)
+          ? [u.id, inner.id]
+          : [u.id]
       // a selected clone instance (viewport click, breadcrumb) shows in the open Clones group
       if (u.feature.kind === 'clones' && selected?.startsWith(`${u.id}_`) === true)
         return [u.id, instancesKey(u.id)]
@@ -834,7 +840,7 @@ function ClonesChildren({
       <ol className={styles['ownedList']} aria-label={f.sourceOf(unit.feature.name)}>
         {unit.nested.map((n) =>
           n.kind === 'operation' ? (
-            <OperationRow key={n.id} ctx={ctx} op={n.op} />
+            <OperationRow key={n.id} ctx={ctx} op={n.op} roughing={n.roughing} />
           ) : (
             <FeatureRow key={n.id} ctx={ctx} unit={n} />
           ),
