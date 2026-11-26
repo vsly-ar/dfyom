@@ -8,7 +8,7 @@
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, openInspectorGroup, test } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -124,6 +124,8 @@ test('setup inspector: link time, clamp height and full retraction (DF64)', asyn
   const checks = inspector.getByRole('region', { name: 'Setup checks' })
   await expect(checks.getByText(/Enter the clamp height to lower 1 link/)).toBeVisible()
 
+  // S5: the clamp height and the links are in the closed "Links and heights" accordion
+  await openInspectorGroup(inspector, 'Links and heights')
   const clamp = inspector.getByLabel('Clamp height', { exact: true })
   await clamp.fill('0')
   await clamp.press('Enter')

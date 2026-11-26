@@ -477,7 +477,7 @@ Four new tools (`plan.alignment.set`, `plan.aid.set`, `run.align.goto`, `run.ali
 No new tools: one optional arg on each of two existing tools ([design.md § Disabling operations and features](../modes/design.md#disabling-operations-and-features-df106), [plan-v0.4.md § Disabling in a plan](../modes/plan-v0.4.md#disabling-in-a-plan-df106)).
 
 - `design_part_update { partId, disabled: [ids] }` replaces the part's list of switched-off top-level operations and features (`[]` enables all). Unknown ids are `input.malformed` (`unknownItem`), owned or nested ones `model.invariant` (`insideFeature`, params name the feature to switch instead). The list shows in `design_part_get`; `design_operation_list` returns `disabled` (every item that is off, dependants included; absent = none). A command that would build on a disabled item fails with `model.invariant` (`disabledTarget`).
-- `plan_update { planId, disabled: [ids] }` (`name` is now optional) replaces the plan's own list and rebuilds the plan from its snapshot; `plan_get` shows it.
+- `plan_update { planId, disabled: [ids] }` (`name` is now optional) replaces the plan's own list and rebuilds the plan from its snapshot; `plan_get` shows it. Follow-up: `plan_get` also shows `parked` (plan operations kept while their items are off; they come back with their settings), and `plan_stale_list` reports `disabledInDesign` per operation (switched off in Design, not removed); output only, `tools/list` unchanged.
 - The ids are validated by the commands, not by the listed schemas (plain strings, A8). `tools/list` 114,198 → **114,401** chars (+203, target ≤ 0.2 K) of 120,000.
 
 ## Implementation (task 3.10)

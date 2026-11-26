@@ -6,7 +6,7 @@
 // section's helpers place two marks or holes for the next setup with the chosen edges, holes on
 // the flip axis or at corners, and an inset (DF83; `plan.aid.set { place, edges, holesAt, inset }`).
 // Doc: docs/modes/alignment.md#plan-ui, docs/conventions/ui.md#design-and-plan-controls-v02
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { AlignmentPointDTO } from '../../../../core/plan/alignment.dto'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
@@ -59,6 +59,7 @@ export function AlignmentFields({
   info,
   sources,
   warnings,
+  afterZero,
 }: {
   plan: PlanDTO
   setup: SetupDTO
@@ -67,6 +68,8 @@ export function AlignmentFields({
   info: SetupAlignmentView | undefined
   sources: readonly AlignmentSourceView[]
   warnings: readonly PlanWarning[]
+  /** Groups between Work zero and Alignment points (the setup's Links and heights, S5). */
+  afterZero?: ReactNode
 }): React.JSX.Element {
   const call = usePlanCommand()
   const store = usePlanStore()
@@ -231,7 +234,15 @@ export function AlignmentFields({
           </Button>
         </div>
       </InspectorGroup>
-      <InspectorGroup title={m.pointsTitle}>
+      {afterZero}
+      <InspectorGroup
+        title={m.pointsTitle}
+        collapsible
+        defaultOpen
+        rememberKey="setup.alignmentPoints"
+        summary={planMessages.setup.pointsSummary(points.length)}
+        severity={errors.some((i) => i.path[0] === 'alignment') ? 'error' : undefined}
+      >
         {points.length === 0 ? <p className={styles['muted']}>{m.pointsEmpty}</p> : null}
         {points.length > 0 ? (
           <ol className={styles['alignList']} aria-label={m.pointsList}>
@@ -367,7 +378,12 @@ export function AlignmentFields({
         ) : null}
       </InspectorGroup>
       {readOnly ? null : (
-        <InspectorGroup title={m.aidsTitle}>
+        <InspectorGroup
+          title={m.aidsTitle}
+          collapsible
+          rememberKey="setup.alignmentAids"
+          summary={planMessages.setup.aidsSummary}
+        >
           <p className={styles['muted']}>
             {next === undefined ? m.aidsNone : m.aidsHint(next.name)}
           </p>

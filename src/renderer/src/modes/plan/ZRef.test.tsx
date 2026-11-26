@@ -14,6 +14,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { openInspectorGroup } from '../../test/inspector'
 import type { RunScene } from '../../viewport'
 import { usePlanScene } from './usePlanScene'
 
@@ -157,6 +158,9 @@ describe('Z reference in the operation inspector (DF69)', () => {
     const t = await renderPlan()
     const drill = t.top().operations[1]!
     t.select(drill.id)
+    // S5: Z from and the touch-off spot are in the closed "Tool setup" accordion
+    await within(t.inspector()).findByRole('region', { name: 'Tool setup' })
+    await openInspectorGroup(t.user, t.inspector(), 'Tool setup')
     const button = await within(t.inspector()).findByRole('button', {
       name: 'Z from for Drill 6: Facing 1 floor · −0.5 mm (default). Choose the surface',
     })

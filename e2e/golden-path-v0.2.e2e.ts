@@ -22,10 +22,11 @@ import {
   expect,
   fitReference,
   launchApp,
+  openInspectorTab,
   openReferencePanel,
+  revealField,
   test,
   zeroXyz,
-  revealField,
 } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
@@ -344,7 +345,8 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await expect(inspector.getByRole('list', { name: 'Why this tool' })).toContainText(
     "Matches the design's 6 mm drill.",
   )
-  // no calculator data for drills: the feeds by hand
+  // no calculator data for drills: the feeds by hand, on the operation's Feeds tab (S5)
+  await openInspectorTab(inspector, 'Feeds')
   await setField(inspector, 'Spindle speed', '3000')
   await setField(inspector, 'Feed rate', '300')
   await setField(inspector, 'Plunge rate', '300')
@@ -357,12 +359,14 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     /Settled design/,
   )
   await setupOps(page, 'Bottom').nth(0).click()
+  await openInspectorTab(inspector, 'Design')
   const planCopy = inspector.getByRole('region', { name: 'Part (plan copy)' })
   await setField(planCopy, 'Depth', '2')
   await expect(planCopy.getByText('Edited in plan')).toBeVisible()
   await expect(setupOps(page, 'Bottom').nth(0)).toContainText('Edited in plan')
 
   await drilling.click()
+  await openInspectorTab(inspector, 'Cut')
   await inspector.getByRole('combobox', { name: 'Cycle' }).click()
   await page.getByRole('option', { name: /Peck/ }).click()
   await setField(inspector, 'Peck depth', '4')

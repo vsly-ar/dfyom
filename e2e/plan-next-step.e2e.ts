@@ -8,7 +8,7 @@
 // Docs: docs/conventions/ui.md#undo-and-redo, #plan-start-df29, #plan-mode-task-37
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { expect, openInspectorGroup, test } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
@@ -118,6 +118,7 @@ test('DF45: undo toast over the view, Plan start machine, next-step primary, set
     .getByRole('button')
     .first()
     .click()
+  await openInspectorGroup(inspector, 'Links and heights')
   const rotation = inspector.getByRole('radiogroup', { name: 'Rotation on the table' })
   await expect(inspector.getByText('Rotation on the table', { exact: true })).toBeVisible()
   await expect(rotation).toHaveAccessibleDescription(/About the spindle axis/)

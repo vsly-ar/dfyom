@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, openInspectorGroup, openInspectorTab, test } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -170,6 +170,7 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
   await expect(inspector.getByText('Bottom face up to the spindle')).toBeVisible()
+  await openInspectorGroup(inspector, 'Links and heights')
   await inspector.getByRole('radio', { name: '90°' }).click()
   await expect(setupRow(/^1\. Bottom/)).toContainText('· 90°')
 
@@ -196,6 +197,7 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   // operation's findings first in its inspector
   const pocketRow = navigator.getByRole('button', { name: /^Pocket 1/ })
   await pocketRow.click({ position: { x: 24, y: 12 } })
+  await openInspectorTab(inspector, 'Feeds')
   const feed = inspector.getByLabel('Feed rate', { exact: true })
   await feed.fill('9000')
   await feed.press('Enter')
@@ -214,7 +216,21 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   await pocketRow.click({ button: 'right' })
   await expect(page.getByRole('menu', { name: /^Actions for Pocket 1/ })).toBeVisible()
   await render(page, 'df67-row-menu')
-  await page.keyboard.press('Escape')
+  // DF106: "Disable in this plan" moves the row to the Off list; "Enable in this plan" brings it
+  // back with its plan edits (the 9000 mm/min feed)
+  await page.getByRole('menuitem', { name: 'Disable in this plan' }).click()
+  const off = navigator.getByRole('list', { name: 'Off in this plan or in design' })
+  await expect(off.getByRole('button', { name: /^Pocket 1/ })).toContainText('Off in this plan')
+  await expect(pocketRow).toHaveCount(1) // only the Off list's entry
+  await off.getByRole('button', { name: /^Pocket 1/ }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Enable in this plan' }).click()
+  await expect(off).toHaveCount(0)
+  const back = navigator.getByRole('button', { name: /^Pocket 1/ })
+  // still selected from before (a click would deselect it)
+  if ((await back.getAttribute('aria-pressed')) !== 'true')
+    await back.click({ position: { x: 24, y: 12 } })
+  await openInspectorTab(inspector, 'Feeds')
+  await expect(inspector.getByLabel('Feed rate', { exact: true })).toHaveValue(/^9000/)
   expect(dfyom.rendererErrors).toEqual([])
 })
 
@@ -274,7 +290,8 @@ test('setup work zero and alignment points: inspector, viewport marker, program 
     setupId,
     items: [{ kind: 'toeClamp', edge: 'uMax', width: '20', grip: '8', reach: '14', top: '12' }],
   })
-  const workholding = inspector.getByRole('heading', { name: /Workholding/ })
+  // the count is the group header's meta (S5), beside the heading
+  const workholding = inspector.getByRole('region', { name: 'Workholding' })
   await expect(workholding).toContainText('1 item')
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })

@@ -36,6 +36,7 @@ import { findPlanOperation, loadPlanDTO, type PlanLoadCache } from './plan'
 import {
   lengthDTO,
   type LengthDTO,
+  type ParkedOperationDTO,
   type PlanDTO,
   type PlanOperationDTO,
   type SetupDTO,
@@ -45,7 +46,7 @@ import { takeDesignSnapshot } from './snapshot'
 import { designToolField, sameDesignToolField } from './design-tool'
 import { resolveTool } from './tool-resolution'
 import { isAid } from './aids'
-import { checkPartFits } from './validity'
+import { checkPartFits, sameValue } from './validity'
 
 export interface BuildContext {
   readonly ids: IdGenerator
@@ -154,6 +155,8 @@ function newPlanOperation(ids: IdGenerator, designOperationIds: string[]): PlanO
 export function pruneSnapshots(plan: PlanDTO): void {
   const used = new Set([
     ...plan.setups.flatMap((s) => s.operations.flatMap((o) => o.tool ?? [])),
+    // a parked plan operation keeps its tool copy for when it comes back (DF106)
+    ...(plan.parked ?? []).flatMap((p) => p.operation.tool ?? []),
     ...plan.design.part.operations.flatMap((o) =>
       o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [],
     ),
@@ -367,17 +370,46 @@ export function rebuildPlan(
   if (part.isErr()) return Err(part.unwrapErr().withContext(where))
   const ops = part.unwrap().operations
   const byId = new Map(ops.map((o) => [o.id, o]))
+  // DF106: design operations that still exist but are off (in the design or in this plan); a
+  // plan operation of only such operations is parked, not dropped, and comes back when they do
+  const record = Object.hasOwn(doc.parts, current.design.partId)
+    ? doc.parts[current.design.partId]
+    : undefined
+  const exists = new Set([
+    ...(record?.operations ?? []).map((o) => o.id),
+    ...(own ? current.design.taken.operations.map((o) => o.id) : []),
+  ])
+  const isOff = (ids: readonly string[]) =>
+    ids.length > 0 && ids.every((id) => exists.has(id) && !byId.has(id))
+  const parked: ParkedOperationDTO[] = []
+  const planEdits = new Map(current.design.part.operations.map((o) => [o.id, o]))
+  const takenById = new Map(current.design.taken.operations.map((o) => [o.id, o]))
   // kept plan operations per setup (a drilling group whose holes no longer match splits)
   const setups: SetupDTO[] = plan.setups.map((s) => {
     const kept: PlanOperationDTO[] = []
-    for (const p of s.operations) {
+    s.operations.forEach((p, index) => {
       // alignment aids are no design operation: a rebuild keeps them in place (S20)
       if (isAid(p)) {
         kept.push(p)
-        continue
+        return
       }
       const ids = p.designOperationIds.filter((id) => byId.has(id))
-      if (ids.length === 0) continue
+      if (ids.length === 0) {
+        if (isOff(p.designOperationIds)) {
+          // the plan's own edits of its design operations go with it (a settled plan's toggle)
+          const edits = p.designOperationIds.flatMap((id) => {
+            const e = planEdits.get(id)
+            return e !== undefined && !sameValue(e, takenById.get(id)) ? [copy(e)] : []
+          })
+          parked.push({
+            setupId: s.id,
+            index,
+            operation: p,
+            ...(own && edits.length > 0 ? { edits } : {}),
+          })
+        }
+        return
+      }
       const groups = groupOperations(
         ids.map((id) => byId.get(id)!),
         ops,
@@ -385,16 +417,42 @@ export function rebuildPlan(
       kept.push({ ...p, designOperationIds: groups[0]! })
       for (const g of groups.slice(1))
         kept.push({ ...copy(p), id: c.ids.next('planOp'), designOperationIds: g })
-    }
+    })
     return { ...s, operations: kept }
   })
-  const covered = new Set(setups.flatMap((s) => s.operations.flatMap((p) => p.designOperationIds)))
+  // DF106: parked plan operations whose design operations are all back return with their
+  // settings, at their place when their setup is still there; others stay parked while off
+  const usedIds = new Set(setups.flatMap((s) => s.operations.map((p) => p.id)))
+  const restored: PlanOperationDTO[] = []
+  const loose: PlanOperationDTO[] = []
+  for (const entry of current.parked ?? []) {
+    const ids = entry.operation.designOperationIds
+    if (ids.length > 0 && ids.every((id) => byId.has(id))) {
+      const p = copy(entry.operation)
+      if (usedIds.has(p.id)) p.id = c.ids.next('planOp')
+      usedIds.add(p.id)
+      restored.push(p)
+      const home = setups.find((s) => s.id === entry.setupId)
+      if (home === undefined) loose.push(p)
+      else home.operations.splice(Math.min(entry.index, home.operations.length), 0, p)
+    } else if (isOff(ids)) {
+      const { edits, ...rest } = entry
+      // a rebuild from the design discards plan edits; a toggle keeps them
+      parked.push(own && edits !== undefined ? { ...rest, edits } : rest)
+    }
+  }
+  if (parked.length > 0) plan.parked = parked
+  else delete plan.parked
+  const covered = new Set([
+    ...setups.flatMap((s) => s.operations.flatMap((p) => p.designOperationIds)),
+    ...loose.flatMap((p) => p.designOperationIds),
+  ])
   const fresh = groupOperations(
     ops.filter((o) => !covered.has(o.id)),
     ops,
   ).map((g) => newPlanOperation(c.ids, g))
   const direction = operationDirections(
-    [...setups.flatMap((s) => s.operations), ...fresh],
+    [...setups.flatMap((s) => s.operations), ...loose, ...fresh],
     part.unwrap(),
   )
   // an operation whose `on` changed direction moves like a new one
@@ -406,7 +464,7 @@ export function rebuildPlan(
       if (!same) placed.push(p)
       return same
     })
-  placed.push(...fresh)
+  placed.push(...loose, ...fresh)
   // an aid ranks as a drilling (holes) or last (marks), alignment.md § Alignment aids (Order)
   const rank = (p: PlanOperationDTO) =>
     p.aid !== undefined
@@ -470,9 +528,16 @@ export function rebuildPlan(
   // re-resolve `design` tools whose design tool field changed; plan assignments stay, flagged
   const changed: string[] = []
   const freshIds = new Set(fresh.map((p) => p.id))
+  const restoredIds = new Set(restored.map((p) => p.id))
   for (const s of plan.setups)
     for (const p of s.operations) {
       if (freshIds.has(p.id)) continue
+      // a restored one: its design tool is resolved again when it came from the design; a
+      // tool assigned in the plan stays (no earlier tool field to compare with)
+      if (restoredIds.has(p.id)) {
+        if (p.toolSource === 'design') changed.push(p.id)
+        continue
+      }
       if (sameDesignToolField(designToolField(before, p), designToolField(design.part, p))) continue
       if (p.toolSource === 'design') changed.push(p.id)
       else p.designToolChanged = true
@@ -499,7 +564,11 @@ function ownSnapshot(
   plan: PlanDTO,
   doc: ProjectDoc,
 ): { design: PlanDTO['design']; stock: PlanDTO['snapshots'][number]; tools: SnapshotDTO[] } {
-  const edited = new Map(plan.design.part.operations.map((o) => [o.id, o]))
+  const edited = new Map([
+    // the plan's edits of parked operations (DF106), then of the ones it has
+    ...(plan.parked ?? []).flatMap((p) => (p.edits ?? []).map((o) => [o.id, o] as const)),
+    ...plan.design.part.operations.map((o) => [o.id, o] as const),
+  ])
   const merged: PartDTO = {
     ...plan.design.taken,
     operations: plan.design.taken.operations.map((o) => edited.get(o.id) ?? o),

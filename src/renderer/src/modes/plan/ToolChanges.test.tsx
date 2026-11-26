@@ -109,7 +109,7 @@ describe('Tool changes (DF66)', () => {
     expect(runs[1]).toHaveTextContent('Drill 6')
     expect(runs[1]).toHaveTextContent('Drilling 1, Drilling 3, Drilling 4')
     expect(runs[4]).toHaveTextContent('Profile 1')
-    expect(within(t.inspector()).getByRole('heading', { name: /Tool changes/ })).toHaveTextContent(
+    expect(within(t.inspector()).getByRole('region', { name: 'Tool changes' })).toHaveTextContent(
       '4 tool changes',
     )
     // every toolpath is current: 2 × 65 s for the drill run

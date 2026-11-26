@@ -168,6 +168,11 @@ export interface PlanState {
    */
   readonly findingsRequest: string | undefined
   /**
+   * A plan finding with a field was chosen (the plan's checks list, S5): the plan operation's
+   * inspector reveals that field (its tab, accordion or More row) and focuses it, once.
+   */
+  readonly fieldRequest: { readonly planOperationId: string; readonly field: string } | undefined
+  /**
    * DF69: the tool run (its first plan operation) whose tool-change row is hovered or focused, or
    * whose "Z from" is hovered: the viewport shows its Z reference instead of the selection's.
    */
@@ -195,6 +200,10 @@ export interface PlanState {
   revealFindings(planOperationId: string): void
   /** The inspector focused them. */
   findingsShown(): void
+  /** Asks the plan operation's inspector to reveal and focus `field` (S5). */
+  revealField(planOperationId: string, field: string): void
+  /** The inspector focused it. */
+  fieldShown(): void
   /** Shows run `planOperationId`'s Z reference in the viewport; undefined: the selection's. */
   previewZRef(planOperationId: string | undefined): void
   /** Marks an alignment point in the viewport; undefined: none. */
@@ -247,6 +256,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     failures: {},
     exporting: false,
     findingsRequest: undefined,
+    fieldRequest: undefined,
     zRefPreview: undefined,
     alignmentPoint: undefined,
     pickingAlignment: undefined,
@@ -263,6 +273,8 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     remember: (lastSelection) => set({ lastSelection }),
     revealFindings: (findingsRequest) => set({ findingsRequest }),
     findingsShown: () => set({ findingsRequest: undefined }),
+    revealField: (planOperationId, field) => set({ fieldRequest: { planOperationId, field } }),
+    fieldShown: () => set({ fieldRequest: undefined }),
     focusAlignmentPoint: (alignmentPoint) => {
       if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
     },

@@ -48,6 +48,10 @@ import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
   directionOfSetup,
+  disableInPlanList,
+  offItems,
+  type OffItem,
+  type RowStale,
   isError,
   isWarning,
   operationStep,
@@ -136,6 +140,14 @@ export function SetupList({
     ? { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown Shift+F10', 'aria-describedby': hintId }
     : { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown' }
   const several = plan.setups.length > 1
+  // DF106: plan-only switches (draft and settled design); the design's own are read-only here
+  const canDisable = canMove && allows(plan, 'plan.update')
+  const off = offItems(doc, plan)
+  /** One `plan.update { disabled }`, announced. */
+  const setDisabled = async (disabled: readonly string[], said: string) => {
+    const r = await call('plan.update', { planId: plan.id, disabled })
+    if (r.ok) setAnnouncement(said)
+  }
   /** Every row in the order shown, for ↑/↓. */
   const order = plan.setups.flatMap((s) => [s.id, ...s.operations.map((o) => o.id)])
   const focus = (id: string) => rows.current.get(id)?.focus()
@@ -341,6 +353,16 @@ export function SetupList({
                         planOperationIds: [op.id],
                       })
                     }
+                    onDisable={(() => {
+                      const list = canDisable ? disableInPlanList(plan, op) : undefined
+                      return list === undefined
+                        ? undefined
+                        : () =>
+                            void setDisabled(
+                              list,
+                              m.operations.disabledInPlan(planOperationName(plan, op)),
+                            )
+                    })()}
                     onMoveTo={(target) =>
                       void call('plan.operation.move', {
                         planId: plan.id,
@@ -356,6 +378,19 @@ export function SetupList({
           )
         })}
       </ol>
+      {off.length > 0 ? (
+        <OffList
+          items={off}
+          canEnable={canDisable}
+          menuKeys={menuKeys}
+          onEnable={(item) =>
+            void setDisabled(
+              (plan.disabled ?? []).filter((id) => id !== item.id),
+              m.operations.enabledInPlan(item.name),
+            )
+          }
+        />
+      ) : null}
       {canMove ? (
         <p id={hintId} className={styles['srOnly']}>
           {m.rowMenuHint}
@@ -464,6 +499,7 @@ function OperationRow({
   onMove,
   onSplit,
   onMoveTo,
+  onDisable,
 }: {
   plan: PlanDTO
   setup: SetupDTO
@@ -490,6 +526,8 @@ function OperationRow({
   onMove: (by: -1 | 1) => void
   onSplit: () => void
   onMoveTo: (setup: SetupDTO) => void
+  /** "Disable in this plan" (DF106); absent for an alignment aid or a read-only plan. */
+  onDisable?: (() => void) | undefined
 }): React.JSX.Element {
   const name = planOperationName(plan, op)
   const findings = findingsOf(data?.warnings ?? [], op.id)
@@ -526,6 +564,12 @@ function OperationRow({
       icon: <Icon name="move-to" />,
       onSelect: () => onMoveTo(s),
     })),
+    ...(onDisable === undefined
+      ? []
+      : ([
+          'separator',
+          { label: m.operations.disableInPlan, icon: <Icon name="eye-off" />, onSelect: onDisable },
+        ] satisfies MenuEntry[])),
   ]
   return (
     <RowMenu
@@ -540,6 +584,7 @@ function OperationRow({
         data-row-menu={canMove ? '' : undefined}
         data-selected={selected ? '' : undefined}
         data-aid={op.aid === undefined ? undefined : op.aid.kind}
+        data-off={stale === 'offInDesign' ? '' : undefined}
       >
         {canMove && setup.operations.length > 1 ? (
           <RowGrip grip={reorder.gripProps(index)} />
@@ -563,7 +608,12 @@ function OperationRow({
             </span>
           </span>
           <span className={styles['opStatus']}>
-            {stale !== undefined ? (
+            {stale === 'offInDesign' ? (
+              <span className={styles['opOff']} title={m.stale.rowOffInDesign} data-where="design">
+                {m.off.inDesign}
+                <span className={styles['srOnly']}>{`: ${m.stale.rowOffInDesign}`}</span>
+              </span>
+            ) : stale !== undefined ? (
               <span className={styles['opStale']} title={staleText(stale)}>
                 <Icon name="history" />
                 <span className={styles['srOnly']}>{staleText(stale)}</span>
@@ -629,5 +679,93 @@ function NameWords({ name }: { name: string }): React.JSX.Element {
   )
 }
 
-const staleText = (s: 'removed' | 'changed' | 'edited') =>
+const staleText = (s: Exclude<RowStale, 'offInDesign'>) =>
   s === 'removed' ? m.stale.rowRemoved : s === 'changed' ? m.stale.rowChanged : m.stale.rowEdited
+
+/**
+ * The items switched off for this plan (DF106), muted, after the setups: off in this plan (its
+ * row menu: "Enable in this plan") or off in Design (read-only here, enabled there).
+ */
+function OffList({
+  items,
+  canEnable,
+  menuKeys,
+  onEnable,
+}: {
+  items: readonly OffItem[]
+  canEnable: boolean
+  menuKeys: { 'aria-keyshortcuts': string; 'aria-describedby'?: string }
+  onEnable: (item: OffItem) => void
+}): React.JSX.Element {
+  return (
+    <div className={styles['offList']}>
+      <h3 className={styles['offTitle']} aria-hidden="true">
+        {m.off.title}
+      </h3>
+      <ol className={styles['ops']} aria-label={m.off.listLabel}>
+        {items.map((item) => {
+          const inPlan = item.where === 'plan'
+          const marker = inPlan ? m.off.inPlan : m.off.inDesign
+          const title = inPlan ? m.off.inPlanTitle : m.off.inDesignTitle
+          const icon =
+            item.operation === undefined
+              ? ({ name: 'facing', rotate: 0 } as const)
+              : partOperationIconProps(item.part, item.operation)
+          const body = (
+            <>
+              <Icon {...icon} />
+              <span className={styles['opText']}>
+                <span className={styles['opName']} title={item.name}>
+                  {item.name}
+                </span>
+              </span>
+              <span className={styles['opOff']} title={title} data-where={item.where}>
+                {marker}
+                <span className={styles['srOnly']}>{`: ${title}`}</span>
+              </span>
+            </>
+          )
+          if (!inPlan || !canEnable)
+            return (
+              <li key={item.id} className={styles['op']} data-off={item.where}>
+                <div className={`${styles['opSelect']} ${styles['planRow']}`}>{body}</div>
+              </li>
+            )
+          return (
+            <RowMenu
+              key={item.id}
+              enabled
+              label={m.off.actions(item.name)}
+              onClose={() => {}}
+              items={[
+                {
+                  label: m.operations.enableInPlan,
+                  icon: <Icon name="eye" />,
+                  onSelect: () => onEnable(item),
+                },
+              ]}
+            >
+              <li className={styles['op']} data-off={item.where} data-row-menu="">
+                <button
+                  type="button"
+                  className={`${styles['opSelect']} ${styles['planRow']}`}
+                  {...menuKeys}
+                  aria-keyshortcuts="Shift+F10"
+                  onKeyDown={(e) => {
+                    if (!isContextMenuKey(e)) return
+                    const el = e.currentTarget.closest('[data-row-menu]')
+                    if (el === null) return
+                    e.preventDefault()
+                    openContextMenu(el)
+                  }}
+                >
+                  {body}
+                </button>
+              </li>
+            </RowMenu>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}

@@ -142,6 +142,7 @@ export interface Stale {
     operationId: string
     changedInDesign: boolean
     removedFromDesign: boolean
+    disabledInDesign: boolean
     editedInPlan: boolean
     designToolChanged: boolean
   }[]

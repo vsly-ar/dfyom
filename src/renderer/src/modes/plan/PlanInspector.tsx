@@ -42,6 +42,7 @@ import {
   type WarningTier,
   type WarningView,
   InspectorGroup,
+  Tabs,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { blankText } from '../design/split-view'
@@ -62,6 +63,7 @@ import {
   type PlanOperationView,
 } from './model'
 import { FeedsCalculation } from './FeedsCalculation'
+import { revealPlanField, severityOf, Slot } from './field-slot'
 import { fieldMessages } from './fieldMessages'
 import { LibraryLink } from '../../library/LibraryLink'
 import { NewToolDialog } from '../../library/NewToolDialog'
@@ -217,6 +219,7 @@ function PlanSummary({
 }): React.JSX.Element {
   const call = usePlanCommand()
   const [, select] = usePlanSelection()
+  const store = usePlanStore()
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
   const ops = allPlanOperations(plan)
   const machine = snapshotName(plan, plan.machine)
@@ -261,7 +264,20 @@ function PlanSummary({
         <InspectorGroup title={m.warnings.title}>
           <WarningList
             labels={planWarningLabels}
-            items={warnings.map((w, i) => planWarningView(w, plan, select, i, units))}
+            items={warnings.map((w, i) =>
+              planWarningView(
+                w,
+                plan,
+                (id) => {
+                  select(id)
+                  // a finding about a field opens it in the operation's inspector (S5)
+                  if (w.field !== undefined && fieldLabel(w.field) !== undefined)
+                    store.getState().revealField(id, w.field)
+                },
+                i,
+                units,
+              ),
+            )}
             empty={m.warnings.none}
             outdated={outdated ? applyMessages.checksOutdated : undefined}
           />
@@ -360,6 +376,20 @@ const FEED_ICON: Record<FeedField, FieldIconName> = {
   stepover: 'stepover',
 }
 
+/** The label of a plan operation field a finding names, if the inspector shows it. */
+function fieldLabel(field: string): string | undefined {
+  if (field === 'tool') return t.tool
+  if (field === 'presetName') return t.preset
+  if (field === 'stickout') return t.stickout
+  if (field === 'zRef') return m.toolChanges.zFrom
+  if (FEED_FIELDS.has(field)) return t.feeds[field as FeedField]
+  if (field.startsWith('strategy.'))
+    return (t.strategy.labels as Record<string, string | undefined>)[
+      field.slice('strategy.'.length)
+    ]
+  return undefined
+}
+
 const DEFAULT_PRESET = '__default'
 const AUTO = '__auto'
 const SEVERITY_ORDER: Record<PlanWarning['severity'], number> = { error: 0, warning: 1, info: 2 }
@@ -402,6 +432,13 @@ function OperationInspector({
     block?.scrollIntoView?.({ block: 'nearest' })
     store.getState().findingsShown()
   }, [request, op.id, store])
+  // a plan finding with a field was chosen (S5): reveal and focus it once it is there
+  const rootRef = useRef<HTMLDivElement>(null)
+  const fieldRequest = usePlanState((s) => s.fieldRequest)
+  useEffect(() => {
+    if (fieldRequest?.planOperationId !== op.id) return
+    if (revealPlanField(rootRef.current, fieldRequest.field)) store.getState().fieldShown()
+  }, [fieldRequest, op.id, store, view])
 
   const send = async (cmd: string, args: object, gesture?: string) => {
     const r = await call(
@@ -478,8 +515,18 @@ function OperationInspector({
     .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity])
     .map((w, i) => {
       // the header names the operation: no subject
-      const { subject: _, ...item } = planWarningView(w, plan, undefined, i, units)
+      const { subject: _, ...view } = planWarningView(w, plan, undefined, i, units)
       const field = w.field
+      // a finding about a field names it and reveals it (its tab, accordion, More row; S5)
+      const label = field === undefined ? undefined : fieldLabel(field)
+      const item =
+        label === undefined || field === undefined
+          ? view
+          : {
+              ...view,
+              subject: label,
+              onSelect: () => void revealPlanField(rootRef.current, field),
+            }
       return w.code === 'feeds.lockInactive' && field !== undefined && !readOnly
         ? {
             ...item,
@@ -488,8 +535,200 @@ function OperationInspector({
         : item
     })
 
+  // S5 (inspector-layout.md § Per-inspector target layout): tabs Cut / Feeds / Design; a tab or
+  // closed accordion with a problem inside says so, and a finding's field is revealed on demand
+  const withField = (keep: (field: string) => boolean) =>
+    findings.filter((w) => w.field !== undefined && keep(w.field))
+  const feedsSeverity = severityOf(withField((f) => FEED_FIELDS.has(f)))
+  const cutSeverity = severityOf(withField((f) => !FEED_FIELDS.has(f) && f !== 'machine'))
+  const toolSetupSeverity = severityOf(withField((f) => f === 'stickout' || f === 'zRef'))
+  const hasDesign = op.aid === undefined && op.designOperationIds.length > 0
+
+  const cut = (
+    <>
+      <InspectorGroup title={t.groups.tool}>
+        <Slot field="tool">
+          <Field label={t.tool} messages={toolMessages} readOnly={readOnly}>
+            <Select
+              placeholder={t.toolPlaceholder}
+              options={toolOptions}
+              {...(current === null ? {} : { value: current.libraryItemId })}
+              disabled={readOnly || toolOptions.length === 0}
+              onValueChange={(id) => {
+                if (id !== current?.libraryItemId)
+                  void send('plan.tool.assign', { toolLibraryItemId: id })
+              }}
+            />
+          </Field>
+        </Slot>
+        <div className={styles['libraryActions']}>
+          {current !== null ? (
+            <LibraryLink target={{ kind: 'tool', itemId: current.libraryItemId }} />
+          ) : null}
+          {!readOnly ? (
+            <NewToolDialog
+              units={units}
+              operationKind={kind}
+              onAdded={async (id) => {
+                const r = await call('plan.tool.assign', {
+                  planId: plan.id,
+                  planOperationId: op.id,
+                  toolLibraryItemId: id,
+                })
+                return r.ok ? undefined : r.error
+              }}
+            />
+          ) : null}
+        </div>
+        {chosen !== undefined && chosen.reasons.length > 0 ? (
+          <ul className={styles['reasons']} aria-label={t.reasons}>
+            {chosen.reasons.map((r) => (
+              <li key={r}>{sentence(r)}</li>
+            ))}
+          </ul>
+        ) : null}
+        {current !== null ? (
+          <Slot field="presetName">
+            <Field label={t.preset} messages={presetMessages} readOnly={readOnly}>
+              <Select
+                options={[
+                  {
+                    value: DEFAULT_PRESET,
+                    label: t.presetDefault(defaultPreset, autoUnavailable === undefined),
+                  },
+                  { value: AUTO, label: t.presetAuto, disabled: autoUnavailable !== undefined },
+                  ...presets.map((p) => ({
+                    value: p.name,
+                    label: p.name,
+                    // library.md#recommended-presets
+                    ...(p.recommended === true ? { description: t.presetFollows } : {}),
+                  })),
+                ]}
+                value={op.auto === true ? AUTO : (op.presetName ?? DEFAULT_PRESET)}
+                disabled={readOnly}
+                onValueChange={(v) =>
+                  update(
+                    v === AUTO
+                      ? { auto: true }
+                      : v === DEFAULT_PRESET
+                        ? { presetName: null, auto: false }
+                        : { presetName: v },
+                  )
+                }
+              />
+            </Field>
+          </Slot>
+        ) : null}
+      </InspectorGroup>
+
+      {/* a witness mark's strategy is fixed (one plunge or line at its depth, S14) */}
+      {current !== null && view !== undefined && op.aid?.kind !== 'witnessMark' ? (
+        <StrategyGroup
+          plan={plan}
+          op={op}
+          view={view}
+          units={units}
+          readOnly={readOnly}
+          findings={findings}
+          onUpdate={update}
+          onCancelGesture={cancelGesture}
+        />
+      ) : null}
+
+      {current !== null ? (
+        <InspectorGroup
+          title={t.groups.toolSetup}
+          collapsible
+          rememberKey="plan.toolSetup"
+          summary={t.toolSetupSummary(stickoutValue?.source)}
+          severity={toolSetupSeverity}
+        >
+          <Slot field="stickout">
+            <QuantityInput
+              label={t.stickout}
+              stepKind="xy"
+              kind="length"
+              defaultUnit={lengthUnit}
+              value={stickoutValue}
+              illustration={<FieldIcon name="stickout" />}
+              readOnly={readOnly}
+              messages={[
+                ...fieldMessages(findings, 'stickout'),
+                ...(op.stickout !== undefined
+                  ? [
+                      {
+                        id: 'stickout.entered',
+                        severity: 'note' as const,
+                        text: t.source('override', null),
+                        ...(readOnly
+                          ? {}
+                          : {
+                              fix: {
+                                label: t.useToolDefault,
+                                onApply: () => update({ stickout: null }),
+                              },
+                            }),
+                      },
+                    ]
+                  : []),
+              ]}
+              onCommit={(q, gesture) => update({ stickout: q.source }, gesture)}
+              onCancelGesture={cancelGesture}
+            />
+          </Slot>
+          {/* DF69: the Z reference of the tool run this operation starts */}
+          <Slot field="zRef">
+            <ZRefFields
+              plan={plan}
+              op={op}
+              tool={current.name}
+              units={units}
+              readOnly={readOnly}
+              findings={findings}
+            />
+          </Slot>
+        </InspectorGroup>
+      ) : null}
+    </>
+  )
+
+  const feeds = (
+    <InspectorGroup title={t.groups.feeds}>
+      {current !== null && view !== undefined ? (
+        <>
+          {fields.map((f) => (
+            <Slot key={f} field={f}>
+              <FeedField
+                field={f}
+                op={op}
+                view={view}
+                units={units}
+                readOnly={readOnly}
+                findings={findings}
+                onSet={(source, gesture) => update({ overrides: { [f]: source } }, gesture)}
+                onCancelGesture={cancelGesture}
+                onLock={(locked) => update({ locks: { [f]: locked } })}
+              />
+            </Slot>
+          ))}
+          {view.chipLoad !== null ? (
+            <p className={styles['muted']}>{t.chipLoad(lengthText(view.chipLoad, units))}</p>
+          ) : null}
+          <FeedsCalculation
+            planId={plan.id}
+            planOperationId={op.id}
+            fields={fields}
+            presetName={view.presetName}
+          />
+        </>
+      ) : (
+        <p className={styles['muted']}>{t.feedsNoTool}</p>
+      )}
+    </InspectorGroup>
+  )
+
   return (
-    <div className={styles['inspector']}>
+    <div className={styles['inspector']} ref={rootRef}>
       {/* the design operations' ids (as the design inspector shows them), not the internal plan id */}
       <PanelHeader
         title={name}
@@ -522,166 +761,40 @@ function OperationInspector({
           />
         )}
 
-        <InspectorGroup title={t.groups.tool}>
-          <Field label={t.tool} messages={toolMessages} readOnly={readOnly}>
-            <Select
-              placeholder={t.toolPlaceholder}
-              options={toolOptions}
-              {...(current === null ? {} : { value: current.libraryItemId })}
-              disabled={readOnly || toolOptions.length === 0}
-              onValueChange={(id) => {
-                if (id !== current?.libraryItemId)
-                  void send('plan.tool.assign', { toolLibraryItemId: id })
-              }}
-            />
-          </Field>
-          <div className={styles['libraryActions']}>
-            {current !== null ? (
-              <LibraryLink target={{ kind: 'tool', itemId: current.libraryItemId }} />
-            ) : null}
-            {!readOnly ? (
-              <NewToolDialog
-                units={units}
-                operationKind={kind}
-                onAdded={async (id) => {
-                  const r = await call('plan.tool.assign', {
-                    planId: plan.id,
-                    planOperationId: op.id,
-                    toolLibraryItemId: id,
-                  })
-                  return r.ok ? undefined : r.error
-                }}
-              />
-            ) : null}
-          </div>
-          {chosen !== undefined && chosen.reasons.length > 0 ? (
-            <ul className={styles['reasons']} aria-label={t.reasons}>
-              {chosen.reasons.map((r) => (
-                <li key={r}>{sentence(r)}</li>
-              ))}
-            </ul>
-          ) : null}
-          {current !== null ? (
-            <QuantityInput
-              label={t.stickout}
-              stepKind="xy"
-              kind="length"
-              defaultUnit={lengthUnit}
-              value={stickoutValue}
-              illustration={<FieldIcon name="stickout" />}
-              readOnly={readOnly}
-              messages={[
-                ...fieldMessages(findings, 'stickout'),
-                ...(op.stickout !== undefined
-                  ? [
-                      {
-                        id: 'stickout.entered',
-                        severity: 'note' as const,
-                        text: t.source('override', null),
-                        ...(readOnly
-                          ? {}
-                          : {
-                              fix: {
-                                label: t.useToolDefault,
-                                onApply: () => update({ stickout: null }),
-                              },
-                            }),
-                      },
-                    ]
-                  : []),
-              ]}
-              onCommit={(q, gesture) => update({ stickout: q.source }, gesture)}
-              onCancelGesture={cancelGesture}
-            />
-          ) : null}
-          {current !== null ? (
-            <Field label={t.preset} messages={presetMessages} readOnly={readOnly}>
-              <Select
-                options={[
+        <Tabs<OperationTab>
+          label={t.tabs.label}
+          rememberKey="plan.op"
+          sticky
+          className={styles['opTabs']}
+          items={[
+            { value: 'cut', label: t.tabs.cut, content: cut, severity: cutSeverity },
+            { value: 'feeds', label: t.tabs.feeds, content: feeds, severity: feedsSeverity },
+            ...(hasDesign
+              ? [
                   {
-                    value: DEFAULT_PRESET,
-                    label: t.presetDefault(defaultPreset, autoUnavailable === undefined),
+                    value: 'design' as const,
+                    label: t.tabs.design,
+                    content: <PlanCopyGroup doc={doc} plan={plan} op={op} />,
                   },
-                  { value: AUTO, label: t.presetAuto, disabled: autoUnavailable !== undefined },
-                  ...presets.map((p) => ({
-                    value: p.name,
-                    label: p.name,
-                    // library.md#recommended-presets
-                    ...(p.recommended === true ? { description: t.presetFollows } : {}),
-                  })),
-                ]}
-                value={op.auto === true ? AUTO : (op.presetName ?? DEFAULT_PRESET)}
-                disabled={readOnly}
-                onValueChange={(v) =>
-                  update(
-                    v === AUTO
-                      ? { auto: true }
-                      : v === DEFAULT_PRESET
-                        ? { presetName: null, auto: false }
-                        : { presetName: v },
-                  )
-                }
-              />
-            </Field>
-          ) : null}
-          {/* DF69: the Z reference of the tool run this operation starts */}
-          <ZRefFields
-            plan={plan}
-            op={op}
-            tool={current?.name ?? m.toolChanges.noTool}
-            units={units}
-            readOnly={readOnly}
-            findings={findings}
-          />
-        </InspectorGroup>
-
-        {op.aid === undefined ? <PlanCopyGroup doc={doc} plan={plan} op={op} /> : null}
-
-        {/* a witness mark's strategy is fixed (one plunge or line at its depth, S14) */}
-        {current !== null && view !== undefined && op.aid?.kind !== 'witnessMark' ? (
-          <StrategyGroup
-            plan={plan}
-            op={op}
-            view={view}
-            units={units}
-            readOnly={readOnly}
-            findings={findings}
-            onUpdate={update}
-            onCancelGesture={cancelGesture}
-          />
-        ) : null}
-
-        {current !== null && view !== undefined ? (
-          <InspectorGroup title={t.groups.feeds}>
-            {fields.map((f) => (
-              <FeedField
-                key={f}
-                field={f}
-                op={op}
-                view={view}
-                units={units}
-                readOnly={readOnly}
-                findings={findings}
-                onSet={(source, gesture) => update({ overrides: { [f]: source } }, gesture)}
-                onCancelGesture={cancelGesture}
-                onLock={(locked) => update({ locks: { [f]: locked } })}
-              />
-            ))}
-            {view.chipLoad !== null ? (
-              <p className={styles['muted']}>{t.chipLoad(lengthText(view.chipLoad, units))}</p>
-            ) : null}
-            <FeedsCalculation
-              planId={plan.id}
-              planOperationId={op.id}
-              fields={fields}
-              presetName={view.presetName}
-            />
-          </InspectorGroup>
-        ) : null}
+                ]
+              : []),
+          ]}
+        />
       </div>
     </div>
   )
 }
+
+type OperationTab = 'cut' | 'feeds' | 'design'
+
+/** The feeds-and-speeds fields (the Feeds tab); every other field is on the Cut tab. */
+const FEED_FIELDS: ReadonlySet<string> = new Set<FeedField>([
+  'spindleSpeed',
+  'feedRate',
+  'plungeRate',
+  'stepdown',
+  'stepover',
+])
 
 /**
  * One feeds-and-speeds field: the resolved value and where it comes from. In auto mode a field

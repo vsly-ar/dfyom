@@ -25,6 +25,7 @@ import {
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { fieldMessages } from './fieldMessages'
+import { Slot } from './field-slot'
 import {
   ANGLE_KEYS,
   CHOICE_KEYS,
@@ -119,76 +120,105 @@ export function StrategyGroup({
     plan.snapshots.find((x) => x.id === op.tool)?.values as { type?: string } | undefined
   )?.type
 
+  // S5: entry details, allowance, finish stepdown and overshoot are rarely changed: a More row
+  // (inspector-layout.md § Per-inspector target layout), open while a problem is in it
+  const rare = keys.filter((k) => RARE_KEYS.has(k))
+  const rareProblem = findings.some(
+    (w) => w.severity !== 'info' && rare.some((k) => w.field === `strategy.${k}`),
+  )
+  const field = (key: StrategyKey) => {
+    const resolved = view.strategy[key]
+    const label = s.labels[key]
+    if (key === 'cycle')
+      return (
+        <Slot key={key} field="strategy.cycle">
+          <CycleField
+            key={key}
+            value={String(resolved ?? '')}
+            stored={op.strategy.cycle !== undefined}
+            toolType={toolType}
+            readOnly={readOnly}
+            messages={fieldMessages(findings, 'strategy.cycle')}
+            onChange={(v) => set('cycle', v)}
+          />
+        </Slot>
+      )
+    if (CHOICE_KEYS.has(key))
+      return (
+        <div key={key} className={styles['choice']} data-plan-field={`strategy.${key}`}>
+          <span className={styles['caption']} aria-hidden="true">
+            {label}
+          </span>
+          <SegmentedControl<string>
+            label={label}
+            options={choiceValues(key, view.kind).map((v) => ({
+              value: v,
+              label: s.choices[key]?.[v] ?? v,
+            }))}
+            value={String(resolved ?? '')}
+            disabled={readOnly}
+            onValueChange={(v) => {
+              if (v !== resolved || op.strategy[key] === undefined) set(key, v)
+            }}
+          />
+        </div>
+      )
+    const stored = op.strategy[key] as QuantityDTO | undefined
+    const throughDepth = view.throughDepth ?? null
+    const cutDepth =
+      key === 'breakthrough' && throughDepth !== null && typeof resolved === 'number' ? (
+        <CutDepthField
+          key="cutDepth"
+          throughDepth={throughDepth}
+          breakthrough={resolved}
+          units={units}
+          readOnly={readOnly}
+          onSet={(v, gesture) => set('breakthrough', v, gesture)}
+          onCancelGesture={onCancelGesture}
+        />
+      ) : null
+    return [
+      cutDepth,
+      <Slot key={key} field={`strategy.${key}`}>
+        <StrategyQuantity
+          strategyKey={key}
+          label={label}
+          stored={stored}
+          resolved={typeof resolved === 'number' ? resolved : undefined}
+          units={units}
+          readOnly={readOnly}
+          findings={fieldMessages(findings, `strategy.${key}`)}
+          onSet={(v, gesture) => set(key, v, gesture)}
+          onCancelGesture={onCancelGesture}
+        />
+      </Slot>,
+    ]
+  }
+
   return (
     <InspectorGroup title={t.groups.strategy}>
-      {keys.map((key) => {
-        const resolved = view.strategy[key]
-        const label = s.labels[key]
-        if (key === 'cycle')
-          return (
-            <CycleField
-              key={key}
-              value={String(resolved ?? '')}
-              stored={op.strategy.cycle !== undefined}
-              toolType={toolType}
-              readOnly={readOnly}
-              messages={fieldMessages(findings, 'strategy.cycle')}
-              onChange={(v) => set('cycle', v)}
-            />
-          )
-        if (CHOICE_KEYS.has(key))
-          return (
-            <div key={key} className={styles['choice']}>
-              <span className={styles['caption']} aria-hidden="true">
-                {label}
-              </span>
-              <SegmentedControl<string>
-                label={label}
-                options={choiceValues(key, view.kind).map((v) => ({
-                  value: v,
-                  label: s.choices[key]?.[v] ?? v,
-                }))}
-                value={String(resolved ?? '')}
-                disabled={readOnly}
-                onValueChange={(v) => {
-                  if (v !== resolved || op.strategy[key] === undefined) set(key, v)
-                }}
-              />
-            </div>
-          )
-        const stored = op.strategy[key] as QuantityDTO | undefined
-        const throughDepth = view.throughDepth ?? null
-        const cutDepth =
-          key === 'breakthrough' && throughDepth !== null && typeof resolved === 'number' ? (
-            <CutDepthField
-              key="cutDepth"
-              throughDepth={throughDepth}
-              breakthrough={resolved}
-              units={units}
-              readOnly={readOnly}
-              onSet={(v, gesture) => set('breakthrough', v, gesture)}
-              onCancelGesture={onCancelGesture}
-            />
-          ) : null
-        return [
-          cutDepth,
-          <StrategyQuantity
-            key={key}
-            strategyKey={key}
-            label={label}
-            stored={stored}
-            resolved={typeof resolved === 'number' ? resolved : undefined}
-            units={units}
-            readOnly={readOnly}
-            findings={fieldMessages(findings, `strategy.${key}`)}
-            onSet={(v, gesture) => set(key, v, gesture)}
-            onCancelGesture={onCancelGesture}
-          />,
-        ]
-      })}
+      {keys.filter((k) => !RARE_KEYS.has(k)).map(field)}
+      {rare.length > 0 ? (
+        <InspectorGroup.More
+          fields={rare.map((k) => s.labels[k])}
+          rememberKey="plan.strategyMore"
+          forceOpen={rareProblem}
+        >
+          {rare.map(field)}
+        </InspectorGroup.More>
+      ) : null}
     </InspectorGroup>
   )
 }
+
+/** Strategy parameters behind the group's More row (changed in under ~1 in 5 uses). */
+const RARE_KEYS: ReadonlySet<StrategyKey> = new Set<StrategyKey>([
+  'helixDiameter',
+  'rampAngle',
+  'finishAllowance',
+  'finishStepdown',
+  'overshoot',
+])
 
 /**
  * A through profile's cut depth (DF23), the alternative input of Breakthrough as the chamfer's

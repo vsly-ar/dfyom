@@ -12,6 +12,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { openInspectorMore, openInspectorTab } from '../../test/inspector'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -94,6 +95,8 @@ describe('Plan inspector: strategy', () => {
     const t = await renderPlan()
     const group = await t.open('Pocket 1')
     const g = within(group)
+    // S5: the finishing parameters are behind the Strategy group's More row
+    await openInspectorMore(t.user, group, 'Finishing allowance')
     const allowance = g.getByLabelText('Finishing allowance', { selector: 'input' })
     expect(allowance).toHaveValue('0.2 mm')
     // a default is a tag on the title row, its sentence the field's description (DF105)
@@ -206,6 +209,7 @@ describe('Plan inspector: calculation', () => {
       })
     })
     await t.open('Pocket 1')
+    await openInspectorTab(t.user, t.inspector(), 'Feeds')
     const insp = within(t.inspector())
     const toggle = insp.getByRole('button', { name: 'Show calculation' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -247,6 +251,7 @@ describe('Plan inspector: calculation', () => {
       })
     })
     await t.open('Drilling 1')
+    await openInspectorTab(t.user, t.inspector(), 'Feeds')
     const insp = within(t.inspector())
     await t.user.click(insp.getByRole('button', { name: 'Show calculation' }))
     const region = await insp.findByRole('region', { name: 'Calculation' })

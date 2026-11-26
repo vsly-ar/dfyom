@@ -229,6 +229,7 @@ describe('toolpaths of general shapes (T1/T2 wiring)', () => {
         operationId: 'profile1',
         changedInDesign: true,
         removedFromDesign: false,
+        disabledInDesign: false,
         editedInPlan: false,
         designToolChanged: false,
       },

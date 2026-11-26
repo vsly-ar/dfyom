@@ -22,6 +22,7 @@ import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { cssRule } from '../../test/css'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { openInspectorGroup, openInspectorTab } from '../../test/inspector'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 import type { PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import { SEGMENT, type RunScene } from '../../viewport'
@@ -261,6 +262,57 @@ describe('Setup panel', () => {
     })
   })
 
+  it('disables an operation in this plan only and enables it back; lists what Design switched off (DF106)', async () => {
+    const t = await renderSetups()
+    const top = () => t.plan().setups.find((s) => s.name === 'Top')!
+    const drilling = top().operations[1]!
+    const designId = drilling.designOperationIds[0]!
+    const row = () =>
+      within(t.opsOf('Top')).getAllByRole('button', { name: new RegExp(`^${'Drilling 1'}`) })[0]!
+    await openMenu(t, row())
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Disable in this plan' }))
+    await waitFor(() => expect(t.plan().disabled).toEqual([designId]))
+    // the row left the setup; it is listed muted under "Off", its menu enables it again
+    const off = () => within(t.nav()).getByRole('list', { name: 'Off in this plan or in design' })
+    const offRow = within(off()).getByRole('button', { name: /^Drilling 1/ })
+    expect(offRow).toHaveTextContent('Off in this plan')
+    expect(within(t.opsOf('Top')).queryByRole('button', { name: /^Drilling 1\b/ })).toBeNull()
+    expect(await screen.findByText('Drilling 1 is off in this plan')).toBeInTheDocument()
+    await openMenu(t, offRow)
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Enable in this plan' }))
+    await waitFor(() => expect(t.plan()).not.toHaveProperty('disabled'))
+    // back at its place, with the same plan operation
+    expect(top().operations[1]!.id).toBe(drilling.id)
+    expect(
+      within(t.nav()).queryByRole('list', { name: 'Off in this plan or in design' }),
+    ).toBeNull()
+
+    // switched off in Design: listed read-only (no menu), "Off in design"
+    await act(async () => {
+      await t.bridge.call('design.part.update', { partId: t.s.partId, disabled: [designId] })
+      await t.bridge.call('project.apply', {})
+    })
+    const inDesign = await within(t.nav()).findByRole('list', {
+      name: 'Off in this plan or in design',
+    })
+    expect(within(inDesign).queryByRole('button')).toBeNull()
+    expect(inDesign).toHaveTextContent('Drilling 1')
+    expect(inDesign).toHaveTextContent('Off in design')
+    await expectNoAxeViolations()
+  })
+
+  it('shows a design-disabled operation of a settled plan as "Off in design", not removed (DF106)', async () => {
+    const t = await renderSetups(async (s, planId) => {
+      await s.toStatus(planId, 'settledDesign')
+      const id = s.plan(planId).setups[1]!.operations[1]!.designOperationIds[0]!
+      await s.run('design.part.update', { partId: s.partId, disabled: [id] })
+      await s.run('project.apply', {})
+    })
+    const row = within(t.opsOf('Top')).getAllByRole('button', { name: /^Drilling 1/ })[0]!
+    await waitFor(() => expect(row).toHaveTextContent('Off in design'))
+    expect(row).not.toHaveTextContent('Removed from design')
+  })
+
   it('splits an operation into a new setup, moves operations across setups of one direction and merges them', async () => {
     const t = await renderSetups()
     const top = t.plan().setups[1]!
@@ -320,6 +372,8 @@ describe('Setup panel', () => {
     expect(within(insp).getByText('1 of 2')).toBeInTheDocument()
     expect(within(insp).getByText('Bottom face up to the spindle')).toBeInTheDocument()
     expect(within(insp).getByText(/G54 at the back left corner of the bottom/)).toBeInTheDocument()
+    // S5: rotation, retract height and links are in the closed "Links and heights" accordion
+    await openInspectorGroup(t.user, insp, 'Links and heights')
     // DF45: a labelled field, its hint in the support area describes the choice
     expect(within(insp).getByText('Rotation on the table', { selector: 'label' })).toBeVisible()
     expect(
@@ -387,6 +441,7 @@ describe('Setup panel', () => {
     expect(
       within(insp).getByText('Generate toolpaths to see the links between operations.'),
     ).toBeInTheDocument()
+    await openInspectorGroup(t.user, insp, 'Links and heights')
     const links = within(insp).getByRole('radiogroup', { name: 'Links' })
     expect(within(links).getByRole('radio', { name: 'Minimum' })).toBeChecked()
     expect(links).toHaveAccessibleDescription(
@@ -691,7 +746,8 @@ describe('Alignment aids and picking points', () => {
     const [first, second] = t.plan().setups
     await t.user.click(t.setupRows()[0]!)
     const insp = t.inspector()
-    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await within(insp).findByRole('region', { name: 'Alignment aids' })
+    await openInspectorGroup(t.user, insp, 'Alignment aids')
     expect(within(insp).getByText(new RegExp(`so ${second!.name} can line up`))).toBeInTheDocument()
     await t.user.click(within(insp).getByRole('button', { name: 'Add witness marks' }))
     await waitFor(() =>
@@ -752,7 +808,8 @@ describe('Registration holes on the flip axis', () => {
     const [first, second] = t.plan().setups
     await t.user.click(t.setupRows()[0]!)
     const insp = t.inspector()
-    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await within(insp).findByRole('region', { name: 'Alignment aids' })
+    await openInspectorGroup(t.user, insp, 'Alignment aids')
     expect(
       within(insp).getByText(new RegExp(`go on the flip axis to ${second!.name}`)),
     ).toBeInTheDocument()
@@ -813,7 +870,8 @@ describe('Aid parameters (DF83)', () => {
     const [first, second] = t.plan().setups
     await t.user.click(t.setupRows()[0]!)
     const insp = t.inspector()
-    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await within(insp).findByRole('region', { name: 'Alignment aids' })
+    await openInspectorGroup(t.user, insp, 'Alignment aids')
     await t.user.click(within(insp).getByRole('radio', { name: 'Left and right' }))
     await t.user.click(within(insp).getByRole('radio', { name: 'At corners' }))
     const inset = within(insp).getByLabelText('Inset', { selector: 'input' })
@@ -903,6 +961,7 @@ describe('Aid parameters (DF83)', () => {
     )
     expect(within(t.inspector()).getByRole('region', { name: 'Tool' })).toBeInTheDocument()
     expect(within(t.inspector()).getByRole('region', { name: 'Strategy' })).toBeInTheDocument()
+    await openInspectorTab(t.user, t.inspector(), 'Feeds')
     expect(
       within(t.inspector()).getByRole('region', { name: 'Feeds and speeds' }),
     ).toBeInTheDocument()
@@ -914,7 +973,8 @@ describe('Aid parameters (DF83)', () => {
     const first = t.plan().setups[0]!
     await t.user.click(t.setupRows()[0]!)
     const insp = t.inspector()
-    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await within(insp).findByRole('region', { name: 'Alignment aids' })
+    await openInspectorGroup(t.user, insp, 'Alignment aids')
     await t.user.click(within(insp).getByRole('button', { name: 'Add registration holes' }))
     await waitFor(() => expect(probe.scene?.aids?.handles).toHaveLength(2))
     await waitFor(() => expect(probe.scene?.flipAxes).toHaveLength(1))
