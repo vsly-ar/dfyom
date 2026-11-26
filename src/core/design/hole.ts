@@ -2,9 +2,11 @@
  * The hole feature kind (v0.4 F3, F4): one round hole with an optional counterbore or countersink
  * at its mouth, sizes from the built-in fastener table, expanded to a drilling (simple), a
  * circular pocket plus a drilling on its floor (counterbore), or a drilling plus a chamfer on its
- * mouth (countersink).
+ * mouth (countersink), or a recess with the drilling and the chamfer on its floor (recessed
+ * countersink, hardening H1).
  * Doc: docs/modes/design-v0.4.md#hole-feature, docs/modes/design-v0.4.md#implementation-f3,
- * docs/modes/design-v0.4.md#implementation-f4
+ * docs/modes/design-v0.4.md#implementation-f4,
+ * docs/modes/hole-slots-and-round-corners.md#implementation-h1
  *
  * Only types come from feature.ts, which registers this kind as built in (so every reader of a
  * part knows it); the commands are in hole-commands.ts.
@@ -30,7 +32,7 @@ export const CS_METHODS = ['chamfer', 'stepped'] as const
 export type CsMethod = (typeof CS_METHODS)[number]
 
 /** Hole types, one `HoleHead` variant each. */
-export const HOLE_TYPES = ['simple', 'counterbore', 'countersink'] as const
+export const HOLE_TYPES = ['simple', 'counterbore', 'countersink', 'recessedCountersink'] as const
 export type HoleType = (typeof HOLE_TYPES)[number]
 
 export const HOLE_PURPOSES = ['clearance', 'tapDrill'] as const
@@ -52,6 +54,18 @@ export type HoleHead =
        * end mill; None = `chamfer` (a chamfer mill, the default).
        */
       readonly csStepdown: Option<Quantity>
+    }
+  | {
+      /**
+       * H1 (hole-slots-and-round-corners.md § Recessed countersink type): a recess `cbDiameter` ×
+       * `cbDepth` on the face, then the hole and a countersink (`csDiameter` at the recess floor,
+       * `csAngle`, chamfer mill only) on the recess floor.
+       */
+      readonly type: 'recessedCountersink'
+      readonly cbDiameter: Quantity
+      readonly cbDepth: Quantity
+      readonly csDiameter: Quantity
+      readonly csAngle: Quantity
     }
 
 export interface Hole extends FeatureBase {
@@ -106,6 +120,16 @@ export function derivedLength(
 const tableLength = (mm: number, units: UnitSystem): AppResult<Quantity> =>
   Quantity.parse(`${mm} mm`, fieldContext('length', units))
 
+/**
+ * A recessed countersink's default recess Ø: `csDiameter` + the ledge (1 mm / 0.04″, 0.5 mm each
+ * side; hole-slots-and-round-corners.md § Recessed countersink type).
+ */
+export function recessDiameter(csDiameter: Quantity, units: UnitSystem): AppResult<Quantity> {
+  return Quantity.parse(DEFAULTS.recessLedge[units], fieldContext('length', units)).andThen(
+    (ledge) => derivedLength(csDiameter.exact.add(ledge.exact), units),
+  )
+}
+
 /** The sizes the table gives a hole (design-v0.4.md § Fastener table). */
 export interface HoleTableSizes {
   readonly diameter: Quantity
@@ -116,6 +140,8 @@ export interface HoleTableSizes {
   readonly csDiameter: Quantity
   /** The countersunk head's angle (90° ISO). */
   readonly csAngle: Quantity
+  /** A recessed countersink's recess Ø: `csDiameter` + the ledge (H1). */
+  readonly recessDiameter: Quantity
 }
 
 export function holeTableSizes(
@@ -135,13 +161,16 @@ export function holeTableSizes(
     k.andThen((k) => derivedLength(k.exact.add(headSink.exact), units)),
     dk.andThen((dk) => derivedLength(dk.exact.add(sink2), units)),
     Quantity.parse(`${row.countersunkHead.angle}°`, fieldContext('angle', units)),
-  ]).map(([diameter, cbDiameter, cbDepth, csDiameter, csAngle]) => ({
-    diameter: diameter!,
-    cbDiameter: cbDiameter!,
-    cbDepth: cbDepth!,
-    csDiameter: csDiameter!,
-    csAngle: csAngle!,
-  }))
+  ]).andThen(([diameter, cbDiameter, cbDepth, csDiameter, csAngle]) =>
+    recessDiameter(csDiameter!, units).map((recess) => ({
+      diameter: diameter!,
+      cbDiameter: cbDiameter!,
+      cbDepth: cbDepth!,
+      csDiameter: csDiameter!,
+      csAngle: csAngle!,
+      recessDiameter: recess,
+    })),
+  )
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────────────────
@@ -180,9 +209,13 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
       issues: [{ path: [path], rule: 'required', message: `is required for a ${d.type}` }],
       where: 'holeFromDTO',
     })
-  /** A head size: required by its own type, ignored otherwise. */
+  /** A head size: required by its own type (and a recessed countersink), ignored otherwise. */
   const head = (type: HoleType, dto: Dto | undefined, path: string) =>
-    d.type !== type ? Ok(undefined) : dto === undefined ? missing(path) : q(dto, path)
+    d.type !== type && d.type !== 'recessedCountersink'
+      ? Ok(undefined)
+      : dto === undefined
+        ? missing(path)
+        : q(dto, path)
   const opt = (dto: Dto | undefined, path: string) =>
     dto === undefined ? Ok(undefined) : q(dto, path)
   return collect<Quantity | undefined>([
@@ -221,7 +254,15 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
               csAngle: csAngle!,
               csStepdown: step === undefined ? None : Some(step),
             }
-          : { type: 'simple' },
+          : d.type === 'recessedCountersink'
+            ? {
+                type: 'recessedCountersink',
+                cbDiameter: cbDiameter!,
+                cbDepth: cbDepth!,
+                csDiameter: csDiameter!,
+                csAngle: csAngle!,
+              }
+            : { type: 'simple' },
   }))
 }
 
@@ -240,8 +281,11 @@ function holeToDTO(h: Hole): FeatureDTO {
     bottom: h.bottom,
     ...(h.depth.isSome() ? { depth: h.depth.unwrap().toDTO() } : {}),
     headSink: h.headSink.toDTO(),
-    ...(h.head.type === 'counterbore'
+    ...(h.head.type === 'counterbore' || h.head.type === 'recessedCountersink'
       ? { cbDiameter: h.head.cbDiameter.toDTO(), cbDepth: h.head.cbDepth.toDTO() }
+      : {}),
+    ...(h.head.type === 'recessedCountersink'
+      ? { csDiameter: h.head.csDiameter.toDTO(), csAngle: h.head.csAngle.toDTO() }
       : {}),
     ...(h.head.type === 'countersink'
       ? {
@@ -313,7 +357,7 @@ function holeInvariants(h: Hole): Issue[] {
         { max: depth.canonical, actual: cbDepth.canonical },
       )
   }
-  if (h.head.type === 'countersink') {
+  if (h.head.type === 'countersink' || h.head.type === 'recessedCountersink') {
     // the angle's range and the stepdown's minimum are the owned chamfer's rules (validate.ts),
     // reported at csAngle / csStepdown by fieldOf
     const { csDiameter, csAngle } = h.head
@@ -322,18 +366,37 @@ function holeInvariants(h: Hole): Issue[] {
       min: h.diameter.canonical,
       actual: csDiameter.canonical,
     })
+    // H1: the recess is at least as wide as the countersink (equal: the cone cuts the recess
+    // floor away, a construction surface of its dependants, construction-surfaces.md)
+    let recess = 0
+    if (h.head.type === 'recessedCountersink') {
+      const { cbDiameter, cbDepth } = h.head
+      check(
+        cbDiameter.exact.compare(csDiameter.exact) >= 0,
+        'cbDiameter',
+        'atLeastCsDiameter',
+        'must be at least the countersink diameter',
+        { min: csDiameter.canonical, actual: cbDiameter.canonical },
+      )
+      if (positive(cbDepth, 'cbDepth')) recess = cbDepth.canonical
+    }
     if (wider && depth !== undefined) {
+      // below a recess the cone starts at its floor: cbDepth + cone < depth
       const tan = Math.tan(((csAngle.canonical / 2) * Math.PI) / 180)
       const cone = (csDiameter.canonical - h.diameter.canonical) / 2 / tan
+      const room = depth.canonical - recess
       check(
-        !(tan > 0) || cone < depth.canonical,
+        !(tan > 0) || cone < room,
         'csDiameter',
         'countersinkTooDeep',
-        `the countersink cone (${round3(cone)} mm deep) must end above the hole bottom (depth ${depth.canonical} mm)`,
+        recess > 0
+          ? `the countersink cone (${round3(cone)} mm deep) must end above the hole bottom (${round3(room)} mm below the recess floor)`
+          : `the countersink cone (${round3(cone)} mm deep) must end above the hole bottom (depth ${depth.canonical} mm)`,
         {
           coneDepth: round3(cone),
           depth: depth.canonical,
-          max: Math.floor((h.diameter.canonical + 2 * depth.canonical * tan) * 1000 + 1e-6) / 1000,
+          ...(recess > 0 ? { cbDepth: recess } : {}),
+          max: Math.floor((h.diameter.canonical + 2 * room * tan) * 1000 + 1e-6) / 1000,
           actual: csDiameter.canonical,
         },
       )
@@ -372,30 +435,38 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
     },
   })
   if (h.head.type === 'simple') return Ok([drill(h.on, h.depth)])
-  if (h.head.type === 'countersink') {
+  /** The chamfer on the drilling's mouth, standing on the drilling's own face `on`. */
+  const countersink = (
+    on: string,
+    cs: Quantity,
+    angle: Quantity,
+    stepdown: Option<Quantity>,
+  ): AppResult<ExpandedOperation> =>
     // the chamfer stores its width (D45): (csDiameter − diameter) / 2, exact, with half
     // csDiameter's tolerance (B5: the mill sets the outer circle from the nominal edge)
-    const cs = h.head.csDiameter
-    const width = halfTolerance(cs.tolerance).andThen((tolerance) =>
-      derivedLength(cs.exact.sub(h.diameter.exact).mul(HALF), ctx.units, tolerance),
-    )
-    if (width.isErr()) return width
-    return Ok([
-      drill(h.on, h.depth),
-      {
+    halfTolerance(cs.tolerance)
+      .andThen((tolerance) =>
+        derivedLength(cs.exact.sub(h.diameter.exact).mul(HALF), ctx.units, tolerance),
+      )
+      .map((width) => ({
         role: 'countersink',
         operation: {
           kind: 'chamfer',
-          on: h.on,
+          on,
           edgeOf: ctx.ownedId('drill'),
-          width: width.unwrap(),
-          angle: h.head.csAngle,
-          stepdown: h.head.csStepdown,
+          width,
+          angle,
+          stepdown,
           sourceEdge: None,
           loops: None,
           cornerLift: false,
         },
-      },
+      }))
+  if (h.head.type === 'countersink') {
+    const { csDiameter, csAngle, csStepdown } = h.head
+    return countersink(h.on, csDiameter, csAngle, csStepdown).map((cs) => [
+      drill(h.on, h.depth),
+      cs,
     ])
   }
   const { cbDiameter, cbDepth } = h.head
@@ -407,7 +478,8 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
         )
         .map(Some)
   if (below.isErr()) return below
-  return Ok([
+  const floor = `${ctx.ownedId('counterbore')}.floor`
+  const bore: ExpandedOperation[] = [
     {
       role: 'counterbore',
       operation: {
@@ -418,8 +490,13 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
         floorRadius: derivedLength(ZERO, ctx.units).unwrap(),
       },
     },
-    drill(`${ctx.ownedId('counterbore')}.floor`, below.unwrap()),
-  ])
+    drill(floor, below.unwrap()),
+  ]
+  if (h.head.type === 'counterbore') return Ok(bore)
+  // H1: the countersink stands on the recess floor too. With cbDiameter = csDiameter it cuts
+  // that floor away; the drill and the countersink are its dependants, so it stays a warning-free
+  // construction surface (construction-surfaces.md § Check)
+  return countersink(floor, h.head.csDiameter, h.head.csAngle, None).map((cs) => [...bore, cs])
 }
 
 /** `csDiameter`'s explicit tolerance halved, for the countersink width (design-v0.4.md § B5). */
@@ -476,20 +553,27 @@ function reevaluateHole(
 ): AppResult<Hole> {
   const head = h.head
   const heads: [string, Quantity][] =
-    head.type === 'counterbore'
+    head.type === 'recessedCountersink'
       ? [
           ['cbDiameter', head.cbDiameter],
           ['cbDepth', head.cbDepth],
+          ['csDiameter', head.csDiameter],
+          ['csAngle', head.csAngle],
         ]
-      : head.type === 'countersink'
+      : head.type === 'counterbore'
         ? [
-            ['csDiameter', head.csDiameter],
-            ['csAngle', head.csAngle],
-            ...(head.csStepdown.isSome()
-              ? [['csStepdown', head.csStepdown.unwrap()] as [string, Quantity]]
-              : []),
+            ['cbDiameter', head.cbDiameter],
+            ['cbDepth', head.cbDepth],
           ]
-        : []
+        : head.type === 'countersink'
+          ? [
+              ['csDiameter', head.csDiameter],
+              ['csAngle', head.csAngle],
+              ...(head.csStepdown.isSome()
+                ? [['csStepdown', head.csStepdown.unwrap()] as [string, Quantity]]
+                : []),
+            ]
+          : []
   return collect<Quantity | undefined>([
     at(h.center[0], 'center.0'),
     at(h.center[1], 'center.1'),
@@ -497,7 +581,7 @@ function reevaluateHole(
     h.depth.isSome() ? at(h.depth.unwrap(), 'depth') : Ok(undefined),
     at(h.headSink, 'headSink'),
     ...heads.map(([path, q]) => at(q, path)),
-  ]).map(([u, v, diameter, depth, headSink, a, b, c]) => ({
+  ]).map(([u, v, diameter, depth, headSink, a, b, c, e]) => ({
     ...h,
     center: [u!, v!],
     diameter: diameter!,
@@ -513,7 +597,15 @@ function reevaluateHole(
               csAngle: b!,
               csStepdown: c === undefined ? None : Some(c),
             }
-          : head,
+          : head.type === 'recessedCountersink'
+            ? {
+                type: 'recessedCountersink',
+                cbDiameter: a!,
+                cbDepth: b!,
+                csDiameter: c!,
+                csAngle: e!,
+              }
+            : head,
   }))
 }
 
@@ -568,7 +660,8 @@ function customSizeNotes(h: Hole, ownedId: (role: string) => string): DfmWarning
       ['cbDiameter', 'counterbore', h.head.cbDiameter, t.cbDiameter],
       ['cbDepth', 'counterbore', h.head.cbDepth, t.cbDepth],
     )
-  if (h.head.type === 'countersink')
+  // H1: no standard sizes a recess (cbDiameter, cbDepth are the user's), so only the cone counts
+  if (h.head.type === 'countersink' || h.head.type === 'recessedCountersink')
     sizes.push(
       ['csDiameter', 'countersink', h.head.csDiameter, t.csDiameter],
       ['csAngle', 'countersink', h.head.csAngle, t.csAngle],

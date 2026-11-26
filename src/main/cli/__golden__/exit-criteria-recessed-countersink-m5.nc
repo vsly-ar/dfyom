@@ -1,0 +1,152 @@
+(Program: Plan 1)
+(Setup 1 of 1: Top)
+(Stock X 60 Y 40 Z 10 mm on the machine)
+(Faces: top up, front towards you, right on the right)
+(Work zero G54 X0 Y0: front-left corner of the top face)
+(That corner sits front left on the machine)
+(Z0 on the top face: the stock surface facing up)
+(Tool stays within the stock outline)
+(Keep clamps below clearance Z 10 mm)
+(Units: mm)
+(Tool 1: Flat 3, dia 3 mm)
+(Tool 2: Chamfer 90 x 12, dia 12 mm)
+(Generator: DFYOM)
+G90 G94 G17 G21
+G54
+G0 Z10
+(Bolt hole 1 - counterbore)
+(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)
+M3 S18000
+(Set spindle to 18000 rpm)
+M0 ;Set spindle to 18000 rpm
+X30 Y18.8
+Z2
+G1 Z0 F300
+G3 Y21.2 Z-0.167 I0 J1.2 F3600
+Y18.8 Z-0.333 I0 J-1.2
+Y21.2 Z-0.5 I0 J1.2
+Y18.8 Z-0.667 I0 J-1.2
+Y21.2 Z-0.833 I0 J1.2
+Y18.8 Z-1 I0 J-1.2
+Y21.2 I0 J1.2
+Y18.8 I0 J-1.2
+G1 Y19.4
+G3 Y20.6 I0 J0.6
+Y19.4 I0 J-0.6
+G1 Y18.4
+G3 Y21.6 I0 J1.6
+Y18.4 I0 J-1.6
+G1 Y17.4
+G3 Y22.6 I0 J2.6
+Y17.4 I0 J-2.6
+G1 Y16.4
+G3 Y23.6 I0 J3.6
+Y16.4 I0 J-3.6
+G1 Y15.4
+G3 Y24.6 I0 J4.6
+Y15.4 I0 J-4.6
+G0 Z2
+Y18.8
+G1 Z-1 F300
+G3 Y21.2 Z-1.167 I0 J1.2 F3600
+Y18.8 Z-1.333 I0 J-1.2
+Y21.2 Z-1.5 I0 J1.2
+Y18.8 Z-1.667 I0 J-1.2
+Y21.2 Z-1.833 I0 J1.2
+Y18.8 Z-2 I0 J-1.2
+Y21.2 I0 J1.2
+Y18.8 I0 J-1.2
+G1 Y19.4
+G3 Y20.6 I0 J0.6
+Y19.4 I0 J-0.6
+G1 Y18.4
+G3 Y21.6 I0 J1.6
+Y18.4 I0 J-1.6
+G1 Y17.4
+G3 Y22.6 I0 J2.6
+Y17.4 I0 J-2.6
+G1 Y16.4
+G3 Y23.6 I0 J3.6
+Y16.4 I0 J-3.6
+G1 Y15.4
+G3 Y24.6 I0 J4.6
+Y15.4 I0 J-4.6
+G0 Z2
+G1 Z-2 F300
+Y15.2 F5000
+G3 Y24.8 I0 J4.8
+Y15.2 I0 J-4.8
+G1 Y15.4
+G0 Z2
+Z10
+(Bolt hole 1 - drill)
+Y18.75
+Z0
+G1 Z-2 F300
+G3 Y21.25 Z-2.202 I0 J1.25 F3600
+Y18.75 Z-2.405 I0 J-1.25
+Y21.25 Z-2.607 I0 J1.25
+Y18.75 Z-2.81 I0 J-1.25
+Y21.25 Z-3.012 I0 J1.25
+Y18.75 Z-3.214 I0 J-1.25
+Y21.25 Z-3.417 I0 J1.25
+Y18.75 Z-3.619 I0 J-1.25
+Y21.25 Z-3.821 I0 J1.25
+Y18.75 Z-4.024 I0 J-1.25
+Y21.25 Z-4.226 I0 J1.25
+Y18.75 Z-4.429 I0 J-1.25
+Y21.25 Z-4.631 I0 J1.25
+Y18.75 Z-4.833 I0 J-1.25
+Y21.25 Z-5.036 I0 J1.25
+Y18.75 Z-5.238 I0 J-1.25
+Y21.25 Z-5.44 I0 J1.25
+Y18.75 Z-5.643 I0 J-1.25
+Y21.25 Z-5.845 I0 J1.25
+Y18.75 Z-6.048 I0 J-1.25
+Y21.25 Z-6.25 I0 J1.25
+Y18.75 Z-6.452 I0 J-1.25
+Y21.25 Z-6.655 I0 J1.25
+Y18.75 Z-6.857 I0 J-1.25
+Y21.25 Z-7.06 I0 J1.25
+Y18.75 Z-7.262 I0 J-1.25
+Y21.25 Z-7.464 I0 J1.25
+Y18.75 Z-7.667 I0 J-1.25
+Y21.25 Z-7.869 I0 J1.25
+Y18.75 Z-8.071 I0 J-1.25
+Y21.25 Z-8.274 I0 J1.25
+Y18.75 Z-8.476 I0 J-1.25
+Y21.25 Z-8.679 I0 J1.25
+Y18.75 Z-8.881 I0 J-1.25
+Y21.25 Z-9.083 I0 J1.25
+Y18.75 Z-9.286 I0 J-1.25
+Y21.25 Z-9.488 I0 J1.25
+Y18.75 Z-9.69 I0 J-1.25
+Y21.25 Z-9.893 I0 J1.25
+Y18.75 Z-10.095 I0 J-1.25
+Y21.25 Z-10.298 I0 J1.25
+Y18.75 Z-10.5 I0 J-1.25
+Y21.25 I0 J1.25
+Y18.75 I0 J-1.25
+G1 Y20
+G0 Z10
+(Bolt hole 1 - countersink)
+(Tool change to T2: spindle off, retract)
+M5
+X13 Y13
+(Stop the spindle)
+(DFYOM TOOL CHANGE 2: Chamfer 90 x 12, 12 mm chamfer)
+M0 ;Stop spindle, install T2 Chamfer 90 x, 12 mm chamfer, then zero Z
+G90 G94 G17 G21
+G54
+G0 Z10
+M3 S12000
+(Set spindle to 12000 rpm)
+M0 ;Set spindle to 12000 rpm
+X30 Y20
+Z0
+G1 Z-7.8 F600
+G0 Z10
+M5
+(Stop the spindle)
+M0 ;Stop the spindle
+M30

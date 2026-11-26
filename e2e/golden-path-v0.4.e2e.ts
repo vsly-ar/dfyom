@@ -263,7 +263,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   const readout = inspector.getByText(/instances? ·/)
   /** The hole inspector's type (a choice: commits once the radio shows it). */
   const pickType = async (type: 'Countersink' | 'Counterbore') => {
-    const radio = inspector.getByRole('radio', { name: type })
+    const radio = inspector.getByRole('radio', { name: type, exact: true })
     await radio.click()
     await expect(radio).toHaveAttribute('aria-checked', 'true')
   }

@@ -139,6 +139,49 @@ describe('holeSection', () => {
     )
   })
 
+  it('draws a recessed countersink: the recess step, then the cone on its floor (H1)', () => {
+    const s = holeSection(
+      {
+        ...base,
+        type: 'recessedCountersink',
+        cbDiameter: 8.12,
+        cbDepth: 2,
+        csDiameter: 7.12,
+        csAngle: 90,
+        fastener: M3,
+      },
+      'mm',
+    )
+    const wall = lines(s.primitives, 'edge')[0]!.points
+    expect(wall.slice(0, 3)).toEqual([
+      [4.06, 0],
+      [4.06, 2],
+      [3.56, 2],
+    ])
+    expect(wall[3]![0]).toBe(1.7)
+    expect(wall[3]![1]).toBeCloseTo(2 + 3.56 - 1.7)
+    // the cone's rim is measured on the recess floor
+    expect(measure(s.primitives, 'csDiameter')!.paths[0]).toEqual([
+      [-3.56, 2],
+      [3.56, 2],
+    ])
+    expect(measure(s.primitives, 'cbDiameter')!.value).toBe('Ø 8.12 mm')
+    expect(measure(s.primitives, 'headSink')!.value).toBe('2.2 mm')
+    expect(s.label).toBe(
+      'Section: Ø 3.4 mm through; recess Ø 8.12 mm, 2 mm deep; countersink Ø 7.12 mm, 90°; M3 head 2.2 mm below the face.',
+    )
+    // as wide as the countersink: no ledge
+    const flush = holeSection(
+      { ...base, type: 'recessedCountersink', cbDiameter: 7.12, cbDepth: 2, csDiameter: 7.12 },
+      'mm',
+    )
+    expect(lines(flush.primitives, 'edge')[0]!.points.slice(0, 3)).toEqual([
+      [3.56, 0],
+      [3.56, 2],
+      [3.56, 2],
+    ])
+  })
+
   it('draws a stepped countersink as terraces with each top step corner on the cone (F7)', () => {
     // M3, 1 mm stepdown: cone 1.86 deep → 2 terraces of 0.93, walls at 3.56 and 2.63
     const s = holeSection(

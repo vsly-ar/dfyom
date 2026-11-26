@@ -10,7 +10,7 @@ import { chamferTerraces } from '../../../core/geometry/model'
 import type { UnitSystem } from '../../../core/project/document'
 import type { Sketch, SketchPoint, SketchPrimitive } from './sketch'
 
-export type HoleSectionType = 'simple' | 'counterbore' | 'countersink'
+export type HoleSectionType = 'simple' | 'counterbore' | 'countersink' | 'recessedCountersink'
 export type HoleSectionBottom = 'through' | 'flat' | 'drillPoint'
 
 /** The hole fields that have a measured part in the drawing. */
@@ -89,15 +89,22 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   const mouth: SketchPoint[] = []
   let boreTop = 0
   let outer = r
-  const cb =
-    values.type === 'counterbore' && ok(values.cbDiameter) && ok(values.cbDepth)
-      ? { R: Math.max(values.cbDiameter / 2, r), depth: Math.max(values.cbDepth, 0) }
-      : undefined
+  // a recessed countersink (H1): the recess is drawn as a counterbore, the cone on its floor
+  const recessed = values.type === 'recessedCountersink'
   const angle = ok(values.csAngle) ? Math.min(Math.max(values.csAngle, 1), 179) : 90
   const cs =
-    values.type === 'countersink' && ok(values.csDiameter)
+    (values.type === 'countersink' || recessed) && ok(values.csDiameter)
       ? { R: Math.max(values.csDiameter / 2, r) }
       : undefined
+  const cb =
+    (values.type === 'counterbore' || recessed) && ok(values.cbDiameter) && ok(values.cbDepth)
+      ? {
+          R: Math.max(values.cbDiameter / 2, cs?.R ?? r),
+          depth: Math.max(values.cbDepth, 0),
+        }
+      : undefined
+  /** Where the cone starts: the face, or a recess floor. */
+  const csTop = recessed ? (cb?.depth ?? 0) : 0
   // stepped (F7): the core's terraces, each top step corner on the cone
   const terraces =
     cs !== undefined && ok(values.csStepdown) && values.csStepdown > 0
@@ -107,21 +114,24 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
           Math.max(values.csStepdown, (cs.R - r) / Math.tan(rad(angle / 2)) / 200),
         )
       : undefined
-  if (cb !== undefined) {
+  if (cb !== undefined && !recessed) {
     mouth.push([cb.R, 0], [cb.R, cb.depth], [r, cb.depth])
     boreTop = cb.depth
     outer = cb.R
   } else if (cs !== undefined) {
     const h = (cs.R - r) / Math.tan(rad(angle / 2))
-    if (terraces === undefined) mouth.push([cs.R, 0], [r, h])
+    if (cb !== undefined) {
+      mouth.push([cb.R, 0], [cb.R, csTop])
+      outer = cb.R
+    } else outer = cs.R
+    if (terraces === undefined) mouth.push([cs.R, csTop], [r, csTop + h])
     else {
       terraces.radii.forEach((rk, k) =>
         mouth.push([rk, k * terraces.height], [rk, (k + 1) * terraces.height]),
       )
       mouth.push([r, h])
     }
-    boreTop = h
-    outer = cs.R
+    boreTop = csTop + h
   } else mouth.push([r, 0])
 
   // ── bore and bottom ──
@@ -161,10 +171,10 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     let seat = 0
     if (values.purpose === 'tapDrill') {
       // the screw comes through the mating part: only its thread shows in the tapped hole
-    } else if (values.type === 'countersink' && cs !== undefined) {
+    } else if (cs !== undefined) {
       const dk2 = f.countersunkHead.diameter / 2
-      // the head's top edge where the cone is as wide as the head
-      headTop = Math.max(cs.R - dk2, 0) / Math.tan(rad(angle / 2))
+      // the head's top edge where the cone is as wide as the head (below a recess, from its floor)
+      headTop = csTop + Math.max(cs.R - dk2, 0) / Math.tan(rad(angle / 2))
       sink = headTop
       const hh = Math.max(dk2 - d2, 0) / Math.tan(rad(f.countersunkHead.angle / 2))
       seat = headTop + hh
@@ -323,7 +333,7 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
       'left',
     )
   if (cb !== undefined) {
-    const y = cb.depth / 2
+    const y = recessed ? cb.depth * 0.35 : cb.depth / 2
     measure(
       'cbDiameter',
       [
@@ -350,28 +360,29 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     )
   }
   if (cs !== undefined) {
+    // below a recess the cone's rim is on the recess floor, its chip under it in the bore
     measure(
       'csDiameter',
       [
         [
-          [-cs.R, 0],
-          [cs.R, 0],
+          [-cs.R, csTop],
+          [cs.R, csTop],
         ],
       ],
       `Ø ${L(values.csDiameter!)}`,
-      [0, 0],
-      'above',
+      [0, csTop],
+      cb !== undefined ? 'below' : 'above',
     )
     // the cone itself (stepped: the line through the step corners)
     const flank: SketchPoint[] = [
-      [cs.R, 0],
+      [cs.R, csTop],
       [r, boreTop],
     ]
     measure(
       'csAngle',
       [flank, mirror(flank)],
       `${+angle.toFixed(2)}°`,
-      [cs.R, boreTop / 2],
+      [cs.R, (csTop + boreTop) / 2],
       'right',
     )
     if (terraces !== undefined)
@@ -424,7 +435,9 @@ function sectionLabel(
   ]
   if (v.type === 'counterbore' && ok(v.cbDiameter) && ok(v.cbDepth))
     parts.push(`counterbore Ø ${L(v.cbDiameter)}, ${L(v.cbDepth)} deep`)
-  if (v.type === 'countersink' && ok(v.csDiameter))
+  if (v.type === 'recessedCountersink' && ok(v.cbDiameter) && ok(v.cbDepth))
+    parts.push(`recess Ø ${L(v.cbDiameter)}, ${L(v.cbDepth)} deep`)
+  if ((v.type === 'countersink' || v.type === 'recessedCountersink') && ok(v.csDiameter))
     parts.push(
       `countersink Ø ${L(v.csDiameter)}, ${+(v.csAngle ?? 90).toFixed(2)}°` +
         (terraces === undefined

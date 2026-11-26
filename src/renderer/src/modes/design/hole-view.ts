@@ -90,6 +90,9 @@ export function sizeFields(h: Pick<HoleRecord, 'type' | 'bottom'>): HoleSizeFiel
   if (h.bottom !== 'through') fields.push('depth')
   if (h.type === 'counterbore') fields.push('cbDiameter', 'cbDepth')
   if (h.type === 'countersink') fields.push('csDiameter', 'csAngle')
+  // H1: Recess Ø / depth, then the countersink on the recess floor
+  if (h.type === 'recessedCountersink')
+    fields.push('cbDiameter', 'cbDepth', 'csDiameter', 'csAngle')
   return fields
 }
 
@@ -208,12 +211,18 @@ export function enteredSizesReplaced(
   const table = holeTableSizes(row, next.purpose, next.fit, sink, units)
   if (table.isErr()) return 0
   const t = table.unwrap()
-  const fields = sizeFields({ type: next.type, bottom: 'through' }) as (keyof typeof t)[]
+  const recessed = next.type === 'recessedCountersink'
+  // a recess: its Ø is refilled (csDiameter + the ledge), its depth never (H1)
+  type TableField = Exclude<keyof typeof t, 'recessDiameter'>
+  const fields = sizeFields({ type: next.type, bottom: 'through' }).filter(
+    (k) => !(recessed && k === 'cbDepth'),
+  ) as TableField[]
+  const tableOf = (k: TableField) => (recessed && k === 'cbDiameter' ? t.recessDiameter : t[k])
   return fields.filter((k) => {
     const was = h.sizes[k]
     if (was === undefined) return false
     const q = quantityOf(was)
-    if (q === undefined || q.exact.equals(t[k].exact)) return false
+    if (q === undefined || q.exact.equals(tableOf(k).exact)) return false
     if (h.fastener !== undefined) return custom.has(k)
     if (k === 'diameter') return was.source !== DEFAULTS.holeDiameter[units]
     // the inspector's own starting head sizes are not entered either
@@ -264,7 +273,8 @@ export function fastenerSources(
     h.purpose === 'tapDrill' ? ['ISO 2306', 'tap drill'] : ['ISO 273', h.fit],
   ]
   if (h.type === 'counterbore') out.push(['ISO 4762', 'head'], ['DIN 974-1', 'counterbore'])
-  if (h.type === 'countersink') out.push([row.countersunkHead.source, 'head'])
+  if (h.type === 'countersink' || h.type === 'recessedCountersink')
+    out.push([row.countersunkHead.source, 'head'])
   return out
 }
 
@@ -278,7 +288,7 @@ export function fastenerSources(
  */
 export function headDefaults(
   h: HoleRecord,
-  type: 'counterbore' | 'countersink',
+  type: Exclude<HoleType, 'simple'>,
   units: UnitSystem,
   below?: number,
 ): Record<string, string> {
@@ -290,6 +300,15 @@ export function headDefaults(
       cbDiameter: lengthSource(1.8 * d, units),
       cbDepth: lengthSource(Math.min(d, room), units),
     }
+  // H1: the core gives the recess (csDiameter + 1 mm, 2 mm deep); here the cone and, in thin
+  // material, a recess that leaves the cone room (both within half of it)
+  if (type === 'recessedCountersink') {
+    const recess = Math.min(2, room / 2)
+    return {
+      csDiameter: lengthSource(d + 2 * Math.min(d / 2, room / 2), units),
+      ...(recess < 2 ? { cbDepth: lengthSource(recess, units) } : {}),
+    }
+  }
   // a 90° cone is as deep as its overhang
   return { csDiameter: lengthSource(d + 2 * Math.min(d / 2, room), units) }
 }
@@ -297,14 +316,18 @@ export function headDefaults(
 /** Default depth when a hole becomes blind: the diameter, below the head's step for a head. */
 export function blindDepth(h: HoleRecord): number {
   const d = mm(h.sizes.diameter) ?? 6
+  const cone = () =>
+    ((mm(h.sizes.csDiameter) ?? d) - d) /
+    2 /
+    Math.tan(((mm(h.sizes.csAngle) ?? 90) * Math.PI) / 360)
   const step =
     h.type === 'counterbore'
       ? (mm(h.sizes.cbDepth) ?? 0)
       : h.type === 'countersink'
-        ? ((mm(h.sizes.csDiameter) ?? d) - d) /
-          2 /
-          Math.tan(((mm(h.sizes.csAngle) ?? 90) * Math.PI) / 360)
-        : 0
+        ? cone()
+        : h.type === 'recessedCountersink'
+          ? (mm(h.sizes.cbDepth) ?? 0) + cone()
+          : 0
   return step + Math.max(d, 1)
 }
 

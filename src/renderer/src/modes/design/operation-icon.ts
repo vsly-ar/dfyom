@@ -50,7 +50,9 @@ export function featureIcon(feature: Pick<FeatureDTO, 'kind'> & Record<string, u
     ? 'hole-counterbore'
     : feature['type'] === 'countersink'
       ? 'hole-countersink'
-      : 'hole-simple'
+      : feature['type'] === 'recessedCountersink'
+        ? 'hole-recessed-countersink'
+        : 'hole-simple'
 }
 
 const HOLE_ROLE_ICON: Record<string, IconName> = {

@@ -140,6 +140,16 @@ export const ICON_SET = {
       { d: 'M2.5 3L6 6.5M13.5 3L10 6.5', a: true },
     ],
   },
+  // H1: a recess step, then the cone on its floor (hole-slots-and-round-corners.md)
+  'hole-recessed-countersink': {
+    label: 'Recessed countersink',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 3h1M13.5 3h1M2.5 3v3M13.5 3v3M1.5 13H6M10 13h4.5M6 8.5V13M10 8.5V13' },
+      { d: 'M2.5 6h1L6 8.5M13.5 6h-1L10 8.5', a: true },
+    ],
+  },
   // an edge in section: top face, 45° bevel, side face; no bore (unlike the countersink)
   chamfer: {
     label: 'Chamfer',
