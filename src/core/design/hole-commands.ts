@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import { None, Some, type Option } from '../../shared/result'
 import type { Quantity } from '../quantity/quantity'
+import { Rational } from '../quantity/rational'
 import { PointArg, Src } from './commands'
 import { FASTENER_FITS } from './fastener/data'
 import { featureKindCommands, type FeatureCommandSpec } from './feature-commands'
@@ -20,6 +21,7 @@ import {
   recessDiameter,
   type Hole,
   type HoleHead,
+  type HoleSlot,
   type HoleTableSizes,
 } from './hole'
 import { DEFAULTS } from './operation'
@@ -48,6 +50,10 @@ const params = {
     .describe("countersink; default chamfer; stepped: cut by the hole's end mill"),
   csStepdown: Src.describe('stepped; default 1 mm / 1/32"'),
   headSink: Src.describe('Head below the face, for table defaults; default 0.2 mm'),
+  // H2: a slotted hole (hole-slots-and-round-corners.md § Slotted holes); rotation is an angle
+  // string as the shapes' (no description: the primer's operation-args line)
+  slotLength: Src.describe('Travel; 0 = round'),
+  rotation: Src,
 }
 
 type Args = Partial<z.output<z.ZodObject<typeof params>>>
@@ -190,6 +196,24 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
       notFor(['cbDiameter', 'cbDepth', 'csDiameter', 'csAngle', 'csMethod', 'csStepdown'])
       head = { type }
     }
+    // H2: `slotLength` 0 makes the hole round again; `rotation` only with a slot (default 0°)
+    const prevSlot = prev?.slot.isSome() ? prev.slot.unwrap() : undefined
+    const slotLength =
+      a.slotLength !== undefined
+        ? (f.q('slotLength', 'length', a.slotLength) as Quantity | undefined)
+        : prevSlot?.length
+    const slotted = slotLength !== undefined && slotLength.exact.compare(Rational.ZERO) !== 0
+    if (!slotted && a.rotation !== undefined)
+      f.issue('rotation', 'notForRound', 'is only used with a slotLength above 0')
+    const slot: Option<HoleSlot> = slotted
+      ? Some({
+          length: slotLength,
+          rotation:
+            a.rotation !== undefined
+              ? f.q('rotation', 'angle', a.rotation)
+              : (prevSlot?.rotation ?? f.q('rotation', 'angle', '0°')),
+        })
+      : None
     const bottom = a.bottom ?? prev?.bottom ?? 'through'
     const depth: Option<Quantity> =
       a.depth !== undefined
@@ -214,6 +238,7 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
       depth,
       headSink,
       head,
+      slot,
     }
   },
 }

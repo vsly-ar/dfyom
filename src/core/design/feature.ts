@@ -21,6 +21,8 @@ import { FEATURE_ROLE_PATTERN } from './feature.dto'
 import { ID_PREFIX, type FeatureOwner, type GeneralTolerance, type Operation } from './operation'
 import type { PartDTO } from './part.dto'
 import type { ShapeDTO } from './shape.dto'
+import type { DesignTool } from './tool'
+import type { ToolType } from '../library/tool.dto'
 import { holeSpec } from './hole'
 import { clonesKindSpec } from './clones/clones'
 import { patternSpec } from './pattern/pattern'
@@ -359,6 +361,17 @@ export function featureOwnedError(
 
 const NO_TOLERANCE: GeneralTolerance = { length: None, angle: None }
 
+/**
+ * Whether a tool of `type` can cut an operation of `kind` at all (its sizes are the fit rules'):
+ * a pocket takes a flat or bull-nose end mill, a drilling a drill or a flat end mill
+ * (tool-fit.ts). Other kinds never change under a role.
+ */
+function toolSuitsKind(type: ToolType | undefined, kind: Operation['kind']): boolean {
+  if (kind === 'pocket') return type === 'flatEndMill' || type === 'bullNoseEndMill'
+  if (kind === 'drilling') return type === 'drill' || type === 'flatEndMill'
+  return false
+}
+
 /** Default name of an owned operation: "Hole 1 · counterbore". */
 export const ownedName = (featureName: string, role: string): string => `${featureName} · ${role}`
 
@@ -375,6 +388,9 @@ export function materialize(
   prevFeatureName: string = feature.name,
   /** A feature with nested operations may own none (F5). */
   allowEmpty = false,
+  /** The type of a kept tool (a specific tool's from its snapshot); undefined = unknown. */
+  toolType: (t: DesignTool) => ToolType | undefined = (t) =>
+    t.kind === 'generalized' ? t.type : undefined,
 ): AppResult<Operation[]> {
   const bad = (message: string, role: string) =>
     fail('internal.unexpected', `${feature.kind} expansion: ${message}`, {
@@ -411,13 +427,19 @@ export function materialize(
       old === undefined || old.name === ownedName(prevFeatureName, role)
         ? ownedName(feature.name, role)
         : old.name
+    // a role whose kind changed (a hole switched round ↔ slotted, H2) keeps its tool only when
+    // the tool's type can cut the new kind (a drill bit never cuts a pocket)
+    const keepTool =
+      old !== undefined &&
+      (old.kind === operation.kind ||
+        old.tool.mapOr(false, (t) => toolSuitsKind(toolType(t), operation.kind)))
     out.push({
       ...operation,
       id,
       name,
       generalTolerance: old?.generalTolerance ?? NO_TOLERANCE,
-      tool: old?.tool ?? None,
-      toolLocked: old?.toolLocked ?? false,
+      tool: keepTool ? old.tool : None,
+      toolLocked: keepTool ? old.toolLocked : false,
       owner: Some({ featureId: feature.id, role }),
     } as Operation)
   }

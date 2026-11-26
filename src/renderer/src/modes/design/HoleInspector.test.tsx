@@ -13,6 +13,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
+import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -27,9 +28,13 @@ vi.mock('../../viewport/Scene', () => ({
 const ui = { kind: 'ui', id: 'test' } as const
 const partId = (d: Dispatcher) => Object.keys(d.doc.parts)[0]!
 
-async function renderHole(hole: Record<string, unknown> = {}, thickness = '20') {
+async function renderHole(
+  hole: Record<string, unknown> = {},
+  thickness = '20',
+  services: Parameters<typeof designDispatcher>[2] = {},
+) {
   const bridge = createFakeBridge()
-  const d = await designDispatcher()
+  const d = await designDispatcher(undefined, undefined, services)
   const stock = await d.dispatch(
     'library.stock.add',
     {
@@ -83,6 +88,16 @@ async function renderHole(hole: Record<string, unknown> = {}, thickness = '20') 
 }
 
 const insp = () => screen.getByRole('complementary', { name: 'Inspector' })
+// the vendored 2D module read from the repo root (jsdom has no file: import.meta.url), as ZRef.test
+const fs = (
+  globalThis as unknown as {
+    process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: string): Uint8Array } }
+  }
+).process.getBuiltinModule('node:fs')
+const nodeRegion2d = () =>
+  loadRegion2dSync(fs.readFileSync('vendor/cavalier-contours/cavalier_contours.wasm')).expect(
+    'the vendored 2D module loads',
+  )
 const src = (v: unknown) => (v as { source: string } | undefined)?.source
 const section = () => within(insp()).getByRole('img', { name: /^Section:/ })
 
@@ -227,6 +242,67 @@ describe('hole inspector (U2)', () => {
     await setField('Recess Ø', '11.6')
     await waitFor(() => expect(src(hole1()['cbDiameter'])).toBe('11.6'))
     await expectNoAxeViolations()
+  })
+
+  it('slotted: the clamps hole from the inspector (M5, Recessed, Slotted 19.5), Overall, section (H3)', async () => {
+    const { user, radio, hole1, setField } = await renderHole({ fastener: 'M5' }, '10', {
+      region2d: nodeRegion2d(),
+    })
+    await user.click(radio('Type', 'Recessed countersink'))
+    await waitFor(() => expect(hole1()['type']).toBe('recessedCountersink'))
+    const type = within(insp()).getByRole('region', { name: 'Type' })
+    const slotted = within(type).getByRole('switch', { name: 'Slotted' })
+    expect(slotted).not.toBeChecked()
+    expect(within(insp()).queryByLabelText('Slot length', { selector: 'input' })).toBeNull()
+    await user.click(slotted)
+    // switched on: twice the diameter, rotation 0°
+    await waitFor(() => expect(src(hole1()['slotLength'])).toBe('11 mm'))
+    expect(slotted).toBeChecked()
+    await setField('Slot length', '19.5')
+    await waitFor(() => expect(src(hole1()['slotLength'])).toBe('19.5'))
+    // Sizes: Diameter, then Slot length, Rotation and the read-only Overall (field order rule 3)
+    const sizes = within(insp()).getByRole('region', { name: 'Sizes' })
+    const labels = ['Diameter', 'Slot length', 'Rotation', 'Overall', 'Bottom']
+    const els = labels.map((l) => within(sizes).getByLabelText(l))
+    const order = [...els].sort((a, b) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+    )
+    expect(order.map((el) => labels[els.indexOf(el)])).toEqual(labels)
+    await waitFor(() => expect(within(sizes).getByLabelText('Overall')).toHaveValue('25 mm'))
+    expect(within(sizes).getByLabelText('Overall')).toHaveAttribute('readonly')
+    await waitFor(() =>
+      expect(
+        within(insp()).getByRole('img', { name: /^Section along the slot:/ }),
+      ).toHaveAccessibleName(
+        'Section along the slot: Ø 5.5 mm through, slotted: 19.5 mm travel, 25 mm overall; recess Ø 12.6 mm, 2 mm deep; countersink Ø 11.6 mm, 90°; M5 head 2.2 mm below the face.',
+      ),
+    )
+    // the drill role is the slot's pocket: its tool row says Slot
+    const tools = within(insp()).getByRole('region', { name: 'Tools' })
+    await waitFor(() =>
+      expect(within(tools).getByRole('combobox', { name: 'Slot' })).toBeInTheDocument(),
+    )
+    await setField('Rotation', '90')
+    await waitFor(() => expect(src(hole1()['rotation'])).toBe('90'))
+    await expectNoAxeViolations()
+    // off: the round hole again, the slot fields gone
+    await user.click(within(type).getByRole('switch', { name: 'Slotted' }))
+    await waitFor(() => expect(hole1()['slotLength']).toBeUndefined())
+    expect(hole1()['rotation']).toBeUndefined()
+    expect(within(insp()).queryByLabelText('Slot length', { selector: 'input' })).toBeNull()
+  })
+
+  it('slotted: a slot longer than the face is refused at Slot length (H3)', async () => {
+    const { user, hole1, setField } = await renderHole({ fastener: 'M5', slotLength: '10' })
+    expect(within(insp()).getByRole('switch', { name: 'Slotted' })).toBeChecked()
+    await setField('Slot length', '120')
+    await waitFor(() =>
+      expect(
+        within(insp()).getByLabelText('Slot length', { selector: 'input' }),
+      ).toHaveAccessibleDescription(/longer than its face/),
+    )
+    expect(src(hole1()['slotLength'])).toBe('10')
+    void user
   })
 
   it('stepped countersink: method, stepdown, the note, terraces in the section, shared tool (F7)', async () => {

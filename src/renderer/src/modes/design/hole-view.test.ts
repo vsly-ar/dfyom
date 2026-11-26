@@ -11,8 +11,10 @@ import {
   headDefaults,
   holeRecord,
   sectionValues,
+  defaultSlotLength,
   sharedToolNote,
   sizeFields,
+  slotOverall,
   type FastenerListRow,
   type HoleRecord,
 } from './hole-view'
@@ -45,6 +47,27 @@ const M3: FastenerListRow = {
 }
 
 describe('hole view', () => {
+  it('reads a slotted hole: travel and rotation, Overall, the default slot length (H3)', () => {
+    const angle = Quantity.parse('30°', fieldContext('angle', 'mm')).unwrap().toDTO()
+    const h = holeRecord({
+      id: 'hole1',
+      kind: 'hole',
+      name: 'Hole 1',
+      on: 'stock.top',
+      type: 'simple',
+      diameter: q('5.5 mm'),
+      slotLength: q('19.5'),
+      rotation: angle,
+    } as never)
+    expect(h.slot).toEqual({ length: q('19.5'), rotation: angle })
+    expect(slotOverall(h)).toBe(25)
+    expect(sectionValues(h, { loaded: undefined, table: undefined }, []).slotLength).toBe(19.5)
+    const round = holeRecord({ id: 'hole1', kind: 'hole', name: 'Hole 1', on: 'stock.top' })
+    expect(round.slot).toBeUndefined()
+    expect(slotOverall(hole())).toBeUndefined()
+    expect(defaultSlotLength(h, 'mm')).toBe('11 mm')
+  })
+
   it('head defaults stay within half the material below a through hole (X2: 6 mm board)', () => {
     const custom = hole({ fastener: undefined, sizes: { diameter: q('6 mm') } })
     // without the material: one diameter deep

@@ -419,6 +419,15 @@ export const designMessages = {
       // a recessed countersink's cb* fields (hole-slots-and-round-corners.md § Inspector layout)
       recessDiameter: 'Recess Ø',
       recessDepth: 'Recess depth',
+      // a slotted (long) hole (H3, hole-slots-and-round-corners.md § Inspector layout)
+      slotted: 'Slotted',
+      slottedInfo:
+        'A long hole for adjustment: cut as Round pockets, the countersink along its outline.',
+      slotLength: 'Slot length',
+      slotLengthInfo: "Travel between the slot's end centres.",
+      rotation: 'Rotation',
+      overall: 'Overall',
+      overallInfo: 'Slot length + diameter: the slot end to end.',
       csDiameter: 'Countersink Ø',
       csAngle: 'Countersink angle',
       headSink: 'Head sink',
@@ -469,6 +478,7 @@ export const designMessages = {
             counterbore: 'Counterbore',
             countersink: 'Countersink',
             recess: 'Recess',
+            slot: 'Slot',
           }) as Record<string, string>
         )[role] ?? role[0]!.toUpperCase() + role.slice(1),
     },

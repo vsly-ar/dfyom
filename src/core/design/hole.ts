@@ -15,6 +15,7 @@ import { z } from 'zod'
 import type { Issue, IssuePath } from '../../shared/errors/app-error'
 import { parseWith } from '../../shared/parse'
 import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
+import { localStock } from '../geometry/face'
 import { chamferTerraces, type DfmWarning } from '../geometry/model'
 import { quantityDto, quantityFromDTO } from '../library/item'
 import type { UnitSystem } from '../project/document'
@@ -24,7 +25,8 @@ import { Tolerance } from '../quantity/tolerance'
 import { FASTENER_FITS, FASTENER_TABLE, type FastenerFit, type FastenerRow } from './fastener/data'
 import type { ExpandedOperation, ExpansionContext, FeatureBase, FeatureKindSpec } from './feature'
 import { FeatureDtoSchema, type FeatureDTO } from './feature.dto'
-import { CENTRE_ANCHOR, DEFAULTS, fieldContext, type Point } from './operation'
+import { CENTRE_ANCHOR, DEFAULTS, fieldContext, type Point, type Shape } from './operation'
+import { SurfaceTable } from './surfaces'
 import { DRILL_BOTTOMS, type DrillBottomKind } from './part.dto'
 
 /** How a countersink is cut (F7): a chamfer mill, or terraces by the hole's end mill. */
@@ -83,6 +85,17 @@ export interface Hole extends FeatureBase {
   /** How far the head sits below the face; only used when defaults are filled. */
   readonly headSink: Quantity
   readonly head: HoleHead
+  /**
+   * H2 (hole-slots-and-round-corners.md § Slotted holes): a slotted (long) hole, `length` the
+   * centre-to-centre travel (> 0) and `rotation` its direction in the face frame (counter-clockwise
+   * from +u); None = a round hole (`slotLength` 0).
+   */
+  readonly slot: Option<HoleSlot>
+}
+
+export interface HoleSlot {
+  readonly length: Quantity
+  readonly rotation: Quantity
 }
 
 // ── table values ───────────────────────────────────────────────────────────────────────────
@@ -196,6 +209,9 @@ const HoleDtoSchema = FeatureDtoSchema.extend({
   /** F7: stored only when `stepped`, with `csStepdown`. */
   csMethod: z.enum(CS_METHODS).optional(),
   csStepdown: length().optional(),
+  /** H2: stored only for a slotted hole, both together. */
+  slotLength: length().optional(),
+  rotation: quantityDto('angle').optional(),
 })
 
 function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
@@ -231,39 +247,61 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
     d.type === 'countersink' && d.csMethod === 'stepped'
       ? head('countersink', d.csStepdown, 'csStepdown')
       : Ok(undefined),
-  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth, csDiameter, csAngle, step]) => ({
-    kind: 'hole',
-    id: d.id,
-    name: d.name,
-    on: d.on,
-    center: [u!, v!],
-    fastener: d.fastener === undefined ? None : Some(d.fastener),
-    purpose: d.purpose,
-    fit: d.fit,
-    diameter: diameter!,
-    bottom: d.bottom,
-    depth: depth === undefined ? None : Some(depth),
-    headSink: headSink!,
-    head:
-      d.type === 'counterbore'
-        ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! }
-        : d.type === 'countersink'
-          ? {
-              type: 'countersink',
-              csDiameter: csDiameter!,
-              csAngle: csAngle!,
-              csStepdown: step === undefined ? None : Some(step),
-            }
-          : d.type === 'recessedCountersink'
+    opt(d.slotLength, 'slotLength'),
+    d.slotLength === undefined
+      ? Ok(undefined)
+      : d.rotation === undefined
+        ? missing('rotation')
+        : q(d.rotation, 'rotation'),
+  ]).map(
+    ([
+      u,
+      v,
+      diameter,
+      depth,
+      headSink,
+      cbDiameter,
+      cbDepth,
+      csDiameter,
+      csAngle,
+      step,
+      sl,
+      rot,
+    ]) => ({
+      kind: 'hole',
+      id: d.id,
+      name: d.name,
+      on: d.on,
+      center: [u!, v!],
+      fastener: d.fastener === undefined ? None : Some(d.fastener),
+      purpose: d.purpose,
+      fit: d.fit,
+      diameter: diameter!,
+      bottom: d.bottom,
+      depth: depth === undefined ? None : Some(depth),
+      headSink: headSink!,
+      head:
+        d.type === 'counterbore'
+          ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! }
+          : d.type === 'countersink'
             ? {
-                type: 'recessedCountersink',
-                cbDiameter: cbDiameter!,
-                cbDepth: cbDepth!,
+                type: 'countersink',
                 csDiameter: csDiameter!,
                 csAngle: csAngle!,
+                csStepdown: step === undefined ? None : Some(step),
               }
-            : { type: 'simple' },
-  }))
+            : d.type === 'recessedCountersink'
+              ? {
+                  type: 'recessedCountersink',
+                  cbDiameter: cbDiameter!,
+                  cbDepth: cbDepth!,
+                  csDiameter: csDiameter!,
+                  csAngle: csAngle!,
+                }
+              : { type: 'simple' },
+      slot: sl === undefined ? None : Some({ length: sl, rotation: rot! }),
+    }),
+  )
 }
 
 function holeToDTO(h: Hole): FeatureDTO {
@@ -294,6 +332,12 @@ function holeToDTO(h: Hole): FeatureDTO {
           ...(h.head.csStepdown.isSome()
             ? { csMethod: 'stepped', csStepdown: h.head.csStepdown.unwrap().toDTO() }
             : {}),
+        }
+      : {}),
+    ...(h.slot.isSome()
+      ? {
+          slotLength: h.slot.unwrap().length.toDTO(),
+          rotation: h.slot.unwrap().rotation.toDTO(),
         }
       : {}),
   }
@@ -339,6 +383,23 @@ function holeInvariants(h: Hole): Issue[] {
   )
   const depth: Quantity | undefined =
     blind && h.depth.isSome() && positive(h.depth.unwrap(), 'depth') ? h.depth.unwrap() : undefined
+  if (h.slot.isSome()) {
+    // H2: a slot is cut as pockets (flat floor) with a chamfer-mill countersink along its outline
+    positive(h.slot.unwrap().length, 'slotLength')
+    const notForSlot = (ok: boolean, path: string, message: string) =>
+      check(ok, path, 'notForSlot', message)
+    notForSlot(
+      h.bottom !== 'drillPoint',
+      'bottom',
+      'a slotted hole has a flat bottom or is through',
+    )
+    notForSlot(h.purpose !== 'tapDrill', 'purpose', 'a slotted hole is a clearance hole')
+    notForSlot(
+      h.head.type !== 'countersink' || h.head.csStepdown.isNone(),
+      'csMethod',
+      'a slotted countersink is cut with a chamfer mill (stepped: round holes only)',
+    )
+  }
   if (h.head.type === 'counterbore') {
     const { cbDiameter, cbDepth } = h.head
     check(
@@ -422,18 +483,60 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
       ? Quantity.parse(DEFAULTS.pointAngle[ctx.units], fieldContext('angle', ctx.units)).map(Some)
       : Ok(None)
   if (pointAngle.isErr()) return pointAngle
-  const drill = (on: string, depth: Option<Quantity>): ExpandedOperation => ({
-    role: 'drill',
-    operation: {
-      kind: 'drilling',
-      on,
+  const tooLong = slotTooLong(h, ctx)
+  if (tooLong !== undefined) return tooLong
+  const zero = derivedLength(ZERO, ctx.units).unwrap()
+  // H2: a slotted hole's bore is a Round rectangle pocket, `slotLength` longer than it is wide
+  const slotShape = (width: Quantity): AppResult<Shape> => {
+    const slot = h.slot.unwrap()
+    return collect([
+      derivedLength(slot.length.exact.add(width.exact), ctx.units),
+      derivedLength(width.exact.mul(HALF), ctx.units),
+    ]).map(([length, cornerRadius]) => ({
+      kind: 'rectangle',
       center: h.center,
-      diameter: h.diameter,
-      bottom: h.bottom,
-      depth,
-      pointAngle: pointAngle.unwrap(),
-    },
-  })
+      anchor: CENTRE_ANCHOR,
+      length: length!,
+      width,
+      cornerRadius: cornerRadius!,
+      round: true,
+      rotation: Some(slot.rotation),
+    }))
+  }
+  const drill = (on: string, depth: Option<Quantity>, recess?: Quantity): ExpandedOperation => {
+    if (h.slot.isNone())
+      return {
+        role: 'drill',
+        operation: {
+          kind: 'drilling',
+          on,
+          center: h.center,
+          diameter: h.diameter,
+          bottom: h.bottom,
+          depth,
+          pointAngle: pointAngle.unwrap(),
+        },
+      }
+    // through: a through pocket (patterns.md P4, DF116) whose depth is the material below its
+    // face when expanded (the recess floor: cbDepth less); blind: a flat floor at `depth`
+    const below = materialBelow(h.on, ctx)
+    return {
+      role: 'drill',
+      operation: {
+        kind: 'pocket',
+        on,
+        shape: slotShape(h.diameter).unwrap(),
+        depth: depth.isSome()
+          ? depth.unwrap()
+          : derivedLength(
+              recess === undefined ? below : below.sub(recess.exact),
+              ctx.units,
+            ).unwrap(),
+        floorRadius: zero,
+        ...(depth.isNone() ? { through: true } : {}),
+      },
+    }
+  }
   if (h.head.type === 'simple') return Ok([drill(h.on, h.depth)])
   /** The chamfer on the drilling's mouth, standing on the drilling's own face `on`. */
   const countersink = (
@@ -485,18 +588,70 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
       operation: {
         kind: 'pocket',
         on: h.on,
-        shape: { kind: 'circle', center: h.center, anchor: CENTRE_ANCHOR, diameter: cbDiameter },
+        shape: h.slot.isSome()
+          ? slotShape(cbDiameter).unwrap()
+          : { kind: 'circle', center: h.center, anchor: CENTRE_ANCHOR, diameter: cbDiameter },
         depth: cbDepth,
-        floorRadius: derivedLength(ZERO, ctx.units).unwrap(),
+        floorRadius: zero,
       },
     },
-    drill(floor, below.unwrap()),
+    drill(floor, below.unwrap(), cbDepth),
   ]
   if (h.head.type === 'counterbore') return Ok(bore)
   // H1: the countersink stands on the recess floor too. With cbDiameter = csDiameter it cuts
   // that floor away; the drill and the countersink are its dependants, so it stays a warning-free
   // construction surface (construction-surfaces.md § Check)
   return countersink(floor, h.head.csDiameter, h.head.csAngle, None).map((cs) => [...bore, cs])
+}
+
+/**
+ * H2: a slot whose outline (its widest: the recess or counterbore, else the bore) is longer than
+ * its face in either face direction can never be cut on it: `model.invariant` at `slotLength`
+ * (`slotTooLong`, params `overall`, `max` in mm). Partly outside stays a DFM note, as for pockets.
+ */
+function slotTooLong(h: Hole, ctx: ExpansionContext): AppResult<never> | undefined {
+  if (h.slot.isNone()) return undefined
+  const { length, rotation } = h.slot.unwrap()
+  const width =
+    h.head.type === 'counterbore' || h.head.type === 'recessedCountersink'
+      ? h.head.cbDiameter.canonical
+      : h.diameter.canonical
+  const entry = SurfaceTable.of(ctx.before, ctx.stock).get(h.on)
+  const face = localStock(entry.isSome() ? entry.unwrap().direction : '+z', {
+    length: ctx.stock.length.canonical,
+    width: ctx.stock.width.canonical,
+    thickness: ctx.stock.thickness.canonical,
+  })
+  const a = (rotation.canonical * Math.PI) / 180
+  const [cos, sin] = [Math.abs(Math.cos(a)), Math.abs(Math.sin(a))]
+  const travel = length.canonical
+  const fits = (along: number, size: number) => travel * along + width <= size + 1e-9
+  if (fits(cos, face.length) && fits(sin, face.width)) return undefined
+  const limit = (along: number, size: number) => (along < 1e-12 ? Infinity : (size - width) / along)
+  const max = Math.max(0, Math.min(limit(cos, face.length), limit(sin, face.width)))
+  return fail('model.invariant', `slotLength: the slot does not fit on its face`, {
+    issues: [
+      {
+        path: ['slotLength'],
+        rule: 'slotTooLong',
+        message: `the slot (${round3(travel + width)} mm overall) is longer than its face (${round3(face.length)} × ${round3(face.width)} mm)`,
+        params: {
+          overall: round3(travel + width),
+          max: Math.floor(max * 1000 + 1e-6) / 1000,
+          actual: travel,
+        },
+      },
+    ],
+    where: 'hole.expand',
+  })
+}
+
+/** The material below `on` when the hole expands (mm, exact): a through slot pocket's depth. */
+function materialBelow(on: string, ctx: ExpansionContext): Rational {
+  const table = SurfaceTable.of(ctx.before, ctx.stock)
+  return table
+    .get(on)
+    .mapOr(ctx.stock.thickness.exact, (e) => e.faceZ.add(table.extent(e.direction)))
 }
 
 /** `csDiameter`'s explicit tolerance halved, for the countersink width (design-v0.4.md § B5). */
@@ -528,11 +683,27 @@ function belowTolerance(
 
 /** Owned operation parameter → hole field (design-v0.4.md#implementation-f3). */
 const FIELD_OF: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  drill: { diameter: 'diameter', depth: 'depth', center: 'center', bottom: 'bottom', on: 'on' },
+  // H2: a slotted hole's drill is a pocket (`shape.*`), its counterbore a Round rectangle
+  drill: {
+    diameter: 'diameter',
+    depth: 'depth',
+    center: 'center',
+    bottom: 'bottom',
+    on: 'on',
+    'shape.width': 'diameter',
+    'shape.length': 'slotLength',
+    'shape.cornerRadius': 'diameter',
+    'shape.rotation': 'rotation',
+    'shape.center': 'center',
+  },
   counterbore: {
     depth: 'cbDepth',
     on: 'on',
     'shape.diameter': 'cbDiameter',
+    'shape.width': 'cbDiameter',
+    'shape.length': 'slotLength',
+    'shape.cornerRadius': 'cbDiameter',
+    'shape.rotation': 'rotation',
     'shape.center': 'center',
   },
   countersink: { width: 'csDiameter', angle: 'csAngle', stepdown: 'csStepdown', on: 'on' },
@@ -580,9 +751,12 @@ function reevaluateHole(
     at(h.diameter, 'diameter'),
     h.depth.isSome() ? at(h.depth.unwrap(), 'depth') : Ok(undefined),
     at(h.headSink, 'headSink'),
+    h.slot.isSome() ? at(h.slot.unwrap().length, 'slotLength') : Ok(undefined),
+    h.slot.isSome() ? at(h.slot.unwrap().rotation, 'rotation') : Ok(undefined),
     ...heads.map(([path, q]) => at(q, path)),
-  ]).map(([u, v, diameter, depth, headSink, a, b, c, e]) => ({
+  ]).map(([u, v, diameter, depth, headSink, sl, rot, a, b, c, e]) => ({
     ...h,
+    slot: sl === undefined ? None : Some({ length: sl, rotation: rot! }),
     center: [u!, v!],
     diameter: diameter!,
     depth: depth === undefined ? None : Some(depth),
