@@ -161,9 +161,9 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   await expect(cell('Machine position Y')).toHaveText('-11.000')
 
   // P7, idle cost: connected and idle, the window draws no frame and gets no status push (the
-  // host polls at 5 Hz but posts changes only; the viewport renders on demand). The motion of the
-  // zeroing (selection pulse, panel fades) is over after a moment.
-  await page.waitForTimeout(1500)
+  // host polls at 5 Hz but posts changes only; the viewport renders on demand). P13: `zeroXyz`
+  // returns once the window applied the zero commands' events (each re-renders the window and could
+  // land well after the DRO showed 0 under load), not after a fixed pause.
   expect(await idleActivity(page)).toEqual({ frames: 0, statusPushes: 0 })
 
   // a front-left machine homes to the other corner: X and Y at −travel + pull-off
