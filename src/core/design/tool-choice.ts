@@ -4,12 +4,14 @@
  * of the standard series) and the candidates list. Pure: the library arrives as items.
  * General shapes (v0.3 K4) are measured with the 2D port (`shapeMeasure`): fit by the region's
  * width and inside corners, and fitting tools that leave no rest material rank first.
+ * Corners and rest material that lie wholly in the face's waste (offcut and frame of through
+ * profiles, D4) do not count, as for the DFM checks (`faceWaste`).
  * Doc: docs/modes/design-v0.2.md#auto-choice, docs/modes/design-v0.2.md#commands-and-queries-v02,
- * docs/modes/design-v0.3.md#dfm-checks-for-shapes
+ * docs/modes/design-v0.3.md#dfm-checks-for-shapes, docs/modes/design-llm-first.md#rule-as-built-d4-slice-lf3
  */
 import { None, Some, type Option } from '../../shared/result'
 import { TOOL_MATCH_TOLERANCE, type DfmTool, type OperationTool } from '../geometry/dfm'
-import { localStock } from '../geometry/face'
+import { localStock, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
   CHAMFER_ANGLE_TOLERANCE,
@@ -20,6 +22,7 @@ import {
 } from '../geometry/model'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
 import { shankClears, toolFit, type ToolUnfit } from '../geometry/tool-fit'
+import { faceWaste, type FaceWaste } from '../geometry/waste'
 import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { snapshotFromRecord } from './frozen-memo'
@@ -120,6 +123,27 @@ export interface ChoiceInput {
    * the hole is bored by the end mill that cuts its terraces); absent = none.
    */
   readonly also?: readonly OperationGeometry[]
+  /**
+   * The waste of the operation's face (D4, `faceWaste`): corners and rest material wholly in it
+   * do not count for fit and ranking; absent = nothing is waste.
+   */
+  readonly waste?: FaceWaste
+}
+
+/**
+ * The waste of an operation's face in a part (`faceWaste`, built on first use per direction), for
+ * `ChoiceInput.waste`: docs/modes/design-llm-first.md#rule-as-built-d4-slice-lf3.
+ */
+export function partWaste(
+  input: PartGeometryInput,
+  port: Region2dPort | undefined,
+): (op: OperationGeometry) => FaceWaste | undefined {
+  const cache = new Map<Direction, FaceWaste | undefined>()
+  return (op) => {
+    const d = op.direction ?? '+z'
+    if (!cache.has(d)) cache.set(d, faceWaste(input.operations, d, input.stock, port))
+    return cache.get(d)
+  }
 }
 
 /** One fitting library tool, in auto-choice order. */
@@ -156,7 +180,14 @@ export function measureOf(input: ChoiceInput): ShapeMeasure | undefined {
 
 /** The failed fit rule of a tool for the operation, or undefined when it fits. */
 export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined {
-  const own = toolFit(tool, input.geometry, localOf(input), metricOf(input.units), measureOf(input))
+  const own = toolFit(
+    tool,
+    input.geometry,
+    localOf(input),
+    metricOf(input.units),
+    measureOf(input),
+    input.waste,
+  )
   if (own !== undefined) return own
   for (const g of input.also ?? []) {
     const unfit = toolFit(tool, g, localOf(input), metricOf(input.units))
@@ -169,10 +200,13 @@ export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined 
 export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
   const m = measureOf(input)
   // DF108: every roughing tool of a pattern leaves rest (the pattern's pocket cuts it)
-  if (input.geometry.kind === 'pocket' && input.geometry.roughing === true) return false
-  return (
-    m !== undefined && isEndMillType(tool.type) && m.rest(tool.diameter / 2 - FIT_SLACK).length > 0
-  )
+  const g = input.geometry
+  if (g.kind === 'pocket' && g.roughing === true) return false
+  if (m === undefined || !isEndMillType(tool.type) || !('shape' in g)) return false
+  const r = tool.diameter / 2 - FIT_SLACK
+  const [cu, cv] = g.shape.center
+  // pieces within the tool radius of waste only do not count (D4, as `dfm.restMaterial`)
+  return m.rest(r).some((p) => !(input.waste?.covers([p.at[0] + cu, p.at[1] + cv], r) ?? false))
 }
 
 /**

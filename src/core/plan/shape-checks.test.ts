@@ -121,6 +121,42 @@ describe('tool checks of general shapes', () => {
     ])
   })
 
+  it('corners in the waste of a through outline do not warn; corners on the part do (D4)', async () => {
+    // a through outside profile 60 × 40 (u 20–80) and a 10 mm groove with 1 mm corners across it
+    const cornerRules = async (length: string) => {
+      const s = await planSetup({ part: false, services: services() })
+      await s.run('design.shape.add', {
+        partId: s.partId,
+        items: [rect(length, '10', '1')],
+      })
+      await s.run('design.pocket.add', {
+        partId: s.partId,
+        shape: { kind: 'named', shapeId: 'shape1', center: ['50', '30'] },
+        depth: '2',
+      })
+      await s.run('design.profile.add', {
+        partId: s.partId,
+        shape: rect('60', '40', '5', ['50', '30']),
+        side: 'outside',
+        tabs: { count: '0' },
+      })
+      await s.run('project.apply', {})
+      const planId = await s.create({ machineLibraryItemId: s.machineId })
+      const ops = s.plan(planId).setups[0]!.operations
+      const planOp = ops.find((o) => o.designOperationIds[0] === 'pocket1')!.id
+      await s.run('plan.tool.assign', {
+        planId,
+        planOperationId: planOp,
+        toolLibraryItemId: s.tools.flat6,
+      })
+      return ofOp(warnings(s, planId), planOp).map((f) => f.rule)
+    }
+    // u 5–95: every corner 15 mm into the frame
+    expect(await cornerRules('90')).toEqual([])
+    // u 25–75: the corners lie on the part
+    expect(await cornerRules('50')).toEqual(['cornerRadius'])
+  })
+
   it('an inside profile checks its opening; outside and on profiles have no width rule', async () => {
     const inside = await onePlan([rect('5', '5', '0')], {
       kind: 'profile',

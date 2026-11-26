@@ -46,6 +46,7 @@ import {
   generalizedChoice,
   nearLibraryTool,
   orphanTool,
+  partWaste,
   resolveDesignTool,
   unfitLibraryTools,
   type ChoiceInput,
@@ -67,22 +68,27 @@ function choiceInputs(
   snapshots: ProjectDoc['snapshots'],
   region2d?: Region2dPort,
 ): AppResult<(index: number, op?: Operation) => ChoiceInput> {
-  return toGeometryInput(loaded.part, loaded.stock, region2d).map((input) => (index, op) => {
-    const id = loaded.part.operations[index]!.id
-    // F7: a drilling under a stepped chamfer is bored by the chamfer's end mill
-    const also = input.operations.filter(
-      (g) => g.kind === 'chamfer' && g.stepdown !== undefined && g.edgeOf === id,
-    )
-    return {
-      op: op ?? loaded.part.operations[index]!,
-      geometry: input.operations[index]!,
-      stock: input.stock,
-      units: loaded.units,
-      materialClass: loaded.stock.material.class,
-      library,
-      snapshots,
-      ...(region2d !== undefined && { region2d }),
-      ...(also.length > 0 && { also }),
+  return toGeometryInput(loaded.part, loaded.stock, region2d).map((input) => {
+    const wasteOf = partWaste(input, region2d)
+    return (index, op) => {
+      const id = loaded.part.operations[index]!.id
+      const waste = wasteOf(input.operations[index]!)
+      // F7: a drilling under a stepped chamfer is bored by the chamfer's end mill
+      const also = input.operations.filter(
+        (g) => g.kind === 'chamfer' && g.stepdown !== undefined && g.edgeOf === id,
+      )
+      return {
+        op: op ?? loaded.part.operations[index]!,
+        geometry: input.operations[index]!,
+        stock: input.stock,
+        units: loaded.units,
+        materialClass: loaded.stock.material.class,
+        library,
+        snapshots,
+        ...(region2d !== undefined && { region2d }),
+        ...(also.length > 0 && { also }),
+        ...(waste !== undefined && { waste }),
+      }
     }
   })
 }
