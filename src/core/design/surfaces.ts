@@ -335,7 +335,7 @@ export const surfaceOfReference = (ref: string): string => ref.replace(/\.[xyz](
 export function operationReferences(op: Operation): AppResult<OperationReference[]> {
   const out: OperationReference[] = []
   // a facing's or profile's `on` is a stock face: always there, and removed by a facing itself
-  if (op.kind === 'pocket' || op.kind === 'drilling' || op.kind === 'chamfer')
+  if (op.kind === 'pocket' || op.kind === 'drilling' || op.kind === 'chamfer' || op.kind === 'line')
     out.push({ param: 'on', reference: op.on, surface: op.on })
   for (const p of quantityParams(op)) {
     const refs = referencesOf(p.value)

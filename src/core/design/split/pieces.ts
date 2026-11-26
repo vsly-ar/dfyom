@@ -20,7 +20,7 @@ import {
 import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
-import { fieldContext, type Operation } from '../operation'
+import { fieldContext, lineDepths, type Operation } from '../operation'
 import type { OperationDTO, OperationShapeDTO, PartDTO, SplitDTO } from '../part.dto'
 import { orientedShape, shapeDefinition, shapeOrientation } from '../placement'
 import type { ShapeDefinition } from '../shape'
@@ -362,6 +362,11 @@ function zRange(c: Ctx, op: Operation, g: OperationGeometry, bevel = false): ZRa
     case 'chamfer': {
       const half = (op.angle.canonical * Math.PI) / 360
       depth = op.width.canonical / Math.tan(half)
+      break
+    }
+    case 'line': {
+      const d = lineDepths(op.depth)
+      depth = Math.max(d.start, d.end)
       break
     }
   }
@@ -772,6 +777,10 @@ function mapOperation(
   const zDepth = z.depth + (dir === '+z' && z.fromFace ? surplus : 0)
   let out: OperationDTO
   switch (base.kind) {
+    case 'line':
+      // engraved-patterns.md E1: Lines are not mapped to pieces yet (clipping per piece is E4)
+      c.finding(op, `line:${op.id}`, `${op.name} is a Line; split pieces do not carry Lines yet`)
+      return Ok(undefined)
     case 'facing':
       out = { ...base, on, ...(depthChanged ? { depth: L(zDepth) } : {}) }
       break

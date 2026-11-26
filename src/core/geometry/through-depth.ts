@@ -501,7 +501,8 @@ export function materialBands(
 ): Map<string, MaterialCover> {
   const out = new Map<string, MaterialCover>()
   for (const op of ops) {
-    if (op.kind === 'chamfer') continue
+    // a chamfer or a Line (engraved-patterns.md E1) starts on material it does not clear first
+    if (op.kind === 'chamfer' || op.kind === 'line') continue
     const direction = op.direction ?? '+z'
     const local = localStock(direction, stock)
     const face = rectangle(local.length, local.width)

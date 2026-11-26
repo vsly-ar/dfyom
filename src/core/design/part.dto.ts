@@ -208,12 +208,39 @@ export const ChamferDtoSchema = z.object({
   cornerLift: z.literal(true).optional(),
 })
 
+/** The most placed shapes one Line takes (docs/modes/engraved-patterns.md#line-operation). */
+export const LINE_PATHS_MAX = 50
+
+/** A named shape a Line places, as a pocket's `named` shape. */
+export const LinePathDtoSchema = OperationShapeDtoSchema.options[2]
+
+/**
+ * A Line's depth below `on` (E1): one length (constant) or `{ start, end }`, linear along each line
+ * by arc length. Levels (`{ min, max }`) come with E2.
+ */
+export const LineDepthDtoSchema = z.union([length(), z.object({ start: length(), end: length() })])
+export type LineDepthDTO = z.output<typeof LineDepthDtoSchema>
+
+/**
+ * A Line (engraved-patterns.md E1): a groove along the centreline of every loop and open path of
+ * its placed named shapes, at a depth that may change along the line.
+ * Doc: docs/modes/engraved-patterns.md#line-operation
+ */
+export const LineDtoSchema = z.object({
+  kind: z.literal('line'),
+  ...common,
+  on: SurfaceIdSchema,
+  paths: z.array(LinePathDtoSchema).min(1).max(LINE_PATHS_MAX),
+  depth: LineDepthDtoSchema,
+})
+
 export const OperationDtoSchema = z.discriminatedUnion('kind', [
   FacingDtoSchema,
   PocketDtoSchema,
   DrillingDtoSchema,
   ProfileDtoSchema,
   ChamferDtoSchema,
+  LineDtoSchema,
 ])
 export type OperationDTO = z.output<typeof OperationDtoSchema>
 export type OperationKind = OperationDTO['kind']

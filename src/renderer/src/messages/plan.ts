@@ -671,6 +671,7 @@ export const planMessages = {
     drilling: 'Drilling',
     profile: 'Profile',
     chamfer: 'Chamfer',
+    line: 'Line',
   } satisfies Record<OperationKind, string>,
 }
 

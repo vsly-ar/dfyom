@@ -200,7 +200,9 @@ export function evaluateOperation(
         : {}),
       ...(strategy.kind === 'drilling' ? { helixPitch: strategy.helixPitch } : {}),
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
-      ...(strategy.kind === 'chamfer' ? { chamferDepth: strategy.cutDepth } : {}),
+      ...(strategy.kind === 'chamfer' || strategy.kind === 'line'
+        ? { chamferDepth: strategy.cutDepth }
+        : {}),
       // DF74: the finishing pass's engagement
       ...(strategy.kind === 'pocket' || strategy.kind === 'profile'
         ? {

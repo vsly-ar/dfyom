@@ -65,6 +65,9 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
       ? undefined
       : port.intersect(r, rectangle(face.length, face.width)).mapOr(undefined, (x) => x)
   switch (op.kind) {
+    case 'line':
+      // a groove leaves no flat face a patch could stand on (engraved-patterns.md E1)
+      return []
     case 'facing':
       return [{ direction, lowest: -op.depth, region: 'face' }]
     case 'pocket':

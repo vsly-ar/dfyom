@@ -159,7 +159,38 @@ export function updateArgs(
     return { center }
   }
   if (head === 'tabs') return { tabs: { [rest.join('.')]: source } }
+  if (op.kind === 'line') {
+    // a Line (engraved-patterns.md E1): paths are replaced whole, a ramp's depth too
+    if (head === 'paths') {
+      const paths = linePathArgs(op)
+      const i = Number(rest[0])
+      const p = { ...paths[i]! }
+      if (rest[1] === 'center') {
+        const center = [...(p['center'] as string[])]
+        center[Number(rest[2])] = source
+        p['center'] = center
+      } else p[rest[1]!] = source
+      paths[i] = p
+      return { paths }
+    }
+    if (head === 'depth' && rest.length > 0 && 'start' in op.depth) {
+      const depth = { start: src(op.depth.start), end: src(op.depth.end) }
+      return { depth: { ...depth, [rest[0]!]: source } }
+    }
+  }
   return { [head]: source }
+}
+
+/** A Line's `paths` args as entered (engraved-patterns.md E1). */
+export function linePathArgs(
+  op: Extract<OperationDTO, { kind: 'line' }>,
+): Record<string, unknown>[] {
+  return op.paths.map((p) => ({
+    shapeId: p.shapeId,
+    center: [src(p.center[0]), src(p.center[1])],
+    ...(p.rotation !== undefined ? { rotation: src(p.rotation) } : {}),
+    ...(p.mirror === true ? { mirror: true } : {}),
+  }))
 }
 
 /**
@@ -274,6 +305,31 @@ export function addArgs(
     case 'chamfer':
       // needs an edge: added from a drilling, circle pocket or inside circle profile (inspector, task U4)
       return {}
+    case 'line':
+      // its paths are the part's shapes (useAddOperation picks or makes one)
+      return {}
+  }
+}
+
+/**
+ * The open path a new Line grooves when the part has no shape yet: an S of two half circles,
+ * half the room's length wide (engraved-patterns.md § UI).
+ */
+export function lineWave(
+  room: { length: number; width: number },
+  units: UnitSystem,
+): Record<string, unknown> {
+  const L = (mm: number) => roundLength(mm, units)
+  const w = Math.min(room.length / 2, room.width)
+  return {
+    kind: 'path',
+    op: 'add',
+    closed: false,
+    start: ['0', '0'],
+    segments: [
+      { kind: 'arc', to: [L(w / 2), '0'], radius: L(w / 4), cw: true },
+      { kind: 'arc', to: [L(w), '0'], radius: L(w / 4), cw: false },
+    ],
   }
 }
 

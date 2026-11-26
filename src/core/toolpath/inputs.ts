@@ -665,5 +665,28 @@ export function toGeneratorInputs(
         })),
       }))
     }
+    case 'line':
+      // a Line (engraved-patterns.md E1): never grouped; its grooves in the face frame
+      return single('line').andThen((operation) =>
+        cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown'], id).map(
+          (c): GeneratorRequest => ({
+            kind: 'line',
+            ...turned,
+            inputs: [
+              {
+                ...base,
+                cutting: {
+                  spindleSpeed: c.spindleSpeed,
+                  feedRate: c.feedRate,
+                  plungeRate: c.plungeRate,
+                  stepdown: c.stepdown,
+                },
+                operation,
+                strategy: { entry: s.entry, rampAngle: s.rampAngle },
+              },
+            ],
+          }),
+        ),
+      )
   }
 }

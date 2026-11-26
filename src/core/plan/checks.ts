@@ -5,7 +5,7 @@
  * Pure: inputs are models, outputs are issue lists; values in canonical mm, °, rpm, mm/min.
  */
 import { z } from 'zod'
-import { effectiveTolerance, type Operation, type Part } from '../design/operation'
+import { effectiveTolerance, lineDepths, type Operation, type Part } from '../design/operation'
 import { SurfaceTable } from '../design/surfaces'
 import type { Machine } from '../library/machine'
 import type { Stock } from '../library/stock'
@@ -91,6 +91,8 @@ export const TOOL_TYPES_FOR: Readonly<Record<Operation['kind'], readonly ToolTyp
   drilling: ['drill', 'flatEndMill'],
   profile: ['flatEndMill'],
   chamfer: ['chamferMill'],
+  // engraved-patterns.md § Line operation: a V-bit (default), ball or flat end mill
+  line: ['chamferMill', 'ballEndMill', 'flatEndMill'],
 }
 
 /** Float slack for comparisons of derived float64 values. */
@@ -412,6 +414,10 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
       if (cut === undefined) return 0
       const plunged = i.strategy.kind === 'chamfer' && i.strategy.entry === 'plunge'
       return belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
+    }
+    case 'line': {
+      const d = lineDepths(op.depth)
+      return belowTop(table, op.on) + Math.max(d.start, d.end)
     }
   }
 }

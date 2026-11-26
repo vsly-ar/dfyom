@@ -126,6 +126,8 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
     return isLoopChamfer(op)
       ? [loopChamferDepth(op) - op.onZ, 'width']
       : [chamferDepth(op) - op.onZ, 'diameter']
+  // a Line (engraved-patterns.md E1): its deepest point below the stock face
+  if (op.kind === 'line') return [Math.max(op.depth.start, op.depth.end) - op.onZ, 'depth']
   return op.bottom.kind === 'through'
     ? [op.throughDepth ?? stock.thickness, 'on']
     : [op.bottom.depth - op.onZ, 'depth']
@@ -305,6 +307,29 @@ export function toolFit(
         !isLoopChamfer(op) && tool.diameter + TOL >= op.diameter
           ? chamferDepth({ ...op, edgeDiameter: tip }) - op.onZ
           : reachDepth(op, stock)[0]
+      return tool.reach + EPSILON >= depth
+        ? undefined
+        : {
+            rule: 'reach',
+            detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
+            values: { reach: tool.reach, depth },
+          }
+    }
+    case 'line': {
+      // a V-bit (chamfer mill with an angle), a ball or a flat end mill (engraved-patterns.md
+      // § Tools); its cutting length is the DFM's `lineTooDeep`, the reach here
+      const ok =
+        (tool.type === 'chamferMill' && tool.angle !== undefined) ||
+        tool.type === 'ballEndMill' ||
+        tool.type === 'flatEndMill'
+      if (!ok)
+        return {
+          rule: 'type',
+          detail: 'a Line needs a V-bit (chamfer mill), a ball or a flat end mill',
+          values: { needs: 'lineTool' },
+        }
+      if (tool.reach === undefined) return undefined
+      const depth = reachDepth(op, stock)[0]
       return tool.reach + EPSILON >= depth
         ? undefined
         : {

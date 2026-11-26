@@ -1,0 +1,40 @@
+(Program: Plan 1)
+(Setup: Setup 1)
+(Units: mm)
+(Tool 1: 6 mm chamfer mill, dia 6 mm)
+(Generator: DFYOM test)
+G90 G94 G17 G21
+G54
+G0 Z10
+(op-line1)
+(DFYOM TOOL CHANGE 1: 6 mm chamfer mill, 6 mm chamfer)
+M3 S18000
+G4 P3
+X20 Y10
+Z2
+G1 Z0 F300
+X22.836 Z-0.5 F1000
+X27
+G3 X30 Y13 I0 J3
+G1 Y27
+G3 X27 Y30 I-3 J0
+G1 X13
+G3 X10 Y27 I0 J-3
+G1 Y13
+G3 X13 Y10 I3 J0
+G1 X20
+X22.836
+X24.537 Z-0.8
+X27
+G3 X30 Y13 I0 J3
+G1 Y27
+G3 X27 Y30 I-3 J0
+G1 X13
+G3 X10 Y27 I0 J-3
+G1 Y13
+G3 X13 Y10 I3 J0
+G1 X20
+X24.537
+G0 Z10
+M5
+M30

@@ -16,6 +16,7 @@ const ICON: Record<OperationDTO['kind'], IconName> = {
   drilling: 'drilling',
   profile: 'profile',
   chamfer: 'chamfer',
+  line: 'groove',
 }
 
 /** A profile cut on its line is a groove (B22-5: the bent slot). */

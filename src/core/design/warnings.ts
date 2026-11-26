@@ -47,7 +47,7 @@ export function partWarnings(
   features: readonly LoadedFeature[] = [],
   shapes: readonly ShapeDTO[] = [],
 ): AppResult<DfmWarning[]> {
-  return toGeometryInput(part, stock, region2d).map((input) =>
+  return toGeometryInput(part, stock, region2d, snapshots).map((input) =>
     insertInOrder(
       part.operations,
       parameterChecks(input, {

@@ -24,6 +24,7 @@ import {
 } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import { listedAs } from '../commands/json-schema'
+import type { ListedArgs } from '../commands/define'
 import type { PendingChange } from '../commands/apply'
 import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
@@ -61,6 +62,9 @@ import {
   type FeatureOwner,
   type FieldKind,
   type GeneralTolerance,
+  type Line,
+  type LineDepth,
+  type NamedPlacement,
   type Operation,
   type Part,
   type Shape,
@@ -79,6 +83,7 @@ import {
   type PartDTO,
   PartIdSchema,
   PROFILE_SIDES,
+  LINE_PATHS_MAX,
   SurfaceIdSchema,
   type OperationKind,
 } from './part.dto'
@@ -202,6 +207,25 @@ const profileParams = {
       'Blind depth below on: a groove (side on) or a step/rebate (outside/inside); null = through',
     ),
   tabs: TabsArg.optional(),
+}
+
+/** A Line's paths and depth (engraved-patterns.md § Agent API, budget ≈ 1.4 K with update). */
+const LinePathArg = z.object({
+  shapeId: z.string().regex(SHAPE_ID_PATTERN),
+  center: PointArg,
+  rotation: RotationArg,
+  mirror: z.literal(true).optional(),
+})
+const lineParams = {
+  on: SurfaceIdSchema.describe('Default as a pocket'),
+  paths: z
+    .array(LinePathArg)
+    .min(1)
+    .max(LINE_PATHS_MAX)
+    .describe('Placed as a named shape; each loop or open path is a line'),
+  depth: z
+    .union([Src, z.object({ start: Src, end: Src })])
+    .describe('Default 0.5 mm; {start, end}: linear along each line'),
 }
 
 const chamferParams = {
@@ -334,6 +358,42 @@ export class Fields {
         'cornerRadius',
       ),
       rotation,
+    }
+  }
+
+  /** A Line's `paths[i]`: a named shape placed by its centre (engraved-patterns.md E1). */
+  linePath(
+    a: {
+      shapeId: string
+      center: readonly [string, string]
+      rotation?: string | undefined
+      mirror?: true | undefined
+    },
+    i: number,
+  ): NamedPlacement {
+    if (!(this.env.dto.shapes ?? []).some((s) => s.id === a.shapeId))
+      this.results.push(
+        fail('input.malformed', `shape ${a.shapeId} does not exist in the part`, {
+          issues: [
+            {
+              path: ['paths', i, 'shapeId'],
+              rule: 'unknownShape',
+              message: "no such shape; design_shape_list lists the part's shapes",
+            },
+          ],
+        }),
+      )
+    return {
+      kind: 'named',
+      center: [
+        this.q(`paths.${i}.center.0`, 'length', a.center[0]),
+        this.q(`paths.${i}.center.1`, 'length', a.center[1]),
+      ],
+      anchor: CENTRE_ANCHOR,
+      shapeId: a.shapeId,
+      rotation:
+        a.rotation === undefined ? None : Some(this.q(`paths.${i}.rotation`, 'angle', a.rotation)),
+      mirror: a.mirror === true,
     }
   }
 
@@ -700,6 +760,8 @@ interface KindSpec<P extends z.ZodRawShape, O extends Operation> {
   readonly params: P
   /** Parameters required on add (all are optional on update). */
   readonly required: readonly (keyof P & string)[]
+  /** Sketches of args in `design.<kind>.update`'s listing ("As design.<kind>.add …"). */
+  readonly updateListed?: ListedArgs
   /** The tool field is not a parameter: add and update set it (design-v0.2.md § Operation tool). */
   build(
     args: Partial<z.output<z.ZodObject<P>>>,
@@ -1072,6 +1134,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...optionalParams,
     }),
+    ...(spec.updateListed === undefined ? {} : { listedArgs: spec.updateListed }),
     result: z.object({ warnings: Warnings, placed: PlacedSchema.optional() }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
@@ -1733,12 +1796,56 @@ const warningList = defineQuery({
   },
 })
 
+/**
+ * A Line (engraved-patterns.md E1): named shapes placed as a pocket's, a constant depth or
+ * `{ start, end }`. A plan copy's update shares the other kinds' `depth` (a string: constant).
+ */
+const lineSpec: KindSpec<typeof lineParams, Line> = {
+  kind: 'line',
+  params: lineParams,
+  required: ['paths'],
+  updateListed: {
+    paths: listedAs('array', 'design.line.add paths'),
+    depth: z.unknown().describe('As design.line.add depth'),
+  },
+  build: (a, prev, { f, id, name, ops }) => ({
+    kind: 'line',
+    id,
+    name,
+    generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+    on: a.on ?? prev?.on ?? defaultOn(ops),
+    paths: a.paths === undefined ? prev!.paths : a.paths.map((p, i) => f.linePath(p, i)),
+    depth: lineDepthOf(f, a.depth, prev?.depth),
+  }),
+}
+
+function lineDepthOf(
+  f: Fields,
+  a: z.output<typeof lineParams.depth> | null | undefined,
+  prev: LineDepth | undefined,
+): LineDepth {
+  if (a === undefined || a === null)
+    return (
+      prev ?? {
+        kind: 'constant',
+        depth: f.pick('depth', 'length', undefined, undefined, 'lineDepth'),
+      }
+    )
+  if (typeof a === 'string') return { kind: 'constant', depth: f.q('depth', 'length', a) }
+  return {
+    kind: 'ramp',
+    start: f.q('depth.start', 'length', a.start),
+    end: f.q('depth.end', 'length', a.end),
+  }
+}
+
 const KIND_SPECS = {
   facing: facingSpec,
   pocket: pocketSpec,
   drilling: drillingSpec,
   profile: profileSpec,
   chamfer: chamferSpec,
+  line: lineSpec,
 } as const
 
 type AnyParamKey =
@@ -1759,7 +1866,8 @@ export const OPERATION_UPDATE_ARGS = {
   // not re-pointed from a plan; `depth` shares the other kinds')
   ...Object.fromEntries(
     Object.values(KIND_SPECS)
-      .filter((spec) => spec.kind !== 'chamfer')
+      // a Line's `paths` and `{ start, end }` are not edited from a plan (its `depth` string is)
+      .filter((spec) => spec.kind !== 'chamfer' && spec.kind !== 'line')
       .flatMap((spec) =>
         Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
       ),
@@ -1813,6 +1921,7 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   ...kindCommands(drillingSpec),
   ...kindCommands(profileSpec),
   ...kindCommands(chamferSpec, true),
+  ...kindCommands(lineSpec, true),
   operationRemove,
   operationMove,
   partEvaluate,

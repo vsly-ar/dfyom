@@ -631,6 +631,8 @@ export function shownStrategyKeys(
         return true
       case 'chamfer':
         return key !== 'rampAngle' || entry === 'contour'
+      case 'line':
+        return key !== 'rampAngle' || entry !== 'plunge'
       case 'facing':
         return true
     }

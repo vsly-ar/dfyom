@@ -345,9 +345,11 @@ export function referencePoint(src: readonly Operation[]): UV {
   const c =
     op.kind === 'drilling'
       ? op.center
-      : op.kind === 'facing' || op.kind === 'chamfer'
-        ? undefined
-        : op.shape.center
+      : op.kind === 'line'
+        ? op.paths[0]?.center
+        : op.kind === 'facing' || op.kind === 'chamfer'
+          ? undefined
+          : op.shape.center
   return c === undefined ? { u: 0, v: 0 } : { u: c[0].canonical, v: c[1].canonical }
 }
 

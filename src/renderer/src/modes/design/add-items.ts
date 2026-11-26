@@ -32,6 +32,7 @@ export const ADD_ITEMS: readonly AddItem[] = [
   { id: 'pocket', group: 'operations', icon: 'pocket', command: 'design.pocket.add' },
   { id: 'profile', group: 'operations', icon: 'profile', command: 'design.profile.add' },
   { id: 'drilling', group: 'operations', icon: 'drilling', command: 'design.drilling.add' },
+  { id: 'line', group: 'operations', icon: 'groove', command: 'design.line.add' },
   { id: 'hole', group: 'features', icon: 'hole-counterbore', command: 'design.hole.add' },
   { id: 'pattern', group: 'features', icon: 'pattern', command: 'design.pattern.add' },
 ]

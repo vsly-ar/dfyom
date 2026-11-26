@@ -165,6 +165,26 @@ export const LoopChamferGeometrySchema = z.object({
   cornerLift: z.literal(true).exactOptional(),
 })
 
+/** Line (engraved-patterns.md E1): docs/modes/engraved-patterns.md#implementation-e1. */
+export const LineGeometrySchema = z.object({
+  kind: z.literal('line'),
+  id: z.string(),
+  direction,
+  onZ: z.number(),
+  paths: z.array(ShapeSchema).readonly(),
+  depth: z.object({ start: z.number(), end: z.number() }),
+  cutter: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('vBit'),
+      diameter: z.number(),
+      angle: z.number(),
+      tipDiameter: z.number(),
+    }),
+    z.object({ kind: z.literal('ball'), diameter: z.number() }),
+    z.object({ kind: z.literal('flat'), diameter: z.number() }),
+  ]),
+})
+
 // two chamfer shapes share `kind`: the circular one first (it needs `center`), then the loop one
 export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.union([
   z.discriminatedUnion('kind', [
@@ -173,6 +193,7 @@ export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.union([
     DrillingGeometrySchema,
     ProfileGeometrySchema,
     ChamferGeometrySchema,
+    LineGeometrySchema,
   ]),
   LoopChamferGeometrySchema,
 ])

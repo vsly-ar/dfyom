@@ -7,7 +7,8 @@ import { STOCK_TOP } from '../../../../core/design/surfaces'
 import { useSettings } from '../../shell/ShellContext'
 import { addTarget, selectedFace, type SelectedFace } from './face-selection'
 import { facingDepthSuggestion } from './facing-depth'
-import { addArgs, type DesignPart } from './model'
+import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
+import { addArgs, lineWave, roundLength, type DesignPart } from './model'
 import { useCommand, useDesignReferences, useDesignSelection } from './useDesign'
 
 /** The stock's size (mm) new operations are placed in; a default block without a stock. */
@@ -41,9 +42,26 @@ export function useAddOperation(part: DesignPart): AddOperation {
     const onTop = target === undefined || target.on === STOCK_TOP
     const facingDepth =
       kind === 'facing' && onTop ? facingDepthSuggestion(part, references) : undefined
+    const room = target?.room ?? stockDims(part)
+    // a Line (engraved-patterns.md E1) grooves the part's first shape, else a new wave shape
+    let paths: Record<string, unknown> = {}
+    if (kind === 'line') {
+      let shapeId = (part.dto.shapes ?? []).find((s) => SHAPE_ID_PATTERN.test(s.id))?.id
+      if (shapeId === undefined) {
+        const s = await call('design.shape.add', {
+          partId: part.dto.id,
+          items: [lineWave(room, part.units)],
+        })
+        if (!s.ok) return
+        shapeId = (s.value as { shapeId: string }).shapeId
+      }
+      const L = (mm: number) => roundLength(mm, part.units)
+      paths = { paths: [{ shapeId, center: [L(room.length / 2), L(room.width / 2)] }] }
+    }
     const r = await call(`design.${kind}.add`, {
       partId: part.dto.id,
-      ...addArgs(kind, target?.room ?? stockDims(part), part.units, defaultAnchor),
+      ...addArgs(kind, room, part.units, defaultAnchor),
+      ...paths,
       ...(target !== undefined ? { on: target.on } : {}),
       ...(facingDepth !== undefined ? { depth: facingDepth.source } : {}),
     })

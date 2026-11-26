@@ -19,6 +19,8 @@ const RANK: Record<OperationKind, number> = {
   drilling: 1,
   pocket: 2,
   chamfer: 3,
+  // engraving after the pockets, before the profiles free the part (engraved-patterns.md § Toolpath)
+  line: 3,
   profile: 4,
 }
 

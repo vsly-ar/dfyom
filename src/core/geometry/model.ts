@@ -224,7 +224,39 @@ export type OperationGeometry = FacePlacement &
       }
     | CircleChamferFields
     | LoopChamferFields
+    | LineFields
   )
+
+/**
+ * A Line's cutter (engraved-patterns.md § Line operation): the tool shape its groove takes, mm
+ * and degrees. A V-bit (chamfer mill, tip Ø `tipDiameter`, 0 = pointed), a ball or a flat end mill.
+ */
+export type LineCutter =
+  | {
+      readonly kind: 'vBit'
+      readonly diameter: number
+      readonly angle: number
+      readonly tipDiameter: number
+    }
+  | { readonly kind: 'ball'; readonly diameter: number }
+  | { readonly kind: 'flat'; readonly diameter: number }
+
+/**
+ * A Line (engraved-patterns.md E1): every loop and open path of `paths` (placed general shapes in
+ * the face frame) is a line cut on its centreline from the `on` face at `onZ`, `depth.start` deep at
+ * its start and `depth.end` at its end, linear by arc length. `cutter` is the tool the groove
+ * takes (the operation's tool, else the default 60° V-bit).
+ */
+interface LineFields {
+  readonly kind: 'line'
+  readonly id: string
+  readonly onZ: number
+  readonly paths: readonly Shape[]
+  readonly depth: { readonly start: number; readonly end: number }
+  readonly cutter: LineCutter
+}
+
+export type LineGeometry = FacePlacement & LineFields
 
 /**
  * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling, circle pocket or inside
@@ -468,6 +500,9 @@ export const DFM_WARNING_CODES = [
   // tabs off free sides (v0.4 TB1): docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
   'dfm.tabsRelocated',
   'dfm.tabsNoHold',
+  // Line (E1): docs/modes/engraved-patterns.md#dfm
+  'dfm.lineTooDeep',
+  'dfm.lineShallow',
   // patterns P1 (`operation` = the feature id): docs/modes/patterns.md#checks-and-dfm
   'dfm.patternEmpty',
   'dfm.patternHeavy',

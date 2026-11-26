@@ -12,6 +12,7 @@ export const designMessages = {
     drilling: 'Drilling',
     profile: 'Profile',
     chamfer: 'Chamfer',
+    line: 'Line',
   } satisfies Record<OperationKind, string>,
   add: (kind: OperationKind) =>
     ({
@@ -20,6 +21,7 @@ export const designMessages = {
       drilling: 'Add drilling',
       profile: 'Add profile',
       chamfer: 'Add chamfer',
+      line: 'Add line',
     })[kind],
   /** The operation list's one Add menu (v0.4 task U1: was "Add operation"). */
   addMenu: 'Add',
@@ -30,6 +32,7 @@ export const designMessages = {
     drilling: 'Drills round holes, blind or through.',
     profile: 'Cuts along a shape’s outline: around it, inside it or on the line.',
     chamfer: 'Bevels the top edge of a drilling or round pocket.',
+    line: 'Engraves grooves along shapes with a V-bit, at a constant or changing depth.',
     hole: 'A hole for a screw or bolt: simple, counterbored or countersunk, sized from the fastener.',
     pattern: 'Many copies of a cell laid on a lattice over a face, cut as one pocket.',
   } satisfies Record<OperationKind | 'hole' | 'pattern', string>,
@@ -1054,6 +1057,7 @@ export const designMessages = {
         drilling: 'Add drilling here',
         profile: 'Add profile here',
         chamfer: 'Add chamfer here',
+        line: 'Add line here',
       })[kind],
     addHole: 'Add bolt hole here',
     addPattern: 'Add pattern here',

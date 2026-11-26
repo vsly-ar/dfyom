@@ -204,7 +204,36 @@ export interface ChamferSourceEdge {
   readonly shape: Shape
   readonly within: { readonly min: Point; readonly max: Point }
 }
-export type Operation = Facing | Pocket | Drilling | Profile | Chamfer
+/** A named shape placed on a face, as a Line's path (the `named` kind of `Shape`). */
+export type NamedPlacement = Extract<Shape, { kind: 'named' }>
+
+/**
+ * A Line's depth below `on` (engraved-patterns.md E1): constant, or linear from `start` to `end`
+ * along each line by arc length. Levels (`{ min, max }`) come with E2.
+ */
+export type LineDepth =
+  | { readonly kind: 'constant'; readonly depth: Quantity }
+  | { readonly kind: 'ramp'; readonly start: Quantity; readonly end: Quantity }
+
+/**
+ * A Line (engraved-patterns.md EP-A, E1): a groove cut on the centreline of every loop and open
+ * path of its placed named shapes, at a depth that may change along the line. No slot width, tabs
+ * or cut side; the tool (V-bit by default, ball or flat end mill) gives the groove's width.
+ * Doc: docs/modes/engraved-patterns.md#line-operation
+ */
+export interface Line extends Common {
+  readonly kind: 'line'
+  readonly paths: readonly NamedPlacement[]
+  readonly depth: LineDepth
+}
+
+/** A Line's depths at the start and end of each line (equal for a constant depth), canonical mm. */
+export const lineDepths = (d: LineDepth): { start: number; end: number } =>
+  d.kind === 'constant'
+    ? { start: d.depth.canonical, end: d.depth.canonical }
+    : { start: d.start.canonical, end: d.end.canonical }
+
+export type Operation = Facing | Pocket | Drilling | Profile | Chamfer | Line
 
 /**
  * The diameter of the circular edge a chamfer can bevel (design-v0.4.md rule `chamferEdge`): the
@@ -288,6 +317,7 @@ export const ID_PREFIX: Record<OperationKind, string> = {
   drilling: 'drill',
   profile: 'profile',
   chamfer: 'chamfer',
+  line: 'line',
 }
 
 /** Display name of an operation kind (default `name`, command titles). */
@@ -297,6 +327,7 @@ export const KIND_LABEL: Record<OperationKind, string> = {
   drilling: 'Drilling',
   profile: 'Profile',
   chamfer: 'Chamfer',
+  line: 'Line',
 }
 
 // ── fields ────────────────────────────────────────────────────────────────────────────────
@@ -333,6 +364,8 @@ export const DEFAULTS = {
   patternGap: { mm: '2 mm', inch: '1/16"' },
   patternMargin: { mm: '5 mm', inch: '3/16"' },
   patternDepth: { mm: '1 mm', inch: '1/32"' },
+  // Line (docs/modes/engraved-patterns.md#line-operation)
+  lineDepth: { mm: '0.5 mm', inch: '0.02"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -386,6 +419,18 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
       add('angle', op.angle)
       addOpt('stepdown', op.stepdown)
       break
+    case 'line':
+      op.paths.forEach((p, i) => {
+        add(`paths.${i}.center.0`, p.center[0])
+        add(`paths.${i}.center.1`, p.center[1])
+        addOpt(`paths.${i}.rotation`, p.rotation)
+      })
+      if (op.depth.kind === 'constant') add('depth', op.depth.depth)
+      else {
+        add('depth.start', op.depth.start)
+        add('depth.end', op.depth.end)
+      }
+      break
   }
   return out
 }
@@ -418,7 +463,29 @@ export function withParam(op: Operation, path: string, value: Quantity): Operati
     return { ...op, depth: Some(value) }
   if (op.kind === 'drilling' && head === 'pointAngle') return { ...op, pointAngle: Some(value) }
   if (op.kind === 'chamfer' && head === 'stepdown') return { ...op, stepdown: Some(value) }
+  if (op.kind === 'line') return lineWithParam(op, path, value)
   return { ...op, [head]: value } as Operation
+}
+
+/** A Line with the quantity at `path` replaced (`depth`, `depth.start`, `paths.<i>.center.0`, …). */
+function lineWithParam(op: Line, path: string, value: Quantity): Line {
+  const parts = path.split('.')
+  if (parts[0] === 'depth') {
+    if (parts[1] === undefined) return { ...op, depth: { kind: 'constant', depth: value } }
+    const d = op.depth.kind === 'ramp' ? op.depth : { start: op.depth.depth, end: op.depth.depth }
+    return {
+      ...op,
+      depth: { kind: 'ramp', start: d.start, end: d.end, [parts[1]]: value } as LineDepth,
+    }
+  }
+  if (parts[0] !== 'paths') return op
+  const i = Number(parts[1])
+  const paths = op.paths.map((p, k): NamedPlacement => {
+    if (k !== i) return p
+    if (parts[2] === 'rotation') return { ...p, rotation: Some(value) }
+    return { ...p, center: parts[3] === '0' ? [value, p.center[1]] : [p.center[0], value] }
+  })
+  return { ...op, paths }
 }
 
 /**
@@ -668,6 +735,25 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         cornerLift: dto.cornerLift === true,
       }))
     }
+    case 'line': {
+      const paths = collect(
+        dto.paths.map((p, i) => shapeFromDTO(p).mapErr((e) => e.prefixIssues('paths', i))),
+      )
+      const d = dto.depth
+      const depth: AppResult<LineDepth> =
+        'start' in d
+          ? collect([q(d.start, 'depth', 'start'), q(d.end, 'depth', 'end')]).map(
+              ([start, end]): LineDepth => ({ kind: 'ramp', start: start!, end: end! }),
+            )
+          : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
+      return collect<unknown>([paths, depth]).map(() => ({
+        ...base,
+        kind: 'line',
+        on: dto.on,
+        paths: paths.unwrap() as NamedPlacement[],
+        depth: depth.unwrap(),
+      }))
+    }
   }
 }
 
@@ -794,6 +880,17 @@ export function operationToDTO(op: Operation): OperationDTO {
         ...(op.loops.isSome() ? { loops: [...op.loops.unwrap()] } : {}),
         ...(op.cornerLift ? { cornerLift: true } : {}),
       } as OperationDTO
+    case 'line':
+      return {
+        kind: 'line',
+        ...base,
+        on: op.on,
+        paths: op.paths.map(shapeToDTO),
+        depth:
+          op.depth.kind === 'constant'
+            ? op.depth.depth.toDTO()
+            : { start: op.depth.start.toDTO(), end: op.depth.end.toDTO() },
+      } as OperationDTO
   }
 }
 
@@ -824,28 +921,28 @@ function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShap
   const out = new Map<string, NamedShape>()
   const results: AppResult<unknown>[] = []
   dto.operations.forEach((op, i) => {
-    if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') return
-    const id = op.shape.shapeId
-    if (out.has(id)) return
-    const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
-    if (k < 0) {
-      results.push(
-        fail('input.malformed', `${op.id} places shape ${id}, which the part does not have`, {
-          issues: [
-            {
-              path: ['operations', i, 'shape', 'shapeId'],
-              rule: 'unknownShape',
-              message: 'no such shape in the part',
-            },
-          ],
-          data: { operationId: op.id, shapeId: id },
-        }),
-      )
-      return
+    for (const { id, path } of placedShapeIds(op)) {
+      if (out.has(id)) continue
+      const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
+      if (k < 0) {
+        results.push(
+          fail('input.malformed', `${op.id} places shape ${id}, which the part does not have`, {
+            issues: [
+              {
+                path: ['operations', i, ...path],
+                rule: 'unknownShape',
+                message: 'no such shape in the part',
+              },
+            ],
+            data: { operationId: op.id, shapeId: id },
+          }),
+        )
+        continue
+      }
+      const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+      results.push(s)
+      if (s.isOk()) out.set(id, s.unwrap())
     }
-    const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
-    results.push(s)
-    if (s.isOk()) out.set(id, s.unwrap())
   })
   results.push(patternCells(out, dto))
   return collect(results).map(() => out)
@@ -904,24 +1001,42 @@ export function shapesOf(
 ): AppResult<ReadonlyMap<string, NamedShape>> {
   const out = new Map<string, NamedShape>()
   for (const op of ops) {
-    if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') continue
-    const id = op.shape.shapeId
-    if (out.has(id)) continue
-    const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
-    if (k < 0)
-      return fail('input.malformed', `${op.id} places shape ${id}, which the part does not have`, {
-        issues: [
+    for (const { id, path } of placedShapeIds(op)) {
+      if (out.has(id)) continue
+      const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
+      if (k < 0)
+        return fail(
+          'input.malformed',
+          `${op.id} places shape ${id}, which the part does not have`,
           {
-            path: ['operations', op.id, 'shape', 'shapeId'],
-            rule: 'unknownShape',
-            message: 'no such shape in the part',
+            issues: [
+              {
+                path: ['operations', op.id, ...path],
+                rule: 'unknownShape',
+                message: 'no such shape in the part',
+              },
+            ],
+            data: { operationId: op.id, shapeId: id },
           },
-        ],
-        data: { operationId: op.id, shapeId: id },
-      })
-    const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
-    if (s.isErr()) return s
-    out.set(id, s.unwrap())
+        )
+      const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+      if (s.isErr()) return s
+      out.set(id, s.unwrap())
+    }
   }
   return patternCells(out, dto).map(() => out)
+}
+
+/**
+ * The named shapes an operation (model or record) places, with the path of each `shapeId`: a
+ * pocket's or profile's `named` shape, every path of a Line (engraved-patterns.md E1).
+ */
+export function placedShapeIds(
+  op: OperationDTO | Operation,
+): { id: string; path: (string | number)[] }[] {
+  if (op.kind === 'line')
+    return op.paths.map((p, i) => ({ id: p.shapeId, path: ['paths', i, 'shapeId'] }))
+  if ((op.kind === 'pocket' || op.kind === 'profile') && op.shape.kind === 'named')
+    return [{ id: op.shape.shapeId, path: ['shape', 'shapeId'] }]
+  return []
 }
