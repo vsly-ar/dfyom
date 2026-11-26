@@ -13,9 +13,11 @@ import type { Quantity } from '../../quantity/quantity'
 import { listedAs } from '../../commands/json-schema'
 import { PointArg, Src } from '../commands'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
-import { DEFAULTS } from '../operation'
+import { DEFAULTS, type RoughingMargins } from '../operation'
+import { RoughingArg, roughingFromArg, type RoughingArgs } from '../roughing'
 import { PATTERN_LATTICES, POLYGON_ACROSS, ShapeIdSchema } from '../shape.dto'
 import {
+  isEmptyMargins,
   patternSpec,
   type Pattern,
   type PatternBoundary,
@@ -80,7 +82,9 @@ const params = {
   invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
   through: z.boolean().describe('Cells cut through the stock'),
-  roughing: z.boolean().describe('Bigger tool clears cells first (<id>_roughing)'),
+  roughing: RoughingArg.describe(
+    'Bigger tool clears cells first (<id>_roughing); {wall, floor} as pocket',
+  ),
   chamfer: z
     .object({
       width: Src.optional(),
@@ -108,6 +112,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
     origin: z.unknown().describe('As design.pattern.add origin'),
     boundary: z.unknown().describe('As design.pattern.add boundary'),
     chamfer: z.unknown().describe('As design.pattern.add chamfer'),
+    roughing: z.unknown().describe('As design.pattern.add roughing'),
   },
   /** Fields not given keep their previous value (add: the patterns.md defaults). */
   build(a: Args, prev, { f, id, name, on }): Pattern {
@@ -240,10 +245,23 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       invert: a.invert ?? prev?.invert ?? false,
       depth: len('depth', prev?.depth, 'patternDepth'),
       through: a.through ?? prev?.through ?? false,
-      roughing: a.roughing ?? prev?.roughing ?? false,
+      // DF122: true / { wall, floor } / false (docs/modes/roughing.md#patterns)
+      ...patternRoughing(a.roughing, prev, (path, src) => f.q(path, 'length', src)),
       chamfer: chamfer(),
     }
   },
+}
+
+/** DF122: the pattern's `roughing` and `roughingLeave` after the arg (roughing.ts rules). */
+function patternRoughing(
+  arg: RoughingArgs | undefined,
+  prev: Pattern | undefined,
+  parse: (path: string, source: string) => Quantity,
+): { roughing: boolean; roughingLeave?: RoughingMargins } {
+  const before = prev?.roughing === true ? (prev.roughingLeave ?? {}) : undefined
+  const after = roughingFromArg(arg, before, parse)
+  if (after === undefined) return { roughing: false }
+  return isEmptyMargins(after) ? { roughing: true } : { roughing: true, roughingLeave: after }
 }
 
 /** `design.pattern.add` / `.update`; the kind itself is built in (feature.ts). */

@@ -9,7 +9,7 @@
  * generators through the `WorkerPort` (docs/architecture/workers.md#toolpath-cache).
  */
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
-import type { Operation, Part } from '../design/operation'
+import { roughingIdOf, roughingOwnerId, type Operation, type Part } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import type { Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -33,8 +33,6 @@ import type { ResolvedStrategy } from './strategy'
 import type { KeepOut } from '../toolpath/keep-out'
 import { setupWorkholding } from './workholding/setup'
 import { aidGeometry, type AidGeometry } from './aids'
-import { ownedOperationId } from '../design/feature'
-import type { RestAfter } from '../toolpath/region-pocket'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
 export interface PlanOperationInput {
@@ -100,12 +98,17 @@ export interface PlanOperationInput {
    */
   readonly aid?: AidGeometry
   /**
-   * A pattern's pocket machined after its roughing pocket (DF108): the roughing's tool radius,
-   * corner radius and finishing allowance, so the pocket cuts only the rest. Absent without an
-   * earlier roughing.
-   * Doc: docs/modes/patterns.md#roughing-df108
+   * A pocket machined after its roughing pocket (DF108 patterns, DF122 pockets): the roughing's
+   * tool radius, corner radius and stock to leave, so the pocket cuts only the rest. Absent
+   * without an earlier roughing.
+   * Doc: docs/modes/roughing.md#rest-by-the-operation
    */
-  readonly restAfter?: RestAfter
+  readonly restAfter?: RoughingReach
+  /**
+   * DF122: a roughing pocket's floor margin (mm, > 0): it stops this much above its floor.
+   * Absent = 0 (to the floor). Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+   */
+  readonly roughingFloor?: number
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -115,6 +118,17 @@ export interface PlanOperationInput {
    * input marks a cached toolpath stale.
    */
   readonly inputHash: string
+}
+
+/**
+ * What a roughing pocket cleared, by its tool and stock to leave (DF122, mm): the generator's
+ * `RestAfter` with the floor margin, which becomes `floorDepth` once the pocket's depth is known.
+ */
+export interface RoughingReach {
+  readonly radius: number
+  readonly cornerRadius: number
+  readonly wall: number
+  readonly floor: number
 }
 
 /**
@@ -251,6 +265,12 @@ export function planOperationInputs(
             e.strategy.kind === 'chamfer' ? e.strategy.cutDepth : undefined,
           )
     const restAfter = e.kind === 'pocket' ? roughingBefore(plan, e.ops[0], index) : undefined
+    // DF122: a roughing pocket leaves its margins: the wall as its finishing allowance
+    const leave = e.kind === 'pocket' ? roughingLeave(plan, e.ops[0]) : undefined
+    const strategy =
+      leave !== undefined && e.strategy.kind === 'pocket'
+        ? { ...e.strategy, finishAllowance: leave.wall }
+        : e.strategy
     out.push({
       planId,
       planOperationId: op.id,
@@ -263,7 +283,7 @@ export function planOperationInputs(
       toolSnapshotId,
       stickout: e.stickout.unwrap(),
       feeds: e.feeds.unwrap(),
-      strategy: e.strategy,
+      strategy,
       machine: plan.machine,
       ...(throughDepths.size === 0 ? {} : { throughDepths }),
       ...(material === undefined ? {} : { material }),
@@ -272,6 +292,7 @@ export function planOperationInputs(
       ...(keepOut === undefined ? {} : { keepOut }),
       ...(aid === undefined ? {} : { aid }),
       ...(restAfter === undefined ? {} : { restAfter }),
+      ...(leave === undefined || leave.floor <= 0 ? {} : { roughingFloor: leave.floor }),
       // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
       inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })
@@ -280,28 +301,50 @@ export function planOperationInputs(
 }
 
 /**
- * DF108: what the roughing pocket of a pattern's pocket `op` cleared, by its tool and finishing
- * allowance, when a plan operation before `index` machines it; undefined otherwise (no roughing,
- * or the pocket moved before it: it then clears every cell itself).
+ * What the roughing pocket of pocket `op` cleared (DF108 a pattern's, DF122 a pocket's own), by
+ * its tool and stock to leave, when a plan operation before `index` machines it; undefined
+ * otherwise (no roughing, or the pocket moved before it: it then clears everything itself).
  */
 function roughingBefore(
   plan: LoadedPlan,
   op: Operation | undefined,
   index: number,
-): RestAfter | undefined {
-  if (op?.kind !== 'pocket' || op.roughing === true || op.owner.isNone()) return undefined
-  const { featureId, role } = op.owner.unwrap()
-  if (role !== 'pocket') return undefined
-  const id = ownedOperationId(featureId, 'roughing')
+): RoughingReach | undefined {
+  const id = op === undefined ? undefined : roughingIdOf(op)
+  if (id === undefined) return undefined
   const at = plan.operations.findIndex((p) => p.designOperationIds.includes(id))
   if (at < 0 || at >= index) return undefined
   const e = evaluateOperation(plan, plan.operations[at]!)
-  if (e.tool.isNone() || e.strategy.kind !== 'pocket') return undefined
+  const leave = roughingLeave(plan, e.ops[0])
+  if (e.tool.isNone() || leave === undefined) return undefined
   const tool = e.tool.unwrap()
   return {
     radius: tool.diameter.canonical / 2,
     cornerRadius:
       tool.type === 'bullNoseEndMill' ? tool.cornerRadius.mapOr(0, (q) => q.canonical) : 0,
-    allowance: e.strategy.finishAllowance,
+    ...leave,
   }
+}
+
+/**
+ * DF122: a roughing pocket's stock to leave (mm): its `leave` margins, the wall by default its
+ * owner's resolved finishing allowance (the owner's finishing ring then takes it), the floor 0;
+ * undefined when `op` is no roughing pocket.
+ * Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+ */
+export function roughingLeave(
+  plan: LoadedPlan,
+  op: Operation | undefined,
+): { wall: number; floor: number } | undefined {
+  if (op?.kind !== 'pocket' || op.roughing !== true) return undefined
+  const floor = op.leave?.floor?.canonical ?? 0
+  if (op.leave?.wall !== undefined) return { wall: op.leave.wall.canonical, floor }
+  const ownerId = roughingOwnerId(op)
+  const owner = plan.operations.find(
+    (p) => ownerId !== undefined && p.designOperationIds.includes(ownerId),
+  )
+  const own = plan.operations.find((p) => p.designOperationIds.includes(op.id))
+  const s =
+    (owner ?? own) === undefined ? undefined : evaluateOperation(plan, (owner ?? own)!).strategy
+  return { wall: s?.kind === 'pocket' ? s.finishAllowance : 0, floor }
 }

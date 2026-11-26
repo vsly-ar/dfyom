@@ -137,6 +137,12 @@ export const FacingDtoSchema = z.object({
   on: stockFaceOn,
   depth: length(),
 })
+/** DF122: a roughing pass's stock to leave on walls and floor (docs/modes/roughing.md#stock-to-leave-wall-and-floor). */
+export const RoughingMarginsDtoSchema = z.object({
+  wall: length().optional(),
+  floor: length().optional(),
+})
+
 export const PocketDtoSchema = z.object({
   kind: z.literal('pocket'),
   ...common,
@@ -146,8 +152,17 @@ export const PocketDtoSchema = z.object({
   floorRadius: length(),
   /** Patterns P4: a through pocket (a pattern's `through`; since DF116 any pocket's). */
   through: z.literal(true).optional(),
-  /** DF108: a pattern's roughing pocket (set by a pattern's `roughing` only). */
+  /** DF108: a roughing pocket (a pattern's `roughing`, DF122 a pocket's `roughingPass`). */
   roughing: z.literal(true).optional(),
+  /**
+   * DF122: this pocket owns the roughing pocket `<id>_roughing` (absent = off); the stock to leave
+   * (absent = the defaults). Doc: docs/modes/roughing.md#model
+   */
+  roughingPass: RoughingMarginsDtoSchema.optional(),
+  /** DF122: the roughing pocket's owner (a plain pocket with `roughingPass`). */
+  roughingOf: OperationIdSchema.optional(),
+  /** DF122: the roughing pocket's stock to leave, copied from its owner (absent = defaults). */
+  leave: RoughingMarginsDtoSchema.optional(),
 })
 export const DrillingDtoSchema = z.object({
   kind: z.literal('drilling'),

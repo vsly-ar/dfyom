@@ -170,6 +170,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       : `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}: an open-sided pocket.`,
   'dfm.shapeHeavy': (p) =>
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
+  // DF122: a roughing tool that is not larger than its pocket's skips nothing
+  'dfm.roughingNoGain': (p) =>
+    `The roughing tool (${String(p['tool'])}) is not larger than the pocket's (${String(p['ownerTool'])}): the pocket still cuts everything. Choose a larger tool or turn Roughing off.`,
   'dfm.holeCustomSize': (p, L) => {
     const v = (x: unknown) => (p['field'] === 'csAngle' ? `${num(x)}°` : L(x))
     return `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${v(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${v(p['table'])} (custom).`

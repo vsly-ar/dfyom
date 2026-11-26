@@ -246,8 +246,12 @@ export function parameterChecks(
           ? undefined
           : shapeMeasure(options.region2d, op, stock)
         : undefined
-    const tool =
-      own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure, waste)
+    const tool = [
+      ...(own === undefined
+        ? []
+        : ownTool(op, own, stock, lib, options, notInLibrary, measure, waste)),
+      ...roughingNoGain(op, own, tools),
+    ]
     // `dfm.shapeHeavy`: a general shape's chords over the evaluation budget (G1, D29)
     // DF108: a pattern's roughing pocket leaves rest on purpose; the pattern's pocket reports the
     // shape's corners, width and size
@@ -457,6 +461,37 @@ function ownTool(
 }
 
 const directionOf = (op: OperationGeometry): Direction => op.direction ?? '+z'
+
+/**
+ * DF122 `dfm.roughingNoGain`: a roughing pocket's tool not larger than its owner's skips
+ * nothing (the owner still cuts everything). Both tools must be known.
+ * Doc: docs/modes/roughing.md#tool-automatic-or-the-users-choice
+ */
+function roughingNoGain(
+  op: OperationGeometry,
+  own: OperationTool | undefined,
+  tools: Readonly<Record<string, OperationTool>>,
+): DfmWarning[] {
+  if (op.kind !== 'pocket' || op.roughing !== true || op.roughingOf === undefined) return []
+  const of = Object.hasOwn(tools, op.roughingOf) ? tools[op.roughingOf] : undefined
+  if (own === undefined || of === undefined) return []
+  if (own.tool.diameter > of.tool.diameter + TOOL_MATCH_TOLERANCE) return []
+  return [
+    warning(
+      'dfm.roughingNoGain',
+      op,
+      'tool',
+      `the roughing tool (${own.label}) is not larger than the pocket's (${of.label}): the pocket still cuts everything`,
+      {
+        tool: own.label,
+        toolDiameter: own.tool.diameter,
+        ownerTool: of.label,
+        ownerDiameter: of.tool.diameter,
+        ownerId: op.roughingOf,
+      },
+    ),
+  ]
+}
 
 /**
  * `dfm.setups` (info): the part uses more than one approach direction. Attached to the first

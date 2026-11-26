@@ -1102,6 +1102,23 @@ const operationUpdate = defineCommand({
           },
         )
     }
+    // DF122: a roughing pocket's wall margin is its owner's roughing setting (design), and it
+    // has no finishing pass (docs/modes/roughing.md#stock-to-leave-wall-and-floor)
+    const roughingKeys = (['finishAllowance', 'finishStepdown'] as const).filter(
+      (k) => typeof args.strategy?.[k] === 'string',
+    )
+    if (
+      roughingKeys.length > 0 &&
+      evaluateOperation(plan, op).ops.some((o) => o.kind === 'pocket' && o.roughing === true)
+    )
+      return fail('input.malformed', 'a roughing pocket has no finishing pass', {
+        issues: roughingKeys.map((k) => ({
+          path: ['strategy', k],
+          rule: 'notForRoughing',
+          message: "not for a roughing pass: set the pocket's roughing wall in the design",
+        })),
+        where,
+      })
     if (args.strategy !== undefined) {
       const s = applyStrategyArgs(kind, op.strategy, args.strategy, units)
       if (s.isErr()) return Err(s.unwrapErr().withContext(where))

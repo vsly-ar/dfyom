@@ -2,9 +2,14 @@
  * Machining order: the default order of plan operations and the order checks.
  * Doc: docs/modes/plan-v0.1.md#plan-operations-and-order, docs/modes/plan-v0.4.md#machining-order-v2
  */
-import { isGeneralShape, type Operation, type Part, type Shape } from '../design/operation'
+import {
+  isGeneralShape,
+  roughingIdOf,
+  type Operation,
+  type Part,
+  type Shape,
+} from '../design/operation'
 import { shapeCentre } from '../design/anchor'
-import { ownedOperationId } from '../design/feature'
 import type { OperationKind } from '../design/part.dto'
 import { placeShape } from '../design/placement'
 import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
@@ -74,11 +79,13 @@ export function edgeDependencies(op: Operation): string[] {
   return op.kind === 'chamfer' ? [op.edgeOf] : []
 }
 
-/** A pattern's roughing pocket, which its pocket follows (DF108, rest machining). */
+/**
+ * The roughing pocket a pocket follows (rest machining): a pattern's (DF108) or a pocket's own
+ * `<id>_roughing` (DF122, docs/modes/roughing.md#order-and-tool-changes).
+ */
 export function restDependencies(op: Operation): string[] {
-  if (op.kind !== 'pocket' || op.roughing === true || op.owner.isNone()) return []
-  const { featureId, role } = op.owner.unwrap()
-  return role === 'pocket' ? [ownedOperationId(featureId, 'roughing')] : []
+  const id = roughingIdOf(op)
+  return id === undefined ? [] : [id]
 }
 
 interface Info {

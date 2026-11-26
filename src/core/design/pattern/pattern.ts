@@ -12,7 +12,16 @@
 import { z } from 'zod'
 import type { Issue, IssuePath } from '../../../shared/errors/app-error'
 import { parseWith } from '../../../shared/parse'
-import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../../../shared/result'
+import {
+  collect,
+  Err,
+  fail,
+  None,
+  Ok,
+  Some,
+  type AppResult,
+  type Option,
+} from '../../../shared/result'
 import type { Region2dPort } from '../../geometry/2d/port'
 import {
   faceToFace,
@@ -40,7 +49,16 @@ import type {
   SpanGeometry,
 } from '../feature'
 import { FeatureDtoSchema, type FeatureDTO } from '../feature.dto'
-import type { Anchor, Operation, Point, Shape } from '../operation'
+import {
+  marginsFromDTO,
+  marginsToDTO,
+  type Anchor,
+  type Operation,
+  type Point,
+  type RoughingMargins,
+  type Shape,
+} from '../operation'
+import { RoughingMarginsDtoSchema } from '../part.dto'
 import {
   POLYGON_ACROSS,
   PATTERN_LATTICES,
@@ -137,7 +155,16 @@ export interface Pattern extends FeatureBase {
    * tool; the pocket then cuts only what it left (rest machining). Off by default.
    */
   readonly roughing: boolean
+  /**
+   * DF122: the roughing's stock to leave (`roughing: { wall, floor }`), copied onto the roughing
+   * pocket's `leave`; absent = the defaults. Doc: docs/modes/roughing.md#patterns
+   */
+  readonly roughingLeave?: RoughingMargins | undefined
 }
+
+/** DF122: margins without a value (the defaults). */
+export const isEmptyMargins = (m: RoughingMargins): boolean =>
+  m.wall === undefined && m.floor === undefined
 
 export const ownedShapeId = (featureId: string): string => `${featureId}_cells`
 
@@ -193,7 +220,8 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   invert: z.boolean().optional(),
   depth: length(),
   through: z.boolean().optional(),
-  roughing: z.literal(true).optional(),
+  // DF122: true, or the roughing's stock to leave (docs/modes/roughing.md#patterns)
+  roughing: z.union([z.literal(true), RoughingMarginsDtoSchema]).optional(),
   chamfer: z
     .object({ width: length(), angle: angle(), side: z.enum(['bottom', 'both']).optional() })
     .optional(),
@@ -204,6 +232,8 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
   if (parsed.isErr()) return parsed
   const d = parsed.unwrap()
   const q = (dto: QuantityDTO, ...path: (string | number)[]) => quantityFromDTO(dto, ...path)
+  const leave = typeof d.roughing === 'object' ? marginsFromDTO(d.roughing, 'roughing') : undefined
+  if (leave?.isErr() === true) return Err(leave.unwrapErr())
   const c = d.cell
   const rotation: AppResult<Quantity> =
     c.rotation === undefined
@@ -304,7 +334,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       invert: d.invert ?? false,
       depth: depth!,
       through: d.through ?? false,
-      roughing: d.roughing ?? false,
+      roughing: d.roughing !== undefined,
+      ...(leave === undefined || isEmptyMargins(leave.unwrap())
+        ? {}
+        : { roughingLeave: leave.unwrap() }),
       chamfer:
         chq.length === 0
           ? None
@@ -380,7 +413,14 @@ function patternToDTO(p: Pattern): FeatureDTO {
     ...(p.invert ? { invert: true } : {}),
     depth: p.depth.toDTO(),
     ...(p.through ? { through: true } : {}),
-    ...(p.roughing ? { roughing: true } : {}),
+    ...(p.roughing
+      ? {
+          roughing:
+            p.roughingLeave === undefined || isEmptyMargins(p.roughingLeave)
+              ? true
+              : marginsToDTO(p.roughingLeave),
+        }
+      : {}),
     ...(p.chamfer.isSome()
       ? {
           chamfer: {
@@ -495,6 +535,10 @@ function expandPattern(p: Pattern, ctx: ExpansionContext): AppResult<readonly Ex
       floorRadius: zero,
       ...(p.through ? { through: true } : {}),
       ...(roughing ? { roughing: true } : {}),
+      // DF122: the roughing's margins (only when set: records without stay byte-identical)
+      ...(roughing && p.roughingLeave !== undefined && !isEmptyMargins(p.roughingLeave)
+        ? { leave: p.roughingLeave }
+        : {}),
     })
     return [
       // DF108: the roughing pocket first, so the pocket's tool cuts only the rest

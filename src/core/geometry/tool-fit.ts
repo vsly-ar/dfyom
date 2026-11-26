@@ -207,6 +207,7 @@ export function toolFit(
       const c = op.shape.contour
       // DF108: a roughing pocket's tool fits some cell and is at most ROUGHING_SHARE of the widest
       // cell's narrowest width (a tool that only just fits clears a centre line); no corner rule
+      // (DF122: any roughing pocket, the region's narrowest width)
       if (op.roughing === true && measure !== undefined)
         unfit = !measure.fits(dc / 2 - FIT_SLACK)
           ? wider(Math.min(measure.narrowest(), dc - 2 * TOL), 'pocket at its narrowest', 'pocket')
@@ -218,6 +219,18 @@ export function toolFit(
                 need: { relation: 'atMost', value: ROUGHING_SHARE * measure.narrowest() },
                 values: { toolDiameter: dc, size: measure.narrowest(), share: ROUGHING_SHARE },
               }
+      // DF122: a rectangle or circle roughing pocket: its width, at most ROUGHING_SHARE of it
+      else if (op.roughing === true && (c.kind === 'rectangle' || c.kind === 'circle'))
+        unfit =
+          wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
+          (dc <= ROUGHING_SHARE * 2 * inradius(c) + TOL
+            ? undefined
+            : {
+                rule: 'roughingWidth',
+                detail: `Ø${mm(dc)} is over ${ROUGHING_SHARE} × the pocket's width (${mm(2 * inradius(c))}): it would clear little`,
+                need: { relation: 'atMost', value: ROUGHING_SHARE * 2 * inradius(c) },
+                values: { toolDiameter: dc, size: 2 * inradius(c), share: ROUGHING_SHARE },
+              })
       // general shapes: the region's width (eroded by the tool radius it is empty) and the
       // smallest inside corner, from the 2D layer
       else

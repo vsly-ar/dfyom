@@ -27,6 +27,8 @@ export const PLAN_WARNING_CODES = [
   'plan.cutoutBeforeSetup',
   'plan.machine',
   'plan.restMaterial',
+  // DF122: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+  'plan.roughingWallThin',
   'plan.stepoverClamped',
   'plan.designToolReplaced',
   'plan.designToolFailed',
@@ -188,6 +190,8 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         const s = op.shape
         if (
           s.kind === 'rectangle' &&
+          // a roughing pocket leaves its corners to its owner (DF122)
+          op.roughing !== true &&
           D / 2 > s.cornerRadius.canonical + EPS &&
           // corners on or beyond the stock edge are open (DF61 follow-up)
           rectangleWallCorner(
