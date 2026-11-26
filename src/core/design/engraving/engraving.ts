@@ -45,6 +45,7 @@ import { ENGRAVING_PRESET_IDS, engravingPreset } from './presets'
 import {
   ENGRAVING_HEAVY_ELEMENTS,
   ENGRAVING_HEAVY_LENGTH,
+  engravingCrossings,
   resolveEngraving,
   type ResolvedEngraving,
 } from './resolve'
@@ -428,6 +429,7 @@ function expandEngraving(
         ],
         depth: e.depth,
         blend: None,
+        within: None,
       },
     },
   ])
@@ -619,6 +621,7 @@ function engravingResult(
     length: Math.round(r.facts.length * 10) / 10,
     size: Math.round(r.facts.size * 100) / 100,
     ...(e.layout.kind === 'lattice' ? { tiles: r.facts.tiles } : {}),
+    crossings: engravingCrossings(r.lines),
   }
 }
 

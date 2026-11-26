@@ -27,6 +27,7 @@ import {
   markerPoint,
   operationFace,
   operationOutline,
+  lineMergeLoops,
   patternGuideLoops,
   surfaceAxes,
 } from './outline'
@@ -180,8 +181,13 @@ export function useDesignScene(): SceneProps {
   // a selected pattern shows its pocket's outline (the cells) and its area dashed (patterns P2),
   // with the cells left out at the border as dashed ghosts and a ring at the thinnest web (P5)
   const pattern = part?.dto.features?.find((f) => f.id === shown && f.kind === 'pattern')
+  // a selected engraved pattern shows its owned Line (its grooves and thin-wall rings)
+  const engraving = part?.dto.features?.find((f) => f.id === shown && f.kind === 'engraving')
   const selectedOp = ops?.find(
-    (o) => o.id === shown || (pattern !== undefined && o.id === `${pattern.id}_pocket`),
+    (o) =>
+      o.id === shown ||
+      (pattern !== undefined && o.id === `${pattern.id}_pocket`) ||
+      (engraving !== undefined && o.id === `${engraving.id}_line`),
   )
   // U9 P4: a pattern's cells (its owned pocket and chamfer) are selected by their outlines, not
   // a fill: hundreds of cells filled amber would be a block of accent
@@ -196,6 +202,13 @@ export function useDesignScene(): SceneProps {
         .map((o) => o.id),
     )
   }, [dto])
+  // `dfm.lineMerge` of the selected Line: its places (face frame u, v pairs)
+  const mergeWarning =
+    selectedOp?.kind === 'line'
+      ? warnings.find((w) => w.code === 'dfm.lineMerge' && w.operation === selectedOp.id)
+      : undefined
+  const mergePoints = mergeWarning?.params['points']
+  const merge = Array.isArray(mergePoints) ? (mergePoints as readonly number[]) : undefined
   const overlays = useMemo(() => {
     if (selectedOp === undefined || part?.loaded === undefined || part.table === undefined)
       return null
@@ -216,6 +229,9 @@ export function useDesignScene(): SceneProps {
       const facts = patternFacts(pattern.id, part.dto.shapes ?? [], port)
       // the area, the ghosts left out at the border and the thinnest web's ring (P2, P5)
       if (facts !== undefined) guide = patternGuideLoops(selectedOp, s, table, facts)
+    } else if (merge !== undefined) {
+      // engraved patterns: a dashed ring at each place two grooves leave a thin wall
+      guide = lineMergeLoops(selectedOp, s, table, merge)
     } else if (rotationGuide === selectedOp.id && outline.length > 0) {
       const top = outline[0]!.map((p) => unapplyPlacement(face.frame, p))
       const us = top.map((p) => p[0])
@@ -245,7 +261,7 @@ export function useDesignScene(): SceneProps {
             : undefined,
       }),
     }
-  }, [selectedOp, part, port, rotationGuide, pattern])
+  }, [selectedOp, part, port, rotationGuide, pattern, merge])
   // DF119 H3 follow-up: a selected slotted Bolt hole's centre line and travel dimension
   const hole = part?.dto.features?.find((f) => f.id === shown && f.kind === 'hole')
   const slot = useMemo(() => {
@@ -364,6 +380,7 @@ export function useDesignScene(): SceneProps {
             }),
             overlays?.describe,
             slot === null ? undefined : designMessages.slotTravel(slot.label),
+            merge === undefined ? undefined : designMessages.lineMergeRings(merge.length / 2),
             constructionSummary,
             face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,

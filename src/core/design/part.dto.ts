@@ -246,6 +246,12 @@ export const LineDtoSchema = z.object({
   paths: z.array(LinePathDtoSchema).min(1).max(LINE_PATHS_MAX),
   depth: LineDepthDtoSchema,
   blend: length().optional(),
+  /**
+   * Written by a split only, on a piece's Line that crosses its cell (engraved-patterns.md § Split
+   * pieces): the cell in the piece's face frame grown by the groove's half width; the resolved
+   * lines are cut there. Absent everywhere else.
+   */
+  within: z.object({ min: PointDtoSchema, max: PointDtoSchema }).optional(),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [

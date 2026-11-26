@@ -22,4 +22,11 @@ export const lineMessages = {
     'Where the level steps between two joined lines, the depth changes over this length on either side.',
   /** A shape the part no longer has (its name, never its id). */
   shapeMissing: 'Missing shape',
+  /** The depth legend under the levels' fields (engraved-patterns.md § Depth legend). */
+  legend: {
+    ticks: (deepest: string, shallowest: string, used: readonly string[]) =>
+      `Depth legend: dark is deep, ${deepest}; light is shallow, ${shallowest}. ${used.length === 1 ? 'Depth' : 'Depths'} in use: ${used.join(', ')}.`,
+    continuous: (deepest: string, shallowest: string, from: string, to: string) =>
+      `Depth legend: dark is deep, ${deepest}; light is shallow, ${shallowest}. The depth fades from ${from} to ${to}.`,
+  },
 }

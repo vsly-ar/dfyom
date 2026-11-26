@@ -263,6 +263,38 @@ export function patternGuideLoops(
   return [...patternAreaLoops(op, stock, table, facts.area), ...ghosts, ...ring]
 }
 
+/** The thin-wall marker's radius (mm): a ring at each `dfm.lineMerge` place (engraved patterns). */
+export const LINE_MERGE_MARKER = 1.5
+
+/**
+ * Rings at the places a selected Line's grooves leave a thin wall (`dfm.lineMerge`'s `points`,
+ * face frame, engraved-patterns.md § DFM), dashed on its face in the part frame.
+ */
+export function lineMergeLoops(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  points: readonly number[],
+): OutlineLoop[] {
+  const face = operationFace(op, stock, table)
+  const out: OutlineLoop[] = []
+  for (let k = 0; k + 1 < points.length; k += 2) {
+    const u = points[k]!
+    const v = points[k + 1]!
+    out.push(
+      Array.from({ length: 24 }, (_, i) => {
+        const t = (i / 24) * 2 * Math.PI
+        return toPartFrame(face.frame, [
+          u + LINE_MERGE_MARKER * Math.cos(t),
+          v + LINE_MERGE_MARKER * Math.sin(t),
+          face.w,
+        ])
+      }),
+    )
+  }
+  return out
+}
+
 const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>
   loops.map((l) => {
     const out = l.map((p) => toPartFrame(face.frame, p))

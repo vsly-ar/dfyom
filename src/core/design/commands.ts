@@ -1968,6 +1968,8 @@ const lineSpec: KindSpec<typeof lineParams, Line> = {
         : a.blend === null
           ? None
           : Some(f.q('blend', 'length', a.blend)),
+    // a split piece's cell stays through an edit of the piece's copy
+    within: prev?.within ?? None,
   }),
 }
 
