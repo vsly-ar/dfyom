@@ -102,7 +102,14 @@ const services = () => ({
 })
 
 interface SetResult {
-  items: { id: string; name: string; summary: string; bounds: number[][]; top: number }[]
+  items: {
+    id: string
+    name: string
+    kind: string
+    summary: string
+    bounds: number[][]
+    top: number
+  }[]
   clearanceHeight: string
   findings: PlanWarning[]
 }
@@ -302,5 +309,110 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.check')
     await s.run('plan.setup.update', { planId, setupId, clearanceHeight: 'auto' })
     expect(findings(s, planId).map((f) => f.code)).not.toContain('plan.workholding.clearanceLow')
+  })
+})
+
+// v0.4-llm-first W6 (workholding.md § Automatic arrangement): four toe clamps placed for the case
+describe("auto: 'toeClamps' on the user's case", () => {
+  const generate = async (s: PlanSetup, planId: string) => {
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+  }
+  const auto = async (s: PlanSetup, planId: string, setupId: string) =>
+    (await s.run('plan.workholding.set', { planId, setupId, auto: 'toeClamps' })) as SetResult
+
+  it('needs toolpaths; then four clamps on the short edges in the waste, and the export clears them (oracle)', async () => {
+    const { s, planId, setupId } = await userCase({ toolpaths: true })
+    const cold = await s.failWith(
+      'plan.workholding.set',
+      { planId, setupId, auto: 'toeClamps' },
+      'plan.workholding',
+    )
+    expect(cold.issues[0]!.rule).toBe('noToolpaths')
+    expect(cold.message).toContain('Generate the toolpaths of Top first')
+    await generate(s, planId)
+    // the long edges have 10 mm of waste beside the outline: too little for a 10 mm grip + margin
+    const r = await auto(s, planId, setupId)
+    expect(r.items.map((i) => [i.id, i.name, i.summary])).toEqual([
+      ['wh1', 'Toe clamp 1', 'left Y25 grip 10 top Z25'],
+      ['wh2', 'Toe clamp 2', 'left Y75 grip 10 top Z25'],
+      ['wh3', 'Toe clamp 3', 'right Y25 grip 10 top Z25'],
+      ['wh4', 'Toe clamp 4', 'right Y75 grip 10 top Z25'],
+    ])
+    expect(r.clearanceHeight).toBe('27 mm')
+    expect(r.findings.filter((f) => f.severity === 'error')).toEqual([])
+    await generate(s, planId)
+    expect(findings(s, planId).filter((f) => f.severity === 'error')).toEqual([])
+    const text = withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
+    const boxes = r.items.map((i) => ({
+      x: [i.bounds[0]![0]!, i.bounds[1]![0]!] as const,
+      y: [i.bounds[0]![1]!, i.bounds[1]![1]!] as const,
+      top: i.top,
+    }))
+    expect(gcodeClearance(text, boxes, 3)).toBeGreaterThanOrEqual(2 - 0.011)
+    // again: the toe clamps are replaced (new ids), the other items stay
+    await s.run('plan.workholding.set', {
+      planId,
+      setupId,
+      items: [...r.items.map((i) => ({ id: i.id, kind: 'toeClamp' })), { kind: 'surface' }],
+    })
+    const again = await auto(s, planId, setupId)
+    expect(again.items.map((i) => [i.id, i.kind])).toEqual([
+      ['wh5', 'surface'],
+      ['wh6', 'toeClamp'],
+      ['wh7', 'toeClamp'],
+      ['wh8', 'toeClamp'],
+      ['wh9', 'toeClamp'],
+    ])
+  })
+
+  it('a turned setup: the same clamps on its front and back (the setup frame)', async () => {
+    const { s, planId, setupId } = await userCase({ toolpaths: true })
+    await s.run('plan.setup.update', { planId, setupId, rotation: 90 })
+    await generate(s, planId)
+    const r = await auto(s, planId, setupId)
+    expect(r.items.map((i) => i.summary)).toEqual([
+      'front X25 grip 10 top Z25',
+      'front X75 grip 10 top Z25',
+      'back X25 grip 10 top Z25',
+      'back X75 grip 10 top Z25',
+    ])
+    await generate(s, planId)
+    expect(findings(s, planId).filter((f) => f.severity === 'error')).toEqual([])
+    expectOk(await exportPlan(s.d.doc, planId, services()))
+  })
+
+  it('no room: refused with every edge named, nothing changed; a vise and both items and auto are refused', async () => {
+    const { s, planId, setupId } = await userCase({ outline: '236', toolpaths: true })
+    await generate(s, planId)
+    const e = await s.failWith(
+      'plan.workholding.set',
+      { planId, setupId, auto: 'toeClamps' },
+      'plan.workholding',
+    )
+    expect(e.message).toMatch(
+      /^Four toe clamps do not fit in Top clear of the toolpaths and in the waste/,
+    )
+    expect(e.issues.map((i) => [i.rule, i.message.split(' ')[0]])).toEqual([
+      ['noRoom', 'front'],
+      ['noRoom', 'back'],
+      ['noRoom', 'left'],
+      ['noRoom', 'right'],
+    ])
+    expect(s.plan(planId).setups[0]!.workholding).toBeUndefined()
+    await s.run('plan.workholding.set', { planId, setupId, items: [{ kind: 'vise' }] })
+    const v = await s.failWith(
+      'plan.workholding.set',
+      { planId, setupId, auto: 'toeClamps' },
+      'plan.workholding',
+    )
+    expect(v.issues[0]!.rule).toBe('vise')
+    const x = await s.failWith(
+      'plan.workholding.set',
+      { planId, setupId, items: [], auto: 'toeClamps' },
+      'input.malformed',
+    )
+    expect(x.issues[0]).toMatchObject({ path: ['auto'], rule: 'exclusive' })
   })
 })

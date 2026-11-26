@@ -34,7 +34,10 @@ const EDGE = 1e-6
 const memo = new WeakMap<LoadedPlan, Map<Region2dPort | undefined, PartGeometryInput | null>>()
 
 /** The plan's part as geometry input (memoised per plan and port; null when it does not map). */
-function geometry(plan: LoadedPlan, port: Region2dPort | undefined): PartGeometryInput | null {
+export function geometry(
+  plan: LoadedPlan,
+  port: Region2dPort | undefined,
+): PartGeometryInput | null {
   let byPort = memo.get(plan)
   if (byPort === undefined) memo.set(plan, (byPort = new Map()))
   if (!byPort.has(port))
@@ -46,7 +49,7 @@ function geometry(plan: LoadedPlan, port: Region2dPort | undefined): PartGeometr
 }
 
 /** The setup's turn of its face frame (no zero: items are entered in the setup frame). */
-function turnOf(setup: SetupDTO, input: PartGeometryInput): SetupWcs {
+export function turnOf(setup: SetupDTO, input: PartGeometryInput): SetupWcs {
   const face = localStock(setupDirection(setup), {
     length: input.stock.length,
     width: input.stock.width,
@@ -221,4 +224,38 @@ export function heldFindings(
     const h = setupWorkholding(s, plan.stock)
     return [...inPart(s, h, input), ...partLoose(plan, s, h, input)]
   })
+}
+
+/** Sample spacing along a rectangle's sides for `rectInWaste` (mm). */
+const SIDE_STEP = 1
+
+/**
+ * W6: whether a rectangle of the setup frame lies in the waste of the setup's face with
+ * `clearance` to the part, or undefined when the face has no waste (no through outline: every
+ * spot is the part, nothing to keep to). Decided on its sides, sampled every mm (the clearance
+ * grown by half a step): a part piece wholly inside the rectangle is not seen (a clamp pad is far
+ * smaller than a part).
+ */
+export function wasteTest(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  port: Region2dPort | undefined,
+  clearance: number,
+): ((rect: readonly [Vec2, Vec2]) => boolean) | undefined {
+  const input = geometry(plan, port)
+  if (input === null) return undefined
+  const waste = faceWaste(input.operations, setupDirection(setup), input.stock)
+  if (waste === undefined) return undefined
+  const wcs = turnOf(setup, input)
+  return ([min, max]) => {
+    const nx = Math.max(1, Math.ceil((max[0] - min[0]) / SIDE_STEP))
+    const ny = Math.max(1, Math.ceil((max[1] - min[1]) / SIDE_STEP))
+    const sx = (max[0] - min[0]) / nx
+    const sy = (max[1] - min[1]) / ny
+    const c = clearance + Math.max(sx, sy) / 2
+    const pts: Vec2[] = []
+    for (let i = 0; i <= nx; i++) pts.push([min[0] + i * sx, min[1]], [min[0] + i * sx, max[1]])
+    for (let j = 1; j < ny; j++) pts.push([min[0], min[1] + j * sy], [max[0], min[1] + j * sy])
+    return pts.every((p) => waste.covers(fromWcs(p, wcs), c))
+  }
 }

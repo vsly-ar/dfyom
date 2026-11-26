@@ -303,6 +303,12 @@ export const planMessages = {
     empty: 'Nothing holds the stock yet: rapids and cuts are not checked against clamps.',
     add: 'Add',
     addMenu: 'Add workholding',
+    // v0.4-llm-first W6 (workholding.md#automatic-arrangement-w6)
+    arrange: 'Arrange automatically',
+    arrangeNeedsToolpaths: (setup: string) =>
+      `Generate the toolpaths of ${setup} first: the clamps go where no toolpath passes.`,
+    arrangeHint:
+      'Four toe clamps in the waste, clear of the generated toolpaths; replaces the toe clamps, keeps the other items.',
     kinds: {
       toeClamp: 'Toe clamp',
       vise: 'Vise',
