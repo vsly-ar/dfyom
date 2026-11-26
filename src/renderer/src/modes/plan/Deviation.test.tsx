@@ -231,7 +231,9 @@ describe('deviation panel (U4)', () => {
     await t.user.click(within(t.panel()).getByRole('button', { name: 'Compare' }))
     const panel = within(t.panel())
     await waitFor(() =>
-      expect(panel.getByRole('status')).toHaveTextContent('5 regions over 0.1 mm · 1 unexplained'),
+      expect(panel.getByRole('status')).toHaveTextContent(
+        '5 regions over 0.1 mm · 1 without a known cause',
+      ),
     )
     const statList = t.panel().querySelector('dl')!
     expect(statList).toHaveTextContent('Mean0.012 mm')
@@ -246,7 +248,9 @@ describe('deviation panel (U4)', () => {
     const rows = within(regions).getAllByRole('listitem')
     expect(rows).toHaveLength(3)
     const first = within(rows[0]!).getByRole('button')
-    expect(first).toHaveAccessibleName(/^Over-cut 0\.8 mm · .+, top, 120 mm², unexplained$/)
+    expect(first).toHaveAccessibleName(
+      /^Over-cut 0\.8 mm · .+, top, 120 mm², check: no known cause$/,
+    )
     expect(within(rows[1]!).getByRole('button')).toHaveAccessibleName(
       /^Under-cut 0\.3 mm · .+, top, 1 mm², tool radius$/,
     )
