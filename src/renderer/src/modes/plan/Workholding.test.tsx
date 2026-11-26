@@ -2,9 +2,10 @@
 // bridge bound to a real project runtime (core plan fixture, one Top setup): the empty note, the
 // Add menu, an item's summary and fields (each change one `plan.workholding.set` with the whole
 // list, ids kept), Remove, the clearance height that follows the items ("From Toe clamp 1 +
-// 2 mm.") and back to following them, and the plan scene's solids and keep-out halo.
-// Doc: docs/conventions/ui.md#workholding
-import { screen, waitFor, within } from '@testing-library/react'
+// 2 mm.") and back to following them, and the plan scene's solids and keep-out halo; X2-6: a toe
+// clamp dragged in the scene (snapped, one set on release) and nudged by the arrow keys.
+// Doc: docs/conventions/ui.md#workholding, docs/modes/workholding.md#toe-clamp-drag-x2-6
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
@@ -191,5 +192,43 @@ describe('Workholding in the setup inspector', () => {
     const row = await within(t.section()).findByRole('button', { name: /^Toe clamp 1/ })
     expect(row).toHaveTextContent('front X30 grip 10 top Z20')
     await expectNoAxeViolations()
+  })
+
+  it('drags a toe clamp along its edge in the plan scene: snapped, one set on release (X2-6)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', { planId, setupId, items: [clamp] })
+    })
+    await waitFor(() => expect(probe.scene?.workholding?.clamps?.handles).toHaveLength(1))
+    const drag = () => probe.scene!.workholding!.clamps!
+    const h = drag().handles[0]!
+    // the front edge of the 100 mm stock: along X, anchored on the grip's top centre
+    expect(h).toMatchObject({ itemId: 'wh1', axis: 0, at: 30, anchor: [30, 5, 20] })
+    expect(h.label).toBe('Toe clamp 1, front X30: drag along the edge, or use the arrow keys')
+    act(() => drag().onDrag('start', 'wh1', 30))
+    act(() => drag().onDrag('move', 'wh1', 48.2))
+    // held: the midpoint snaps (50), the solids follow before anything is sent
+    await waitFor(() => expect(probe.scene?.workholding?.clamps?.handles[0]?.at).toBe(50))
+    expect(probe.scene?.workholding?.clamps?.handles[0]?.dragging).toBe(true)
+    const minX = Math.min(...probe.scene!.workholding!.solids[0]!.outline.map((p) => p[0]))
+    expect(minX).toBeCloseTo(35)
+    expect(t.callsOf('plan.workholding.set')).toHaveLength(0)
+    act(() => drag().onDrag('end', 'wh1', 61.4))
+    await waitFor(() => expect(t.callsOf('plan.workholding.set')).toHaveLength(1))
+    expect(t.callsOf('plan.workholding.set')[0]).toMatchObject({
+      items: [{ id: 'wh1', kind: 'toeClamp', at: '61 mm' }],
+    })
+    const row = () => within(t.section()).getByRole('button', { name: /^Toe clamp 1/ })
+    await waitFor(() => expect(row()).toHaveTextContent('front X61'))
+    // the arrow keys: 1 mm (Shift 10 mm), one set each
+    act(() => drag().onNudge('wh1', 10))
+    await waitFor(() => expect(t.callsOf('plan.workholding.set')).toHaveLength(2))
+    expect(t.callsOf('plan.workholding.set')[1]).toMatchObject({
+      items: [{ id: 'wh1', kind: 'toeClamp', at: '71 mm' }],
+    })
+    // a press without moving opens the item
+    act(() => drag().onSelect('wh1'))
+    const fields = await within(t.section()).findByRole('group', { name: 'Item Toe clamp 1' })
+    expect(fields).toBeVisible()
   })
 })

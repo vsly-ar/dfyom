@@ -17,11 +17,20 @@
 // (`linkedToolpaths` with `plan.warning.list`'s lowered links, docs/modes/safe-links.md#where-it-runs).
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
 // docs/modes/z-reference.md#implementation-notes-df69. The setup's workholding (items, the open
-// item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary).
+// item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary);
+// X2-6: toe clamps drag along their edge (`WorkholdingOverlay.clamps`, snapped by `snapClampAt`);
+// a drop commits one `plan.workholding.set` with the whole list and is held until the plan
+// re-reads it (docs/modes/workholding.md#toe-clamp-drag-x2-6).
 import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
+import {
+  acrossEdge,
+  EDGE_WORD,
+  edgeLength,
+  lengthText as summaryLength,
+} from '../../../../core/plan/workholding/items'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
@@ -32,6 +41,7 @@ import {
   type AlignmentMarker,
   type AlignmentTarget,
   type Box,
+  type ClampDrag,
   type FlipAxisLine,
   type RunScene,
   type ViewportMesh,
@@ -54,8 +64,20 @@ import {
   setupZeroOf,
   lengthText,
 } from './model'
-import { useDeviationBasis, usePlanCommand, usePlanData, usePlanState } from './plan-store'
-import { shiftOverlay, workholdingOverlay } from './workholding-scene'
+import {
+  useDeviationBasis,
+  usePlanCommand,
+  usePlanData,
+  usePlanState,
+  usePlanStore,
+} from './plan-store'
+import {
+  clampAxis,
+  moveClamp,
+  shiftOverlay,
+  snapClampAt,
+  workholdingOverlay,
+} from './workholding-scene'
 import { shownZRefRun, snapSpot } from './z-spot'
 import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
 import { usePlanSelection } from './usePlan'
@@ -75,6 +97,13 @@ interface HeldAid {
   readonly at: P
   readonly dragging: boolean
   readonly offAxis?: number | undefined
+}
+
+/** A dragged or dropped toe clamp: its centre along the edge (setup frame, mm). */
+interface HeldClamp {
+  readonly itemId: string
+  readonly at: number
+  readonly dragging: boolean
 }
 
 const same = (a: P, b: P) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6
@@ -100,6 +129,8 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
   const [heldAid, setHeldAid] = useState<HeldAid | null>(null)
+  const [heldClamp, setHeldClamp] = useState<HeldClamp | null>(null)
+  const planStore = usePlanStore()
   const [, selectPlan] = usePlanSelection()
   const doc = replica.status === 'open' ? replica.doc : undefined
   const setup = plan === undefined ? undefined : currentSetup(plan, selected, last)
@@ -266,6 +297,79 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       },
     }
   }, [plan, setup, aidOps, info, heldAid, selected, units, call, selectPlan])
+  // X2-6: the setup's toe clamps drag along their edge (setup frame → WCS: less the zero)
+  const planStock =
+    plan === undefined || doc === undefined ? undefined : planPart(doc, plan).loaded?.stock
+  const holding =
+    setup === undefined || planStock === undefined ? undefined : setupWorkholding(setup, planStock)
+  useEffect(() => {
+    if (heldClamp === null || heldClamp.dragging) return
+    const item = holding?.items.find((i) => i.id === heldClamp.itemId)
+    if (item?.kind !== 'toeClamp' || Math.abs(item.at - heldClamp.at) < 1e-6) setHeldClamp(null)
+  }, [heldClamp, holding])
+  const clamps = useMemo((): ClampDrag | undefined => {
+    if (plan === undefined || setup === undefined || holding === undefined) return undefined
+    if (!allows(plan, 'plan.workholding.set')) return undefined
+    const toe = holding.items.flatMap((i) => (i.kind === 'toeClamp' ? [i] : []))
+    if (toe.length === 0) return undefined
+    const zero = setupZeroOf(setup, info)
+    const m = planMessages.workholding
+    const s = holding.stock
+    const commit = (itemId: string, at: number) => {
+      setHeldClamp({ itemId, at, dragging: false })
+      void call('plan.workholding.set', {
+        planId: plan.id,
+        setupId: setup.id,
+        items: (setup.workholding ?? []).map((i) =>
+          i.id === itemId ? { id: i.id, kind: i.kind, at: `${at} mm` } : { id: i.id, kind: i.kind },
+        ),
+      }).then((r) => {
+        if (!r.ok) setHeldClamp(null)
+      })
+    }
+    return {
+      handles: toe.map((c) => {
+        const axis = clampAxis(c.edge)
+        const mine = heldClamp?.itemId === c.id ? heldClamp : undefined
+        const at = mine?.at ?? c.at
+        const half = Math.min(c.grip, acrossEdge(c.edge, s)) / 2
+        const across =
+          c.edge === 'vMin' || c.edge === 'uMin'
+            ? half
+            : (c.edge === 'vMax' ? s.width : s.length) - half
+        const anchor: P = axis === 0 ? [at, across] : [across, at]
+        const where = `${EDGE_WORD[c.edge]} ${axis === 0 ? 'X' : 'Y'}${summaryLength(at - zero[axis], units === 'inch' ? 'in' : 'mm')}`
+        return {
+          itemId: c.id,
+          axis,
+          at: at - zero[axis],
+          anchor: [anchor[0] - zero[0], anchor[1] - zero[1], c.top] as const,
+          caption: m.clampCaption(c.name, where),
+          label: m.clampLabel(c.name, where),
+          dragging: mine?.dragging ?? false,
+        }
+      }),
+      onSelect: (itemId) => planStore.getState().selectWorkholding({ setupId: setup.id, itemId }),
+      onDrag(phase, itemId, wcsAt) {
+        const c = toe.find((i) => i.id === itemId)
+        if (c === undefined) return
+        if (phase === 'cancel') return setHeldClamp(null)
+        if (phase === 'start') return setHeldClamp({ itemId, at: c.at, dragging: true })
+        const axis = clampAxis(c.edge)
+        const at = snapClampAt(wcsAt + zero[axis], edgeLength(c.edge, s), c.width)
+        if (phase === 'move') return setHeldClamp({ itemId, at, dragging: true })
+        if (Math.abs(at - c.at) < 1e-6) return setHeldClamp(null)
+        commit(itemId, at)
+      },
+      onNudge(itemId, mm) {
+        const c = toe.find((i) => i.id === itemId)
+        if (c === undefined) return
+        const len = edgeLength(c.edge, s)
+        const at = Math.min(len, Math.max(0, Math.round((c.at + mm) * 1000) / 1000))
+        if (Math.abs(at - c.at) > 1e-6) commit(itemId, at)
+      },
+    }
+  }, [plan, setup, holding, info, heldClamp, units, call, planStore])
   // S22: while picking, the setup's valid sources are targets; a click adds that point
   const targets = useMemo((): AlignmentTarget[] => {
     if (plan === undefined || setup === undefined || picking !== setup.id) return []
@@ -309,20 +413,25 @@ export function usePlanScene(mode: AppMode): RunScene | null {
         ? linkedToolpaths(generated, lowered)
         : generated
     const stock = planStockSize(doc, plan)
-    // workholding.md#ui-summary: the setup's items, the open item's keep-out, collision hits
-    const planStock = planPart(doc, plan).loaded?.stock
-    const workholding =
-      planStock === undefined
+    // workholding.md#ui-summary: the setup's items, the open item's keep-out, collision hits;
+    // a dragged clamp drawn where it is held (X2-6)
+    const overlay =
+      holding === undefined
         ? undefined
-        : shiftOverlay(
-            workholdingOverlay(
-              setupWorkholding(setup, planStock),
-              setup.id,
-              openItem?.setupId === setup.id ? openItem.itemId : undefined,
-              data.warnings,
-            ),
-            setupZeroOf(setup, info),
+        : workholdingOverlay(
+            holding,
+            setup.id,
+            openItem?.setupId === setup.id ? openItem.itemId : undefined,
+            data.warnings,
           )
+    const heldItem = holding?.items.find((i) => i.id === heldClamp?.itemId)
+    const moved =
+      overlay === undefined || heldClamp === null || heldItem?.kind !== 'toeClamp'
+        ? overlay
+        : moveClamp(overlay, heldItem.id, clampAxis(heldItem.edge), heldClamp.at - heldItem.at)
+    const shifted = shiftOverlay(moved, setupZeroOf(setup, info))
+    const workholding =
+      shifted === undefined ? undefined : clamps === undefined ? shifted : { ...shifted, clamps }
     return {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
@@ -338,7 +447,22 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(aids === undefined ? {} : { aids }),
       ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef, info, alignment, targets, flipAxes, aids, openItem])
+  }, [
+    data,
+    plan,
+    setup,
+    doc,
+    zRef,
+    info,
+    alignment,
+    targets,
+    flipAxes,
+    aids,
+    openItem,
+    holding,
+    heldClamp,
+    clamps,
+  ])
 }
 
 /** The deviation panel's chosen region in the plan scene (U4 follow-up). */

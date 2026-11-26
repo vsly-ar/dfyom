@@ -338,6 +338,10 @@ export const planMessages = {
       glue: 'Glue or a glue-and-tape sheet under the stock: holds pieces cut free',
     },
     item: (name: string) => `Item ${name}`,
+    // v0.4-llm-first X2-6: a toe clamp dragged in the viewport (workholding.md#toe-clamp-drag-x2-6)
+    clampCaption: (name: string, where: string) => `${name}  ${where}`,
+    clampLabel: (name: string, where: string) =>
+      `${name}, ${where}: drag along the edge, or use the arrow keys`,
     remove: 'Remove',
     removeItem: (name: string) => `Remove ${name}`,
     name: 'Name',

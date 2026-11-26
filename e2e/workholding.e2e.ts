@@ -47,6 +47,7 @@ async function render(page: Page, name: string): Promise<void> {
 async function hardwoodPlan(
   page: Page,
   extra: (partId: string) => Promise<unknown> = async () => undefined,
+  { facing = true }: { facing?: boolean } = {},
 ): Promise<{ planId: string }> {
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   const stock = await call<{ id: string }>('library.stock.add', {
@@ -97,7 +98,7 @@ async function hardwoodPlan(
     name: 'Clamped',
     stockLibraryItemId: stock.id,
   })
-  await call('design.facing.add', { partId, depth: '0.5' })
+  if (facing) await call('design.facing.add', { partId, depth: '0.5' })
   await extra(partId)
   await call('project.apply', {})
   return call<{ planId: string }>('plan.create', { partId, machineLibraryItemId: machine.id })
@@ -328,5 +329,139 @@ test('arrange automatically (W6): four toe clamps in the waste, clear of the too
   await page.getByRole('button', { name: 'Fit' }).click()
   await arrange.scrollIntoViewIfNeeded()
   await render(page, 'w6-arrange')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+// X2-6 (docs/modes/workholding.md#toe-clamp-drag-x2-6): a toe clamp dragged in the Plan viewport
+// with the real mouse (the window is hidden; pointer events reach the canvas as for the tab
+// markers in operation-shapes.e2e.ts) from the corner, clear of the outline, onto the profile's
+// path: one `plan.workholding.set` on release, the collision found at once (a profile's cuts do
+// not depend on the clamps, DF90), the clamp drawn red; one undo puts it back. With
+// DFYOM_X26_SHOTS=<dir> a dark capture of the red clamp goes there.
+test('toe clamp dragged in the viewport onto the profile: the collision in red, one undo (X2-6)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  // an outline 150 × 70 in the middle (X 50–200) and no facing: every toolpath stays current
+  const { planId } = await hardwoodPlan(
+    page,
+    async (partId) => {
+      // a 6 mm flat long enough for the 40 mm stock (as W6's)
+      await bridgeCall(page, 'library.tool.add', {
+        values: {
+          name: 'Long flat 6',
+          type: 'flatEndMill',
+          diameter: '6',
+          fluteLength: '45',
+          overallLength: '80',
+          fluteCount: '2',
+          toolMaterial: 'carbide',
+          presets: [
+            {
+              name: 'Hardwood',
+              materialClass: 'hardwood',
+              spindleSpeed: '18000',
+              feedRate: '1500',
+              plungeRate: '300',
+              stepdown: '2',
+              stepover: '3',
+            },
+          ],
+        },
+      })
+      await bridgeCall(page, 'design.profile.add', {
+        partId,
+        shape: { kind: 'rectangle', center: ['125', '50'], length: '150', width: '70' },
+        tabs: { count: '4', width: '8', thickness: '3' },
+      })
+    },
+    { facing: false },
+  )
+  const setupId = (
+    await bridgeCall<{ plan: { setups: { id: string }[] } }>(page, 'plan.get', { planId })
+  ).plan.setups[0]!.id
+  // flush with the front left corner (X0–30): clear of the outline's path
+  await bridgeCall(page, 'plan.workholding.set', {
+    planId,
+    setupId,
+    items: [{ kind: 'toeClamp', edge: 'vMin', at: '15' }],
+  })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const selectTop = async () => {
+    if (!(await inspector.getByRole('heading', { name: 'Setup', exact: true }).isVisible()))
+      await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  }
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  await selectTop()
+  const section = inspector.getByRole('region', { name: /^Workholding/ })
+  const row = section.getByRole('button', { name: /^Toe clamp 1/ })
+  await expect(row).toContainText('front X15')
+  const checks = inspector.getByRole('region', { name: 'Setup checks' })
+  await expect(inspector).not.toContainText('hits Toe clamp 1')
+
+  // seen from the top, the screen's right is +X; the clamp's anchor sits on its grip
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await page.getByRole('button', { name: 'Views' }).click()
+  await page.getByRole('menu', { name: 'Views' }).getByRole('menuitem', { name: /^Top/ }).click()
+  await expect(viewport).toHaveAccessibleDescription(/View: Top\./)
+  const anchor = viewport.locator('[data-workholding-clamp="wh1"]')
+  await expect(anchor).toHaveAccessibleName(/^Toe clamp 1, front X15: drag along the edge/)
+  await expect(anchor).not.toHaveAttribute('data-colliding')
+  const box = (await anchor.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  // the chip shows where it goes while held; move right until it is past the outline's start
+  const chip = viewport.locator('[data-dragging]').filter({ hasText: 'Toe clamp 1' })
+  let at = 15
+  for (let i = 1; i <= 120 && at < 110; i++) {
+    await page.mouse.move(x + i * 5, y)
+    if (i === 1) await expect(chip).toBeVisible()
+    at = Number(/front X(-?[\d.]+)/.exec((await chip.textContent()) ?? '')?.[1] ?? at)
+  }
+  expect(at).toBeGreaterThanOrEqual(110)
+  await page.mouse.up()
+
+  // one set: the clamp moved along its edge only, the collision found and drawn red
+  await expect(row).toContainText(/front X\d+ grip 10 top Z25/)
+  const moved = Number(/front X(\d+)/.exec((await row.textContent()) ?? '')![1])
+  expect(moved).toBeGreaterThanOrEqual(110)
+  await expect(checks).toContainText(/Profile 1: a cut at Z-?[\d.]+ hits Toe clamp 1/)
+  await expect(anchor).toHaveAttribute('data-colliding', '')
+  await expect(anchor).toHaveAccessibleName(new RegExp(`^Toe clamp 1, front X${moved}:`))
+  const shots = process.env['DFYOM_X26_SHOTS']
+  if (shots !== undefined) {
+    await page.evaluate(() => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', 'dark')
+    })
+    await page.getByRole('button', { name: 'Views' }).click()
+    await page
+      .getByRole('menu', { name: 'Views' })
+      .getByRole('menuitem', { name: /^Isometric/ })
+      .click()
+    await page.getByRole('button', { name: 'Fit', exact: true }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: `${shots}/x26-clamp-collision-dark.png` })
+  }
+
+  // one drag is one undo step: back to the corner, clear again
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(row).toContainText('front X15')
+  await expect(inspector).not.toContainText('hits Toe clamp 1')
+  await expect(anchor).not.toHaveAttribute('data-colliding')
   expect(dfyom.rendererErrors).toEqual([])
 })

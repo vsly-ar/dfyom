@@ -104,7 +104,7 @@ Rules go to a [ui.md](../conventions/ui.md) amendment (plan task 1.6):
 
 - **Setup inspector:** a "Workholding" section: the item list (icon, name, one-line summary), an Add menu (Toe clamp, Vise, Screw, Block, Spoilboard / fixture plate, Tape / vacuum), the margin, and per item its fields; the derived clearance height shows "from Toe clamp 2 + 2 mm".
 - **Copy from another setup** (v0.4-llm-first X2-5, the agent's `copyFrom`): "Copy from…" beside "Arrange automatically" lists the plan's other setups; choosing one replaces this setup's list with that setup's items (new ids, same edges and positions: a flipped setup keeps "front X45"), one undo step. Decided over "Same as Bottom" (the plan's first wording) so it works with any number of setups, and over a second "Arrange automatically" (it keeps clear of this setup's toolpaths only, so the clamps of the two sides of a flip would land on different pads). Visuals: [ui.md § Workholding](../conventions/ui.md#workholding).
-- **Plan viewport:** items drawn as neutral solid geometry (not the accent, not the stock colour), keep-out zones as a faint dashed halo while an item is selected; toe clamps drag along their edge with snap to the stock corners and the edge midpoint; a colliding move draws red with a marker at the first hit, and the finding selects it.
+- **Plan viewport:** items drawn as neutral solid geometry (not the accent, not the stock colour), keep-out zones as a faint dashed halo while an item is selected; toe clamps drag along their edge with snap to the stock corners and the edge midpoint ([Toe clamp drag](#toe-clamp-drag-x2-6)); an item a collision finding names draws red, with a marker at the first hit.
 - **Run scene and setup-change picture:** the same items, so the operator sees what to place.
 
 ## Testing
@@ -143,7 +143,8 @@ Built in hardening DF59 (2026-11-24). Code: `src/core/plan/workholding/` (`items
 | Hops inside an operation and between operations                 | DF64's link pass, through the interface above                               |
 | `plan.workholding.inPart`, `partLoose`, held pieces (`surface`) | Built in v0.4-llm-first W5, [below](#held-pieces-and-screws-in-the-part-w5) |
 | Formulas in item params (`stock.length / 2`)                    | Plain quantities for now                                                    |
-| Toe clamp drag in the viewport, the setup-change dialog list    | UI follow-up; the inspector edits every param                               |
+| Toe clamp drag in the viewport                                  | Built in v0.4-llm-first X2-6, [below](#toe-clamp-drag-x2-6)                 |
+| The setup-change dialog list                                    | UI follow-up; the inspector edits every param                               |
 | Items in the Run scene                                          | With the setup-change picture                                               |
 
 ## Held pieces and screws in the part (W5)
@@ -181,6 +182,17 @@ Built in v0.4-llm-first W6 (2026-11-26; D70: decisions taken by the implementing
 | W6-I | **Inspector:** a ghost "Arrange automatically" button (icon `toe-clamp`, tooltip "Four toe clamps in the waste, clear of the generated toolpaths; replaces the toe clamps, keeps the other items.") beside Add; a refusal shows as one line under the buttons ("Generate the toolpaths of Top first: the clamps go where no toolpath passes." in the UI's words; otherwise the core's message). Dark render `w6-arrange-*.png`, `w6-arrange-refused-*.png` from `e2e/workholding.e2e.ts` with `DFYOM_RENDERS=1`.                                                                                                                                                                                  |
 
 Limits: a toolpath generated before the clamps may change once they are there (a pocket or facing regenerates round them; only the facing's moves in the waste are left out of the search, see W6-B); the set result's `movesUnchecked` and the export guard cover that. A part piece wholly inside a clamp's grip is not seen by the waste test (a clamp pad is far smaller than a part).
+
+## Toe clamp drag (X2-6)
+
+Built in v0.4-llm-first X2-6 (2026-11-26; D70: decisions taken by the implementing agent). Code: `WorkholdingLayer.tsx` (pointer handling, as the alignment aids' handles, DF83), `workholding-scene.ts` (`snapClampAt`, `moveClamp`, the collision colouring; pure, tested), `usePlanScene.ts` (the held position and the commit). E2E: `e2e/workholding.e2e.ts` ("toe clamp dragged in the viewport …").
+
+- **What drags:** a toe clamp's solids (both prisms) in the Plan viewport, when the plan allows `plan.workholding.set`. Hover shows a grab cursor and a chip with the clamp's name and position ("Toe clamp 1 front X125"); other kinds stay unpickable (a screw or block has two coordinates: later, with the inspector's fields meanwhile).
+- **Along its edge only:** the pointer ray meets the horizontal plane at the height it pressed (the clamp's top); the clamp moves by the pointer's travel along the edge's axis (X for front and back, Y for left and right), its edge and every other param stay. A press without moving opens the item in the inspector (and its keep-out halo); Escape cancels; camera controls are off while held.
+- **Snap:** within 3 mm of a stock corner (the clamp flush with the end: `at` = width / 2 or edge length − width / 2) or of the edge's midpoint it snaps there; otherwise `at` rounds to 1 mm. It stays within the edge (0 … edge length, the model's invariant).
+- **Commit:** the release sends one `plan.workholding.set` with the whole list, the moved clamp `{ id, kind, at }` and every other item by id (one undo step, as an inspector edit); the dropped position is held until the plan re-reads it, a refusal drops it. Nothing is sent when the clamp did not move.
+- **Collision in red:** a solid whose item a `plan.workholding.collision` finding of the shown setup names (`params.itemId`) draws in `--danger` (fill and outline) besides the finding's first-hit ring; profiles, grooves, drilling and chamfers are checked at once on release (DF90: their cuts do not depend on the items), facings and pockets once they regenerate.
+- **Keyboard:** each clamp has a focusable anchor in the viewport (`data-workholding-clamp`, named "Toe clamp 1, front X125: drag along the edge, or use the arrow keys"); Arrow keys move it 1 mm along its edge (Shift 10 mm), each press one `plan.workholding.set`.
 
 ## Not yet
 
