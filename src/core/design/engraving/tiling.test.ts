@@ -35,6 +35,7 @@ interface Result {
   lines?: number
   length?: number
   tiles?: number
+  crossings?: number
   warnings: { code: string; severity: string; operation: string; parameter?: string }[]
 }
 const add = async (s: DesignSetup, args: object = {}) =>
@@ -83,6 +84,22 @@ const roundedRect = async (s: DesignSetup) =>
   ).shapeId
 
 describe('tiles on a lattice (E4)', () => {
+  it('the crossings in the results: none between rows of waves, one per crosshatch tile', async () => {
+    const s = await setup(LID)
+    expect((await add(s, {})).crossings).toBe(0)
+    const one = await update(s, {
+      motif: { preset: 'crosshatch' },
+      layout: 'single',
+      fit: 'whole',
+      center: ['75', '50'],
+    })
+    // the tile's two diagonals cross at its centre
+    expect(one.crossings).toBe(1)
+    // tiled: every tile's centre and every corner where four tiles meet
+    const many = await update(s, { layout: { lattice: 'square' }, fit: 'clip' })
+    expect(many.crossings!).toBeGreaterThan(many.tiles!)
+  })
+
   it('Waves (the default) over a lid, clipped to a rounded rectangle: continuous lines, cut once', async () => {
     const s = await setup(LID)
     const outline = await roundedRect(s)

@@ -84,8 +84,15 @@ export const engravingMessages = {
     'Darker lines of the motif cut deeper: black or level 1 at Deepest, the lightest at Shallowest.',
   tool: 'Tool',
   /** The read-out under the name: "14 lines · 60 mm wide · 2.1 m"; tiles: "209 tiles · 19 lines …". */
-  readout: (lines: number, width: string, length: string, tiles?: number) =>
-    `${tiles === undefined ? '' : `${tiles} ${tiles === 1 ? 'tile' : 'tiles'} · `}${lines} ${lines === 1 ? 'line' : 'lines'} · ${width} wide · ${length} of groove`,
+  readout: (
+    lines: number,
+    width: string,
+    length: string,
+    tiles?: number,
+    groove?: string,
+    crossings?: number,
+  ) =>
+    `${tiles === undefined ? '' : `${tiles} ${tiles === 1 ? 'tile' : 'tiles'} · `}${lines} ${lines === 1 ? 'line' : 'lines'} · ${width} wide · ${length} of groove${groove === undefined ? '' : ` · grooves ≤ ${groove} wide`}${crossings === undefined || crossings === 0 ? '' : ` · ${crossings} ${crossings === 1 ? 'crossing' : 'crossings'}`}`,
 
   // the Presets dialog (engraved-patterns.md § Presets)
   presetsButton: 'Presets…',

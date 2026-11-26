@@ -28,6 +28,7 @@ import { orientRegion, translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { Region } from '../../geometry/2d/model'
 import { chainOpen, dropCoincident, sliceProfile, type RawLine } from '../../geometry/line'
+import { lineCrossings } from '../../geometry/line-crossings'
 import type { LinePathLevels, Shape as ShapeGeometry, Vec2 } from '../../geometry/model'
 import { polarNodes, rowNodes, type LatticeNode } from '../pattern/layout'
 import type { Part } from '../operation'
@@ -363,6 +364,22 @@ function resolveUncached(
       coincident: 0,
     },
   })
+}
+
+const crossingsMemo = new WeakMap<readonly EngravingLine[], number>()
+
+/**
+ * The places where the resolved lines cross or meet (line-crossings.ts): the read-out's crossings
+ * (engraved-patterns.md § DFM); cached per resolution.
+ */
+export function engravingCrossings(lines: readonly EngravingLine[]): number {
+  const hit = crossingsMemo.get(lines)
+  if (hit !== undefined) return hit
+  const n = lineCrossings(
+    lines.map((l) => ({ elements: lineElements(l), closed: l.shape.contour.kind === 'region' })),
+  )
+  crossingsMemo.set(lines, n)
+  return n
 }
 
 const lineElements = (l: EngravingLine): readonly Element[] =>

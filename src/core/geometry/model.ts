@@ -270,6 +270,11 @@ interface LineFields {
   readonly levels?: readonly (LinePathLevels | null)[]
   /** E2, with `{ min, max }`: a level step is blended over ±`blend` mm (default 1). */
   readonly blend?: number
+  /**
+   * On a split piece only: the piece's cell in the face frame (grown by the groove's half width);
+   * the resolved lines are cut there, after chaining and blends, so their depths stay the source's.
+   */
+  readonly within?: { readonly min: Vec2; readonly max: Vec2 }
   readonly cutter: LineCutter
 }
 

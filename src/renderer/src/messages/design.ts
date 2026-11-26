@@ -1150,6 +1150,9 @@ export const designMessages = {
 
   /** A selected slotted hole's travel dimension in the viewport's summary (DF119 H3 follow-up). */
   slotTravel: (travel: string) => `Slot travel ${travel}.`,
+  /** A selected Line's `dfm.lineMerge` places ringed in the viewport (engraved patterns). */
+  lineMergeRings: (n: number) =>
+    `${n === 1 ? 'A thin wall between grooves is' : `${n} thin walls between grooves are`} ringed.`,
   /** The selected operation in the viewport's text summary (face frame and anchor shown). */
   selectionSummary: (p: { name: string; on: string; anchor: string | undefined }) =>
     `Selected: ${p.name} on ${p.on}, face axes u and v shown${

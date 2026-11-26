@@ -357,6 +357,14 @@ function operationGeometry(
         ...(op.depth.kind === 'levels' && op.blend.isSome()
           ? { blend: op.blend.unwrap().canonical }
           : {}),
+        ...(op.within.isSome()
+          ? {
+              within: {
+                min: vec2(op.within.unwrap().min),
+                max: vec2(op.within.unwrap().max),
+              },
+            }
+          : {}),
         cutter: lineCutter(op, ctx.snapshots),
       })
     }

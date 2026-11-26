@@ -18,6 +18,7 @@ import {
   regionLoops,
   type Element,
 } from './2d/model'
+import { ClipBoundary, clipLine } from './2d/clip-lines'
 import { arcSegments } from './contour'
 import { localSolids, Table, type LocalSolids } from './local-solids'
 import type { LabelledMesh } from './loft'
@@ -129,7 +130,7 @@ export interface LineChains {
 const chainsMemo = new WeakMap<object, LineChains>()
 
 /** What `lineChains` reads of a Line's geometry. */
-export type LineChainsInput = Pick<LineGeometry, 'paths' | 'depth' | 'levels' | 'blend'>
+export type LineChainsInput = Pick<LineGeometry, 'paths' | 'depth' | 'levels' | 'blend' | 'within'>
 
 /** The default blend of a level step (mm, engraved-patterns.md § Line operation). */
 export const DEFAULT_LINE_BLEND = 1
@@ -328,9 +329,58 @@ export function lineChains(op: LineChainsInput): LineChains {
   const lines2 = isLevelDepth(op.depth)
     ? chainOpen(out).map((l) => ({ ...l, profile: blendSteps(l.profile, l.length, blend) }))
     : out
-  const result = { lines: lines2, coincident }
+  const result = {
+    lines: op.within === undefined ? lines2 : clipWithin(lines2, op.within),
+    coincident,
+  }
   chainsMemo.set(op, result)
   return result
+}
+
+/**
+ * A split piece's Line (engraved-patterns.md § Split pieces): the resolved lines cut at the
+ * piece's cell (`within`, face frame), each kept piece with its slice of the depth profile, so a
+ * ramp, levels and blends stay exactly the source's along what is left.
+ */
+export function clipWithin(
+  lines: readonly ResolvedLine[],
+  within: { readonly min: Vec2; readonly max: Vec2 },
+): ResolvedLine[] {
+  const [x0, y0] = within.min
+  const [x1, y1] = within.max
+  const corners: Vec2[] = [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ]
+  const boundary = new ClipBoundary({
+    pieces: [
+      { outer: { elements: corners.map((p, i) => line(p, corners[(i + 1) % 4]!)) }, holes: [] },
+    ],
+  })
+  const out: ResolvedLine[] = []
+  for (const l of lines) {
+    const c = clipLine(l.elements, l.closed, boundary)
+    if (c === 'inside') out.push(l)
+    else if (c !== 'outside')
+      for (const run of c) {
+        // a loop's run may pass its start: its profile in two slices
+        const a = sliceProfile(l.profile, run.from, Math.min(run.to, l.length))
+        const b = run.to > l.length + EPSILON ? sliceProfile(l.profile, 0, run.to - l.length) : null
+        const profile =
+          b === null
+            ? a
+            : {
+                s: [...a.s, ...b.s.map((x) => x + a.s.at(-1)!)],
+                d: [...a.d, ...b.d],
+              }
+        let length = 0
+        for (const e of run.elements) length += elementLength(e)
+        if (length > EPSILON) out.push({ elements: run.elements, closed: false, length, profile })
+      }
+  }
+  return out
 }
 
 /** A line before coincident removal: its elements, whether a loop, and its profile. */

@@ -17,6 +17,7 @@ import {
   type Bounds2,
   type Region,
 } from '../../geometry/2d/model'
+import { clipWithin, grooveWidth, lineChains, lineMaxDepth } from '../../geometry/line'
 import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
@@ -787,10 +788,59 @@ function mapOperation(
   const zDepth = z.depth + (dir === '+z' && z.fromFace ? surplus : 0)
   let out: OperationDTO
   switch (base.kind) {
-    case 'line':
-      // engraved-patterns.md E1: Lines are not mapped to pieces yet (clipping per piece is E4)
-      c.finding(op, `line:${op.id}`, `${op.name} is a Line; split pieces do not carry Lines yet`)
-      return Ok(undefined)
+    case 'line': {
+      // engraved-patterns.md § Split pieces: shifted; one crossing the cell is cut at the cell
+      // grown by the groove's half width (`within`), so the pieces' grooves add up to the source's
+      const cutByLevel =
+        z.capped || (dir === '+z' ? r.zhi > cell.band.zt + EPS : r.zlo < cell.band.zb - EPS)
+      if (cutByLevel) {
+        c.finding(op, `level:${op.id}`, `${op.name} is a Line cut by a split level`)
+        return Ok(undefined)
+      }
+      const gl = g as Extract<OperationGeometry, { kind: 'line' }>
+      const lines = lineChains(gl).lines
+      const lb = chainBounds(lines.flatMap((l) => l.elements))
+      if (lb === undefined) return Ok(undefined)
+      const half = grooveWidth(gl.cutter, lineMaxDepth(gl)) / 2
+      const groove = partBounds(dir, c.W, {
+        min: [lb.min[0] - half, lb.min[1] - half],
+        max: [lb.max[0] + half, lb.max[1] + half],
+      })
+      if (!overlaps(cell.rect, groove)) return Ok(undefined)
+      const vsCut = cell.cut === undefined ? undefined : cutRelation(c.port, cell.cut, groove, 0)
+      if (vsCut === 'miss') return Ok(undefined)
+      const paths = base.paths.map(
+        (p) => ({ ...p, ...shiftedShape(p, delta, c.units) }) as typeof p,
+      )
+      const rect = cell.rect
+      const grown: Rect = {
+        x0: rect.x0 - half,
+        x1: rect.x1 + half,
+        y0: rect.y0 - half,
+        y1: rect.y1 + half,
+      }
+      const lineOn = on ?? base.on
+      if (vsCut === undefined ? inside(partBounds(dir, c.W, lb), grown) : vsCut === 'inside') {
+        out = { ...base, on: lineOn, paths }
+        break
+      }
+      // the grown cell in the source face frame, as patternClip
+      const u0 = grown.x0
+      const u1 = grown.x1
+      const v0 = dir === '+z' ? grown.y0 : c.W - grown.y1
+      const v1 = dir === '+z' ? grown.y1 : c.W - grown.y0
+      if (clipWithin(lines, { min: [u0, v0], max: [u1, v1] }).length === 0) return Ok(undefined)
+      out = {
+        ...base,
+        on: lineOn,
+        paths,
+        within: {
+          min: [L(u0 + delta[0]), L(v0 + delta[1])],
+          max: [L(u1 + delta[0]), L(v1 + delta[1])],
+        },
+      }
+      break
+    }
     case 'facing':
       out = { ...base, on, ...(depthChanged ? { depth: L(zDepth) } : {}) }
       break
@@ -1289,7 +1339,9 @@ export function planPieces(
       b.ops.flatMap((o) =>
         (o.kind === 'pocket' || o.kind === 'profile') && o.shape.kind === 'named'
           ? [o.shape.shapeId]
-          : [],
+          : o.kind === 'line'
+            ? o.paths.map((p) => p.shapeId)
+            : [],
       ),
     )
     for (let k = b.shapes.length - 1; k >= 0; k--)

@@ -1,7 +1,8 @@
 // The live outline of named and rotated shapes (task U1): placed through the renderer's 2D port
 // (`placeShape`), all loops of a region at the top face and the floor, an open path marked open;
 // without the port these shapes draw no outline. Patterns P5: a selected pattern's guide is its
-// area, the cells left out at the border (ghosts) and a ring at the thinnest web.
+// area, the cells left out at the border (ghosts) and a ring at the thinnest web. Engraved
+// patterns: a ring at each place `dfm.lineMerge` names.
 // Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
 // docs/modes/design-v0.3.md#placing-a-shape-on-a-face
 import { describe, expect, it } from 'vitest'
@@ -9,7 +10,13 @@ import { designSetup } from '../../../../core/design/design.fixture'
 import { nodeRegion2d } from '../../../../core/geometry/2d/testing/node-wasm'
 import { designPart } from './model'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
-import { operationOutline, PATTERN_WEB_MARKER, patternGuideLoops } from './outline'
+import {
+  LINE_MERGE_MARKER,
+  lineMergeLoops,
+  operationOutline,
+  PATTERN_WEB_MARKER,
+  patternGuideLoops,
+} from './outline'
 
 const region2d = nodeRegion2d()
 
@@ -117,5 +124,42 @@ describe("a pattern's guide (patterns P5)", () => {
     const [u, v] = facts.web!.at
     for (const p of loops.at(-1)!)
       expect(Math.hypot(p[0]! - u, p[1]! - v)).toBeCloseTo(PATTERN_WEB_MARKER, 6)
+  })
+})
+
+describe('thin walls between grooves (engraved patterns, dfm.lineMerge)', () => {
+  it("a ring on the face at each of the finding's places", async () => {
+    const s = await designSetup({
+      stock: {
+        name: 'Lid',
+        shape: 'block',
+        length: '60',
+        width: '40',
+        thickness: '6',
+        material: { name: 'Birch plywood', class: 'sheetGood' },
+      },
+      services: { region2d },
+    })
+    const out = (await s.run('design.engraving.add', {
+      partId: s.partId,
+      depth: '1',
+      layout: { lattice: 'square', spacing: { pitch: ['20', '1.2'] } },
+    })) as { warnings: { code: string; params: Record<string, unknown> }[] }
+    const merge = out.warnings.find((w) => w.code === 'dfm.lineMerge')!
+    const points = merge.params['points'] as number[]
+    expect(points.length).toBeGreaterThanOrEqual(2)
+    const part = designPart(s.d.doc)!
+    const op = part.loaded!.part.operations.find((o) => o.id === 'engraving1_line')!
+    const loops = lineMergeLoops(op, part.loaded!.stock, part.table!, points)
+    expect(loops).toHaveLength(points.length / 2)
+    loops.forEach((l, k) => {
+      for (const p of l) {
+        expect(Math.hypot(p[0]! - points[2 * k]!, p[1]! - points[2 * k + 1]!)).toBeCloseTo(
+          LINE_MERGE_MARKER,
+          6,
+        )
+        expect(Math.abs(p[2]!)).toBeLessThan(1e-9)
+      }
+    })
   })
 })

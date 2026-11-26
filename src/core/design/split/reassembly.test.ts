@@ -16,6 +16,7 @@ import { designSetup, type DesignSetup } from '../design.fixture'
 import { loadPart, partGeometryInput } from '../load'
 import { toGeometryInput } from '../geometry-input'
 import { regionLoops } from '../../geometry/2d/model'
+import { elementPoint, lineChains } from '../../geometry/line'
 import { resolveShape } from '../shape'
 import { keyItem, tBoneCentres } from './keys'
 import { shapeRegion } from './layout'
@@ -341,5 +342,106 @@ describe('reassembly with a half lap (4d): pieces == source up to the clearance'
     }
     expect(solid).toBeGreaterThan(600)
     expect(band).toBeLessThan(20)
+  }, 60_000)
+})
+
+// Engraved patterns (engraved-patterns.md § Split pieces): a Line with a ramp (an open path and a
+// loop) and an engraved pattern cross the line; each piece carries them cut at its cell grown by
+// the groove's half width, so a point near the grooves at the seam is in exactly one piece.
+describe('reassembly with Lines crossing the split (engraved patterns)', () => {
+  it('on the 600 × 400 panel', async () => {
+    const s = await designSetup({ stock: PANEL_STOCK, services: { region2d } })
+    for (const [name, args] of panelCommands(s.partId)) await s.run(name, args)
+    const shape = async (items: object[]) =>
+      ((await s.run('design.shape.add', { partId: s.partId, items })) as { shapeId: string })
+        .shapeId
+    const diagonal = await shape([
+      {
+        kind: 'path',
+        closed: false,
+        start: ['-30', '-20'],
+        segments: [{ kind: 'line', to: ['30', '20'] }],
+      },
+    ])
+    const ring = await shape([{ kind: 'circle', op: 'add', center: ['0', '0'], diameter: '40' }])
+    const disc = await shape([{ kind: 'circle', op: 'add', center: ['0', '0'], diameter: '60' }])
+    await s.run('design.line.add', {
+      partId: s.partId,
+      paths: [
+        { shapeId: diagonal, center: ['305', '150'] },
+        { shapeId: ring, center: ['305', '300'] },
+      ],
+      depth: { start: '0.2', end: '1.5' },
+    })
+    await s.run('design.engraving.add', {
+      partId: s.partId,
+      motif: { preset: 'waves' },
+      boundary: { shapeId: disc, center: ['305', '80'] },
+    })
+    const r = (await s.run('design.split.set', {
+      partId: s.partId,
+      split: { lines: [PANEL_LINE] },
+    })) as { findings: { params: { rule: string; operationId?: string } }[] }
+    // no finding about the Lines: they are carried
+    expect(r.findings.filter((f) => f.params.operationId?.includes('line'))).toEqual([])
+    const source = evaluate(s, s.partId)
+    const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+    const planned = expectOk(planPieces(loaded, loaded.dto.split!, region2d))
+    expect(planned.pieces).toHaveLength(2)
+    const pieces = planned.pieces.map((plan) => {
+      const piece = Object.values(s.d.doc.parts).find((p) => p.derivedFrom?.index === plan.n)!
+      // both Lines, cut at the cell; the engraving's owned shape stays with its Line
+      for (const id of ['line1', 'engraving1_line'])
+        expect(
+          piece.operations.find((o) => o.id === id),
+          `${plan.n} ${id}`,
+        ).toMatchObject({
+          kind: 'line',
+          within: { min: [{}, {}], max: [{}, {}] },
+        })
+      expect(piece.shapes?.some((x) => x.id === 'engraving1_lines')).toBe(true)
+      const pl = expectOk(loadPart(s.d.doc, piece.id, 'test'))
+      const g = expectOk(toGeometryInput(pl.part, pl.stock, region2d)).operations
+      const og = g[pl.part.operations.findIndex((o) => o.id === 'split1_outline')]
+      const outline = og?.kind === 'profile' ? shapeRegion(og.shape) : undefined
+      expect(outline).toBeDefined()
+      return { off: piece.offset!.map(mm), e: evaluate(s, piece.id), outline: outline! }
+    })
+    // points round the source's grooves within 6 mm of the seam, beside and below them
+    const sg = expectOk(toGeometryInput(loaded.part, loaded.stock, region2d)).operations
+    const random = lcg(17)
+    const points: [number, number, number][] = []
+    for (const g of sg) {
+      if (g.kind !== 'line') continue
+      for (const l of lineChains(g).lines)
+        for (const el of l.elements)
+          for (let k = 0; k < 40; k++) {
+            const u = random()
+            const p = elementPoint(el, u)
+            if (Math.abs(p[0] - 305) > 6) continue
+            const q = elementPoint(el, Math.min(1, u + 1e-3))
+            const t = [q[0] - p[0], q[1] - p[1]] as const
+            const n = Math.hypot(t[0], t[1]) || 1
+            const side = (random() - 0.5) * 2.4
+            const x = p[0] - (t[1] / n) * side
+            if (Math.abs(x - 305) < 0.02) continue
+            points.push([x, p[1] + (t[0] / n) * side, -1.6 * random() - 0.005])
+          }
+    }
+    expect(points.length).toBeGreaterThan(200)
+    let empty = 0
+    for (const p of points) {
+      const want = inside(source, p)
+      const hits = pieces.filter(
+        ({ off, e, outline }) =>
+          regionContains(outline, [p[0] + off[0]!, p[1] + off[1]!]) &&
+          inside(e, [p[0] + off[0]!, p[1] + off[1]!, p[2] + off[2]!]),
+      ).length
+      expect([p, hits]).toEqual([p, want ? 1 : 0])
+      if (!want) empty++
+    }
+    // the sample hit the grooves and the wood beside them
+    expect(empty).toBeGreaterThan(50)
+    expect(empty).toBeLessThan(points.length - 50)
   }, 60_000)
 })

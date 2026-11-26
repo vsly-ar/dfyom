@@ -1,10 +1,12 @@
 // The engraved pattern inspector (engraved-patterns.md E3, E4): name, the read-out ([tiles ·]
-// lines · width · groove length) with the motif's thumbnail and Presets…, then the groups Motif
+// lines · width · groove length · groove width · [crossings]) with the motif's thumbnail and
+// Presets…, then the groups Motif
 // (Preset or Shapes; the shapes as Selects of the part's shapes), Layout (E4: Single or a lattice;
 // a lattice's Gap or pitches and Angle, Face out on polar; Spacing, Origin and Flip behind More),
 // Area (On, Boundary: Whole face or a closed shape with its centre and rotation, Margin), Placement
 // (Fit: Size, Fit to boundary or Clip, single; Clip or Whole tiles, tiles; Width; Centre and
-// Rotation behind More), Depth (From levels: Deepest and Shallowest, or Constant) and Cut (the
+// Rotation behind More), Depth (From levels: Deepest and Shallowest and the depth legend, or
+// Constant) and Cut (the
 // owned Line's tool). The conventions of the S1–S6 inspectors (inspector-layout.md): groups, a More
 // row shown open while it holds a value or a problem, (i) tips on the fields that need one,
 // `stepKind` on every quantity, errors and findings at their field, the rest under Findings.
@@ -13,6 +15,11 @@
 // docs/modes/engraved-patterns.md#implementation-e4, docs/conventions/inspector-layout.md
 import { useMemo, useState } from 'react'
 import { engravingResolved } from '../../../../core/design/engraving/engraving'
+import { legendOf, pathLevelValues } from '../../../../core/design/engraving/legend'
+import { engravingCrossings } from '../../../../core/design/engraving/resolve'
+import { lineCutter } from '../../../../core/design/geometry-input'
+import { lineDeepest } from '../../../../core/design/operation'
+import { grooveWidth } from '../../../../core/geometry/line'
 import { engravingPreset } from '../../../../core/design/engraving/presets'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
@@ -47,6 +54,7 @@ import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
 import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
+import { DepthLegend } from './DepthLegend'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
@@ -155,6 +163,22 @@ export function EngravingInspector({
   const depth = feature['depth'] as Depth
   const levels = typeof depth === 'object' && 'min' in depth
   const lineOp = owned.find((o) => o.id === `${feature.id}_line`)
+  // the read-out's groove width (the owned Line's tool at its deepest) and crossings (§ DFM)
+  const lineModel = part.loaded?.part.operations.find((o) => o.id === `${feature.id}_line`)
+  const widest =
+    lineModel?.kind === 'line'
+      ? grooveWidth(lineCutter(lineModel, part.doc.snapshots), lineDeepest(lineModel.depth))
+      : undefined
+  const { crossings, legend } = useMemo(
+    () =>
+      resolved === undefined
+        ? { crossings: undefined, legend: undefined }
+        : {
+            crossings: engravingCrossings(resolved.lines),
+            legend: legendOf(pathLevelValues(resolved.lines.map((l) => l.levels))),
+          },
+    [resolved],
+  )
 
   const findings = warnings.warnings.filter((w) => ownedIds.has(w.operation))
   const fieldOf = (w: DfmWarning): string | undefined => {
@@ -286,7 +310,7 @@ export function EngravingInspector({
       })),
     }))
     return motifThumb(moved as never, b.max[0] - b.min[0] || 1, b.max[1] - b.min[1] || 1)
-  }, [preset, resolved, facts?.bounds])
+  }, [preset, resolved, facts])
 
   const placementMore =
     center !== undefined ||
@@ -317,6 +341,10 @@ export function EngravingInspector({
                   lengthSource(Math.round(facts.size * 10) / 10, units),
                   lengthSource(Math.round(facts.length), units),
                   layout === undefined ? undefined : facts.tiles,
+                  widest === undefined
+                    ? undefined
+                    : lengthSource(Math.round(widest * 100) / 100, units),
+                  crossings,
                 )}
           </p>
           <EngravingPresetsDialog
@@ -712,6 +740,15 @@ export function EngravingInspector({
                   (min) => ({
                     depth: { min, max: (depth as { max: QuantityDTO }).max.source },
                   }),
+                ),
+                legend === undefined ? null : (
+                  <DepthLegend
+                    key="legend"
+                    min={quantityOf((depth as { min: QuantityDTO }).min)?.canonical ?? 0}
+                    max={quantityOf((depth as { max: QuantityDTO }).max)?.canonical ?? 0}
+                    legend={legend}
+                    units={units}
+                  />
                 ),
               ]
             : quantityField(

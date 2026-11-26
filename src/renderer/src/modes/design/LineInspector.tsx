@@ -2,15 +2,18 @@
 // OperationFields, so the Design inspector and the plan copy share it. Paths (`on`, then per path
 // its shape, a Select of the part's shapes, and its centre on the face), Depth (a segmented choice
 // Constant / Start → end / From SVG levels, then the fields; to Constant keeps the deeper end;
-// levels: Min and Max, Blend behind More), then the tool group. Each commit is one
+// levels: Min and Max, the depth legend, Blend behind More), then the tool group. Each commit is one
 // `design.line.update` (one undo step).
 // Doc: docs/modes/engraved-patterns.md#ui, docs/conventions/inspector-layout.md
+import { lineLegend } from '../../../../core/design/engraving/legend'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
 import { lineMessages } from '../../messages/line'
 import { DEFAULTS } from '../../../../core/design/operation'
 import type { UnitSystem } from '../../../../core/project/document'
+import { useRegion2d } from '../../shell/ShellContext'
 import { Field, InspectorGroup, SegmentedControl, Select } from '../../ui'
+import { DepthLegend } from './DepthLegend'
 import { linePathArgs, quantityAt } from './model'
 import { OnField, ParamField, type OperationFieldsContext } from './OperationFields'
 
@@ -74,6 +77,7 @@ export function LineInspector({
               kind="length"
               icon="depth"
             />
+            <LevelsLegend ctx={ctx} op={op} />
             <InspectorGroup.More fields={[t.blend]} rememberKey="line.depth.more">
               <ParamField
                 ctx={ctx}
@@ -121,6 +125,26 @@ export function LineInspector({
       {tool}
     </>
   )
+}
+
+/** The depth legend of a Line with levels: its paths' levels between Shallowest and Deepest. */
+function LevelsLegend({
+  ctx,
+  op,
+}: {
+  ctx: OperationFieldsContext
+  op: LineDTO
+}): React.JSX.Element | null {
+  const port = useRegion2d()
+  const min = quantityAt(op, 'depth.min')?.canonical
+  const max = quantityAt(op, 'depth.max')?.canonical
+  if (min === undefined || max === undefined) return null
+  const legend = lineLegend(
+    op.paths.map((p) => p.shapeId),
+    ctx.part.dto.shapes ?? [],
+    port,
+  )
+  return <DepthLegend min={min} max={max} legend={legend} units={ctx.units} />
 }
 
 /**

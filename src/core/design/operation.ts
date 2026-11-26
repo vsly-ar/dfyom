@@ -241,6 +241,12 @@ export interface Line extends Common {
   readonly paths: readonly LinePath[]
   readonly depth: LineDepth
   readonly blend: Option<Quantity>
+  /**
+   * On a split piece only (engraved-patterns.md § Split pieces): the piece's cell in its face
+   * frame, grown by the groove's half width; the resolved lines are cut there. Written by the
+   * split, None everywhere else.
+   */
+  readonly within: Option<{ readonly min: Point; readonly max: Point }>
 }
 
 /**
@@ -818,13 +824,22 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
               )
             : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
       const blend = optQ(dto.blend, 'blend')
-      return collect<unknown>([paths, depth, blend]).map(() => ({
+      const w = dto.within
+      const within: AppResult<Option<{ min: Point; max: Point }>> =
+        w === undefined
+          ? Ok(None)
+          : collect([
+              pointFromDTO(w.min, 'within', 'min'),
+              pointFromDTO(w.max, 'within', 'max'),
+            ]).map(([min, max]) => Some({ min: min!, max: max! }))
+      return collect<unknown>([paths, depth, blend, within]).map(() => ({
         ...base,
         kind: 'line',
         on: dto.on,
         paths: paths.unwrap(),
         depth: depth.unwrap(),
         blend: blend.unwrap(),
+        within: within.unwrap(),
       }))
     }
   }
@@ -970,6 +985,14 @@ export function operationToDTO(op: Operation): OperationDTO {
               ? { start: op.depth.start.toDTO(), end: op.depth.end.toDTO() }
               : { min: op.depth.min.toDTO(), max: op.depth.max.toDTO() },
         ...(op.blend.isSome() ? { blend: op.blend.unwrap().toDTO() } : {}),
+        ...(op.within.isSome()
+          ? {
+              within: {
+                min: op.within.unwrap().min.map((x) => x.toDTO()),
+                max: op.within.unwrap().max.map((x) => x.toDTO()),
+              },
+            }
+          : {}),
       } as OperationDTO
   }
 }
