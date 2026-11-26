@@ -1,6 +1,7 @@
 // Field illustrations (viewBox 20, drawn at --icon-xl 28 px): a thin grey drawing of the feature
 // whose measured part is one amber line on the same centreline (butt caps, no arrows).
-// Shapes from the approved design system (FI map). Doc: docs/conventions/ui.md#field
+// Shapes from the approved design system (FI map); the generic dimension glyphs (Q131) put the
+// amber extent between two end ticks beside the object. Doc: docs/conventions/ui.md#field
 import type { ReactNode } from 'react'
 import styles from './FieldIcon.module.css'
 import { STOCK_SIZE_ICONS } from './stockSize'
@@ -36,7 +37,17 @@ const centre = (x: number, y: number) => (
 )
 
 const ICONS = {
+  // Q131 (design review, decided by the user): generic dimension glyphs, reusable for any field
+  // that measures that kind of extent. The grey object, and the amber extent between two short
+  // end ticks beside it (a dimension line without arrows); length and width share one plate.
   length: (
+    <>
+      <rect x="2.5" y="7" width="11" height="9" rx="1.5" />
+      <path data-accent="" d="M2.5 4H13.5M2.5 2.5V5.5M13.5 2.5V5.5" />
+    </>
+  ),
+  // the slotted hole's Overall (H3): end to end along the slot (was `length` until Q131)
+  slotLength: (
     <>
       <rect x="2" y="6" width="16" height="8" rx="4" />
       <path data-accent="" d="M2 10H18" />
@@ -51,8 +62,63 @@ const ICONS = {
   ),
   width: (
     <>
-      <rect x="2" y="6" width="16" height="8" rx="4" />
-      <path data-accent="" d="M10 6V14" />
+      <rect x="2.5" y="7" width="11" height="9" rx="1.5" />
+      <path data-accent="" d="M16.5 7V16M15 7H18M15 16H18" />
+    </>
+  ),
+  // front view: a block standing on the ground line, its height beside it
+  height: (
+    <>
+      <path d="M2 17.5H18M4 17.5V6.5H11V17.5" />
+      <path data-accent="" d="M15 6.5V17.5M13.5 6.5H16.5" />
+    </>
+  ),
+  // a top above the Z0 reference (dashed): from Z0 up to the top, not from the ground
+  topZ: (
+    <>
+      <path d="M5 18V5H11V18" />
+      <path d="M2 12H4.5M11.5 12H18" strokeDasharray="2 1.5" />
+      <path data-accent="" d="M15 12V5M13.5 5H16.5M13.5 12H16.5" />
+    </>
+  ),
+  // down from a surface to a floor (the generic depth, beside the recess, not its wall)
+  depthBelow: (
+    <>
+      <path d="M2 6H6V15H10V6H18M10 15H12.5" />
+      <path data-accent="" d="M15 6V15M13.5 6H16.5M13.5 15H16.5" />
+    </>
+  ),
+  // a plate seen edge-on, its thickness beside it
+  thickness: (
+    <>
+      <rect x="2" y="7" width="11" height="6" rx="0.5" />
+      <path data-accent="" d="M16.5 7V13M15 7H18M15 13H18" />
+    </>
+  ),
+  // front view: a bar lying over a block's edge (dashed under the bar); the part over the block
+  overlap: (
+    <>
+      <rect x="2" y="10" width="11" height="7.5" rx="0.5" />
+      <rect x="6" y="6" width="12" height="4" rx="0.5" />
+      <path d="M13 10V6" strokeDasharray="1 1" />
+      <path data-accent="" d="M6 3.5H13M6 2V5M13 2V5" />
+    </>
+  ),
+  // front view: a bar running past a block's edge; the free part, under the bar
+  overhang: (
+    <>
+      <rect x="2" y="10" width="8" height="7.5" rx="0.5" />
+      <rect x="4" y="6" width="14" height="4" rx="0.5" />
+      <path data-accent="" d="M10 13.5H18M10 12V15M18 12V15" />
+    </>
+  ),
+  // two jaws on a base, the gap between their faces
+  opening: (
+    <>
+      <path d="M2 17.5H18" />
+      <rect x="2" y="5" width="3" height="10" rx="0.5" />
+      <rect x="15" y="5" width="3" height="10" rx="0.5" />
+      <path data-accent="" d="M5 10H15M5 8.5V11.5M15 8.5V11.5" />
     </>
   ),
   depth: (

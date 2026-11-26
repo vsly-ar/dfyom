@@ -337,6 +337,131 @@ describe('Workholding in the setup inspector', () => {
     await expectNoAxeViolations()
   })
 
+  it('shows an open toe clamp in a front view that follows the focused size, renamed in its row (R12, Q131)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', { planId, setupId, items: [clamp] })
+    })
+    await t.user.click(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ }))
+    const fields = within(t.section()).getByRole('group', { name: 'Item Toe clamp 1' })
+    const view = within(fields).getByRole('img', {
+      name: 'Front view of the toe clamp: grip 10 mm on the stock, reach 50 mm past the edge, top 20 mm above Z0.',
+    })
+    // the generic dimension illustrations (Q131), one per size
+    const icon = (label: string) =>
+      within(fields)
+        .getByLabelText(label, { selector: 'input' })
+        .closest('[data-kind]')
+        ?.querySelector('svg[data-icon]')
+        ?.getAttribute('data-icon')
+    expect(icon('Width')).toBe('width')
+    expect(icon('Grip on the stock')).toBe('overlap')
+    expect(icon('Reach past the edge')).toBe('overhang')
+    expect(icon('Top above Z0')).toBe('topZ')
+    // focusing a size makes its part amber; leaving it clears it
+    const part = (p: string) => view.querySelector(`[data-part="${p}"]`)
+    expect(part('grip')).not.toHaveAttribute('data-state')
+    within(fields).getByLabelText('Grip on the stock', { selector: 'input' }).focus()
+    await waitFor(() => expect(part('grip')).toHaveAttribute('data-state', 'active'))
+    within(fields).getByLabelText('Top above Z0', { selector: 'input' }).focus()
+    await waitFor(() => expect(part('top')).toHaveAttribute('data-state', 'active'))
+    expect(part('grip')).not.toHaveAttribute('data-state')
+    // Name is no longer a field of the item: the row's name is renamed in place
+    expect(within(fields).queryByLabelText('Name', { selector: 'input' })).toBeNull()
+    const name = within(t.section()).getByRole('textbox', { name: 'Name of Toe clamp 1' })
+    await t.user.clear(name)
+    await t.user.type(name, 'Front left{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toEqual({
+        planId: t.planId,
+        setupId: t.setupId,
+        items: [{ id: 'wh1', kind: 'toeClamp', name: 'Front left' }],
+      }),
+    )
+    // the row stays the toggle, named by the item and its summary
+    const row = await within(t.section()).findByRole('button', { name: /^Front left front X30/ })
+    expect(row).toHaveAttribute('aria-expanded', 'true')
+    // Escape and an empty name put the name back
+    const renamed = within(t.section()).getByRole('textbox', { name: 'Name of Front left' })
+    await t.user.clear(renamed)
+    await t.user.type(renamed, 'x{Escape}')
+    expect(renamed).toHaveValue('Front left')
+    await t.user.clear(renamed)
+    await t.user.tab()
+    expect(renamed).toHaveValue('Front left')
+    expect(t.callsOf('plan.workholding.set')).toHaveLength(1)
+    await expectNoAxeViolations()
+    await t.user.click(row)
+    expect(within(t.section()).queryByRole('textbox', { name: /^Name of/ })).toBeNull()
+  })
+
+  it('marks the base and surface kinds in the Add menu and the rows (R2, Q131)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', {
+        planId,
+        setupId,
+        items: [
+          { kind: 'base', type: 'fixturePlate' },
+          { kind: 'surface', type: 'vacuum' },
+        ],
+      })
+    })
+    const rowIcon = (name: RegExp) =>
+      within(t.section()).getByRole('button', { name }).querySelector('svg')
+    expect(rowIcon(/^Fixture plate/)).toHaveAttribute('data-icon', 'fixture-plate')
+    expect(rowIcon(/^Vacuum/)).toHaveAttribute('data-icon', 'vacuum')
+    await t.user.click(within(t.section()).getByRole('button', { name: 'Add' }))
+    const icon = async (name: string) =>
+      (await screen.findByRole('menuitem', { name: new RegExp(`^${name}`) }))
+        .querySelector('svg')
+        ?.getAttribute('data-icon')
+    expect(await icon('Spoilboard')).toBe('base')
+    expect(await icon('Fixture plate')).toBe('fixture-plate')
+    expect(await icon('Tape')).toBe('tape')
+    expect(await icon('Vacuum')).toBe('vacuum')
+    expect(await icon('Glue')).toBe('glue')
+  })
+
+  it('arranges with a text-only button and says what it placed until the next edit (R4, R13, Q131)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', { planId, setupId, items: [clamp] })
+    })
+    // the core needs toolpaths to arrange; here it answers with four placed clamps
+    t.bridge.handle('plan.workholding.set', (args) =>
+      (args as { auto?: string }).auto === 'toeClamps'
+        ? {
+            ok: true,
+            value: {
+              items: [1, 2, 3, 4].map((n) => ({
+                id: `wh${n}`,
+                name: `Toe clamp ${n}`,
+                kind: 'toeClamp',
+              })),
+              clearanceHeight: '27 mm',
+              findings: [],
+              movesUnchecked: [],
+            },
+            revision: 0,
+          }
+        : { ok: true, value: { items: [] }, revision: 0 },
+    )
+    const arrange = within(t.section()).getByRole('button', { name: 'Arrange automatically' })
+    expect(arrange.querySelector('svg')).toBeNull()
+    await t.user.click(arrange)
+    const line = await within(t.section()).findByRole('status', { name: '' })
+    expect(line).toHaveTextContent('4 toe clamps placed.')
+    expect(line).toHaveAttribute('data-arrange-result')
+    await expectNoAxeViolations()
+    // the next edit clears it
+    await t.user.click(within(t.section()).getByRole('button', { name: /^Toe clamp 1/ }))
+    const top = within(t.section()).getByLabelText('Top above Z0', { selector: 'input' })
+    await t.user.clear(top)
+    await t.user.type(top, '30{Enter}')
+    await waitFor(() => expect(t.section().querySelector('[data-arrange-result]')).toBeNull())
+  })
+
   it('drags a toe clamp along its edge in the plan scene: snapped, one set on release (X2-6)', async () => {
     const t = await renderInspector(async (s, planId) => {
       const setupId = s.plan(planId).setups[0]!.id

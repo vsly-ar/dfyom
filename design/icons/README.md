@@ -62,6 +62,14 @@ Drawn to the rules above for [ui.md § Icons (workholding, offset, deviation)](.
 
 Dogfood DF11 ([ui.md § Stock dialog](../../docs/conventions/ui.md#stock-dialog-df11df13)): the Stock dialog showed the slot's length, width and depth drawings for the stock's Length, Width and Thickness. `stock-length`, `stock-width` and `stock-thickness` are field illustrations (viewBox 20, 1 px grey, one amber measured line) of one oblique block with its front bottom edge, receding bottom edge and front right vertical edge highlighted; the data is in [`ui/icons/field/stockSize.ts`](../../src/renderer/src/ui/icons/field/stockSize.ts), which `FieldIcon` and `render.mjs` both read. Review sheet: `renders/df11-stock-size-{light,dark}.png` (28 px beside the label at rest and focused, then 16 / 20 / 28 / 32 px, then the slot drawing replaced).
 
+## Q131 generic dimension glyphs and workholding kind marks
+
+Design review R2 and R12, decided by the user 2026-11-26 (Q131, D75, TG #396: field icons "more or less generic so they can be reused somewhere else too, but different from existing ones … I don't like that 'width' icon everywhere illustrates a slot").
+
+- **Field illustrations** (`src/renderer/src/ui/icons/field/FieldIcon.tsx`, 20 viewBox, drawn at 28 px): `length`, `width`, `height`, `topZ`, `depthBelow`, `thickness`, `overlap`, `overhang`, `opening`; `diameter` kept. A plain grey object and the amber extent between two short end ticks beside it, a dimension line without arrows. The old slot drawing is `slotLength`, kept for the slotted hole's Overall. Rule: [ui.md § Field](../../docs/conventions/ui.md#field).
+- **Workholding kind marks** (`iconSet.ts`, 16 px): `fixture-plate` (two bolt-hole dots), `tape` (a strip under the stock), `vacuum` (three holes), `glue` (a drop) on the shared `base` / `surface-hold` drawing; the spoilboard keeps `base`. Vise, screw, block and toe clamp unchanged (R1, R3).
+- The review sheet (16 px, 28 px, 2×, light and dark) was rendered outside the repo from these components; the app renders are `e2e/workholding.e2e.ts` (`q131-open-clamp`, `q131-add-menu`, `w6-arrange`).
+
 ## Provenance and licence
 
 - `b21/*` and every icon in `src/renderer/src/ui/icons/iconSet.ts` (`src`: `approved` = shapes approved with the design system or earlier, `b22` = drawn for this proposal, `redraw` = drawn for B22-1 b in place of a former Lucide glyph): own drawings for DFYOM, GPL-3.0-or-later. The `redraw` icons were drawn from scratch on the 16 px grid to the rules above, not traced or copied from Lucide or any other set.

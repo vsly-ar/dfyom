@@ -309,6 +309,10 @@ test('arrange automatically (W6): four toe clamps in the waste, clear of the too
   await arrange.click()
   await expect(section).toContainText('4 items')
   await expect(section.getByRole('alert')).toHaveCount(0)
+  // R4, R13 (Q131): a text-only button, and a line that says what it placed
+  await expect(arrange.locator('svg')).toHaveCount(0)
+  const result = section.locator('[data-arrange-result]')
+  await expect(result).toContainText('4 toe clamps placed')
   const rows = [
     [1, 'left Y25 grip 10 top Z25'],
     [2, 'left Y75 grip 10 top Z25'],
@@ -326,9 +330,32 @@ test('arrange automatically (W6): four toe clamps in the waste, clear of the too
   await selectTop()
   const checks = inspector.getByRole('region', { name: 'Setup checks' })
   await expect(checks).not.toContainText('hits Toe clamp')
+  // the facing goes round the clamps in the waste: the line says so (R13)
+  await expect(result).toHaveText('4 toe clamps placed; Facing 1 leaves the area under them uncut.')
   await page.getByRole('button', { name: 'Fit' }).click()
-  await arrange.scrollIntoViewIfNeeded()
+  await result.scrollIntoViewIfNeeded()
   await render(page, 'w6-arrange')
+
+  // R2 (Q131): the Add menu's base and surface rows carry their kind marks
+  await section.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(
+    page.getByRole('menuitem', { name: /^Fixture plate/ }).locator('svg'),
+  ).toHaveAttribute('data-icon', 'fixture-plate')
+  await render(page, 'q131-add-menu')
+  await page.keyboard.press('Escape')
+
+  // R12 (Q131): the open clamp's front view follows the focused size; the name is in the row
+  await section.getByRole('button', { name: /^Toe clamp 1/ }).click()
+  const item = section.getByRole('group', { name: 'Item Toe clamp 1' })
+  const view = item.getByRole('img', { name: /^Front view of the toe clamp: grip 10 mm/ })
+  await expect(view).toBeVisible()
+  await item.getByLabel('Grip on the stock', { exact: true }).focus()
+  await expect(view.locator('[data-part="grip"]')).toHaveAttribute('data-state', 'active')
+  await expect(section.getByRole('textbox', { name: 'Name of Toe clamp 1' })).toHaveValue(
+    'Toe clamp 1',
+  )
+  await section.getByRole('textbox', { name: 'Name of Toe clamp 1' }).scrollIntoViewIfNeeded()
+  await render(page, 'q131-open-clamp')
   if (RENDERS) {
     // design review R8: an operation selected, the clamps faint behind its toolpath
     await navigator.getByRole('button', { name: /^Pocket 1/ }).click({ position: { x: 24, y: 12 } })

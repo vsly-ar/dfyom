@@ -21,6 +21,26 @@ export const WORKHOLDING_TYPE_ICON: Record<WorkholdingType, IconName> = {
   surface: 'surface-hold',
 }
 
+/**
+ * A device's row icon: its type's, a base or surface with its kind mark (design review R2, Q131:
+ * fixture plate, tape, vacuum, glue; a spoilboard the plain base).
+ */
+export function workholdingIcon(v: {
+  readonly type: WorkholdingType
+  readonly baseType?: string | undefined
+  readonly surfaceType?: string | undefined
+}): IconName {
+  if (v.type === 'base' && v.baseType === 'fixturePlate') return 'fixture-plate'
+  if (v.type === 'surface' && v.surfaceType !== undefined)
+    return SURFACE_ICON[v.surfaceType] ?? 'surface-hold'
+  return WORKHOLDING_TYPE_ICON[v.type]
+}
+const SURFACE_ICON: Partial<Record<string, IconName>> = {
+  tape: 'tape',
+  vacuum: 'vacuum',
+  glue: 'glue',
+}
+
 /** A `library.workholding.list` / `.get` row: the stored DTO plus its output-only flags. */
 export type WorkholdingRow = LibraryItemDTO & {
   readonly kind: 'workholding'

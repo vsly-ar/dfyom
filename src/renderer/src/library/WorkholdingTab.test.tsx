@@ -105,6 +105,17 @@ describe('Library window: Workholding tab (WL3)', () => {
     expect(within(editor()).getByRole('img', { name: 'Device drawing' })).toBeInTheDocument()
     expect(input(editor(), 'Strap width')).toHaveValue('25')
     expect(input(editor(), 'Grip to')).toHaveValue('20')
+    // Q131: the generic dimension illustrations, not the slot drawings
+    const icon = (label: string) =>
+      input(editor(), label).closest('[data-kind]')?.querySelector('svg')?.getAttribute('data-icon')
+    expect(icon('Strap width')).toBe('width')
+    expect(icon('Strap length')).toBe('length')
+    expect(icon('Grip from')).toBe('overlap')
+    // R2: the base and surface rows carry their kind mark
+    const rowIcon = (name: RegExp) => row(name).querySelector('svg')?.getAttribute('data-icon')
+    expect(rowIcon(/^Fixture plate/)).toBe('fixture-plate')
+    expect(rowIcon(/^Spoilboard/)).toBe('base')
+    expect(rowIcon(/^Double-sided tape/)).toBe('tape')
     await expectNoAxeViolations()
   })
 
@@ -186,6 +197,10 @@ describe('Library window: Workholding tab (WL3)', () => {
     expect(range).toHaveTextContent('None')
     await user.click(range)
     const opening = input(editor(), 'Max opening')
+    expect(opening.closest('[data-kind]')?.querySelector('svg')).toHaveAttribute(
+      'data-icon',
+      'opening',
+    )
     await user.type(opening, '100{Enter}')
     await user.click(within(editor()).getByRole('checkbox', { name: 'Soft jaws' }))
     await user.click(within(editor()).getByRole('button', { name: 'Save' }))
