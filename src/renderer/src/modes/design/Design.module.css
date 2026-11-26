@@ -1278,6 +1278,13 @@
   border-color: var(--accent-border);
 }
 
+/* P10: a polar preview's ring guides, quiet construction circles behind the cells */
+.presetRing {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 0.75;
+}
+
 .presetPreview {
   display: block;
   width: 100%;
@@ -1788,6 +1795,26 @@
 
 .splitSection > button {
   justify-self: start;
+}
+
+/* P10: Remove split after the split's groups, untitled with a following group's rule (as the Run
+   inspector's .resetSection); the quiet danger button at its natural width */
+.splitRemove {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+}
+
+.splitRemove::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--inspector-bleed, var(--space-3)));
+  left: calc(-1 * var(--inspector-bleed, var(--space-3)));
+  border-top: 1px solid var(--border);
+  pointer-events: none;
 }
 
 .splitGroup {

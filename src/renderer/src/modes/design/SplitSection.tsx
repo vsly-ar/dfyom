@@ -9,8 +9,9 @@
 // its blank and opens a menu to change it, "Use library stocks" and "Split to fit…". Since 4e a
 // line can run along an open named shape: "Add curved line" (a new shape and the line, one undo
 // step), "Line along shape", the row's shape picker and "Edit shape"; Top draws the pieces' shapes.
-// DF110 S4: the editor is three groups – Split (preview, pieces, lines and levels, Remove), Joints
-// (an accordion, open) and Blanks (margin, library stocks, Split to fit…; an accordion, closed).
+// DF110 S4: the editor is three groups – Split (preview, pieces, lines and levels), Joints (an
+// accordion, open) and Blanks (margin, library stocks, Split to fit…; an accordion, closed) –
+// then, P10, Remove split last (untitled, the rule above it).
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design,
 // docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4e,
 // docs/conventions/inspector-layout.md#s4-implementation-notes
@@ -499,16 +500,6 @@ export function SplitSection({
             )}
           </div>
         </div>
-        <div className={styles['addRow']}>
-          <Button
-            size="sm"
-            variant="danger"
-            icon={<Icon name="delete" />}
-            onClick={() => void send(null)}
-          >
-            {t.remove}
-          </Button>
-        </div>
         {error ? <ErrorMessage error={error} /> : null}
         {confirmDialog}
       </InspectorGroup>
@@ -568,6 +559,18 @@ export function SplitSection({
         </Field>
         <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
       </InspectorGroup>
+      {/* P10: the destructive action last, after Joints and Blanks; untitled (the button names
+        it) with the rule of a following group, as the Run inspector's Reset (DF110) */}
+      <section className={styles['splitRemove']} aria-label={t.remove}>
+        <Button
+          size="sm"
+          variant="danger"
+          icon={<Icon name="delete" />}
+          onClick={() => void send(null)}
+        >
+          {t.remove}
+        </Button>
+      </section>
     </>
   )
 }

@@ -5,8 +5,10 @@
 // the window is about 2.4 pitches wide, so a cell is a readable few pixels and the arrangement
 // shows, the cells at its edges cut by the box. P5: a flipped preset (Triangles) turns every other
 // cell and nests them about half a cell apart. DF107: drawn at any size (the Presets dialog's
-// previews), and a polar preset as rings of cells about the window's centre.
+// previews), and a polar preset as rings of cells about the window's centre (P10: the layout's
+// own `polarNodes`).
 // Doc: docs/conventions/ui.md#pattern-inspector-p1, docs/modes/patterns.md#presets-dialog-and-more-presets-df107
+import { polarNodes } from '../../../../core/design/pattern/layout'
 import type { PatternPreset } from '../../../../core/design/pattern/presets'
 
 type Vec = [number, number]
@@ -99,7 +101,7 @@ export function presetThumb(preset: PatternPreset, box: Box = THUMB): Vec[][] {
   const w = Math.max(...xs) - Math.min(...xs)
   const h = Math.max(...ys) - Math.min(...ys)
   const gap = num(spacing.gap)
-  if (lattice === 'polar') return polarThumb(pts, Math.max(w, h) + gap, box)
+  if (lattice === 'polar') return polarThumb(pts, gap, box)
   // P5: flipped neighbours nest (about half a cell apart, as triangles), every other cell turned
   const flip = alternate === 'flip'
   const px = flip ? w / 2 + gap : w + gap
@@ -123,26 +125,53 @@ export function presetThumb(preset: PatternPreset, box: Box = THUMB): Vec[][] {
   return out
 }
 
-/**
- * A polar lattice: one cell at the centre, then rings `pitch` apart, each with as many cells as
- * fit at the pitch along it (the layout's rule, P2), scaled so 1.4 rings fill half the height
- * (a wider box: as many more as the row lattices show).
- */
-function polarThumb(pts: readonly Vec[], pitch: number, box: Box): Vec[][] {
-  const rings = 1.4 * Math.max(1, box.w / THUMB.w / 2)
+/** A polar preview's ring guide (px): a circle through one ring's cell centres. */
+export interface RingGuide {
+  readonly cx: number
+  readonly cy: number
+  readonly r: number
+}
+
+/** The polar window: the pitch (mm), the scale (px/mm) and the half box (mm). */
+function polarWindow(pts: readonly Vec[], gap: number, box: Box) {
+  // the layout's polar pitch: the cell's circumscribed diameter plus the gap (P2)
+  const pitch = 2 * Math.max(...pts.map(([x, y]) => Math.hypot(x, y))) + gap
+  // `rings` rings fill half the height: the centre and a few rings, cells a readable size
+  const rings = 1.4 * Math.max(1, (1.15 * box.w) / THUMB.w / 2)
   const scale = box.h / (2 * rings * pitch)
-  const [cx, cy] = [box.w / 2, box.h / 2]
-  const reach = Math.hypot(box.w, box.h) / 2 / scale + pitch
+  return { pitch, scale, hw: box.w / 2 / scale, hh: box.h / 2 / scale }
+}
+
+/**
+ * A polar lattice: the layout's own rings (`polarNodes`, P2: ring k at k · pitch holds
+ * ⌊π / asin(pitch / 2r)⌋ cells), about the window's centre, so the preview cannot drift from the
+ * pattern (hardening P10: the former 6k-per-ring rule drew a plain hex grid).
+ */
+function polarThumb(pts: readonly Vec[], gap: number, box: Box): Vec[][] {
+  const { pitch, scale, hw, hh } = polarWindow(pts, gap, box)
   const out: Vec[][] = []
-  for (let ring = 0; ring * pitch < reach; ring++) {
-    const r = ring * pitch
-    const n = ring === 0 ? 1 : Math.max(1, Math.floor((2 * Math.PI * r) / pitch))
-    for (let k = 0; k < n; k++) {
-      const a = (2 * Math.PI * k) / n
-      const [ox, oy] = [cx + r * Math.cos(a) * scale, cy + r * Math.sin(a) * scale]
-      const cell = pts.map(([x, y]) => [ox + x * scale, oy + y * scale] as Vec)
-      if (cell.some(([x, y]) => x >= 0 && x <= box.w && y >= 0 && y <= box.h)) out.push(cell)
-    }
+  for (const { at } of polarNodes([0, 0], [-hw, -hh], [hw, hh], pitch, pitch, 0, false)) {
+    const cell = pts.map(([x, y]) => [(at[0] + x + hw) * scale, (at[1] + y + hh) * scale] as Vec)
+    if (cell.some(([x, y]) => x >= 0 && x <= box.w && y >= 0 && y <= box.h)) out.push(cell)
   }
+  return out
+}
+
+/**
+ * P10: a polar preset's ring guides, one circle per ring through its cells' centres (ring k at
+ * k · pitch), so the rings read about the centre even where close-packed inner rings look like a
+ * hex grid; none for the row lattices.
+ */
+export function presetRings(preset: PatternPreset, box: Box = THUMB): RingGuide[] {
+  if (preset.args.lattice !== 'polar') return []
+  const { pitch, scale, hw, hh } = polarWindow(
+    cellPoints(preset.args.cell),
+    num(preset.args.spacing.gap),
+    box,
+  )
+  const reach = Math.hypot(hw, hh)
+  const out: RingGuide[] = []
+  for (let k = 1; k * pitch < reach; k++)
+    out.push({ cx: box.w / 2, cy: box.h / 2, r: k * pitch * scale })
   return out
 }

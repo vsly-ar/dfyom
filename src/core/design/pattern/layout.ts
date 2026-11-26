@@ -487,7 +487,7 @@ function stackedArea(
 }
 
 /** A lattice node and whether its cell is flipped (P5, `alternate: flip`). */
-interface LatticeNode {
+export interface LatticeNode {
   readonly at: Vec2
   readonly flip: boolean
 }
@@ -536,9 +536,10 @@ function rowNodes(
 /**
  * Polar nodes (P2): ring 0 is the origin, ring k at radius k·b holds ⌊π / asin(a / 2r)⌋ cells
  * (neighbours a chord of at least `a` apart), each ring starting at `angle`; rings out to the
- * area's farthest corner. With `flip` (P5) every odd cell of a ring is flipped.
+ * area's farthest corner. With `flip` (P5) every odd cell of a ring is flipped. Exported for the
+ * Presets dialog's polar previews (hardening P10), so they draw the layout's own rings.
  */
-function polarNodes(
+export function polarNodes(
   origin: Vec2,
   lo: Vec2,
   hi: Vec2,

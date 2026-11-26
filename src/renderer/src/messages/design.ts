@@ -108,6 +108,8 @@ export const designMessages = {
       /** DF107: the button that opens the Presets dialog. */
       presetsButton: 'Presets…',
       presetsTitle: 'Pattern presets',
+      /** The dialog's footer button (P10): closes without a change, as Escape. */
+      presetsClose: 'Close',
       presetsDescription:
         'Sets the cell, lattice, gap and Flip; the area, depth and tools stay. Arrow keys move, Enter applies.',
       presetCurrent: 'Current',
