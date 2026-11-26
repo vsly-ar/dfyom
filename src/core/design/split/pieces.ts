@@ -20,7 +20,7 @@ import {
 import { isLoopChamfer, type DfmWarning, type OperationGeometry } from '../../geometry/model'
 import { toGeometryInput } from '../geometry-input'
 import type { LoadedPart } from '../load'
-import { fieldContext, lineDepths, type Operation } from '../operation'
+import { fieldContext, lineDeepest, type Operation } from '../operation'
 import type { OperationDTO, OperationShapeDTO, PartDTO, SplitDTO } from '../part.dto'
 import { orientedShape, shapeDefinition, shapeOrientation } from '../placement'
 import type { ShapeDefinition } from '../shape'
@@ -365,8 +365,7 @@ function zRange(c: Ctx, op: Operation, g: OperationGeometry, bevel = false): ZRa
       break
     }
     case 'line': {
-      const d = lineDepths(op.depth)
-      depth = Math.max(d.start, d.end)
+      depth = lineDeepest(op.depth)
       break
     }
   }

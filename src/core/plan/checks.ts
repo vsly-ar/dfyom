@@ -5,7 +5,7 @@
  * Pure: inputs are models, outputs are issue lists; values in canonical mm, °, rpm, mm/min.
  */
 import { z } from 'zod'
-import { effectiveTolerance, lineDepths, type Operation, type Part } from '../design/operation'
+import { effectiveTolerance, lineDeepest, type Operation, type Part } from '../design/operation'
 import { SurfaceTable } from '../design/surfaces'
 import type { Machine } from '../library/machine'
 import type { Stock } from '../library/stock'
@@ -416,8 +416,7 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
       return belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
     }
     case 'line': {
-      const d = lineDepths(op.depth)
-      return belowTop(table, op.on) + Math.max(d.start, d.end)
+      return belowTop(table, op.on) + lineDeepest(op.depth)
     }
   }
 }

@@ -358,12 +358,41 @@ export function operationIssues(
       const depths: [string, Quantity][] =
         op.depth.kind === 'constant'
           ? [['depth', op.depth.depth]]
-          : [
-              ['depth.start', op.depth.start],
-              ['depth.end', op.depth.end],
-            ]
+          : op.depth.kind === 'ramp'
+            ? [
+                ['depth.start', op.depth.start],
+                ['depth.end', op.depth.end],
+              ]
+            : [
+                ['depth.min', op.depth.min],
+                ['depth.max', op.depth.max],
+              ]
       for (const [path, q] of depths)
         if (c.positive(q, path) && on !== undefined) checkAboveBottom(c, path, on, q, T.exact)
+      // E2: level 0 is `min`, level 1 `max`; a blend is a length ≥ 0
+      if (op.depth.kind === 'levels')
+        c.check(
+          op.depth.min.exact.compare(op.depth.max.exact) <= 0,
+          'depth.min',
+          'minAboveMax',
+          'must not be deeper than max',
+          { min: op.depth.min.canonical, max: op.depth.max.canonical },
+        )
+      if (op.blend.isSome())
+        c.check(
+          op.blend.unwrap().exact.compare(ZERO) >= 0,
+          'blend',
+          'nonNegative',
+          'must be 0 or more',
+          {
+            actual: op.blend.unwrap().canonical,
+          },
+        )
+      for (const [i, p] of op.paths.entries())
+        if (p.scale !== undefined)
+          c.check(p.scale > 0, `paths.${i}.scale`, 'positive', 'must be greater than 0', {
+            actual: p.scale,
+          })
       break
     }
     case 'chamfer': {

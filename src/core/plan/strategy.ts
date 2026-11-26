@@ -13,7 +13,7 @@ import {
   fieldContext,
   isGeneralShape,
   isLoopChamferOp,
-  lineDepths,
+  lineDeepest,
   type Operation,
 } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
@@ -360,8 +360,7 @@ export function resolveStrategy(
         rampAngle: mm(s.rampAngle).unwrapOr(LINE_RAMP_ANGLE),
         cutDepth: c.ops.reduce((m, op) => {
           if (op.kind !== 'line') return m
-          const d = lineDepths(op.depth)
-          return Math.max(m, d.start, d.end)
+          return Math.max(m, lineDeepest(op.depth))
         }, 0),
       }
     case 'chamfer': {

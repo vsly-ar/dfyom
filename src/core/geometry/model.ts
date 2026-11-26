@@ -242,17 +242,34 @@ export type LineCutter =
   | { readonly kind: 'flat'; readonly diameter: number }
 
 /**
- * A Line (engraved-patterns.md E1): every loop and open path of `paths` (placed general shapes in
- * the face frame) is a line cut on its centreline from the `on` face at `onZ`, `depth.start` deep at
- * its start and `depth.end` at its end, linear by arc length. `cutter` is the tool the groove
- * takes (the operation's tool, else the default 60° V-bit).
+ * The levels (0..1) of one Line path (engraved-patterns.md E2, § Levels on shapes): an open
+ * path's level profile by arc-length fraction `u` (0 = start, 1 = end, ascending, linear between),
+ * or one level for every loop of a closed shape.
+ */
+export type LinePathLevels =
+  | { readonly kind: 'path'; readonly u: readonly number[]; readonly level: readonly number[] }
+  | { readonly kind: 'loops'; readonly level: number }
+
+/**
+ * A Line (engraved-patterns.md E1, E2): every loop and open path of `paths` (placed general
+ * shapes in the face frame) is a line cut on its centreline from the `on` face at `onZ`. Its
+ * depth is `depth.start` at its start and `depth.end` at its end, linear by arc length; or, with
+ * `{ min, max }` (E2), from the paths' `levels` (level 0 → `min`, 1 → `max`, a path without levels
+ * is level 1): open lines whose ends meet are chained and a level step is blended over ±`blend`.
+ * `cutter` is the tool the groove takes (the operation's tool, else the default 60° V-bit).
  */
 interface LineFields {
   readonly kind: 'line'
   readonly id: string
   readonly onZ: number
   readonly paths: readonly Shape[]
-  readonly depth: { readonly start: number; readonly end: number }
+  readonly depth:
+    | { readonly start: number; readonly end: number }
+    | { readonly min: number; readonly max: number }
+  /** E2, with `{ min, max }`: one entry per path (null: no levels, level 1). */
+  readonly levels?: readonly (LinePathLevels | null)[]
+  /** E2, with `{ min, max }`: a level step is blended over ±`blend` mm (default 1). */
+  readonly blend?: number
   readonly cutter: LineCutter
 }
 

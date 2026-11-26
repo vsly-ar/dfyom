@@ -1,15 +1,69 @@
 // Engraved patterns E1 in the built app: Add → Operations → Line adds a Line on a new wave shape
 // (the part has no shape yet), its inspector switches the depth to Start → end, and the Line is
-// planned as its own operation in Plan. Windows stay hidden (app.fixture.ts).
-// Docs: docs/modes/engraved-patterns.md#implementation-e1, docs/conventions/ui.md
-import type { Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+// planned as its own operation in Plan. E2: an SVG whose line fades by data-level imported through
+// the stubbed "Import SVG…" dialog, the Line set to From SVG levels, and the program exported from
+// Plan cutting at many depths between Shallowest and Deepest. Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/engraved-patterns.md#implementation-e1, #implementation-e2, docs/conventions/ui.md
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { Locator, Page } from '@playwright/test'
+import type { PreloadApi } from '../src/shared/preload-api'
+import { closeDialog, expect, openPartSetup, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
   await field.fill(value)
   await field.press('Enter')
   await field.blur()
+}
+
+const V_BIT = {
+  name: 'V-bit 60 × 6',
+  type: 'chamferMill',
+  diameter: '6',
+  angle: '60',
+  fluteLength: '6',
+  overallLength: '50',
+  fluteCount: '2',
+  toolMaterial: 'carbide',
+  presets: [
+    {
+      name: 'Plywood',
+      materialClass: 'sheetGood',
+      spindleSpeed: '18000',
+      feedRate: '1500',
+      plungeRate: '400',
+      stepdown: '0.5',
+    },
+  ],
+}
+
+/** New project "Lines" with the default stock and its part. */
+async function newProject(page: Page): Promise<void> {
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Lines')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+}
+
+/** Plan mode with a new machine "Router" and a plan. */
+async function planWithMachine(page: Page): Promise<void> {
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const start = page.getByRole('dialog', { name: 'Plan the part' })
+  await start.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
+  await setField(newMachine, 'Travel Z', '100')
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
+  await start.getByRole('button', { name: 'Create plan' }).click()
+  await expect(start).toBeHidden()
 }
 
 test('line: add a Line in Design, see it in Plan', async ({ dfyom }) => {
@@ -19,14 +73,7 @@ test('line: add a Line in Design, see it in Plan', async ({ dfyom }) => {
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
 
-  await navigator.getByRole('button', { name: 'New project' }).click()
-  const dialog = page.getByRole('dialog', { name: 'New project' })
-  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Lines')
-  await dialog.getByRole('button', { name: 'Create project' }).click()
-  await page
-    .getByRole('dialog', { name: 'Stock' })
-    .getByRole('button', { name: 'Create part' })
-    .click()
+  await newProject(page)
 
   // ── Add → Operations → Line ────────────────────────────────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()
@@ -47,21 +94,92 @@ test('line: add a Line in Design, see it in Plan', async ({ dfyom }) => {
   ).toHaveValue(/^1\.2/)
 
   // ── Plan: the Line is a plan operation of its own ──────────────────────────────────────────
-  await page.keyboard.press('ControlOrMeta+2')
-  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
-  const start = page.getByRole('dialog', { name: 'Plan the part' })
-  await start.getByRole('button', { name: 'New machine…' }).click()
-  const newMachine = page.getByRole('dialog', { name: 'New machine' })
-  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
-  await setField(newMachine, 'Travel Z', '100')
-  await newMachine.getByRole('button', { name: 'Add machine' }).click()
-  await expect(newMachine).toBeHidden()
-  await start.getByRole('button', { name: 'Create plan' }).click()
-  await expect(start).toBeHidden()
+  await planWithMachine(page)
   const planned = navigator
     .getByRole('list', { name: 'Setups in machining order' })
     .getByRole('list', { name: 'Plan operations in machining order' })
     .getByRole('button', { name: /^Line 1/ })
   await expect(planned).toHaveCount(1)
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('line: depth from SVG levels, varying depth in the Plan program (E2)', async ({ dfyom }) => {
+  test.setTimeout(150_000)
+  const svg = join(dfyom.dataDir, 'fade.svg')
+  writeFileSync(
+    svg,
+    '<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="20mm" viewBox="0 0 60 20">' +
+      '<path id="fade" d="M 0 10 C 15 0, 45 20, 60 10" stroke="#000" data-level="0.2 1 0.2"/></svg>',
+  )
+  await dfyom.app.evaluate(
+    ({ dialog }, f) => {
+      dialog.showOpenDialog = (() =>
+        Promise.resolve({ canceled: false, filePaths: [f.svg] })) as typeof dialog.showOpenDialog
+      dialog.showSaveDialog = ((...args: unknown[]) => {
+        const o = (args.at(-1) ?? {}) as { defaultPath?: string }
+        const name = (o.defaultPath ?? 'out.nc').split(/[\\/]/).at(-1)!
+        return Promise.resolve({ canceled: false, filePath: `${f.dir}/${name}` })
+      }) as typeof dialog.showSaveDialog
+    },
+    { svg, dir: dfyom.dataDir },
+  )
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  // a 60° V-bit with plywood feeds in the library (the plan picks it for the Line)
+  const added = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: V_BIT }] as const,
+  )
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+  await newProject(page)
+
+  // ── Import SVG…: one open path with levels ─────────────────────────────────────────────────
+  const shapes = await openPartSetup(page, 'Shapes')
+  await shapes.getByRole('button', { name: 'Import SVG…' }).click()
+  await page
+    .getByRole('dialog', { name: 'Import SVG' })
+    .getByRole('button', { name: 'Import' })
+    .click()
+  const report = page.getByRole('dialog', { name: 'Imported fade' })
+  await expect(report).toBeVisible({ timeout: 30_000 })
+  await report.getByRole('button', { name: 'Close' }).first().click()
+  await closeDialog(shapes)
+
+  // ── a Line on it (the first shape), From SVG levels 0.2–1 mm ─────────────────────────────
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Operations' })
+    .getByRole('menuitem', { name: 'Line' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await inspector.getByRole('radio', { name: 'From SVG levels' }).click()
+  const field = (label: string) =>
+    inspector.getByLabel(label, { exact: true }).and(inspector.locator('input'))
+  // the constant depth becomes the deepest, the shallowest its default
+  await expect(field('Deepest')).toHaveValue(/^0\.5/)
+  await expect(field('Shallowest')).toHaveValue(/^0\.2/)
+  await setField(inspector, 'Deepest', '1')
+  await expect(field('Deepest')).toHaveValue(/^1/)
+
+  // ── Plan: toolpaths and the program at many depths between 0.2 and 1 mm ──────────────────
+  await planWithMachine(page)
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await navigator
+    .getByRole('button', { name: /^Export (.* )?gCode…$/ })
+    .first()
+    .click()
+  const done = page.getByRole('dialog', { name: 'gCode exported' })
+  await expect(done).toBeVisible({ timeout: 30_000 })
+  const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
+  const zs = [
+    ...readFileSync(join(dfyom.dataDir, file), 'utf8').matchAll(/Z(-\d+(?:\.\d+)?)/g),
+  ].map((m) => Number(m[1]))
+  expect(Math.min(...zs)).toBeCloseTo(-1, 3)
+  expect(zs.some((z) => z > -0.4)).toBe(true)
+  expect(new Set(zs.map((z) => z.toFixed(2))).size).toBeGreaterThan(5)
   expect(dfyom.rendererErrors).toEqual([])
 })

@@ -211,19 +211,29 @@ export const ChamferDtoSchema = z.object({
 /** The most placed shapes one Line takes (docs/modes/engraved-patterns.md#line-operation). */
 export const LINE_PATHS_MAX = 50
 
-/** A named shape a Line places, as a pocket's `named` shape. */
-export const LinePathDtoSchema = OperationShapeDtoSchema.options[2]
+/**
+ * A named shape a Line places, as a pocket's `named` shape; E2: `scale` (absent = 1) about its
+ * anchor point.
+ */
+export const LinePathDtoSchema = OperationShapeDtoSchema.options[2].extend({
+  scale: z.number().positive().max(1000).optional(),
+})
 
 /**
- * A Line's depth below `on` (E1): one length (constant) or `{ start, end }`, linear along each line
- * by arc length. Levels (`{ min, max }`) come with E2.
+ * A Line's depth below `on`: one length (constant), `{ start, end }` (linear along each line by
+ * arc length) or, E2, `{ min, max }` (from the paths' levels: level 0 → `min`, 1 → `max`).
  */
-export const LineDepthDtoSchema = z.union([length(), z.object({ start: length(), end: length() })])
+export const LineDepthDtoSchema = z.union([
+  length(),
+  z.object({ start: length(), end: length() }),
+  z.object({ min: length(), max: length() }),
+])
 export type LineDepthDTO = z.output<typeof LineDepthDtoSchema>
 
 /**
- * A Line (engraved-patterns.md E1): a groove along the centreline of every loop and open path of
- * its placed named shapes, at a depth that may change along the line.
+ * A Line (engraved-patterns.md E1, E2): a groove along the centreline of every loop and open path
+ * of its placed named shapes, at a depth that may change along the line. `blend` (E2, absent =
+ * 1 mm): a level step is blended over ±`blend`.
  * Doc: docs/modes/engraved-patterns.md#line-operation
  */
 export const LineDtoSchema = z.object({
@@ -232,6 +242,7 @@ export const LineDtoSchema = z.object({
   on: SurfaceIdSchema,
   paths: z.array(LinePathDtoSchema).min(1).max(LINE_PATHS_MAX),
   depth: LineDepthDtoSchema,
+  blend: length().optional(),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [
