@@ -19,6 +19,7 @@ import {
   orderFindings,
 } from './order'
 import type { PlanDTO, PlanOperationDTO, SetupDTO, SetupRotation } from './plan.dto'
+import { holdsOnSurface } from './workholding/items'
 
 /** Default setup order (decision 3), defined with the face model (design reads it too, DF50). */
 export { SETUP_ORDER }
@@ -327,14 +328,15 @@ const isThroughProfile = (op: Part['operations'][number] | undefined): boolean =
 /**
  * `plan.cutoutBeforeSetup` (warning): a through profile in a setup before another setup; the part
  * (or the slug) is held only by its tabs while it is re-fixtured. A blind `on` groove (v0.3)
- * frees nothing.
+ * frees nothing; a setup held on a surface (tape, vacuum, glue; W5,
+ * docs/modes/workholding.md#held-pieces-and-screws-in-the-part-w5) keeps its pieces held.
  */
 export function setupFindings(setups: readonly SetupDTO[], part: Part): PlanWarning[] {
   const out: PlanWarning[] = []
   const byId = new Map(part.operations.map((o) => [o.id, o]))
   setups.forEach((s, i) => {
     const next = setups[i + 1]
-    if (next === undefined) return
+    if (next === undefined || holdsOnSurface(s)) return
     for (const op of s.operations)
       for (const d of op.designOperationIds)
         if (isThroughProfile(byId.get(d)))

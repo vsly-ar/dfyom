@@ -45,6 +45,8 @@ export const PLAN_WARNING_CODES = [
   'plan.workholding.close',
   'plan.workholding.unmachined',
   'plan.workholding.breakthrough',
+  'plan.workholding.inPart',
+  'plan.workholding.partLoose',
   'feeds.rpmAboveMachine',
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',

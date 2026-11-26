@@ -1,7 +1,8 @@
 /**
  * Plan findings of workholding (WH-A–F): `plan.workholding.none` (info), `.clearanceLow` (error),
- * `.unmachined` (warning, needs the 2D port), and on a setup's current toolpaths `.collision`
- * (error), `.close` (warning) and `.breakthrough` (error). Errors block `plan.export` and
+ * `.unmachined` (warning, needs the 2D port), `.inPart` and `.partLoose` (warnings, W5,
+ * `held.ts`), and on a setup's current toolpaths `.collision` (error), `.close` (warning) and
+ * `.breakthrough` (error). Errors block `plan.export` and
  * `run.job.start` of their setup (the export guard), never toolpath generation.
  * Doc: docs/modes/workholding.md#collision-check
  */
@@ -16,6 +17,7 @@ import { aidName, planOpLabel } from '../labels'
 import type { LoadedPlan } from '../plan'
 import type { SetupDTO } from '../plan.dto'
 import { checkWorkholding, type CheckOperation, type Collision } from './check'
+import { heldFindings } from './held'
 import { highestTop } from './obstacles'
 import { setupWorkholding, type SetupWorkholding } from './setup'
 
@@ -267,7 +269,8 @@ export function checkedWorkholdingFindings(
   partial: boolean,
   last: (input: PlanOperationInput) => Toolpath | undefined = () => undefined,
 ): { findings: PlanWarning[]; unchecked: PlanOperationInput[] } {
-  const out = staticWorkholdingFindings(plan, setupId)
+  // W5: held pieces and screws in the part need no toolpath
+  const out = [...staticWorkholdingFindings(plan, setupId), ...heldFindings(plan, setupId, port)]
   const unchecked: PlanOperationInput[] = []
   if (inputs === undefined) return { findings: out, unchecked }
   if (port !== undefined)

@@ -352,7 +352,7 @@ export function SetupInspector({
           }
         />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
-        <Workholding doc={doc} plan={plan} setup={setup} />
+        <Workholding doc={doc} plan={plan} setup={setup} warnings={mine} />
         {mine.length > 0 ? (
           <InspectorGroup title={m.findings}>
             <WarningList

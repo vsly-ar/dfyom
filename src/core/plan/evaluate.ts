@@ -28,6 +28,7 @@ import {
 } from './feeds'
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
+import { holdsOnSurface } from './workholding/items'
 import { planThroughDepths } from './through'
 import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from './z-headroom'
 import { checkPartFits } from './validity'
@@ -321,7 +322,8 @@ function markToolFindings(
 }
 
 /**
- * Every finding of the plan: per operation, then order (across setups), then setups, then machine
+ * Every finding of the plan: per operation, then order (across setups; `plan.loosePiece` left out
+ * in a setup held on a surface, W5), then setups, then machine
  * (stock vs. travel per setup, `params.setupId` when the plan has several setups; the Z headroom
  * per setup and tool, always with `params.setupId`, then `zHeadroomUnknown` once). With the 2D port
  * the part's shape checks run as in the design (`tabOutside`, `tabsOverlap`, …); the shape
@@ -345,7 +347,15 @@ export function planFindings(
         stickout: e.stickout.unwrap(),
       })
   }
-  out.push(...orderFindings(plan.operations, plan.part, port))
+  // W5: an operation in a setup held on a surface (tape, vacuum, glue) works on held pieces
+  const surface = new Set(
+    plan.setups.filter(holdsOnSurface).flatMap((s) => s.operations.map((o) => o.id)),
+  )
+  out.push(
+    ...orderFindings(plan.operations, plan.part, port).filter(
+      (w) => w.code !== 'plan.loosePiece' || !surface.has(w.planOperationId ?? ''),
+    ),
+  )
   out.push(...setupFindings(plan.setups, plan.part))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
   if (stock !== undefined) {

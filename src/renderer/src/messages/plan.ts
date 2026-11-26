@@ -312,6 +312,7 @@ export const planMessages = {
       fixturePlate: 'Fixture plate',
       tape: 'Tape',
       vacuum: 'Vacuum',
+      glue: 'Glue',
     },
     kindHints: {
       toeClamp: 'A toe or strap clamp on one stock edge',
@@ -320,8 +321,9 @@ export const planMessages = {
       block: 'A fixture block, stop or dowel',
       spoilboard: 'What the stock sits on; cutting into it is fine',
       fixturePlate: 'What the stock sits on; cutting into it is an error',
-      tape: 'Double-sided tape under the stock: no obstacle',
-      vacuum: 'A vacuum table under the stock: no obstacle',
+      tape: 'Double-sided tape under the stock: holds pieces cut free',
+      vacuum: 'A vacuum table under the stock: holds pieces cut free',
+      glue: 'Glue or a glue-and-tape sheet under the stock: holds pieces cut free',
     },
     item: (name: string) => `Item ${name}`,
     remove: 'Remove',
@@ -350,6 +352,9 @@ export const planMessages = {
     marginHint: 'Kept clear around every item, sideways and above.',
     /** The derived clearance height's note: "From Toe clamp 2 + 2 mm." */
     clearanceFrom: (item: string, margin: string) => `From ${item} + ${margin}.`,
+    /** W5: the open surface item's note (workholding.md § Held pieces). */
+    surfaceNote:
+      'Holds the bottom face: pieces cut free stay held, so this setup has no loose-piece warnings.',
     clearanceAuto: 'Follow the workholding',
     clearanceAutoHint: 'Use the highest item + the margin, at least the default.',
   },

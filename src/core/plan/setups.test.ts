@@ -146,6 +146,13 @@ describe('order checks across setups', () => {
     ])
     // the loose-piece check compares face-frame positions of one direction only
     expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([])
+    // W5: held on a surface (tape, vacuum, glue), the cut-free part stays held while re-fixtured
+    await s.run('plan.workholding.set', {
+      planId,
+      setupId: top,
+      items: [{ kind: 'surface', type: 'tape' }],
+    })
+    expect(warnings(s, planId).filter((w) => w.code === 'plan.cutoutBeforeSetup')).toEqual([])
   })
 
   it('a blind on groove before another setup frees nothing: no plan.cutoutBeforeSetup', async () => {
