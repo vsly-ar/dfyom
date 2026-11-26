@@ -18,7 +18,15 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, fitReference, launchApp, openReferencePanel, test, zeroXyz } from './app.fixture'
+import {
+  expect,
+  fitReference,
+  launchApp,
+  openReferencePanel,
+  test,
+  zeroXyz,
+  revealField,
+} from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 
@@ -167,6 +175,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
 
   await addOperation(page, 'Pocket', 'Pocket 1')
   await pickOn(page, /^Facing 1 floor/)
+  await revealField(inspector, 'Anchor')
   const anchor = inspector.getByRole('radiogroup', { name: 'Anchor' })
   await anchor.getByRole('radio', { name: 'Front left' }).click()
   await expect(anchor.getByRole('radio', { name: 'Front left' })).toBeChecked()
@@ -185,6 +194,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await setField(inspector, 'Length (X)', '249.5')
   await setField(inspector, 'Width (Y)', '177')
   await setField(inspector, 'Corner radius', '6')
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', '12')
   await setField(inspector, 'Tab count', '4')
   await setField(inspector, 'Tab width', '12')
@@ -473,6 +483,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     // the operations and the cavity's anchor
     await expect(designRows(page2)).toHaveCount(6)
     await designRows(page2).nth(1).click()
+    await revealField(inspector2, 'Anchor')
     await expect(
       inspector2.getByRole('radiogroup', { name: 'Anchor' }).getByRole('radio', {
         name: 'Front left',

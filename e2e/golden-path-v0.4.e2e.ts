@@ -38,6 +38,7 @@ import {
   shapeEditorWindow,
   test,
   zeroXyz,
+  revealField,
 } from './app.fixture'
 import { withoutAppVersion } from '../src/core/post/plan-export'
 
@@ -333,6 +334,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     .getByRole('radiogroup', { name: 'Side' })
     .getByRole('radio', { name: 'Outside' })
     .click()
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', `${LID_PROFILE.slotWidth}`)
   await setField(inspector, 'Tab count', `${LID_PROFILE.tabs.count}`)
   await setField(inspector, 'Tab width', `${LID_PROFILE.tabs.width}`)
@@ -393,6 +395,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     .getByRole('radiogroup', { name: 'Side' })
     .getByRole('radio', { name: 'Inside' })
     .click()
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', `${CUTOUT.diameter / 2}`)
   await setField(inspector, 'Tab count', '0')
 
@@ -470,6 +473,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     .getByRole('radio', { name: 'Inside' })
     .click()
   // covers the slot (≥ half its width) and takes the Ø 3 mill
+  await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', `${LID_TOOLS.mill.diameter}`)
   await setField(inspector, 'Tab count', '0')
   await fromRowMenu(page, /^Profile 3/, 'Make Clones…')

@@ -5,7 +5,7 @@
 // pocket. Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/design-v0.2.md, docs/conventions/ui.md#design-and-plan-controls-v02
 import type { Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { expect, test, revealField } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -92,6 +92,7 @@ test('face picking and anchors: on by direction, side-face fields, anchor picker
   await expect(page.getByRole('dialog', { name: 'Adjust Depth' })).toHaveCount(0)
 
   // ── F2: re-anchor without moving the feature ─────────────────────────────────────────────
+  await revealField(inspector, 'Anchor')
   const anchor = inspector.getByRole('radiogroup', { name: 'Anchor' })
   await expect(anchor.getByRole('radio', { name: 'Centre', exact: true })).toBeChecked()
   await anchor.getByRole('radio', { name: 'Bottom left' }).click()
@@ -122,6 +123,7 @@ test('face picking and anchors: on by direction, side-face fields, anchor picker
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 2' })).toBeVisible()
+  await revealField(inspector, 'Anchor')
   await expect(
     inspector
       .getByRole('radiogroup', { name: 'Anchor' })

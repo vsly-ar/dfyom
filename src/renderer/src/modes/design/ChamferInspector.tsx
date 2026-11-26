@@ -7,7 +7,8 @@
 // alternative: a commit sends `depth` and the core turns it into the width through the angle),
 // Angle (60°–120°) and the derived Diameter at the face (read-only, "from the edge and the
 // width"), then the tool field (where `dfm.chamferNoTool` and a chamfer's `dfm.reach` show with
-// "New tool…", ToolField). The section draws a part red only for an invalid value (U9 P1).
+// "New tool…", ToolField) and, for a general edge with several loops, the Loops accordion (DF110).
+// The section draws a part red only for an invalid value (U9 P1).
 // The focused field's measured part is amber in the section; hovering a part of the section
 // highlights its field's label and clicking it focuses the field. Each commit is one
 // `design.chamfer.update` (one undo step); a new edge keeps the width.
@@ -159,8 +160,8 @@ export function ChamferInspector({
         {target('diameter', <DiameterField ctx={ctx} />)}
         <CornerLiftField ctx={ctx} />
       </InspectorGroup>
-      <LoopsGroup ctx={ctx} level={level} />
       {tool}
+      <LoopsGroup ctx={ctx} level={level} />
     </>
   )
 }
@@ -372,6 +373,7 @@ function LoopsGroup({
   const labels = edgeLoopLabels(ctx.part, op, port)
   if (labels.length < 2) return null
   const chosen = new Set(op.loops ?? labels.map((_, i) => i))
+  const errors = ctx.errors.filter((e) => e.path === 'loops')
   const toggle = (i: number, on: boolean) => {
     const next = new Set(chosen)
     if (on) next.add(i)
@@ -382,9 +384,18 @@ function LoopsGroup({
       'loops',
     )
   }
-  const errors = ctx.errors.filter((e) => e.path === 'loops')
+  // an accordion, open by default (it shows only with more than one loop; DF110 target layout)
   return (
-    <InspectorGroup title={t.loops} level={level}>
+    <InspectorGroup
+      title={t.loops}
+      level={level}
+      collapsible
+      defaultOpen
+      rememberKey="chamfer.loops"
+      summary={t.loopsSummary(chosen.size, labels.length)}
+      severity={errors.length > 0 ? 'error' : undefined}
+      forceOpen={errors.length > 0}
+    >
       <ul className={own['loops']} aria-label={t.loops}>
         {labels.map((label, i) => (
           <li key={i}>

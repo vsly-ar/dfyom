@@ -13,6 +13,7 @@ import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { expectOk } from '../../../../shared/testing/result'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
+import { revealInInspector } from '../../ui'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 import { ADD_ITEMS, addItemLabel, addItemsFor, type AddSurface } from './add-items'
 
@@ -703,6 +704,8 @@ describe('design mode', () => {
     const { user, part, bridge, d } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
     await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    // Anchor sits behind the Shape group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Anchor, Rotation)' }))
     const anchor = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
     expect(within(anchor).getByRole('radio', { name: 'Centre' })).toBeChecked()
     const entries = d.history.undoable.length
@@ -744,6 +747,8 @@ describe('design mode', () => {
         shape: { center: [{ source: '25 * 2' }, {}] },
       }),
     )
+    // Anchor sits behind the Shape group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Anchor, Rotation)' }))
     const anchor = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
     expect(anchor).toHaveAttribute('aria-disabled', 'true')
     expect(
@@ -753,6 +758,32 @@ describe('design mode', () => {
     const before = bridge.calls.length
     await user.click(within(anchor).getByRole('radio', { name: 'Back right' }))
     expect(bridge.calls.length).toBe(before)
+  })
+
+  it('keeps rare fields behind More rows and opens them for a reveal or a problem (DF110 S3)', async () => {
+    const { user, part } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    // Anchor and Rotation: closed by default, still mounted
+    const more = within(inspector()).getByRole('button', { name: 'More (Anchor, Rotation)' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    const rotation = within(inspector()).getByLabelText('Rotation', { selector: 'input' })
+    expect(rotation).not.toBeVisible()
+    // a message's target, a pick or an agent selection reveals the field: its More row opens
+    act(() => revealInInspector(rotation))
+    expect(more).toHaveAttribute('aria-expanded', 'true')
+    expect(rotation).toBeVisible()
+    // an error at a field behind a More row keeps it shown, even when the row is closed
+    const corners = within(inspector()).getByRole('region', { name: 'Corners' })
+    const floorMore = within(corners).getByRole('button', { name: 'More (Floor fillet radius)' })
+    await user.click(floorMore)
+    const floor = within(corners).getByLabelText('Floor fillet radius', { selector: 'input' })
+    await retype(user, floor, '50{Enter}')
+    await within(corners).findByText(/must be between 0 and the smaller of depth/i)
+    await user.click(floorMore)
+    expect(floor).toBeVisible()
+    expect(part().operations[0]).toMatchObject({ floorRadius: { source: '0' } })
+    await expectNoAxeViolations(inspector())
   })
 
   it('places a new pocket by the default-anchor setting', async () => {
@@ -767,6 +798,8 @@ describe('design mode', () => {
         center: [{ source: '66.5 mm' }, { source: '40 mm' }],
       },
     })
+    // Anchor sits behind the Shape group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Anchor, Rotation)' }))
     expect(
       within(within(inspector()).getByRole('radiogroup', { name: 'Anchor' })).getByRole('radio', {
         name: 'Back right',

@@ -7,7 +7,7 @@
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, test, revealField } from './app.fixture'
 
 const input = (scope: Locator, label: string) =>
   scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -166,6 +166,7 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
   await navigator.getByRole('button', { name: 'Add profile' }).click()
   await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
   // DF51: no library tool fits the default 6 mm slot, so the new slot is as wide as the 6.22 mm
+  await revealField(inspector, 'Slot width')
   await expect(input(inspector, 'Slot width')).toHaveValue('6.22 mm')
   // a 6 mm slot set by the user (Enter applies)
   await setField(inspector, 'Slot width', '6')
@@ -209,6 +210,7 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
     'true',
   )
   await tool.getByRole('button', { name: 'Widen slot to 6.22 mm' }).click()
+  await revealField(inspector, 'Slot width')
   await expect(input(inspector, 'Slot width')).toHaveValue('6.22 mm')
   await expect(tool.getByText(/is wider than the slot/)).toBeHidden()
 
