@@ -43,6 +43,7 @@ import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesIn
 import { parseInstanceId } from './clones-view'
 import { HoleInspector } from './HoleInspector'
 import { PatternInspector } from './PatternInspector'
+import { EngravingInspector } from './EngravingInspector'
 import { FaceInspector } from './FaceInspector'
 import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
@@ -171,6 +172,8 @@ function DesignInspectorBody({ part }: { part: DesignPart | undefined }): React.
     return <ClonesInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature?.kind === 'pattern')
     return <PatternInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
+  if (feature?.kind === 'engraving')
+    return <EngravingInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature !== undefined)
     return <FeatureInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   const instance = parseInstanceId(part, selected)

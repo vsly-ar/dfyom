@@ -313,6 +313,8 @@ describe('agent tools', () => {
     expect(sketched.sort()).toEqual([
       'design.clones.preview',
       'design.clones.update',
+      'design.engraving.add',
+      'design.engraving.update',
       'design.line.update',
       'design.part.update',
       'design.pattern.update',

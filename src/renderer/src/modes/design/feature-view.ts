@@ -4,6 +4,7 @@
 // the feature field behind an owned operation's parameter (core `FeatureKindSpec.fieldOf`, F3).
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #owned-operations-and-clone-instances;
 // docs/modes/design-v0.4.md#implementation-f3
+import { engravingMessages } from '../../messages/engraving'
 import { featureKind, featureSpan, ownerOf } from '../../../../core/design/feature'
 import { featurePath, type Clones } from '../../../../core/design/clones/clones'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
@@ -324,6 +325,13 @@ export function featureReadout(feature: FeatureDTO, instances?: number): string 
   // patterns P1: lattice and cell ("hex · polygon"); the cell count is the inspector's read-out
   if (feature.kind === 'pattern')
     return `${String(feature['lattice'])} · ${String((feature['cell'] as { kind?: unknown }).kind)}`
+  // engraved patterns E3: the preset ("rosette"), else the shapes' count ("2 shapes")
+  if (feature.kind === 'engraving') {
+    const motif = feature['motif'] as { preset?: string; shapeIds?: string[] }
+    return motif.preset === undefined
+      ? `${motif.shapeIds?.length ?? 0} shapes`
+      : (engravingMessages.presetNames[motif.preset] ?? motif.preset)
+  }
   if (feature.kind === 'hole') {
     const type = HOLE_TYPES[String(feature['type'])] ?? String(feature['type'])
     const fastener = typeof feature['fastener'] === 'string' ? feature['fastener'] : undefined

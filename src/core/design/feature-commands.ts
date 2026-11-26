@@ -65,6 +65,9 @@ const FeatureResult = z.object({
     .array(OperationIdSchema)
     .describe('Owned operations in design order (remove: the removed ones)'),
   cells: z.number().int().optional().describe('pattern: cells laid out'),
+  lines: z.number().int().optional().describe('engraving: lines placed'),
+  length: z.number().optional().describe('engraving: total line length (mm)'),
+  size: z.number().optional().describe("engraving: the motif's width as placed (mm)"),
   warnings: Warnings,
 })
 
@@ -339,6 +342,11 @@ export interface FeatureCommandSpec<
    * the full ones (tools/list budget, llm-api.md#schemas). Absent: the update lists them in full.
    */
   readonly updateParams?: { readonly [K in keyof P]?: z.ZodType }
+  /**
+   * Short add-tool schemas for params whose full schema another tool lists ("As
+   * design.pattern.add boundary", engraved-patterns.md E3); the add validates the full ones.
+   */
+  readonly addParams?: { readonly [K in keyof P]?: z.ZodType }
   /** The feature from args as entered (parsed through `c.f`) and its previous version. */
   build(args: Partial<z.output<z.ZodObject<P>>>, prev: F | undefined, c: FeatureBuildContext): F
 }
@@ -367,7 +375,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
     name: `design.${spec.kind}.add`,
     summary:
       spec.addSummary ??
-      `Add a ${lower} feature at the end of the part; it creates its operations.`,
+      `Add ${an(lower)} feature at the end of the part; it creates its operations.`,
     title: () => `Add ${lower}`,
     machine: false,
     args: z.object({
@@ -376,6 +384,9 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(true),
     }),
+    ...(spec.addParams === undefined
+      ? {}
+      : { listedArgs: spec.addParams as Readonly<Record<string, z.ZodType>> }),
     result: FeatureResult,
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.add`
@@ -406,7 +417,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
   const update = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.update`,
-    summary: `Change parameters of a ${lower} feature; its operations are regenerated.`,
+    summary: `Change parameters of ${an(lower)} feature; its operations are regenerated.`,
     title: () => `Update ${lower}`,
     machine: false,
     args: z.object({
@@ -518,6 +529,9 @@ function refuseNestedFeature(l: LoadedPart, featureId: string, where: string): A
     },
   )
 }
+
+/** `lower` with its indefinite article (an engraved pattern). */
+const an = (lower: string): string => `${/^[aeiou]/.test(lower) ? 'an' : 'a'} ${lower}`
 
 // ── shared commands ────────────────────────────────────────────────────────────────────────
 

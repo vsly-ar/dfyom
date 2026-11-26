@@ -9,32 +9,47 @@ interface PartLike {
   readonly operations: readonly {
     readonly id: string
     readonly shape?: unknown
+    readonly paths?: readonly unknown[] | undefined
     readonly featureId?: string | undefined
   }[]
   readonly shapes?:
-    | readonly { readonly id: string; readonly pattern?: { readonly cell: object } | undefined }[]
+    | readonly {
+        readonly id: string
+        readonly pattern?: { readonly cell: object } | undefined
+        readonly engraving?: { readonly motif: object } | undefined
+      }[]
     | undefined
 }
 
 /**
  * Ids of the operations whose shape places `shapeId` (`shape: { kind: 'named', shapeId }`, v0.3
- * K3), or an owned pattern shape whose cell it is (patterns P1); in design order.
+ * K3; a Line's paths), or an owned pattern shape whose cell it is (patterns P1), or an owned
+ * engraving shape whose motif it is (engraved-patterns.md E3); in design order.
  */
 export function operationsUsingShape(part: PartLike, shapeId: string): string[] {
   const ids = new Set([shapeId])
-  for (const sh of part.shapes ?? [])
+  for (const sh of part.shapes ?? []) {
     if ((sh.pattern?.cell as { shapeId?: unknown } | undefined)?.shapeId === shapeId) ids.add(sh.id)
+    const motif = sh.engraving?.motif as { shapeIds?: unknown } | undefined
+    if (Array.isArray(motif?.shapeIds) && motif.shapeIds.includes(shapeId)) ids.add(sh.id)
+  }
+  const named = (s: unknown) => {
+    const n = s as { kind?: unknown; shapeId?: unknown } | undefined
+    return n?.kind === 'named' && ids.has(n.shapeId as string)
+  }
   return part.operations
-    .filter((op) => {
-      const s = op.shape as { kind?: unknown; shapeId?: unknown } | undefined
-      return s?.kind === 'named' && ids.has(s.shapeId as string)
-    })
+    .filter(
+      (op) =>
+        named(op.shape) ||
+        (op.paths ?? []).some((p) => ids.has((p as { shapeId?: string }).shapeId ?? '')),
+    )
     .map((op) => op.id)
 }
 
 /**
  * Ids of the features with a Clones `along` row on `shapeId` (v0.4 F6; their clones follow the
- * shape) or a pattern whose cell it is (patterns P1), in record order.
+ * shape), a pattern whose cell it is (patterns P1) or an engraved pattern whose motif it is, in
+ * record order.
  */
 export function featuresUsingShape(
   part: { readonly features?: readonly { readonly id: string }[] | undefined },
@@ -44,6 +59,9 @@ export function featuresUsingShape(
     .filter((f) => {
       const cell = (f as { cell?: { kind?: unknown; shapeId?: unknown } }).cell
       if (cell?.kind === 'shape' && cell.shapeId === shapeId) return true
+      // an engraved pattern whose motif it is (engraved-patterns.md E3)
+      const motif = (f as { motif?: { shapeIds?: unknown } }).motif
+      if (Array.isArray(motif?.shapeIds) && motif.shapeIds.includes(shapeId)) return true
       const rows = (f as { rows?: unknown }).rows
       return (
         Array.isArray(rows) &&

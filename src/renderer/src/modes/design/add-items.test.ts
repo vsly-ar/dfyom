@@ -39,7 +39,7 @@ describe('Add items (DF98)', () => {
       for (const why of Object.values(ADD_EXCEPTIONS[s])) expect(why, s).toMatch(/\S/)
     }
     // today no surface leaves anything out: Pattern was missing from the empty list and the face
-    expect(SURFACES.map((s) => addItemsFor(s).length)).toEqual([7, 7, 7])
+    expect(SURFACES.map((s) => addItemsFor(s).length)).toEqual([8, 8, 8])
   })
 
   it('labels each item once per surface', () => {

@@ -389,6 +389,8 @@ export const DEFAULTS = {
   lineLevelMin: { mm: '0.2 mm', inch: '0.008"' },
   lineLevelMax: { mm: '1 mm', inch: '0.04"' },
   lineBlend: { mm: '1 mm', inch: '0.04"' },
+  // engraved pattern (docs/modes/engraved-patterns.md#engraved-pattern-feature)
+  engravingMargin: { mm: '3 mm', inch: '1/8"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -1021,12 +1023,19 @@ function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>
   const queue = [...out.values()]
   for (let s = queue.shift(); s !== undefined; s = queue.shift()) {
     const p = s.pattern
-    if (p === undefined) continue
-    // the cell, (patterns P2) the boundary shape and (P4) the pattern below
+    const e = s.engraving
+    // the cell, (patterns P2) the boundary shape and (P4) the pattern below; an engraving's
+    // motif shapes and boundary (engraved-patterns.md E3)
     const refs: [string, string][] = []
-    if ('shapeId' in p.cell) refs.push(['cell', p.cell.shapeId])
-    if (p.area !== undefined) refs.push(['area', p.area.shapeId])
-    if (p.floor !== undefined) refs.push(['floor', p.floor])
+    if (p !== undefined) {
+      if ('shapeId' in p.cell) refs.push(['cell', p.cell.shapeId])
+      if (p.area !== undefined) refs.push(['area', p.area.shapeId])
+      if (p.floor !== undefined) refs.push(['floor', p.floor])
+    }
+    if (e !== undefined) {
+      if ('shapeIds' in e.motif) for (const id of e.motif.shapeIds) refs.push(['motif', id])
+      if (e.area !== undefined) refs.push(['area', e.area.shapeId])
+    }
     for (const [field, id] of refs) {
       if (out.has(id)) continue
       const k = dto.shapes?.findIndex((x) => x.id === id) ?? -1
@@ -1037,7 +1046,7 @@ function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>
           {
             issues: [
               {
-                path: ['shapes', s.id, 'pattern', field, 'shapeId'],
+                path: ['shapes', s.id, p !== undefined ? 'pattern' : 'engraving', field, 'shapeId'],
                 rule: 'unknownShape',
                 message: 'no such shape in the part',
               },

@@ -217,6 +217,10 @@ const LinePathArg = z.object({
   mirror: z.literal(true).optional(),
   scale: z.number().positive().optional(),
 })
+/** A Line's depth as entered (also the engraved pattern's, engraved-patterns.md E3). */
+export const LineDepthArg = z
+  .union([Src, z.object({ start: Src, end: Src }), z.object({ min: Src, max: Src })])
+  .describe('Default 0.5 mm; {start, end}: linear along each line; {min, max}: by shape levels')
 const lineParams = {
   on: SurfaceIdSchema.describe('Default as a pocket'),
   paths: z
@@ -224,9 +228,7 @@ const lineParams = {
     .min(1)
     .max(LINE_PATHS_MAX)
     .describe('Placed as a named shape; each loop or open path is a line'),
-  depth: z
-    .union([Src, z.object({ start: Src, end: Src }), z.object({ min: Src, max: Src })])
-    .describe('Default 0.5 mm; {start, end}: linear along each line; {min, max}: by shape levels'),
+  depth: LineDepthArg,
   blend: Src.describe('±, at level steps; default 1 mm'),
 }
 
@@ -1829,18 +1831,17 @@ const lineSpec: KindSpec<typeof lineParams, Line> = {
   }),
 }
 
-function lineDepthOf(
+/** A Line's depth from its arg, else `prev`, else `fallback()` (default: the constant default). */
+export function lineDepthOf(
   f: Fields,
-  a: z.output<typeof lineParams.depth> | null | undefined,
+  a: z.output<typeof LineDepthArg> | null | undefined,
   prev: LineDepth | undefined,
+  fallback: () => LineDepth = () => ({
+    kind: 'constant',
+    depth: f.pick('depth', 'length', undefined, undefined, 'lineDepth'),
+  }),
 ): LineDepth {
-  if (a === undefined || a === null)
-    return (
-      prev ?? {
-        kind: 'constant',
-        depth: f.pick('depth', 'length', undefined, undefined, 'lineDepth'),
-      }
-    )
+  if (a === undefined || a === null) return prev ?? fallback()
   if (typeof a === 'string') return { kind: 'constant', depth: f.q('depth', 'length', a) }
   if ('min' in a)
     return {

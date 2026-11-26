@@ -24,6 +24,7 @@ import {
 } from '../design/clones/commands'
 import { HOLE_COMMANDS } from '../design/hole-commands'
 import { PATTERN_COMMANDS } from '../design/pattern/commands'
+import { ENGRAVING_COMMANDS } from '../design/engraving/commands'
 import { SPLIT_COMMANDS, splitFollowApply, splitFollowHook } from '../design/split/commands'
 import { patternFollowHook } from '../design/pattern/follow'
 import { disabledFollowHook } from '../design/disabled-follow'
@@ -89,6 +90,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...HOLE_COMMANDS,
   ...CLONES_COMMANDS,
   ...PATTERN_COMMANDS,
+  ...ENGRAVING_COMMANDS,
   ...SPLIT_COMMANDS,
   ...TEST_FIT_COMMANDS,
   ...REFERENCE_COMMANDS,

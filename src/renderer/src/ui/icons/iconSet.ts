@@ -177,6 +177,18 @@ export const ICON_SET = {
       { d: 'M8 5.4l2.25 1.3v2.6L8 10.6L5.75 9.3V6.7z', a: true },
     ],
   },
+  // Engraved patterns E3 (engraved-patterns.md § UI): three wavy grooves across the face, the
+  // middle one the accent; strokes only, as the Groove's line work.
+  engraving: {
+    label: 'Engraved pattern',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 4c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0c1.1-1.1 2.2-1.4 3.4-.8' },
+      { d: 'M1.5 12c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0c1.1-1.1 2.2-1.4 3.4-.8' },
+      { d: 'M1.5 8c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0c1.1-1.1 2.2-1.4 3.4-.8', a: true },
+    ],
+  },
   // Clones path-row kinds (the Add row menu): dots in the row's layout; may fall back to the label
   // alone if they don't read at 16 px (L2).
   'row-grid': {

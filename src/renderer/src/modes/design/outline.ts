@@ -17,6 +17,8 @@ import {
 } from '../../../../core/design/operation'
 import { chamferEdge } from '../../../../core/design/geometry-input'
 import { placeShape } from '../../../../core/design/placement'
+import { resolveEngraving } from '../../../../core/design/engraving/resolve'
+import type { EngravingRecord } from '../../../../core/design/shape.dto'
 import type { Element, Loop, Region } from '../../../../core/geometry/2d/model'
 import { chamferDepth } from '../../../../core/geometry/model'
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
@@ -87,6 +89,35 @@ function generalLoops(shape: Shape, w: number, ctx: ShapeContext): OutlineLoop[]
   }
   const loops: Loop[] = outline.region.pieces.flatMap((p) => [p.outer, ...p.holes])
   return loops.map((l) => chainPoints(l.elements, at))
+}
+
+/**
+ * An engraved pattern's lines (engraved-patterns.md E3) at height `w`, moved by `at` (the owned
+ * Line's path centre: [0, 0], a Clones copy's offset): closed lines as loops, open ones marked.
+ */
+function engravingLoops(
+  rec: EngravingRecord,
+  at: readonly [number, number],
+  w: number,
+  ctx: ShapeContext,
+): OutlineLoop[] {
+  const r = resolveEngraving(rec, ctx.shapes, ctx.port)
+  if (r.isErr()) return []
+  const pt = (u: number, v: number): Vec3 => [at[0] + u, at[1] + v, w]
+  return r.unwrap().lines.flatMap((l): OutlineLoop[] => {
+    const c = l.shape.contour
+    if (c.kind === 'path') {
+      const els = c.path.elements
+      const pts = chainPoints(els, pt)
+      const last = els.at(-1)
+      if (last !== undefined) pts.push(pt(last.b[0], last.b[1]))
+      return [Object.assign(pts, { open: true as const })]
+    }
+    if (c.kind !== 'region') return []
+    return c.region.pieces
+      .flatMap((p) => [p.outer, ...p.holes])
+      .map((loop) => chainPoints(loop.elements, pt))
+  })
 }
 
 /**
@@ -285,7 +316,13 @@ export function operationOutline(
       // a Line (engraved-patterns.md E1): its paths at the face (the groove is the solid)
       return place(
         face,
-        op.paths.flatMap((p) => shapeLoops(p, face.w, ctx)),
+        op.paths.flatMap((p) => {
+          // an engraved pattern's owned shape (E3): its resolved lines, moved by the path centre
+          const rec = ctx?.shapes?.get(p.shapeId)?.engraving
+          return rec === undefined
+            ? shapeLoops(p, face.w, ctx)
+            : engravingLoops(rec, [p.center[0].canonical, p.center[1].canonical], face.w, ctx!)
+        }),
       )
     case 'chamfer': {
       const edge = chamferEdge(ops, op.edgeOf)

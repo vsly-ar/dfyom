@@ -35,7 +35,8 @@ export const designMessages = {
     line: 'Engraves grooves along shapes with a V-bit, at a constant or changing depth.',
     hole: 'A hole for a screw or bolt: simple, counterbored or countersunk, sized from the fastener.',
     pattern: 'Many copies of a cell laid on a lattice over a face, cut as one pocket.',
-  } satisfies Record<OperationKind | 'hole' | 'pattern', string>,
+    engraving: 'A decorative motif of V-bit grooves over a face, from a preset or your shapes.',
+  } satisfies Record<OperationKind | 'hole' | 'pattern' | 'engraving', string>,
 
   /** Features in the navigator and inspector (v0.4 task U1, ui.md § Features (v0.4)). */
   features: {
@@ -44,6 +45,8 @@ export const designMessages = {
     addHole: 'Bolt hole',
     /** Patterns P1 (patterns.md § UI). */
     addPattern: 'Pattern',
+    /** Engraved patterns E3 (engraved-patterns.md § UI). */
+    addEngraving: 'Engraved pattern',
     pattern: {
       groups: { cell: 'Cell', layout: 'Layout', area: 'Area', cut: 'Cut', chamfer: 'Chamfer' },
       cell: 'Cell',
@@ -752,6 +755,7 @@ export const designMessages = {
       addHole: 'Add bolt hole',
       /** DF98: every Add item is offered here too (add-items.ts). */
       addPattern: 'Add pattern',
+      addEngraving: 'Add engraved pattern',
     },
     /** The row menu's Remove (DF16). */
     removeItem: 'Remove',
@@ -1084,6 +1088,7 @@ export const designMessages = {
       })[kind],
     addHole: 'Add bolt hole here',
     addPattern: 'Add pattern here',
+    addEngraving: 'Add engraved pattern here',
     /** The empty part inspector: how operations get onto a face. */
     emptyHint: 'Select a face in the viewport (Alt+click for a floor) to add operations on it.',
     summary: (label: string) => `Selected face: ${label}; operations you add start on it.`,

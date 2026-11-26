@@ -520,6 +520,9 @@ export const DFM_WARNING_CODES = [
   // Line (E1): docs/modes/engraved-patterns.md#dfm
   'dfm.lineTooDeep',
   'dfm.lineShallow',
+  // engraved pattern (E3, `operation` = the feature id): docs/modes/engraved-patterns.md#dfm
+  'dfm.engravingEmpty',
+  'dfm.engravingHeavy',
   // patterns P1 (`operation` = the feature id): docs/modes/patterns.md#checks-and-dfm
   'dfm.patternEmpty',
   'dfm.patternHeavy',
