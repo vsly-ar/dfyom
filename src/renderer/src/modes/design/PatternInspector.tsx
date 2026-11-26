@@ -60,7 +60,8 @@ const LATTICES: readonly Lattice[] = ['square', 'staggered', 'hex', 'polar']
 /** The Boundary select's value for the whole face. */
 const FACE = 'face'
 /** The size fields of each primitive cell, in order. */
-const CELL_FIELDS: Record<CellKind, readonly string[]> = {
+type CellField = 'diameter' | 'length' | 'width' | 'cornerRadius' | 'sides'
+const CELL_FIELDS: Record<CellKind, readonly CellField[]> = {
   circle: ['diameter'],
   rectangle: ['length', 'width', 'cornerRadius'],
   obround: ['length', 'width'],
@@ -245,7 +246,7 @@ export function PatternInspector({
   )
 
   const quantityField = (
-    path: string,
+    path: PatternPath,
     label: string,
     kind: 'length' | 'angle' | 'scalar',
     dto: unknown,
@@ -259,7 +260,7 @@ export function PatternInspector({
         kind={kind}
         defaultUnit={defaultUnit(kind, units)}
         value={dto === undefined ? undefined : quantityOf(dto as QuantityDTO)}
-        stepKind={patternStep(path)}
+        stepKind={PATTERN_STEP[path]}
         stepKey={`pattern.${path}`}
         {...(path === 'cell.sides' ? { stepMax: 12 } : {})}
         {...(placeholder === undefined ? {} : { placeholder })}
@@ -806,15 +807,39 @@ function poly(pts: Vec[]): Loop {
   }
 }
 
-/** Adjust steps of a pattern field by its path (inspector-layout.md § Step assignment per field). */
-function patternStep(path: string): StepKind {
-  if (path === 'cell.sides') return 'count'
-  if (path === 'cell.cornerRadius' || path === 'spacing.gap' || path === 'chamfer.width')
-    return 'small'
-  if (path === 'chamfer.angle') return 'angle'
-  if (path === 'angle' || path.endsWith('rotation')) return 'rotation'
-  if (path === 'depth') return 'depth'
-  return 'xy'
+/** A pattern quantity field's path (its messages and remembered step). */
+type PatternPath =
+  | `cell.${CellField}`
+  | 'cell.rotation'
+  | 'spacing.gap'
+  | `spacing.pitch.${0 | 1}`
+  | 'angle'
+  | `boundary.center.${0 | 1}`
+  | 'boundary.rotation'
+  | 'margin'
+  | 'depth'
+  | 'chamfer.width'
+  | 'chamfer.angle'
+
+/** Adjust steps per pattern field (inspector-layout.md § Step assignment per field). */
+const PATTERN_STEP: Record<PatternPath, StepKind> = {
+  'cell.diameter': 'xy',
+  'cell.length': 'xy',
+  'cell.width': 'xy',
+  'cell.cornerRadius': 'small',
+  'cell.sides': 'count',
+  'cell.rotation': 'rotation',
+  'spacing.gap': 'small',
+  'spacing.pitch.0': 'xy',
+  'spacing.pitch.1': 'xy',
+  angle: 'rotation',
+  'boundary.center.0': 'xy',
+  'boundary.center.1': 'xy',
+  'boundary.rotation': 'rotation',
+  margin: 'xy',
+  depth: 'depth',
+  'chamfer.width': 'small',
+  'chamfer.angle': 'angle',
 }
 
 /** A primitive cell kind's mini outline (the Cell select's thumbnails; not to scale). */

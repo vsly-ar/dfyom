@@ -413,18 +413,11 @@ export function ShapeItemList({
 
 const KIND_OF: Record<string, QuantityKind> = { rotation: 'angle', sides: 'scalar' }
 
-/** Adjust steps by the item's field (inspector-layout.md § Step assignment, Shape Editor rows). */
-const STEP_OF: Record<string, StepKind> = {
-  rotation: 'rotation',
-  sides: 'count',
-  cornerRadius: 'small',
-  radius: 'small',
-}
-
 /** One quantity field of the selected item (`path` inside the item: `center.0`, `length`). */
 export function ItemQuantity({
   ctx,
   path,
+  stepKind,
   label,
   icon,
   optional = false,
@@ -432,6 +425,8 @@ export function ItemQuantity({
 }: {
   ctx: ItemEditContext
   path: readonly (string | number)[]
+  /** What the field measures (inspector-layout.md § Step assignment, Shape Editor rows). */
+  stepKind: StepKind
   label: string
   icon?: FieldIconName
   /** Absent means 0 (rotation, polygon corner radius): an emptied field commits 0. */
@@ -454,7 +449,7 @@ export function ItemQuantity({
   const common = {
     label,
     kind,
-    stepKind: STEP_OF[String(path[0])] ?? STEP_OF[String(path.at(-1))] ?? 'xy',
+    stepKind,
     ...(path[0] === 'sides' ? { stepMax: 12 } : {}),
     defaultUnit: defaultUnit(unitKind, ctx.part.units),
     value: dto === undefined ? undefined : quantityOf(dto),
@@ -480,8 +475,20 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
   const item = ctx.dto
   const centre = (
     <div className={styles['pair']}>
-      <ItemQuantity ctx={ctx} path={['center', 0]} label={t.centerX} icon="positionX" />
-      <ItemQuantity ctx={ctx} path={['center', 1]} label={t.centerY} icon="positionY" />
+      <ItemQuantity
+        ctx={ctx}
+        path={['center', 0]}
+        stepKind="xy"
+        label={t.centerX}
+        icon="positionX"
+      />
+      <ItemQuantity
+        ctx={ctx}
+        path={['center', 1]}
+        stepKind="xy"
+        label={t.centerY}
+        icon="positionY"
+      />
     </div>
   )
   switch (item.kind) {
@@ -489,34 +496,66 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
       return (
         <>
           {centre}
-          <ItemQuantity ctx={ctx} path={['length']} label={t.length} icon="length" />
-          <ItemQuantity ctx={ctx} path={['width']} label={t.width} icon="width" />
-          <ItemQuantity ctx={ctx} path={['cornerRadius']} label={t.cornerRadius} icon="corner" />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
+          <ItemQuantity ctx={ctx} path={['length']} stepKind="xy" label={t.length} icon="length" />
+          <ItemQuantity ctx={ctx} path={['width']} stepKind="xy" label={t.width} icon="width" />
+          <ItemQuantity
+            ctx={ctx}
+            path={['cornerRadius']}
+            stepKind="small"
+            label={t.cornerRadius}
+            icon="corner"
+          />
+          <ItemQuantity
+            ctx={ctx}
+            path={['rotation']}
+            stepKind="rotation"
+            label={t.rotation}
+            icon="rotation"
+            optional
+          />
         </>
       )
     case 'circle':
       return (
         <>
           {centre}
-          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="diameter" />
+          <ItemQuantity
+            ctx={ctx}
+            path={['diameter']}
+            stepKind="xy"
+            label={t.diameter}
+            icon="diameter"
+          />
         </>
       )
     case 'obround':
       return (
         <>
           {centre}
-          <ItemQuantity ctx={ctx} path={['length']} label={t.length} icon="length" />
-          <ItemQuantity ctx={ctx} path={['width']} label={t.width} icon="width" />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
+          <ItemQuantity ctx={ctx} path={['length']} stepKind="xy" label={t.length} icon="length" />
+          <ItemQuantity ctx={ctx} path={['width']} stepKind="xy" label={t.width} icon="width" />
+          <ItemQuantity
+            ctx={ctx}
+            path={['rotation']}
+            stepKind="rotation"
+            label={t.rotation}
+            icon="rotation"
+            optional
+          />
         </>
       )
     case 'polygon':
       return (
         <>
           {centre}
-          <ItemQuantity ctx={ctx} path={['sides']} label={t.sides} />
-          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="diameter" />
+          <ItemQuantity ctx={ctx} path={['sides']} stepKind="count" label={t.sides} />
+          <ItemQuantity
+            ctx={ctx}
+            path={['diameter']}
+            stepKind="xy"
+            label={t.diameter}
+            icon="diameter"
+          />
           <Field label={t.across} kind="toggle">
             <SegmentedControl
               label={t.across}
@@ -532,11 +571,19 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
           <ItemQuantity
             ctx={ctx}
             path={['cornerRadius']}
+            stepKind="small"
             label={t.cornerRadius}
             icon="corner"
             optional
           />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
+          <ItemQuantity
+            ctx={ctx}
+            path={['rotation']}
+            stepKind="rotation"
+            label={t.rotation}
+            icon="rotation"
+            optional
+          />
         </>
       )
     case 'path': {
@@ -547,8 +594,20 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
       return (
         <>
           <div className={styles['pair']}>
-            <ItemQuantity ctx={ctx} path={['start', 0]} label={t.startX} icon="positionX" />
-            <ItemQuantity ctx={ctx} path={['start', 1]} label={t.startY} icon="positionY" />
+            <ItemQuantity
+              ctx={ctx}
+              path={['start', 0]}
+              stepKind="xy"
+              label={t.startX}
+              icon="positionX"
+            />
+            <ItemQuantity
+              ctx={ctx}
+              path={['start', 1]}
+              stepKind="xy"
+              label={t.startY}
+              icon="positionY"
+            />
           </div>
           <Field
             label={t.closed}
@@ -597,7 +656,13 @@ function StartFillet({ ctx }: { ctx: ItemEditContext }): React.JSX.Element | nul
       />
     )
   return (
-    <ItemQuantity ctx={ctx} path={['fillets', at, 'radius']} label={t.startFillet} icon="corner" />
+    <ItemQuantity
+      ctx={ctx}
+      path={['fillets', at, 'radius']}
+      stepKind="small"
+      label={t.startFillet}
+      icon="corner"
+    />
   )
 }
 

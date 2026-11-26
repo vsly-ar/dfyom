@@ -106,6 +106,14 @@ describe('design mode', () => {
     // an empty library: nothing to choose, and the note says how to add one (DF48)
     expect(within(form).getByRole('combobox', { name: 'From library' })).toBeDisabled()
     expect(within(form).getByText(/No stock in the library yet/)).toBeVisible()
+    // the block's size and its material are groups (DF110 S6)
+    const size = within(form).getByRole('region', { name: 'Size' })
+    expect(within(size).getByRole('combobox', { name: 'Thickness (Z)' })).toBeInTheDocument()
+    expect(
+      within(within(form).getByRole('region', { name: 'Material' })).getByRole('textbox', {
+        name: 'Material name',
+      }),
+    ).toBeInTheDocument()
     const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
     // the primary Create part is in the footer beside Cancel, not in the body (DF12 re-report)

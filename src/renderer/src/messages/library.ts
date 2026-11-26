@@ -150,6 +150,19 @@ export const libraryMessages = {
       size: 'Size',
       material: 'Material',
     },
+    /** The full machine form's tabs (DF110, inspector-layout.md § Per-inspector target layout). */
+    machineTabs: {
+      label: 'Machine sections',
+      machine: 'Machine',
+      motion: 'Motion',
+      spindle: 'Spindle',
+    },
+    /** A closed Notes accordion's summary: the first line, shortened. */
+    notesSummary: (notes: string | undefined): string | undefined => {
+      const line = notes?.trim().split('\n')[0]?.trim()
+      if (line === undefined || line === '') return undefined
+      return line.length > 32 ? `${line.slice(0, 31)}…` : line
+    },
     machineRegion: 'Machine',
   },
 

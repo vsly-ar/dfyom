@@ -175,6 +175,17 @@ describe('AppShell', () => {
     const { user, bridge } = renderShell()
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     const dialog = await screen.findByRole('dialog', { name: 'Settings' })
+    // grouped with the inspectors' group header style (DF110 S6)
+    expect(
+      within(dialog)
+        .getAllByRole('heading', { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual(['Appearance', 'Editing', 'Run', 'Agents'])
+    expect(
+      within(within(dialog).getByRole('region', { name: 'Appearance' })).getByRole('switch', {
+        name: 'Reduce motion',
+      }),
+    ).toBeInTheDocument()
     await user.click(within(dialog).getByRole('radio', { name: 'Dark' }))
     expect(document.documentElement.dataset['theme']).toBe('dark')
     await user.click(within(dialog).getByRole('switch', { name: 'Reduce motion' }))

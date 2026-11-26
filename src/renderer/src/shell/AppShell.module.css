@@ -307,6 +307,14 @@
 .settings {
   display: grid;
   gap: var(--space-4);
+  /* the groups' rules (InspectorGroup, DF110) stay within the dialog's body */
+  --inspector-bleed: 0px;
+}
+
+/* the rows inside a group keep the dialog's row rhythm (each has a hint line under it): the
+   group's --space-2 gap plus --space-2 between rows */
+.settingsGroup > .settingRow + .settingRow {
+  margin-top: var(--space-2);
 }
 
 .settingRow {

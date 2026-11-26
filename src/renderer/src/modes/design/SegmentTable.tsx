@@ -364,6 +364,7 @@ export function SegmentTable({
                       <ItemQuantity
                         ctx={ctx}
                         path={['segments', k, 'to', 0]}
+                        stepKind="xy"
                         label={t.cell(num, t.x)}
                         compact
                       />,
@@ -375,6 +376,7 @@ export function SegmentTable({
                       <ItemQuantity
                         ctx={ctx}
                         path={['segments', k, 'to', 1]}
+                        stepKind="xy"
                         label={t.cell(num, t.y)}
                         compact
                       />,
@@ -387,6 +389,7 @@ export function SegmentTable({
                         <ItemQuantity
                           ctx={ctx}
                           path={['segments', k, 'radius']}
+                          stepKind="small"
                           label={t.cell(num, t.radius)}
                           compact
                         />
@@ -435,6 +438,7 @@ export function SegmentTable({
                           <ItemQuantity
                             ctx={ctx}
                             path={['fillets', fi, 'radius']}
+                            stepKind="small"
                             label={t.cell(num, t.fillet)}
                             compact
                             optional

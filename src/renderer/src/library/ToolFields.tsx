@@ -29,8 +29,24 @@ import styles from './LibraryForm.module.css'
 
 const m = libraryMessages.tool
 const NO_MATERIAL = 'none'
-/** Adjust steps per tool field (inspector-layout.md § Step assignment per field); others `small`. */
-const TOOL_STEP: Partial<Record<string, StepKind>> = {
+/** The tool form's quantity fields. */
+type ToolQuantityField =
+  | 'diameter'
+  | 'cornerRadius'
+  | 'angle'
+  | 'tipDiameter'
+  | 'fluteLength'
+  | 'stickout'
+  | 'shankDiameter'
+  | 'fluteCount'
+  | 'pointAngle'
+  | 'overallLength'
+/** Adjust steps per tool field (inspector-layout.md § Step assignment per field). */
+const TOOL_STEP: Record<ToolQuantityField, StepKind> = {
+  diameter: 'small',
+  cornerRadius: 'small',
+  tipDiameter: 'small',
+  shankDiameter: 'small',
   fluteLength: 'xy',
   stickout: 'xy',
   overallLength: 'xy',
@@ -119,14 +135,14 @@ export function ToolFields({
         setFocused(f !== undefined && DIMENSIONS.has(f) ? (f as ToolDimension) : undefined)
     : undefined
   const quantity = (
-    field: keyof ToolDraft & string,
+    field: ToolQuantityField,
     kind: 'length' | 'scalar' | 'angle',
     icon: Parameters<typeof QuantityField>[0]['icon'],
     opts: { optional?: boolean; info?: string; placeholder?: string } = {},
   ) => (
     <QuantityField
       field={field}
-      stepKind={TOOL_STEP[field] ?? 'small'}
+      stepKind={TOOL_STEP[field]}
       {...(field === 'fluteCount' ? { stepMax: 12 } : {})}
       label={m[field as keyof typeof m] as string}
       kind={kind}
@@ -251,13 +267,7 @@ export function ToolFields({
       >
         {quantity('overallLength', 'length', 'overallLength', { info: m.overallLengthNote })}
         {material}
-        <Field
-          label={m.coating}
-          messages={[
-            ...messages('coating'),
-            { id: 'coating-hint', severity: 'note', text: m.coatingHint },
-          ]}
-        >
+        <Field label={m.coating} messages={messages('coating')} info={m.coatingHint}>
           <FieldInput
             value={values.coating ?? ''}
             maxLength={60}

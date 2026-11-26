@@ -1201,6 +1201,12 @@ describe('Run mode', () => {
     await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
     const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
     const section = within(inspector.getByRole('region', { name: 'Overrides' }))
+    // Run and Overrides take the inspectors' group header style (DF110 S6): h3 titles, Reset none
+    expect(inspector.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'Run',
+      'Overrides',
+    ])
+    expect(inspector.getByRole('region', { name: 'Reset (immediate)' })).toBeInTheDocument()
     // not reported yet
     expect(section.queryByText('Overrides apply until reset or the program ends.')).toBeNull()
     t.machine.push({ overrides: { feed: 120, rapid: 100, spindle: 100 } })

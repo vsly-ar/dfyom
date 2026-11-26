@@ -70,8 +70,14 @@ const ICON: Partial<Record<StrategyKey, FieldIconName>> = {
   breakthrough: 'breakthrough',
 }
 
+/** The strategy parameters entered as a quantity (every other key is a choice). */
+type QuantityStrategyKey = Exclude<
+  StrategyKey,
+  'direction' | 'pattern' | 'axis' | 'entry' | 'cycle'
+>
+
 /** Adjust steps per strategy length (inspector-layout.md § Step assignment per field). */
-const STRATEGY_STEP: Partial<Record<StrategyKey, StepKind>> = {
+const STRATEGY_STEP: Record<QuantityStrategyKey, StepKind> = {
   overshoot: 'small',
   helixDiameter: 'small',
   rampAngle: 'angle',
@@ -82,6 +88,7 @@ const STRATEGY_STEP: Partial<Record<StrategyKey, StepKind>> = {
   helixPitch: 'stepdown',
   breakthrough: 'depth',
 }
+const isQuantityKey = (key: StrategyKey): key is QuantityStrategyKey => key in STRATEGY_STEP
 
 function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
   const design = plan.design.part.operations.find((o) => o.id === view.designOperationIds[0])
@@ -163,6 +170,7 @@ export function StrategyGroup({
           />
         </div>
       )
+    if (!isQuantityKey(key)) return null
     const stored = op.strategy[key] as QuantityDTO | undefined
     const throughDepth = view.throughDepth ?? null
     const cutDepth =
@@ -326,7 +334,7 @@ function StrategyQuantity({
   onSet,
   onCancelGesture,
 }: {
-  strategyKey: StrategyKey
+  strategyKey: QuantityStrategyKey
   label: string
   stored: QuantityDTO | undefined
   resolved: number | undefined
@@ -367,7 +375,7 @@ function StrategyQuantity({
       kind={angle ? 'angle' : 'length'}
       defaultUnit={angle ? 'deg' : defaultUnit('length', units)}
       value={value}
-      stepKind={STRATEGY_STEP[strategyKey] ?? (angle ? 'angle' : 'small')}
+      stepKind={STRATEGY_STEP[strategyKey]}
       stepKey={`plan.strategy.${strategyKey}`}
       {...(tag !== undefined ? { tag } : {})}
       illustration={<FieldIcon name={ICON[strategyKey] ?? 'length'} />}

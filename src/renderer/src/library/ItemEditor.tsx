@@ -7,7 +7,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
-import { Icon, Button, ConfirmDialog, ErrorMessage, StatusChip, type FieldMessage } from '../ui'
+import {
+  Icon,
+  Button,
+  ConfirmDialog,
+  ErrorMessage,
+  StatusChip,
+  revealInInspector,
+  type FieldMessage,
+} from '../ui'
 import { useStore } from 'zustand'
 import {
   draftIssues,
@@ -70,7 +78,13 @@ export function ItemEditor({
 
   useEffect(() => {
     if (s.failures === 0) return
-    ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+    // a field in another machine tab or a closed accordion is shown first (DF110)
+    const invalid = ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+    if (invalid === null || invalid === undefined) return
+    revealInInspector(invalid)
+    invalid.focus()
+    // from an effect the reveal's tab switch commits a frame later (as revealPlanField): again then
+    if (document.activeElement !== invalid) requestAnimationFrame(() => invalid.focus())
   }, [s.failures])
 
   if (d === null) {

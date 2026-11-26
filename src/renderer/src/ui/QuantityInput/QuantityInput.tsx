@@ -115,9 +115,9 @@ export interface QuantityInputBaseProps {
   precision?: number
   /**
    * What the field measures, for its adjust steps (inspector-layout.md § Step kinds and the
-   * per-field assignment table); `xy` until every field names one (slice S6).
+   * per-field assignment table). Required (S6): no field falls back to a default kind.
    */
-  stepKind?: StepKind
+  stepKind: StepKind
   /** The field's maximum (count fields): the ladder stops at half of it (DF104 rule 6). */
   stepMax?: number
   /** No stock or machine cap (a "no cap" row of the assignment table: setup heights, stock size). */
@@ -210,7 +210,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     references = [],
     validate,
     precision,
-    stepKind = 'xy',
+    stepKind,
     stepMax,
     stepUncapped = false,
     stepKey,

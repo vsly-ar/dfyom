@@ -141,6 +141,8 @@
   display: grid;
   gap: var(--space-3);
   color: var(--text);
+  /* the Size and Material groups' rules (InspectorGroup, DF110) stay within the dialog's body */
+  --inspector-bleed: 0px;
 }
 
 /* Save to library (DF13), at the end of the Stock dialog's body; Create part is in its footer */

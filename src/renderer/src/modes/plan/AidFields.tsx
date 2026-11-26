@@ -17,12 +17,31 @@ import { Quantity } from '../../../../core/quantity/quantity'
 import { lengthSource } from '../../messages/dfm'
 import { findingText, planMessages } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
-import { Button, FieldIcon, Icon, InspectorGroup, QuantityInput, type FieldMessage } from '../../ui'
+import {
+  Button,
+  FieldIcon,
+  Icon,
+  InspectorGroup,
+  QuantityInput,
+  type FieldMessage,
+  type StepKind,
+} from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import styles from './Plan.module.css'
 import { NameField } from './PlanInspector'
 
 const m = planMessages.aid
+
+/** An aid's size fields. */
+type AidSizeField = 'diameter' | 'spoilboardDepth' | 'lineLength' | 'markDiameter' | 'markDepth'
+/** Adjust steps per aid size (inspector-layout.md § Step assignment per field). */
+const AID_STEP: Record<AidSizeField, StepKind> = {
+  diameter: 'small',
+  spoilboardDepth: 'depth',
+  lineLength: 'xy',
+  markDiameter: 'small',
+  markDepth: 'depth',
+}
 
 type XY = readonly [number, number]
 
@@ -87,7 +106,7 @@ export function AidFields({
       />
     ))
   const size = (
-    key: string,
+    key: AidSizeField,
     label: string,
     mm: number,
     hint?: string,
@@ -100,7 +119,7 @@ export function AidFields({
       defaultUnit={unit}
       value={q(mm)}
       readOnly={readOnly}
-      stepKind={key === 'markDepth' ? 'depth' : key === 'lineLength' ? 'xy' : 'small'}
+      stepKind={AID_STEP[key]}
       {...(hint === undefined ? {} : { info: hint })}
       onCommit={commit}
       onCancelGesture={cancelGesture}

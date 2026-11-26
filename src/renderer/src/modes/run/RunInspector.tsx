@@ -5,13 +5,15 @@
 // Feed hold, resume and Stop live in the main toolbar (MachineToolbar). Without a project (DF80) the
 // run section is the "Open a project to run a plan" empty state; the DRO, overrides and Reset stay.
 // There, "Run gCode file…" and the recent files open an external gCode file, whose card and
-// "Start run" then take the run section (DF93).
+// "Start run" then take the run section (DF93). Run and Overrides are `InspectorGroup`s (the
+// inspectors' group header style, DF110 S6); Reset has no title, only the rule above it.
 // Doc: docs/modes/run.md#run-without-a-project-df80, #run-an-external-g-code-file-df93
-// Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
+// Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress,
+// docs/conventions/inspector-layout.md#group-header-style
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, EmptyState, PanelHeader, Progress } from '../../ui'
+import { Icon, Button, EmptyState, InspectorGroup, PanelHeader, Progress } from '../../ui'
 import { useShell } from '../../shell/ShellContext'
 import { AlignmentPanel } from './AlignmentPanel'
 import { Dro } from './Dro'
@@ -83,8 +85,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
         {/* DF78 (Q107): the alignment step docked beside the DRO */}
         {doc === undefined ? null : <AlignmentPanel doc={doc} />}
 
-        <section className={styles['section']} aria-label={m.title}>
-          <h3 className={styles['sectionTitle']}>{m.title}</h3>
+        <InspectorGroup title={m.title}>
           {job?.plan ? (
             <p className={styles['runOf']}>
               {m.runOf(job.plan.planName, job.plan.setup, job.plan.setups, job.plan.setupName)}
@@ -196,7 +197,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
               )}
             </>
           ) : null}
-        </section>
+        </InspectorGroup>
 
         {isConnected(status) ? (
           <OverridesSection
@@ -208,7 +209,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
         ) : null}
 
         {isConnected(status) ? (
-          <section className={styles['section']} aria-label={runMessages.controls.reset}>
+          // no title: the button names it; the rule of a following group (DF110)
+          <section className={styles['resetSection']} aria-label={runMessages.controls.reset}>
             <Button
               size="lg"
               variant="danger"

@@ -99,6 +99,7 @@ export const shellMessages = {
   settingsDialog: {
     title: 'Settings',
     description: 'Settings apply to every window and are kept for the next start.',
+    groups: { appearance: 'Appearance', editing: 'Editing', run: 'Run', agents: 'Agents' },
     theme: 'Theme',
     themes: { light: 'Light', dark: 'Dark', system: 'System' } satisfies Record<
       ThemeSetting,

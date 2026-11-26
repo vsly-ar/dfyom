@@ -10,6 +10,7 @@ import {
   Field,
   FieldIcon,
   FieldInput,
+  InspectorGroup,
   QuantityInput,
   type FieldIconName,
   type FieldMessage,
@@ -166,13 +167,7 @@ export function NotesField({
   messages: FieldMessage[]
 }): React.JSX.Element {
   return (
-    <Field
-      label={libraryMessages.notes}
-      messages={[
-        ...messages,
-        { id: 'notes-hint', severity: 'note' as const, text: libraryMessages.notesHint },
-      ]}
-    >
+    <Field label={libraryMessages.notes} messages={messages} info={libraryMessages.notesHint}>
       <textarea
         className={styles['notes']}
         rows={4}
@@ -181,6 +176,37 @@ export function NotesField({
         onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
       />
     </Field>
+  )
+}
+
+/**
+ * The Notes accordion of the machine and stock forms (DF110): closed by default with the first
+ * line as its summary, open while the notes have an issue; remembered per item kind.
+ */
+export function NotesGroup({
+  kind,
+  value,
+  onChange,
+  messages,
+}: {
+  kind: 'machine' | 'stock'
+  value: string | undefined
+  onChange: (notes: string | undefined) => void
+  messages: FieldMessage[]
+}): React.JSX.Element {
+  const w = libraryMessages.window
+  const problem = messages.some((x) => x.severity === 'error')
+  return (
+    <InspectorGroup
+      title={w.groups.notes}
+      collapsible
+      rememberKey={`library.${kind}.notes`}
+      forceOpen={problem}
+      summary={w.notesSummary(value)}
+      severity={problem ? 'error' : undefined}
+    >
+      <NotesField value={value} messages={messages} onChange={onChange} />
+    </InspectorGroup>
   )
 }
 

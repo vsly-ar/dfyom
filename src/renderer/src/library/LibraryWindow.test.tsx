@@ -14,6 +14,7 @@ import type { LibraryContext } from '../../../shared/preload-api'
 import { App } from '../App'
 import { createShell, ShellProvider } from '../shell/ShellContext'
 import { createFakeBridge, designDispatcher } from '../test/bridge'
+import { openInspectorGroup, openInspectorTab } from '../test/inspector'
 import { expectNoAxeViolations, renderUi } from '../test/render'
 
 const UI = { kind: 'ui', id: 'test' } as const
@@ -505,7 +506,8 @@ describe('Library window', () => {
     await user.click(screen.getByRole('tab', { name: 'Machines' }))
     const grid = await screen.findByRole('grid', { name: 'Machines' })
     await user.click(await within(grid).findByRole('row', { name: /Router/ }))
-    // the full form has the new fields
+    // the full form has the new fields, on its Motion tab (DF110)
+    await openInspectorTab(user, editor(), 'Motion')
     expect(
       within(editor()).getByLabelText('Junction deviation', { selector: 'input' }),
     ).toHaveValue('')
@@ -575,6 +577,7 @@ describe('Library window', () => {
     await user.click(screen.getByRole('tab', { name: 'Machines' }))
     const grid = await screen.findByRole('grid', { name: 'Machines' })
     await user.click(await within(grid).findByRole('row', { name: /Trim router/ }))
+    await openInspectorTab(user, editor(), 'Spindle')
     await waitFor(() =>
       expect(
         within(editor()).getByLabelText('Controller $31 (PWM min)', { selector: 'input' }),
@@ -590,6 +593,96 @@ describe('Library window', () => {
       expect(within(editor()).getByRole('heading', { name: 'Dial router' })).toBeInTheDocument(),
     )
     expect(within(editor()).queryByLabelText('Controller $31 (PWM min)')).toBeNull()
+  })
+
+  it('S6: the machine form in tabs Machine / Motion / Spindle; a problem marks and reveals its tab; Notes closed', async () => {
+    const { user, editor, add } = await renderLibrary()
+    await add('machine', {
+      name: 'Router',
+      controller: 'grbl',
+      travel: { x: '800', y: '800', z: '100' },
+      maxFeedRate: { x: '5000', y: '5000', z: '1000' },
+      spindle: { control: 'manual', maxSpeed: '30000' },
+      programUnits: 'mm',
+      toolChanger: 'none',
+      notes: 'Garage router\nBought 2024',
+    })
+    await user.click(screen.getByRole('tab', { name: 'Machines' }))
+    const grid = await screen.findByRole('grid', { name: 'Machines' })
+    await user.click(await within(grid).findByRole('row', { name: /Router/ }))
+    const tabs = within(editor()).getByRole('tablist', { name: 'Machine sections' })
+    expect(
+      within(tabs)
+        .getAllByRole('tab')
+        .map((t) => t.textContent),
+    ).toEqual(['Machine', 'Motion', 'Spindle'])
+    expect(within(tabs).getByRole('tab', { name: 'Machine' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    // Machine: travel, Z height, homing, controller; Notes a closed accordion with its first line
+    const ed = editor()
+    expect(within(ed).getByRole('region', { name: 'Travel' })).toBeVisible()
+    expect(within(ed).getByRole('region', { name: 'Controller' })).toBeVisible()
+    expect(within(ed).queryByRole('region', { name: 'Max feed rate' })).toBeNull()
+    const notes = within(ed).getByRole('region', { name: 'Notes' })
+    expect(within(notes).getByRole('button', { name: /Notes/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    const header = notes.querySelector('h3')
+    expect(header).toHaveTextContent('Garage router')
+    expect(header).not.toHaveTextContent('Bought 2024')
+    await openInspectorGroup(user, ed, 'Notes')
+    expect(within(ed).getByRole('textbox', { name: 'Notes' })).toBeVisible()
+    await expectNoAxeViolations()
+
+    // an invalid max feed rate on Motion: the tab carries a dot while another tab is shown, and
+    // Save shows the field (selects its tab) and focuses it
+    await openInspectorTab(user, ed, 'Motion')
+    const feedX = within(ed).getByLabelText('Max feed rate X', { selector: 'input' })
+    await user.clear(feedX)
+    await user.type(feedX, '-5{Enter}')
+    await openInspectorTab(user, ed, 'Spindle')
+    expect(within(tabs).getByRole('tab', { name: 'Motion, has errors' })).toBeInTheDocument()
+    expect(feedX).not.toBeVisible()
+    await user.click(within(ed).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(feedX).toHaveFocus())
+    expect(within(tabs).getByRole('tab', { name: /^Motion/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+  })
+
+  it('S6: the stock form: Size, Material, Notes closed with its first line', async () => {
+    const { user, editor, add } = await renderLibrary()
+    await add('stock', {
+      name: 'Birch ply',
+      shape: 'block',
+      length: '600',
+      width: '400',
+      thickness: '10.1',
+      material: { name: 'Birch plywood', class: 'sheetGood' },
+      notes: 'Rack 2',
+    })
+    await user.click(screen.getByRole('tab', { name: 'Stock' }))
+    const grid = await screen.findByRole('grid', { name: 'Stock' })
+    await user.click(await within(grid).findByRole('row', { name: /Birch ply/ }))
+    const ed = editor()
+    expect(within(ed).getByRole('region', { name: 'Size' })).toBeVisible()
+    expect(within(ed).getByRole('region', { name: 'Material' })).toBeVisible()
+    const notes = within(ed).getByRole('region', { name: 'Notes' })
+    expect(within(notes).getByRole('button', { name: /Notes/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(notes.querySelector('h3')).toHaveTextContent('Rack 2')
+    // the notes hint is the field's (i) tip, in its description
+    await openInspectorGroup(user, ed, 'Notes')
+    expect(within(ed).getByRole('textbox', { name: 'Notes' })).toHaveAccessibleDescription(
+      /Vendor, product number/,
+    )
+    await expectNoAxeViolations()
   })
 
   it('offers Import $$… only for a saved machine without unsaved changes', async () => {

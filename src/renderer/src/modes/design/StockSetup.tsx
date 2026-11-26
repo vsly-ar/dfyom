@@ -9,7 +9,8 @@
 // `onCreated` closes the dialog. Since DF95 the same form edits the stock of an existing part
 // (`edit`): it starts from the part's copy, and "Update stock" sends `design.part.update` with the
 // new stock (one undo step; operations that no longer fit show as warnings). Since DF96 a block's
-// automatic name is its material class (not Other) and material, then its size.
+// automatic name is its material class (not Other) and material, then its size. Since DF110 (S6)
+// the sizes and the material are the groups Size and Material (inspector-layout.md).
 // Doc: docs/conventions/ui.md#stock-dialog-df11df13, docs/modes/design.md#workflow,
 // docs/architecture/library.md#stock-variants-df13, docs/conventions/ui.md#radix-wrapping-pattern
 import { useEffect, useRef, useState } from 'react'
@@ -37,6 +38,7 @@ import {
   Field,
   FieldIcon,
   FieldInput,
+  InspectorGroup,
   QuantityInput,
   Select,
   type SelectOption,
@@ -391,30 +393,34 @@ export function StockSetup({
               onValueChange={(id) => choose(id)}
             />
           </Field>
-          {sizeField(0, m.length)}
-          {sizeField(1, m.width)}
-          {sizeField(2, m.thickness)}
-          <Field
-            label={m.materialName}
-            readOnly={locked}
-            messages={
-              locked ? [{ id: 'materialLocked', severity: 'note', text: m.materialLocked }] : []
-            }
-          >
-            <FieldInput
-              value={material}
+          <InspectorGroup title={libraryMessages.window.groups.size}>
+            {sizeField(0, m.length)}
+            {sizeField(1, m.width)}
+            {sizeField(2, m.thickness)}
+          </InspectorGroup>
+          <InspectorGroup title={libraryMessages.window.groups.material}>
+            <Field
+              label={m.materialName}
               readOnly={locked}
-              onChange={(e) => setMaterial(e.target.value)}
-            />
-          </Field>
-          <Field label={m.materialClass} readOnly={locked}>
-            <Select<MaterialClass>
-              options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
-              value={materialClass}
-              disabled={locked}
-              onValueChange={setMaterialClass}
-            />
-          </Field>
+              messages={
+                locked ? [{ id: 'materialLocked', severity: 'note', text: m.materialLocked }] : []
+              }
+            >
+              <FieldInput
+                value={material}
+                readOnly={locked}
+                onChange={(e) => setMaterial(e.target.value)}
+              />
+            </Field>
+            <Field label={m.materialClass} readOnly={locked}>
+              <Select<MaterialClass>
+                options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
+                value={materialClass}
+                disabled={locked}
+                onValueChange={setMaterialClass}
+              />
+            </Field>
+          </InspectorGroup>
           {/* the two library actions in one row, each with its own icon (DF48) */}
           <div className={styles['setupButtons']}>
             <LibraryLink

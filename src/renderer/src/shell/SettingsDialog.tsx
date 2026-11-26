@@ -1,7 +1,8 @@
 // Settings dialog: theme (Light / Dark / System), reduced motion, "Allow local agents to connect",
 // the default placement anchor of new pockets and profiles (task F2), the snap grid per unit
 // system (task U3), the jog hotkey style and "Ask again" for the skipped homing confirmations
-// (DF88).
+// (DF88). The rows are grouped (Appearance, Editing, Run, Agents) with the inspectors' group
+// header style (DF110 S6, docs/conventions/inspector-layout.md#group-header-style).
 // Changes apply at once to every window and persist (main's settings store).
 // Doc: docs/conventions/ui.md#settings
 import { useEffect, useId, useState } from 'react'
@@ -17,6 +18,7 @@ import {
   Button,
   Dialog,
   DialogClose,
+  InspectorGroup,
   QuantityInput,
   SegmentedControl,
   Select,
@@ -91,147 +93,155 @@ export function SettingsDialog(): React.JSX.Element {
       }
     >
       <div className={styles['settings']}>
-        <div className={styles['settingRow']}>
-          {/* the group is named by its own aria-label; this is the visible caption */}
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.theme}
-          </span>
-          <SegmentedControl<ThemeSetting>
-            label={m.theme}
-            options={THEMES.map((t) => ({ value: t, label: m.themes[t] }))}
-            value={settings.theme}
-            onValueChange={(theme) => update({ theme })}
-          />
-        </div>
-        <div className={styles['settingRow']}>
-          <Switch
-            label={m.reduceMotion}
-            checked={settings.reduceMotion}
-            onCheckedChange={(reduceMotion) => update({ reduceMotion })}
-            aria-describedby={motionHint}
-          />
-          <p id={motionHint} className={styles['settingHint']}>
-            {m.reduceMotionHint}
-          </p>
-        </div>
-        <div className={styles['settingRow']}>
-          <Switch
-            label={m.allowAgents}
-            checked={settings.allowLocalAgents}
-            onCheckedChange={(allowLocalAgents) => update({ allowLocalAgents })}
-            aria-describedby={agentsHint}
-          />
-          <p id={agentsHint} className={styles['settingHint']}>
-            {m.allowAgentsHint(http?.enabled === true ? http.port : undefined)}
-          </p>
-        </div>
-        <div className={styles['settingRow']}>
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.autoApply}
-          </span>
-          <div className={styles['settingSelect']}>
-            <Select<string>
-              aria-label={m.autoApply}
-              aria-describedby={autoApplyHint}
-              options={delays.map((s) => ({
-                value: String(s),
-                label: s === 0 ? m.autoApplyOff : m.autoApplySeconds(s),
-              }))}
-              value={String(settings.autoApplyDelay)}
-              onValueChange={(v) => update({ autoApplyDelay: Number(v) })}
+        <InspectorGroup title={m.groups.appearance} className={styles['settingsGroup']}>
+          <div className={styles['settingRow']}>
+            {/* the group is named by its own aria-label; this is the visible caption */}
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.theme}
+            </span>
+            <SegmentedControl<ThemeSetting>
+              label={m.theme}
+              options={THEMES.map((t) => ({ value: t, label: m.themes[t] }))}
+              value={settings.theme}
+              onValueChange={(theme) => update({ theme })}
             />
           </div>
-          <p id={autoApplyHint} className={styles['settingHint']}>
-            {m.autoApplyHint}
-          </p>
-        </div>
-        <div className={styles['settingRow']}>
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.jogKeys}
-          </span>
-          <div className={styles['settingSelect']}>
-            <Select<string>
-              aria-label={m.jogKeys}
-              aria-describedby={jogKeysHint}
-              options={[
-                ...JOG_KEY_STYLES.map((s) => ({ value: s, label: m.jogKeyStyles[s] })),
-                { value: 'custom', label: m.jogKeysCustom, disabled: true },
-              ]}
-              value={settings.jogKeys}
-              onValueChange={(v) => {
-                const style = JOG_KEY_STYLES.find((s) => s === v)
-                if (style !== undefined) update({ jogKeys: style })
-              }}
+          <div className={styles['settingRow']}>
+            <Switch
+              label={m.reduceMotion}
+              checked={settings.reduceMotion}
+              onCheckedChange={(reduceMotion) => update({ reduceMotion })}
+              aria-describedby={motionHint}
             />
+            <p id={motionHint} className={styles['settingHint']}>
+              {m.reduceMotionHint}
+            </p>
           </div>
-          <p id={jogKeysHint} className={styles['settingHint']}>
-            {m.jogKeysHint}
-          </p>
-        </div>
-        <div className={styles['settingRow']}>
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.homeConfirm}
-          </span>
-          <div>
-            <Button
-              disabled={settings.skipHomeConfirm.length === 0}
-              aria-describedby={homeHint}
-              onClick={() => update({ skipHomeConfirm: [] })}
-            >
-              {m.homeConfirmReset}
-            </Button>
+        </InspectorGroup>
+        <InspectorGroup title={m.groups.editing} className={styles['settingsGroup']}>
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.autoApply}
+            </span>
+            <div className={styles['settingSelect']}>
+              <Select<string>
+                aria-label={m.autoApply}
+                aria-describedby={autoApplyHint}
+                options={delays.map((s) => ({
+                  value: String(s),
+                  label: s === 0 ? m.autoApplyOff : m.autoApplySeconds(s),
+                }))}
+                value={String(settings.autoApplyDelay)}
+                onValueChange={(v) => update({ autoApplyDelay: Number(v) })}
+              />
+            </div>
+            <p id={autoApplyHint} className={styles['settingHint']}>
+              {m.autoApplyHint}
+            </p>
           </div>
-          <p id={homeHint} className={styles['settingHint']}>
-            {m.homeConfirmHint(settings.skipHomeConfirm.length)}
-          </p>
-        </div>
-        <div className={styles['settingRow']}>
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.defaultAnchor}
-          </span>
-          {/* named in the top face's frame: new operations start on the stock top */}
-          <AnchorPicker
-            label={m.defaultAnchor}
-            value={settings.defaultAnchor}
-            caption={designMessages.anchorPoint('+z', settings.defaultAnchor)}
-            pointLabel={(p) => designMessages.anchorPoint('+z', p)}
-            onValueChange={(defaultAnchor) => update({ defaultAnchor })}
-            aria-describedby={anchorHint}
-          />
-          <p id={anchorHint} className={styles['settingHint']}>
-            {m.defaultAnchorHint}
-          </p>
-        </div>
-        <div className={styles['settingRow']} role="group" aria-label={m.snapGrid}>
-          <span className={styles['settingLabel']} aria-hidden="true">
-            {m.snapGrid}
-          </span>
-          <div className={styles['settingPair']}>
-            <QuantityInput
-              label={m.snapGridMm}
-              stepKind="small"
-              kind="length"
-              defaultUnit="mm"
-              value={gridValue(settings.snapGrid.mm, 'mm')}
-              validate={positive}
-              onCommit={(q) => update({ snapGrid: { ...settings.snapGrid, mm: q.canonical } })}
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.defaultAnchor}
+            </span>
+            {/* named in the top face's frame: new operations start on the stock top */}
+            <AnchorPicker
+              label={m.defaultAnchor}
+              value={settings.defaultAnchor}
+              caption={designMessages.anchorPoint('+z', settings.defaultAnchor)}
+              pointLabel={(p) => designMessages.anchorPoint('+z', p)}
+              onValueChange={(defaultAnchor) => update({ defaultAnchor })}
+              aria-describedby={anchorHint}
             />
-            <QuantityInput
-              label={m.snapGridInch}
-              stepKind="small"
-              kind="length"
-              defaultUnit="in"
-              value={gridValue(settings.snapGrid.inch, 'in')}
-              validate={positive}
-              onCommit={(q) =>
-                update({ snapGrid: { ...settings.snapGrid, inch: q.canonical / 25.4 } })
-              }
-            />
+            <p id={anchorHint} className={styles['settingHint']}>
+              {m.defaultAnchorHint}
+            </p>
           </div>
-          <p id={gridHint} className={styles['settingHint']}>
-            {m.snapGridHint}
-          </p>
-        </div>
+          <div className={styles['settingRow']} role="group" aria-label={m.snapGrid}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.snapGrid}
+            </span>
+            <div className={styles['settingPair']}>
+              <QuantityInput
+                label={m.snapGridMm}
+                stepKind="small"
+                kind="length"
+                defaultUnit="mm"
+                value={gridValue(settings.snapGrid.mm, 'mm')}
+                validate={positive}
+                onCommit={(q) => update({ snapGrid: { ...settings.snapGrid, mm: q.canonical } })}
+              />
+              <QuantityInput
+                label={m.snapGridInch}
+                stepKind="small"
+                kind="length"
+                defaultUnit="in"
+                value={gridValue(settings.snapGrid.inch, 'in')}
+                validate={positive}
+                onCommit={(q) =>
+                  update({ snapGrid: { ...settings.snapGrid, inch: q.canonical / 25.4 } })
+                }
+              />
+            </div>
+            <p id={gridHint} className={styles['settingHint']}>
+              {m.snapGridHint}
+            </p>
+          </div>
+        </InspectorGroup>
+        <InspectorGroup title={m.groups.run} className={styles['settingsGroup']}>
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.jogKeys}
+            </span>
+            <div className={styles['settingSelect']}>
+              <Select<string>
+                aria-label={m.jogKeys}
+                aria-describedby={jogKeysHint}
+                options={[
+                  ...JOG_KEY_STYLES.map((s) => ({ value: s, label: m.jogKeyStyles[s] })),
+                  { value: 'custom', label: m.jogKeysCustom, disabled: true },
+                ]}
+                value={settings.jogKeys}
+                onValueChange={(v) => {
+                  const style = JOG_KEY_STYLES.find((s) => s === v)
+                  if (style !== undefined) update({ jogKeys: style })
+                }}
+              />
+            </div>
+            <p id={jogKeysHint} className={styles['settingHint']}>
+              {m.jogKeysHint}
+            </p>
+          </div>
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.homeConfirm}
+            </span>
+            <div>
+              <Button
+                disabled={settings.skipHomeConfirm.length === 0}
+                aria-describedby={homeHint}
+                onClick={() => update({ skipHomeConfirm: [] })}
+              >
+                {m.homeConfirmReset}
+              </Button>
+            </div>
+            <p id={homeHint} className={styles['settingHint']}>
+              {m.homeConfirmHint(settings.skipHomeConfirm.length)}
+            </p>
+          </div>
+        </InspectorGroup>
+        <InspectorGroup title={m.groups.agents} className={styles['settingsGroup']}>
+          <div className={styles['settingRow']}>
+            <Switch
+              label={m.allowAgents}
+              checked={settings.allowLocalAgents}
+              onCheckedChange={(allowLocalAgents) => update({ allowLocalAgents })}
+              aria-describedby={agentsHint}
+            />
+            <p id={agentsHint} className={styles['settingHint']}>
+              {m.allowAgentsHint(http?.enabled === true ? http.port : undefined)}
+            </p>
+          </div>
+        </InspectorGroup>
       </div>
     </Dialog>
   )
