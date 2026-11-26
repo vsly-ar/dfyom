@@ -203,7 +203,7 @@ export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
   const m = measureOf(input)
   // DF108: every roughing tool of a pattern leaves rest (the pattern's pocket cuts it)
   const g = input.geometry
-  if (g.kind === 'pocket' && g.roughing === true) return false
+  if ((g.kind === 'pocket' || g.kind === 'profile') && g.roughing === true) return false
   if (m === undefined || !isEndMillType(tool.type) || !('shape' in g)) return false
   const r = tool.diameter / 2 - FIT_SLACK
   const [cu, cv] = g.shape.center

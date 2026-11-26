@@ -54,6 +54,7 @@ describe('field illustrations', () => {
       'plunge',
       'stepover',
       'allowance',
+      'floorAllowance',
       'finishStepdown',
       'chipBreak',
       'clearance',

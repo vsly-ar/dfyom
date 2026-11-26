@@ -3,8 +3,10 @@
 // Leave on walls changes the pocket's margin, and in Plan the roughing is its own row before the
 // pocket (its tool's run) while the pocket's row carries the "rest" chip; the program exports.
 // With DFYOM_R2_DIR set it also captures light and dark renders of the open accordion and the
-// plan list there (review captures, not asserted). Windows stay hidden (app.fixture.ts).
-// Docs: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2, docs/conventions/ui.md
+// plan list there (review captures, not asserted). R4: the same for a through outside profile
+// (its floor margin is the Skin; captures with DFYOM_R4_DIR). Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2,
+// docs/modes/roughing.md#implementation-r4, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -12,6 +14,7 @@ import type { PreloadApi } from '../src/shared/preload-api'
 import { expect, test } from './app.fixture'
 
 const SHOTS = process.env['DFYOM_R2_DIR']
+const SHOTS_R4 = process.env['DFYOM_R4_DIR']
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -42,10 +45,10 @@ const flat = (diameter: number) => ({
   ],
 })
 
-/** `name`-light.png and -dark.png of the window (only with DFYOM_R2_DIR). */
-async function shoot(page: Page, name: string): Promise<void> {
-  if (SHOTS === undefined) return
-  const dir = resolve(SHOTS)
+/** `name`-light.png and -dark.png of the window (only with DFYOM_R2_DIR, or `to`). */
+async function shoot(page: Page, name: string, to = SHOTS): Promise<void> {
+  if (to === undefined) return
+  const dir = resolve(to)
   mkdirSync(dir, { recursive: true })
   for (const theme of ['light', 'dark'] as const) {
     // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
@@ -178,5 +181,106 @@ test('roughing: turn it on for a pocket, see the pass in the Plan list, export',
   expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
   expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
   expect(program.indexOf('(Pocket 1 - roughing)')).toBeLessThan(program.indexOf('(Pocket 1)'))
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('roughing R4: a through outside profile roughs above its skin, rest chip, export', async ({
+  dfyom,
+}) => {
+  test.setTimeout(180_000)
+  await dfyom.app.evaluate(({ dialog }, dir) => {
+    dialog.showSaveDialog = ((...args: unknown[]) => {
+      const o = (args.at(-1) ?? {}) as { defaultPath?: string }
+      const name = (o.defaultPath ?? 'out.nc').split(/[\\/]/).at(-1)!
+      return Promise.resolve({ canceled: false, filePath: `${dir}/${name}` })
+    }) as typeof dialog.showSaveDialog
+  }, dfyom.dataDir)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (SHOTS_R4 !== undefined) await page.setViewportSize({ width: 1440, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  for (const d of [3, 8]) {
+    const added = await page.evaluate(
+      ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+      ['library.tool.add', { values: flat(d) }] as const,
+    )
+    expect(added.ok, JSON.stringify(added)).toBe(true)
+  }
+
+  // ── a 100 × 72 × 10 part, a through outside profile with a 9 mm slot, its Ø 3 locked ──────
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Profile roughing')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '100')
+  await setField(setup, 'Width (Y)', '72')
+  await setField(setup, 'Thickness (Z)', '10')
+  await stock.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
+  await navigator.getByRole('button', { name: 'Add profile' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
+  await inspector.getByRole('radio', { name: 'Outside' }).click()
+  const slotHeader = inspector.getByRole('button', { name: /^Slot/ })
+  if ((await slotHeader.getAttribute('aria-expanded')) === 'false') await slotHeader.click()
+  await setField(inspector, 'Slot width', '9')
+  await inspector.getByRole('combobox', { name: 'Tool' }).click()
+  await page.getByRole('option', { name: /^Flat 3/ }).click()
+
+  // ── Roughing: the Skin (a through profile's floor margin) ──────────────────────────────────
+  const header = inspector.getByRole('button', { name: /^Roughing/ })
+  await expect(header).toContainText('Off')
+  await header.click()
+  await inspector.getByRole('switch', { name: 'Roughing' }).click()
+  await expect(inspector.getByRole('switch', { name: 'Roughing' })).toBeChecked()
+  const skin = inspector.getByLabel('Skin', { exact: true }).and(inspector.locator('input'))
+  await expect(skin).toHaveAttribute('placeholder', /^Auto · /)
+  await expect(inspector.getByRole('combobox', { name: 'Roughing tool' })).toHaveText(/Flat 8/)
+  const row = navigator.getByRole('button', { name: /^Profile 1, with roughing/ })
+  await expect(row).toBeVisible()
+  await row.getByTitle('Expand Profile 1').click()
+  await expect(
+    navigator.getByRole('button', { name: /^Profile 1 · roughing, edited through Profile 1/ }),
+  ).toBeVisible()
+  await skin.scrollIntoViewIfNeeded()
+  await shoot(page, 'r4-profile-roughing', SHOTS_R4)
+
+  // ── Plan: the roughing row first, the profile's row with the rest chip ─────────────────────
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const start = page.getByRole('dialog', { name: 'Plan the part' })
+  await start.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
+  await setField(newMachine, 'Travel Z', '100')
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
+  await start.getByRole('button', { name: 'Create plan' }).click()
+  await expect(start).toBeHidden()
+  const list = navigator
+    .getByRole('list', { name: 'Setups in machining order' })
+    .getByRole('list', { name: 'Plan operations in machining order' })
+  const rows = list.getByRole('button', { name: /^Profile 1/ })
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('Profile 1 · roughing')
+  await expect(rows.nth(1).getByTitle('Cuts only what Profile 1 · roughing left')).toBeVisible()
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await rows.nth(1).click()
+  await shoot(page, 'r4-plan-rest', SHOTS_R4)
+  await navigator
+    .getByRole('button', { name: /^Export (.* )?gCode…$/ })
+    .first()
+    .click()
+  await expect(page.getByRole('dialog', { name: 'gCode exported' })).toBeVisible({
+    timeout: 30_000,
+  })
+  const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
+  const program = readFileSync(join(dfyom.dataDir, file), 'utf8')
+  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
+  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
+  expect(program.indexOf('(Profile 1 - roughing)')).toBeLessThan(program.indexOf('(Profile 1)'))
   expect(dfyom.rendererErrors).toEqual([])
 })

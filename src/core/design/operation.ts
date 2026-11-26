@@ -181,6 +181,11 @@ export const roughingOperationId = (ownerId: string): string => `${ownerId}_roug
  * without roughing).
  */
 export function roughingIdOf(op: Operation): string | undefined {
+  // DF122 R4: an inside/outside profile's own roughing profile
+  if (op.kind === 'profile')
+    return op.roughing === true || op.roughingPass === undefined
+      ? undefined
+      : roughingOperationId(op.id)
   if (op.kind !== 'pocket' || op.roughing === true) return undefined
   if (op.owner.isNone())
     return op.roughingPass === undefined ? undefined : roughingOperationId(op.id)
@@ -190,6 +195,7 @@ export function roughingIdOf(op: Operation): string | undefined {
 
 /** The owner id of a roughing pocket (DF122 `roughingOf`, else a pattern's `<feature>_pocket`). */
 export function roughingOwnerId(op: Operation): string | undefined {
+  if (op.kind === 'profile') return op.roughing === true ? op.roughingOf : undefined
   if (op.kind !== 'pocket' || op.roughing !== true) return undefined
   if (op.roughingOf !== undefined) return op.roughingOf
   if (op.owner.isNone()) return undefined
@@ -219,6 +225,17 @@ export interface Profile extends Common {
     /** Distances along the loop from its start point; Some replaces `count` (v0.3). */
     readonly positions: Option<readonly Quantity[]>
   }
+  /**
+   * DF122 R4: an `inside`/`outside` profile's roughing setting (as a pocket's): on, it owns the
+   * roughing profile `<id>_roughing` (roughing.ts). Doc: docs/modes/roughing.md#implementation-r4
+   */
+  readonly roughingPass?: RoughingMargins | undefined
+  /** DF122 R4: a roughing profile (removes nothing of its own; no finishing pass, no tabs). */
+  readonly roughing?: true | undefined
+  /** DF122 R4: a roughing profile's owner. */
+  readonly roughingOf?: string | undefined
+  /** DF122 R4: a roughing profile's stock to leave (its owner's margins). */
+  readonly leave?: RoughingMargins | undefined
 }
 /**
  * v0.4: a conical bevel at the mouth of an earlier circular drilling, pocket or inside profile. `on` is always
@@ -838,23 +855,37 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
           : collect(given.map((p, i) => q(p, 'tabs', 'positions', i))).map(
               (l): Option<readonly Quantity[]> => Some(l),
             )
-      return collect<unknown>([shape, slotWidth, depth, count, width, thickness, positions]).map(
-        () => ({
-          ...base,
-          kind: 'profile',
-          on: dto.on ?? DEFAULT_STOCK_FACE,
-          shape: shape.unwrap(),
-          side: dto.side,
-          slotWidth: slotWidth.unwrap(),
-          depth: depth.unwrap(),
-          tabs: {
-            count: count.unwrap(),
-            width: width.unwrap(),
-            thickness: thickness.unwrap(),
-            positions: positions.unwrap(),
-          },
-        }),
-      )
+      const pass = dto.roughingPass && marginsFromDTO(dto.roughingPass, 'roughingPass')
+      const leave = dto.leave && marginsFromDTO(dto.leave, 'leave')
+      return collect<unknown>([
+        shape,
+        slotWidth,
+        depth,
+        count,
+        width,
+        thickness,
+        positions,
+        ...(pass === undefined ? [] : [pass]),
+        ...(leave === undefined ? [] : [leave]),
+      ]).map(() => ({
+        ...base,
+        kind: 'profile',
+        on: dto.on ?? DEFAULT_STOCK_FACE,
+        shape: shape.unwrap(),
+        side: dto.side,
+        slotWidth: slotWidth.unwrap(),
+        depth: depth.unwrap(),
+        tabs: {
+          count: count.unwrap(),
+          width: width.unwrap(),
+          thickness: thickness.unwrap(),
+          positions: positions.unwrap(),
+        },
+        ...(pass === undefined ? {} : { roughingPass: pass.unwrap() }),
+        ...(dto.roughing === true ? { roughing: true as const } : {}),
+        ...(dto.roughingOf === undefined ? {} : { roughingOf: dto.roughingOf }),
+        ...(leave === undefined ? {} : { leave: leave.unwrap() }),
+      }))
     }
     case 'chamfer': {
       const width = q(dto.width, 'width')
@@ -1031,6 +1062,10 @@ export function operationToDTO(op: Operation): OperationDTO {
             ? { positions: op.tabs.positions.unwrap().map((p) => p.toDTO()) }
             : {}),
         },
+        ...(op.roughingPass === undefined ? {} : { roughingPass: marginsToDTO(op.roughingPass) }),
+        ...(op.roughing === true ? { roughing: true } : {}),
+        ...(op.roughingOf === undefined ? {} : { roughingOf: op.roughingOf }),
+        ...(op.leave === undefined ? {} : { leave: marginsToDTO(op.leave) }),
       } as OperationDTO
     case 'chamfer':
       return {

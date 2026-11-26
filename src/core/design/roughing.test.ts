@@ -211,3 +211,75 @@ describe('pocket roughing (DF122 R1)', () => {
     expect(ids(s)).toEqual(['pattern1_pocket'])
   })
 })
+
+// DF122 R4: inside/outside profiles own a roughing profile the same way
+describe('profile roughing (DF122 R4)', () => {
+  const PROFILE = {
+    shape: {
+      kind: 'rectangle',
+      center: ['40', '25'],
+      length: '50',
+      width: '30',
+      cornerRadius: '3',
+    },
+    side: 'inside',
+    slotWidth: '6',
+  }
+  const addProfile = async (s: DesignSetup, args: object = {}) =>
+    (await s.run('design.profile.add', { partId: s.partId, ...PROFILE, ...args })) as Result
+  const updateProfile = async (s: DesignSetup, args: object) =>
+    (await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      ...args,
+    })) as Result
+
+  it('on: profile1_roughing before it with its shape, side, slot, depth and tabs; off removes it', async () => {
+    const s = await setup()
+    await addProfile(s, { roughing: { floor: '1' } })
+    expect(ids(s)).toEqual(['profile1_roughing', 'profile1'])
+    const p = op(s, 'profile1')
+    expect(op(s, 'profile1_roughing')).toMatchObject({
+      kind: 'profile',
+      name: 'Profile 1 · roughing',
+      roughing: true,
+      roughingOf: 'profile1',
+      shape: p['shape'],
+      side: 'inside',
+      slotWidth: p['slotWidth'],
+      tabs: p['tabs'],
+    })
+    await updateProfile(s, { side: 'outside', depth: '4' })
+    expect(op(s, 'profile1_roughing')).toMatchObject({
+      side: 'outside',
+      depth: op(s, 'profile1')['depth'],
+    })
+    await updateProfile(s, { roughing: false })
+    expect(ids(s)).toEqual(['profile1'])
+    expect(op(s, 'profile1')).not.toHaveProperty('roughingPass')
+  })
+
+  it('a groove (side on) takes no roughing; a through skin is > 0; the tool fits the slot, no corner rule', async () => {
+    const s = await setup()
+    await addProfile(s)
+    const bad = async (args: object, rule: string) => {
+      const e = await s.fail(
+        'design.profile.update',
+        { partId: s.partId, operationId: 'profile1', ...args },
+        'model.invariant',
+      )
+      expect(e.issues.map((i) => i.rule)).toContain(rule)
+    }
+    await bad({ side: 'on', roughing: true }, 'notForGroove')
+    await bad({ roughing: { floor: '0' } }, 'floorRange')
+    expect(ids(s)).toEqual(['profile1'])
+    await updateProfile(s, { roughing: true })
+    const rule = (r: Result) =>
+      r.warnings.find((w) => w.code === 'dfm.toolUnfit' && w.operation === 'profile1_roughing')
+        ?.params.rule
+    expect(rule(await setTool(s, 'profile1_roughing', '8'))).toBe('width')
+    expect(rule(await setTool(s, 'profile1_roughing', '6'))).toBeUndefined()
+    const gain = await setTool(s, 'profile1', '6')
+    expect(gain.warnings.some((w) => w.code === 'dfm.roughingNoGain')).toBe(true)
+  })
+})

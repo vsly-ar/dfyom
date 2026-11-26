@@ -223,6 +223,12 @@ export type OperationGeometry = FacePlacement &
            */
           readonly positions?: readonly number[]
         }
+        /**
+         * DF122 R4: a roughing profile: removes nothing of its own, is no through cut (its skin
+         * holds), cuts no tabs; its owner in `roughingOf`.
+         */
+        readonly roughing?: true
+        readonly roughingOf?: string
       }
     | CircleChamferFields
     | LoopChamferFields

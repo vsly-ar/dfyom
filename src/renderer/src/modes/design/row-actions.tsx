@@ -97,9 +97,11 @@ export function useRowActions(part: DesignPart): RowActions {
     // written until "Make clones"; its first row puts one clone beside the source, a tool
     // diameter apart
     const choice = clonesSource(part, id)
-    // DF122: a pocket with roughing is no Clones source until R5 (the core's `roughingNested`)
+    // DF122: a pocket or profile (R4) with roughing is no Clones source until R5 (the core's
+    // `roughingNested`)
     const roughing =
-      op?.kind === 'pocket' && (op.roughingPass !== undefined || op.roughing === true)
+      (op?.kind === 'pocket' || op?.kind === 'profile') &&
+      (op.roughingPass !== undefined || op.roughing === true)
     if (choice.ok && !roughing)
       items.push({
         label: f.makeClones,

@@ -310,13 +310,28 @@ export function toolFit(
         }
       unfit =
         wider(op.slotWidth, 'slot', 'slot') ??
-        (measure !== undefined
-          ? shapeCorner(measure)
-          : op.side === 'inside' &&
-              op.shape.contour.kind === 'rectangle' &&
-              rectangleCorners(op.shape.center, op.shape.contour).some(onPart)
-            ? corner(op.shape.contour.cornerRadius)
-            : undefined)
+        // DF122 R4: a roughing profile enters the slot or opening; no corner rule (its owner's)
+        (op.roughing === true
+          ? op.side !== 'inside'
+            ? undefined
+            : measure !== undefined
+              ? measure.fits(dc / 2 - FIT_SLACK)
+                ? undefined
+                : wider(
+                    Math.min(measure.narrowest(), dc - 2 * TOL),
+                    'opening at its narrowest',
+                    'opening',
+                  )
+              : op.shape.contour.kind === 'rectangle' || op.shape.contour.kind === 'circle'
+                ? wider(2 * inradius(op.shape.contour), 'opening at its narrowest', 'opening')
+                : undefined
+          : measure !== undefined
+            ? shapeCorner(measure)
+            : op.side === 'inside' &&
+                op.shape.contour.kind === 'rectangle' &&
+                rectangleCorners(op.shape.center, op.shape.contour).some(onPart)
+              ? corner(op.shape.contour.cornerRadius)
+              : undefined)
       if (unfit !== undefined) return unfit
       break
     case 'chamfer': {

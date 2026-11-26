@@ -748,7 +748,9 @@ function OwnedRow({
   const menu = roughing ? [] : ctx.rowMenu(op.id)
   // DF122: a roughing row carries its tool ("Ø 8 mm", roughing.md § UI)
   const tool =
-    op.kind === 'pocket' && op.roughing === true ? roughingToolText(ctx.part, op) : undefined
+    (op.kind === 'pocket' || op.kind === 'profile') && op.roughing === true
+      ? roughingToolText(ctx.part, op)
+      : undefined
   return (
     <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
       <li

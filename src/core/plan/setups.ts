@@ -321,9 +321,12 @@ export function setupStockSize(
   return { x: turned ? v : u, y: turned ? u : v, z: size(info.extent) }
 }
 
-/** A profile that cuts through (every v0.1/v0.2 profile; v0.3 `on` without `depth`). */
+/**
+ * A profile that cuts through (every v0.1/v0.2 profile; v0.3 `on` without `depth`); a roughing
+ * profile (DF122 R4) leaves a skin.
+ */
 const isThroughProfile = (op: Part['operations'][number] | undefined): boolean =>
-  op?.kind === 'profile' && op.depth.isNone()
+  op?.kind === 'profile' && op.depth.isNone() && op.roughing !== true
 
 /**
  * `plan.cutoutBeforeSetup` (warning): a through profile in a setup before another setup; the part

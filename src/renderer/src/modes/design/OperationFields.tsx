@@ -221,7 +221,7 @@ export function OperationFields({
   level?: 3 | 4
   /** The tool field (Design inspector only), placed as the first group after `on`'s. */
   tool?: React.ReactNode
-  /** DF122: a pocket's Roughing accordion (Design inspector only), right after Tool. */
+  /** DF122: a pocket's or inside/outside profile's (R4) Roughing accordion (Design inspector only), right after Tool. */
   roughing?: React.ReactNode
 }): React.JSX.Element | null {
   const op = ctx.op
@@ -412,6 +412,8 @@ export function OperationFields({
             </>,
           )}
           {toolGroup}
+          {/* DF122 R4: inside/outside only (the caller leaves it out for `on`) */}
+          {roughing}
           <TabsGroup ctx={ctx} level={level} />
           <InspectorGroup
             title={t.groups.slot}

@@ -10,6 +10,7 @@
  */
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import { roughingIdOf, roughingOwnerId, type Operation, type Part } from '../design/operation'
+import { roughingSkin } from '../design/roughing'
 import type { OperationKind } from '../design/part.dto'
 import type { Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -228,7 +229,8 @@ export function planOperationInputs(
     const through = planThroughDepths(plan, port)
     const throughDepths = new Map<string, number>()
     for (const o of e.ops) {
-      const d = through.get(o.id)
+      // DF122 R4: a through roughing profile stops above the material its owner cuts through
+      const d = through.get(o.kind === 'profile' && o.roughing === true ? o.roughingOf! : o.id)
       if (d !== undefined) throughDepths.set(o.id, d)
     }
     // facings, pockets and profiles machine one design operation each
@@ -264,11 +266,13 @@ export function planOperationInputs(
             op.aid,
             e.strategy.kind === 'chamfer' ? e.strategy.cutDepth : undefined,
           )
-    const restAfter = e.kind === 'pocket' ? roughingBefore(plan, e.ops[0], index) : undefined
-    // DF122: a roughing pocket leaves its margins: the wall as its finishing allowance
-    const leave = e.kind === 'pocket' ? roughingLeave(plan, e.ops[0]) : undefined
+    const rests = e.kind === 'pocket' || e.kind === 'profile'
+    const restAfter = rests ? roughingBefore(plan, e.ops[0], index) : undefined
+    // DF122: a roughing pocket or profile (R4) leaves its margins: the wall as its finishing
+    // allowance
+    const leave = rests ? roughingLeave(plan, e.ops[0]) : undefined
     const strategy =
-      leave !== undefined && e.strategy.kind === 'pocket'
+      leave !== undefined && (e.strategy.kind === 'pocket' || e.strategy.kind === 'profile')
         ? { ...e.strategy, finishAllowance: leave.wall }
         : e.strategy
     out.push({
@@ -327,17 +331,19 @@ function roughingBefore(
 }
 
 /**
- * DF122: a roughing pocket's stock to leave (mm): its `leave` margins, the wall by default its
- * owner's resolved finishing allowance (the owner's finishing ring then takes it), the floor 0;
- * undefined when `op` is no roughing pocket.
- * Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+ * DF122: a roughing pocket's or profile's (R4) stock to leave (mm): its `leave` margins, the wall
+ * by default its owner's resolved finishing allowance (the owner's finishing ring or pass then
+ * takes it), the floor 0, a through profile's its skin (`roughingSkin`); undefined when `op` is no
+ * roughing operation.
+ * Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor, docs/modes/roughing.md#implementation-r4
  */
 export function roughingLeave(
   plan: LoadedPlan,
   op: Operation | undefined,
 ): { wall: number; floor: number } | undefined {
-  if (op?.kind !== 'pocket' || op.roughing !== true) return undefined
-  const floor = op.leave?.floor?.canonical ?? 0
+  if ((op?.kind !== 'pocket' && op?.kind !== 'profile') || op.roughing !== true) return undefined
+  const floor =
+    op.kind === 'profile' ? roughingSkin(op, plan.units) : (op.leave?.floor?.canonical ?? 0)
   if (op.leave?.wall !== undefined) return { wall: op.leave.wall.canonical, floor }
   const ownerId = roughingOwnerId(op)
   const owner = plan.operations.find(
@@ -346,5 +352,5 @@ export function roughingLeave(
   const own = plan.operations.find((p) => p.designOperationIds.includes(op.id))
   const s =
     (owner ?? own) === undefined ? undefined : evaluateOperation(plan, (owner ?? own)!).strategy
-  return { wall: s?.kind === 'pocket' ? s.finishAllowance : 0, floor }
+  return { wall: s?.kind === 'pocket' || s?.kind === 'profile' ? s.finishAllowance : 0, floor }
 }

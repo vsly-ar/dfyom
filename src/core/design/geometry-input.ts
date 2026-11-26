@@ -246,6 +246,9 @@ function operationGeometry(
             ? { positions: op.tabs.positions.unwrap().map((q) => q.canonical) }
             : {}),
         },
+        // DF122 R4: a roughing profile (removes nothing, cuts no tabs) and its owner
+        ...(op.roughing === true ? { roughing: true as const } : {}),
+        ...(op.roughingOf === undefined ? {} : { roughingOf: op.roughingOf }),
       }))
     case 'chamfer': {
       const edgeOp = ops.slice(0, index).find((o) => o.id === op.edgeOf)

@@ -332,7 +332,13 @@ function roughingFindings(plan: LoadedPlan): PlanWarning[] {
   const byId = new Map(plan.part.operations.map((o) => [o.id, o]))
   for (const p of plan.operations) {
     const d = byId.get(p.designOperationIds[0] ?? '')
-    if (d?.kind !== 'pocket' || d.roughing !== true || d.leave?.wall === undefined) continue
+    // DF122 R4: a roughing profile likewise
+    if (
+      (d?.kind !== 'pocket' && d?.kind !== 'profile') ||
+      d.roughing !== true ||
+      d.leave?.wall === undefined
+    )
+      continue
     const ownerId = roughingOwnerId(d)
     const owner = plan.operations.find(
       (q) => ownerId !== undefined && q.designOperationIds.includes(ownerId),
@@ -340,11 +346,11 @@ function roughingFindings(plan: LoadedPlan): PlanWarning[] {
     if (owner === undefined) continue
     const s = evaluateOperation(plan, owner).strategy
     const wall = d.leave.wall.canonical
-    if (s.kind !== 'pocket' || wall >= s.finishAllowance - 1e-9) continue
+    if ((s.kind !== 'pocket' && s.kind !== 'profile') || wall >= s.finishAllowance - 1e-9) continue
     out.push({
       code: 'plan.roughingWallThin',
       severity: 'warning',
-      message: `the roughing leaves ${+wall.toFixed(4)} mm on the walls, less than the pocket's finishing allowance (${+s.finishAllowance.toFixed(4)} mm)`,
+      message: `the roughing leaves ${+wall.toFixed(4)} mm on the walls, less than the ${s.kind}'s finishing allowance (${+s.finishAllowance.toFixed(4)} mm)`,
       planOperationId: p.id,
       field: 'roughing.wall',
       rule: 'roughingWallThin',

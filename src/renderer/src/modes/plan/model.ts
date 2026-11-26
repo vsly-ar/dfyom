@@ -149,10 +149,11 @@ export const allPlanOperations = (plan: PlanDTO): PlanOperationDTO[] =>
 export function roughingBefore(plan: PlanDTO, op: PlanOperationDTO): PlanOperationDTO | undefined {
   const ops = plan.design.part.operations
   const d = ops.find((o) => o.id === op.designOperationIds[0])
-  if (d?.kind !== 'pocket' || d.roughing === true) return undefined
+  // R4: a profile's roughing profile likewise
+  if ((d?.kind !== 'pocket' && d?.kind !== 'profile') || d.roughing === true) return undefined
   const rough = ops.find(
     (o) =>
-      o.kind === 'pocket' &&
+      o.kind === d.kind &&
       o.roughing === true &&
       (o.roughingOf === d.id ||
         (o.roughingOf === undefined &&

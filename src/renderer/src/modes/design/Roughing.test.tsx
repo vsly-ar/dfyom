@@ -4,8 +4,10 @@
 // "Auto · 0.2 mm" for the default wall, a margin edit keeps the other one), the navigator's pocket
 // row with its roughing row nested, the roughing pocket's short inspector (read-only margins,
 // "Edit in Pocket 1"), `dfm.roughingNoGain` under the Roughing tool, and the Pattern inspector's
-// same accordion; axe on each. The canvas is stubbed.
-// Doc: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2
+// same accordion; axe on each. R4: the Profile inspector's accordion (Skin for a through profile),
+// its nested roughing row, none for a groove. The canvas is stubbed.
+// Doc: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2,
+// docs/modes/roughing.md#implementation-r4
 import { screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -242,4 +244,75 @@ describe('roughing in the Design UI (DF122 R2)', () => {
     expect(within(insp()).getByRole('combobox', { name: 'Roughing tool' })).toBeInTheDocument()
     await expectNoAxeViolations()
   })
+})
+
+// DF122 R4: the Profile inspector (inside/outside) takes the same accordion; a through profile's
+// floor margin is its Skin (default 0.5 mm, at least the tabs' thickness)
+describe('roughing on profiles in the Design UI (DF122 R4)', () => {
+  const PROFILE = {
+    shape: {
+      kind: 'rectangle',
+      center: ['50', '30'],
+      length: '60',
+      width: '40',
+      cornerRadius: '0',
+    },
+    side: 'outside',
+    slotWidth: '8',
+  }
+
+  it('Profile inspector: Roughing after Tool, Skin when through; nested row; none for a groove', async () => {
+    const { user, bridge, part } = await renderPart((d, id) =>
+      run(d, 'design.profile.add', { partId: id, ...PROFILE, tabs: { count: '0' } }),
+    )
+    await user.click(await within(nav()).findByRole('button', { name: /^Profile 1/ }))
+    await within(insp()).findByRole('heading', { name: 'Profile 1' })
+    const titles = within(insp())
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent ?? '')
+    const toolAt = titles.findIndex((x) => x.startsWith('Tool'))
+    expect(titles[toolAt + 1]).toMatch(/^Roughing/)
+    const header = within(insp()).getByRole('button', { name: /^Roughing/ })
+    expect(header).toHaveTextContent('Off')
+    await user.click(header)
+    await user.click(within(insp()).getByRole('switch', { name: 'Roughing' }))
+    await waitFor(() =>
+      expect(part().operations.map((o) => o.id)).toEqual(['profile1_roughing', 'profile1']),
+    )
+    expect(bridge.calls.find((c) => c.name === 'design.profile.update')?.args).toMatchObject({
+      operationId: 'profile1',
+      roughing: true,
+    })
+    // a through profile: the floor margin is its Skin, 0.5 mm by default
+    const skin = await within(insp()).findByLabelText('Skin', { selector: 'input' })
+    expect(skin).toHaveAttribute('placeholder', 'Auto · 0.5 mm')
+    expect(within(insp()).queryByLabelText('Leave on floor', { selector: 'input' })).toBeNull()
+    await expectNoAxeViolations()
+    await user.type(skin, '1{Enter}')
+    await waitFor(() =>
+      expect(part().operations.find((o) => o.id === 'profile1')).toMatchObject({
+        roughingPass: { floor: { source: '1' } },
+      }),
+    )
+    // the navigator: one row for the pair, the roughing row nested
+    const row = within(nav()).getByRole('button', { name: /^Profile 1, with roughing/ })
+    const list = within(nav()).getByRole('list', { name: 'Operations in design order' })
+    expect(list.querySelectorAll(':scope > li')).toHaveLength(1)
+    if (row.getAttribute('aria-expanded') === 'false')
+      await user.click(within(row).getByTitle('Expand Profile 1'))
+    const rough = await within(nav()).findByRole('button', {
+      name: /^Profile 1 · roughing, edited through Profile 1/,
+    })
+    await user.click(rough)
+    await within(insp()).findByRole('heading', { name: 'Profile 1 · roughing' })
+    expect(within(insp()).getByLabelText('Skin', { selector: 'input' })).toHaveValue('1')
+    await expectNoAxeViolations()
+    await user.click(within(insp()).getByRole('button', { name: 'Edit in Profile 1' }))
+    await within(insp()).findByRole('heading', { name: 'Profile 1' })
+
+    // a groove (side on) shows no Roughing accordion; switching to it turns roughing off
+    await user.click(within(insp()).getByRole('radio', { name: /^On/ }))
+    await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1']))
+    expect(within(insp()).queryByRole('button', { name: /^Roughing/ })).toBeNull()
+  }, 30_000) // a full App render with several edits; slow under the check-under-load criterion
 })
