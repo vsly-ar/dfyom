@@ -173,8 +173,10 @@ export type OperationGeometry = FacePlacement &
         readonly floorRadius: number
         /** Patterns P4: cleared through the opposite face (no floor); absent = blind. */
         readonly through?: true
-        /** DF108: a pattern's roughing pocket (no removal of its own, no finishing ring). */
+        /** DF108: a roughing pocket (no removal of its own, no finishing ring). */
         readonly roughing?: true
+        /** DF122: a roughing pocket's owner pocket (`dfm.roughingNoGain` compares their tools). */
+        readonly roughingOf?: string
         /**
          * A through pocket's depth below the stock face when an earlier setup already cleared
          * material under its whole region from the opposite face (DF50 for through pockets,
@@ -511,6 +513,8 @@ export const DFM_WARNING_CODES = [
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',
   'dfm.shapeHeavy',
+  // roughing passes (DF122): docs/modes/roughing.md#tool-automatic-or-the-users-choice
+  'dfm.roughingNoGain',
   // features (v0.4): docs/modes/design-v0.4.md#checks-and-dfm
   'dfm.holeCustomSize',
   // stepped countersink (F7): docs/modes/design-v0.4.md#stepped-countersink-f7-d41

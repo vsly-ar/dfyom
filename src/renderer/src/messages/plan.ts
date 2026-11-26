@@ -910,6 +910,14 @@ export function findingText(
         return sentence(message)
       return `${capital(names.design(profile))} cuts through in setup ${names.setup(setup)} before setup ${names.setup(next)}: held only by its tabs while re-fixtured.`
     }
+    // DF122: a roughing wall margin under the pocket's finishing allowance
+    case 'plan.roughingWallThin': {
+      const owner = str('ownerId')
+      const [wall, allowance] = [p['wall'], p['finishAllowance']]
+      if (owner === undefined || typeof wall !== 'number' || typeof allowance !== 'number')
+        return sentence(message)
+      return `The roughing leaves ${lengthText(wall, units)} on the walls, less than the finishing allowance of ${names.design(owner)} (${lengthText(allowance, units)}): its finishing pass then takes less than its allowance. Raise Leave on walls.`
+    }
     case 'plan.restMaterial': {
       const op = str('operation')
       const [area, u, v] = [p['area'], p['u'], p['v']]

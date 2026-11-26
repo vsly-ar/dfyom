@@ -42,6 +42,7 @@ import {
   type Part,
   type Point,
   type Shape,
+  roughingOwnerId,
 } from './operation'
 import { throughDepths, withThroughDepths } from '../geometry/through-depth'
 import { placeShape } from './placement'
@@ -206,6 +207,7 @@ function operationGeometry(
           : { depth: op.depth.canonical }),
         floorRadius: op.floorRadius.canonical,
         ...(op.roughing === true ? { roughing: true as const } : {}),
+        ...(roughingOwnerId(op) === undefined ? {} : { roughingOf: roughingOwnerId(op)! }),
       }))
     case 'drilling': {
       const base = {

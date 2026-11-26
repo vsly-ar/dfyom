@@ -433,16 +433,32 @@ export function toGeneratorInputs(
           // the material an earlier setup left under it (its `throughDepth`, DF50)
           const outline = pocketRegion(op)
           const left = op.throughDepth === undefined ? outline.depth : op.throughDepth + outline.onZ
+          // DF122: a roughing pocket with a floor margin stops that much above the floor (or the
+          // stock bottom: no breakthrough)
+          const roughFloor = input.roughingFloor
           const placed =
-            op.through === true && s.kind === 'pocket'
-              ? { ...outline, depth: left + (s.breakthrough ?? 0) }
-              : outline
+            roughFloor !== undefined
+              ? { ...outline, depth: left - roughFloor }
+              : op.through === true && s.kind === 'pocket'
+                ? { ...outline, depth: left + (s.breakthrough ?? 0) }
+                : outline
           const R = tool.diameter / 2
           const reach = openReach(R, s.finishAllowance)
-          // DF108: a pattern's roughing pocket, and its pocket's rest machining after it
+          // DF108: a roughing pocket, and its pocket's rest machining after it (DF122: down to
+          // the roughing's floor)
+          const after = input.restAfter
           const rest = {
             ...(op.roughing === true ? { roughing: true as const } : {}),
-            ...(input.restAfter === undefined ? {} : { restAfter: input.restAfter }),
+            ...(after === undefined
+              ? {}
+              : {
+                  restAfter: {
+                    radius: after.radius,
+                    cornerRadius: after.cornerRadius,
+                    wall: after.wall,
+                    floorDepth: after.floor > 0 ? left - after.floor : placed.depth,
+                  },
+                }),
           }
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
           // tool runs past the edge there

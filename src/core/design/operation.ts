@@ -150,7 +150,53 @@ export interface Pocket extends Common {
    * Doc: docs/modes/patterns.md#roughing-df108
    */
   readonly roughing?: boolean | undefined
+  /**
+   * DF122: a plain pocket's roughing setting: on, it owns the roughing pocket `<id>_roughing`
+   * (kept in sync by the design commands, roughing.ts) with these margins; absent = off.
+   * Doc: docs/modes/roughing.md#model
+   */
+  readonly roughingPass?: RoughingMargins | undefined
+  /** DF122: a roughing pocket's owner (a plain pocket); a pattern's derives it from its role. */
+  readonly roughingOf?: string | undefined
+  /** DF122: a roughing pocket's stock to leave (its owner's margins); absent fields = defaults. */
+  readonly leave?: RoughingMargins | undefined
 }
+
+/**
+ * DF122: a roughing pass's stock to leave: `wall` radial (absent = the owner's finishing
+ * allowance), `floor` axial (absent = 0). Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+ */
+export interface RoughingMargins {
+  readonly wall?: Quantity | undefined
+  readonly floor?: Quantity | undefined
+}
+
+/** The roughing pocket a plain pocket owns: `pocket1_roughing` (DF122). */
+export const roughingOperationId = (ownerId: string): string => `${ownerId}_roughing`
+
+/**
+ * The id of the roughing pocket that roughs pocket `op` (DF122: a plain pocket with
+ * `roughingPass`; DF108: a pattern's pocket, whose roughing is its feature's `roughing` role),
+ * or undefined (no roughing, or not a pocket). The operation itself may not exist (a pattern
+ * without roughing).
+ */
+export function roughingIdOf(op: Operation): string | undefined {
+  if (op.kind !== 'pocket' || op.roughing === true) return undefined
+  if (op.owner.isNone())
+    return op.roughingPass === undefined ? undefined : roughingOperationId(op.id)
+  const { featureId, role } = op.owner.unwrap()
+  return role === 'pocket' ? `${featureId}_roughing` : undefined
+}
+
+/** The owner id of a roughing pocket (DF122 `roughingOf`, else a pattern's `<feature>_pocket`). */
+export function roughingOwnerId(op: Operation): string | undefined {
+  if (op.kind !== 'pocket' || op.roughing !== true) return undefined
+  if (op.roughingOf !== undefined) return op.roughingOf
+  if (op.owner.isNone()) return undefined
+  const { featureId, role } = op.owner.unwrap()
+  return role === 'roughing' ? `${featureId}_pocket` : undefined
+}
+
 export interface Drilling extends Common {
   readonly kind: 'drilling'
   readonly center: Point
@@ -579,6 +625,29 @@ const optQ = (
 ): AppResult<Option<Quantity>> =>
   dto === undefined ? Ok(None) : q(dto, ...path).map((v): Option<Quantity> => Some(v))
 
+/** DF122: a roughing pass's margins (absent fields stay absent). */
+export function marginsFromDTO(
+  dto: { wall?: QuantityDTO | undefined; floor?: QuantityDTO | undefined },
+  ...path: string[]
+): AppResult<RoughingMargins> {
+  return collect([optQ(dto.wall, ...path, 'wall'), optQ(dto.floor, ...path, 'floor')]).map(
+    ([wall, floor]) => ({
+      ...(wall!.isSome() ? { wall: wall!.unwrap() } : {}),
+      ...(floor!.isSome() ? { floor: floor!.unwrap() } : {}),
+    }),
+  )
+}
+
+export function marginsToDTO(m: RoughingMargins): {
+  wall?: QuantityDTO
+  floor?: QuantityDTO
+} {
+  return {
+    ...(m.wall === undefined ? {} : { wall: m.wall.toDTO() }),
+    ...(m.floor === undefined ? {} : { floor: m.floor.toDTO() }),
+  }
+}
+
 function pointFromDTO(p: readonly [QuantityDTO, QuantityDTO], ...path: string[]) {
   return collect([q(p[0], ...path, 0), q(p[1], ...path, 1)]).map(([x, y]): Point => [
     x as Quantity,
@@ -717,7 +786,15 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
       const shape = shapeFromDTO(dto.shape)
       const depth = q(dto.depth, 'depth')
       const floorRadius = q(dto.floorRadius, 'floorRadius')
-      return collect<unknown>([shape, depth, floorRadius]).map(() => ({
+      const pass = dto.roughingPass && marginsFromDTO(dto.roughingPass, 'roughingPass')
+      const leave = dto.leave && marginsFromDTO(dto.leave, 'leave')
+      return collect<unknown>([
+        shape,
+        depth,
+        floorRadius,
+        ...(pass === undefined ? [] : [pass]),
+        ...(leave === undefined ? [] : [leave]),
+      ]).map(() => ({
         ...base,
         kind: 'pocket',
         on: dto.on,
@@ -726,6 +803,9 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         floorRadius: floorRadius.unwrap(),
         ...(dto.through === true ? { through: true } : {}),
         ...(dto.roughing === true ? { roughing: true } : {}),
+        ...(dto.roughingOf === undefined ? {} : { roughingOf: dto.roughingOf }),
+        ...(pass === undefined ? {} : { roughingPass: pass.unwrap() }),
+        ...(leave === undefined ? {} : { leave: leave.unwrap() }),
       }))
     }
     case 'drilling': {
@@ -919,6 +999,9 @@ export function operationToDTO(op: Operation): OperationDTO {
         floorRadius: op.floorRadius.toDTO(),
         ...(op.through === true ? { through: true } : {}),
         ...(op.roughing === true ? { roughing: true } : {}),
+        ...(op.roughingPass === undefined ? {} : { roughingPass: marginsToDTO(op.roughingPass) }),
+        ...(op.roughingOf === undefined ? {} : { roughingOf: op.roughingOf }),
+        ...(op.leave === undefined ? {} : { leave: marginsToDTO(op.leave) }),
       } as OperationDTO
     case 'drilling':
       return {

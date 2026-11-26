@@ -497,7 +497,7 @@ describe('roughing and rest machining (DF108)', () => {
   // a 30 × 20 cell with R 1 corners and a 4 × 4 one the Ø 6 cannot enter, 2 mm deep
   const loops = () => placeLoops([rect(0, 0, 30, 20, 1), rect(36, 0, 4, 4, 1)])
   const D2 = endMill(2)
-  const rough = { radius: 3, cornerRadius: 0, allowance: 0.2 }
+  const rough = { radius: 3, cornerRadius: 0, wall: 0.2, floorDepth: 2 }
   const pocket = (tool: ToolpathTool, extra: object) => {
     const { loops: ls, size } = loops()
     const region = norm(ls)
@@ -531,6 +531,30 @@ describe('roughing and rest machining (DF108)', () => {
     expect(rest.passes.some((p) => p.kind === 'finish')).toBe(true)
     expect(checkRules(restIn.inp, rest)).toEqual([])
     // both passes together: nothing the Ø 2 reaches is left above the floor, no gouge
+    const c0 = port.offset(r.region, 1).unwrap()
+    const cov = regionCoverage(r.region, c0, rest, D2, r.size, -2, 0.1, 0.01, undefined, [
+      { tool: D6, tp: roughTp },
+    ])
+    expect(cov.gouge).toBe(0)
+    expect(cov.belowFloor).toBe(0)
+    expect(cov.leftover).toBeLessThan(0.05)
+  })
+
+  it('DF122 floor margin: below the roughing floor the rest cuts every node, nothing is left', () => {
+    // the roughing stops 1 mm above the 2 mm floor
+    const r = pocket(D6, { roughing: true })
+    const roughTp = generateRegionPocket(
+      { ...r.inp, operation: { ...r.inp.operation, depth: 1 } },
+      port,
+    ).unwrap()
+    const full = generateRegionPocket(pocket(D2, { restAfter: rough }).inp, port).unwrap()
+    const restIn = pocket(D2, { restAfter: { ...rough, floorDepth: 1 } })
+    const rest = generateRegionPocket(restIn.inp, port).unwrap()
+    // more to cut than with the roughing down to the floor, still less than the Ø 2 alone
+    const plain = generateRegionPocket(pocket(D2, {}).inp, port).unwrap()
+    expect(rest.stats.cutLength).toBeGreaterThan(full.stats.cutLength)
+    expect(rest.stats.cutLength).toBeLessThan(plain.stats.cutLength)
+    expect(checkRules(restIn.inp, rest)).toEqual([])
     const c0 = port.offset(r.region, 1).unwrap()
     const cov = regionCoverage(r.region, c0, rest, D2, r.size, -2, 0.1, 0.01, undefined, [
       { tool: D6, tp: roughTp },

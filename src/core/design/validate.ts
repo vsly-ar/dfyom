@@ -229,6 +229,22 @@ export function operationIssues(
       // a through pocket (patterns P4) goes through the opposite face by definition
       if (depthOk && on !== undefined && op.through !== true)
         checkAboveBottom(c, 'depth', on, op.depth, T.exact)
+      // DF122: a roughing pass's stock to leave: ≥ 0, the floor's under the depth (roughing.md)
+      const pass = op.roughingPass
+      if (pass?.wall !== undefined)
+        c.check(pass.wall.canonical >= 0, 'roughing.wall', 'nonNegative', 'must be 0 or more', {
+          min: 0,
+          actual: pass.wall.canonical,
+        })
+      if (pass?.floor !== undefined)
+        c.check(
+          pass.floor.canonical >= 0 &&
+            (op.through === true || pass.floor.exact.compare(op.depth.exact) < 0),
+          'roughing.floor',
+          'floorRange',
+          'must be 0 or more and less than the depth',
+          { min: 0, max: op.depth.canonical, actual: pass.floor.canonical },
+        )
       const f = op.floorRadius.exact
       if (op.shape.kind === 'named') {
         // a named shape's corners are its own: the floor fillet waits for G1 (design-v0.3.md)

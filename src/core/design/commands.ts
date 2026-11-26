@@ -68,8 +68,17 @@ import {
   type LinePath,
   type Operation,
   type Part,
+  type Pocket,
   type Shape,
 } from './operation'
+import {
+  isOwnedRoughing,
+  ROUGHING_DESCRIPTION,
+  RoughingArg,
+  roughingFromArg,
+  roughingOwnedError,
+  syncRoughing,
+} from './roughing'
 import { checkDisabledList, disabledState, dropDisabledWarnings } from './disabled'
 import { baseOf } from './frozen-memo'
 import {
@@ -189,6 +198,8 @@ const pocketParams = {
   floorRadius: Src.optional().describe('Floor fillet radius; default 0'),
   // DF116: user-settable through (docs/modes/design.md#pocket)
   through: z.boolean().optional().describe('Cut through; depth kept, unused'),
+  // DF122: a roughing pass with a bigger tool (docs/modes/roughing.md#agent-api)
+  roughing: RoughingArg.optional().describe(ROUGHING_DESCRIPTION),
 }
 const drillingParams = {
   on: OnArg.optional(),
@@ -725,7 +736,10 @@ export function settle(
 
 /** Writes operations whose DTO changed (and appended ones) to the draft. */
 function writeOperations(draft: Draft<ProjectDoc>, partId: string, ops: readonly Operation[]) {
-  writeOperationList(draft.parts[partId]!.operations, ops)
+  const list = draft.parts[partId]!.operations
+  writeOperationList(list, ops)
+  // DF122: turning roughing off drops the roughing pocket (the list gets shorter)
+  if (list.length > ops.length) list.splice(ops.length)
 }
 
 /**
@@ -825,6 +839,13 @@ export function refuseOwned(
         },
       )
   }
+  // DF122: a pocket's roughing pocket is edited through its owner
+  if (isOwnedRoughing(op)) {
+    const p = op as Pocket
+    const ownerName =
+      loaded.part.operations.find((o) => o.id === p.roughingOf)?.name ?? p.roughingOf!
+    return roughingOwnedError(p, ownerName, where)
+  }
   if (op.owner.isNone()) return Ok(undefined)
   const owner = op.owner.unwrap()
   const name = loaded.dto.features?.find((f) => f.id === owner.featureId)?.name ?? owner.featureId
@@ -890,20 +911,32 @@ const pocketSpec: KindSpec<typeof pocketParams, Extract<Operation, { kind: 'pock
   kind: 'pocket',
   params: pocketParams,
   required: ['shape', 'depth'],
-  updateListed: { shape: listedAs('object', 'design.pocket.add shape') },
-  build: (a, prev, { f, id, name, ops }) => ({
-    kind: 'pocket',
-    id,
-    name,
-    generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-    on: a.on ?? prev?.on ?? defaultOn(ops),
-    shape: f.placedShape(a.shape, a.anchor, prev?.shape),
-    depth: f.val('depth', 'length', a.depth, prev?.depth),
-    floorRadius: f.pick('floorRadius', 'length', a.floorRadius, prev?.floorRadius, 'floorRadius'),
-    // DF116: through (P4's through pocket, settable on any pocket); roughing stays a pattern's
-    ...((a.through ?? prev?.through) === true ? { through: true } : {}),
-    ...(prev?.roughing === true ? { roughing: true } : {}),
-  }),
+  updateListed: {
+    shape: listedAs('object', 'design.pocket.add shape'),
+    roughing: z.unknown().describe('As design.pocket.add roughing'),
+  },
+  build: (a, prev, { f, id, name, ops }) => {
+    // DF122: the roughing setting (a roughing pocket itself keeps its owner and margins)
+    const pass = roughingFromArg(a.roughing, prev?.roughingPass, (path, src) =>
+      f.q(path, 'length', src),
+    )
+    return {
+      kind: 'pocket',
+      id,
+      name,
+      generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+      on: a.on ?? prev?.on ?? defaultOn(ops),
+      shape: f.placedShape(a.shape, a.anchor, prev?.shape),
+      depth: f.val('depth', 'length', a.depth, prev?.depth),
+      floorRadius: f.pick('floorRadius', 'length', a.floorRadius, prev?.floorRadius, 'floorRadius'),
+      // DF116: through (P4's through pocket, settable on any pocket)
+      ...((a.through ?? prev?.through) === true ? { through: true } : {}),
+      ...(prev?.roughing === true ? { roughing: true } : {}),
+      ...(pass === undefined || prev?.roughing === true ? {} : { roughingPass: pass }),
+      ...(prev?.roughingOf === undefined ? {} : { roughingOf: prev.roughingOf }),
+      ...(prev?.leave === undefined ? {} : { leave: prev.leave }),
+    }
+  },
 }
 
 const drillingSpec: KindSpec<typeof drillingParams, Extract<Operation, { kind: 'drilling' }>> = {
@@ -1213,17 +1246,19 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
           if (again.isOk()) settled = again
         }
       }
-      writeOperations(draft, args.partId, settled.unwrap())
+      // DF122: a pocket with roughing owns `<id>_roughing`, right before it
+      const synced = syncRoughing(settled.unwrap())
+      writeOperations(draft, args.partId, synced)
       const result = {
         operationId: id,
         ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
         toolLocked: op.toolLocked,
-        ...roundResult(settled.unwrap(), id, f.adjusted),
+        ...roundResult(synced, id, f.adjusted),
       }
       return withPlaced(
-        withWarnings(result, loaded.unwrap(), settled.unwrap(), ctx, where),
+        withWarnings(result, loaded.unwrap(), synced, ctx, where),
         loaded.unwrap(),
-        settled.unwrap(),
+        synced,
         id,
         ctx.services.region2d,
       )
@@ -1263,6 +1298,27 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         if (owned.isErr()) return owned
       }
       const l = loaded.unwrap()
+      // DF122: roughing on a Clones source comes with R5 (the source's span stays contiguous)
+      const roughingArg = (args as { roughing?: unknown }).roughing
+      if (roughingArg !== undefined && roughingArg !== null && roughingArg !== false) {
+        const outer = nestingFeature(l.part.operations, l.features, args.operationId)
+        if (outer !== undefined)
+          return fail(
+            'design.featureOwned',
+            `${args.operationId} is nested in ${outer.feature.name}; roughing a Clones source comes later`,
+            {
+              issues: [
+                {
+                  path: ['roughing'],
+                  rule: 'roughingNested',
+                  message: `nested in ${outer.feature.name}`,
+                  params: { featureId: outer.feature.id },
+                },
+              ],
+              where,
+            },
+          )
+      }
       const adjusted: Adjusted[] = []
       const settled = applyUpdate(
         spec,
@@ -1279,7 +1335,9 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const env = shapeEnv(l, ctx.services.region2d)
       const synced = settleFeatures(settled.unwrap(), l.features, l.stock, l.units, where, env)
       if (synced.isErr()) return synced
-      const { ops, features, changed } = synced.unwrap()
+      const { features, changed } = synced.unwrap()
+      // DF122: the roughing pocket follows its owner (on, off, geometry, margins)
+      const ops = syncRoughing(synced.unwrap().ops)
       writeOperations(draft, args.partId, ops)
       writeFeatures(draft, args.partId, features, changed)
       return withPlaced(
@@ -1694,11 +1752,14 @@ const operationRemove = defineCommand({
     if (index.isErr()) return index
     const owned = refuseOwned(loaded.unwrap(), index.unwrap(), where, true)
     if (owned.isErr()) return owned
-    const next = part.operations.filter((_, k) => k !== index.unwrap())
+    // DF122: removing a pocket removes its roughing pocket (one undo step)
+    const next = syncRoughing(part.operations.filter((_, k) => k !== index.unwrap()))
     const refs = checkReferences(next, stock)
     if (refs.isErr())
       return Err(refs.unwrapErr().withContext(where, { operationId: args.operationId }))
-    draft.parts[args.partId]!.operations.splice(index.unwrap(), 1)
+    if (next.length === part.operations.length - 1)
+      draft.parts[args.partId]!.operations.splice(index.unwrap(), 1)
+    else writeOperations(draft, args.partId, next)
     return withWarnings({}, loaded.unwrap(), next, ctx, where)
   },
 })
@@ -1737,9 +1798,12 @@ const operationMove = defineCommand({
         where,
       })
     if (from === args.toIndex) return withWarnings({}, loaded.unwrap(), part.operations, ctx, where)
-    const next = [...part.operations]
-    const [moved] = next.splice(from, 1)
-    next.splice(args.toIndex, 0, moved!)
+    const moving = [...part.operations]
+    const [moved] = moving.splice(from, 1)
+    moving.splice(args.toIndex, 0, moved!)
+    // DF122: a roughing pocket stays right before its owner (it moves with it)
+    const next = syncRoughing(moving)
+    const resynced = next.some((o, k) => o !== moving[k])
     const split = splitFeature(
       next,
       args.toIndex,
@@ -1751,9 +1815,12 @@ const operationMove = defineCommand({
     const refs = checkReferences(next, stock)
     if (refs.isErr())
       return Err(refs.unwrapErr().withContext(where, { operationId: args.operationId }))
-    const list = draft.parts[args.partId]!.operations
-    const [dto] = list.splice(from, 1)
-    list.splice(args.toIndex, 0, dto!)
+    if (resynced) writeOperations(draft, args.partId, next)
+    else {
+      const list = draft.parts[args.partId]!.operations
+      const [dto] = list.splice(from, 1)
+      list.splice(args.toIndex, 0, dto!)
+    }
     return withWarnings({}, loaded.unwrap(), next, ctx, where)
   },
 })
@@ -2028,7 +2095,10 @@ export const OPERATION_UPDATE_ARGS = {
       // a Line's `paths` and `{ start, end }` are not edited from a plan (its `depth` string is)
       .filter((spec) => spec.kind !== 'chamfer' && spec.kind !== 'line')
       .flatMap((spec) =>
-        Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
+        Object.entries(spec.params)
+          // DF122: roughing changes the design's operation list, not a plan copy's
+          .filter(([k]) => k !== 'roughing')
+          .map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
       ),
   ),
   angle: chamferParams.angle.optional(),

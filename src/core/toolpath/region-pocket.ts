@@ -44,23 +44,29 @@ export interface RegionPocketOperation {
   readonly onZ: number
   readonly depth: number
   /**
-   * A pattern's roughing pocket (DF108): roughing levels only, leaving `finishAllowance` on the
-   * walls; no finishing ring. Pieces its tool does not fit get no rings.
+   * A roughing pocket (DF108, DF122): roughing levels only, leaving `finishAllowance` (its wall
+   * margin) on the walls; no finishing ring. Pieces its tool does not fit get no rings.
    */
   readonly roughing?: true | undefined
   /**
-   * Rest machining after a roughing pocket of the same region (DF108): that pocket's tool radius,
-   * corner radius and finishing allowance. Ring-tree nodes whose tool-centre region lies where
-   * the roughing cleared (`restInside`) are skipped with their children.
+   * Rest machining after a roughing pocket of the same region (DF108, DF122): that pocket's tool
+   * radius, corner radius, wall margin and floor depth. At levels at or above its floor, ring-tree
+   * nodes whose tool-centre region lies where the roughing cleared (`restInside`) are skipped
+   * with their children; below it every node is cut.
    */
   readonly restAfter?: RestAfter | undefined
 }
 
-/** What an earlier roughing pocket of the same region cleared, by its tool (DF108). */
+/**
+ * What an earlier roughing pocket of the same region cleared, by its tool (DF108) and margins
+ * (DF122): `wall` left on the walls, down to `floorDepth` below `onZ`.
+ * Doc: docs/modes/roughing.md#rest-by-the-operation
+ */
 export interface RestAfter {
   readonly radius: number
   readonly cornerRadius: number
-  readonly allowance: number
+  readonly wall: number
+  readonly floorDepth: number
 }
 
 /** The skip test keeps this much (mm) off the roughed area's edge (2D library epsilons). */
@@ -166,7 +172,8 @@ export function generateRegionPocket(
   const step = clearingStep(tool, cutting.stepover)
   const treeR = ringTree(port, roots, R + a, step, steps)
   if (treeR.isErr()) return Err(treeR.unwrapErr())
-  let tree = treeR.unwrap()
+  const fullTree = treeR.unwrap()
+  let tree = fullTree
   if (op.restAfter !== undefined) {
     const inside = restInside(port, op.region, op.restAfter, R)
     if (inside.isErr()) return Err(inside.unwrapErr())
@@ -190,31 +197,39 @@ export function generateRegionPocket(
   const helixRadius = Math.min(st.helixDiameter, tool.diameter) / 2
   const order = ['helix', 'ramp', 'plunge'] as const
   const allowed = order.slice(order.indexOf(st.entry))
-  const leaves = new Map<RingNode, Leaf>()
-  for (const root of tree) {
-    const stack: RingNode[] = [root]
-    while (stack.length > 0) {
-      const n = stack.pop()!
-      stack.push(...n.children)
-      if (n.children.length > 0) continue
-      let helix: Leaf['helix']
-      if (allowed.includes('helix')) {
-        const deep = deepestPoint(port, n.region, step)
-        if (deep.isErr()) return Err(deep.unwrapErr())
-        const c = deep.unwrap().point
-        const room = port.distance(regionLoops(root.region), c)?.distance ?? 0
-        if (port.contains(root.region, c) && room >= helixRadius - 1e-9) {
-          // the ring starts at its closest point to the centre: that link stays in the bore
-          const near = rings(n)
-            .map((ring, loop) => ({ loop, p: ringClosest(ring, c) }))
-            .filter((x) => x.p !== undefined)
-            .sort((x, y) => x.p!.distance - y.p!.distance)[0]
-          if (near !== undefined) helix = { center: c, loop: near.loop, from: near.p!.point }
+  const leafMap = (roots: readonly RingNode[]): AppResult<Map<RingNode, Leaf>> => {
+    const leaves = new Map<RingNode, Leaf>()
+    for (const root of roots) {
+      const stack: RingNode[] = [root]
+      while (stack.length > 0) {
+        const n = stack.pop()!
+        stack.push(...n.children)
+        if (n.children.length > 0) continue
+        let helix: Leaf['helix']
+        if (allowed.includes('helix')) {
+          const deep = deepestPoint(port, n.region, step)
+          if (deep.isErr()) return Err(deep.unwrapErr())
+          const c = deep.unwrap().point
+          const room = port.distance(regionLoops(root.region), c)?.distance ?? 0
+          if (port.contains(root.region, c) && room >= helixRadius - 1e-9) {
+            // the ring starts at its closest point to the centre: that link stays in the bore
+            const near = rings(n)
+              .map((ring, loop) => ({ loop, p: ringClosest(ring, c) }))
+              .filter((x) => x.p !== undefined)
+              .sort((x, y) => x.p!.distance - y.p!.distance)[0]
+            if (near !== undefined) helix = { center: c, loop: near.loop, from: near.p!.point }
+          }
         }
+        leaves.set(n, helix === undefined ? {} : { helix })
       }
-      leaves.set(n, helix === undefined ? {} : { helix })
     }
+    return Ok(leaves)
   }
+  const treeLeaves = leafMap(tree)
+  if (treeLeaves.isErr()) return Err(treeLeaves.unwrapErr())
+  // DF122: the whole tree's leaves, for levels below the roughing's floor (on first use)
+  let fullLeaves: Map<RingNode, Leaf> | undefined
+  let leaves = treeLeaves.unwrap()
 
   const floor = op.onZ - op.depth
   const retract = op.onZ + heights.retractHeight
@@ -355,12 +370,27 @@ export function generateRegionPocket(
   }
 
   let top = cutTop(op.onZ, floor, input.material)
+  // DF122: below the roughing's floor (its floor margin) the roughing cleared nothing
+  const rest = op.restAfter
+  const levelTree = (z: number): readonly RingNode[] =>
+    rest === undefined || z >= op.onZ - rest.floorDepth - 1e-9 ? tree : fullTree
   // DF108: rest machining may leave no ring to cut (the roughing cleared every node)
-  for (const [k, z] of (tree.length === 0 ? [] : roughZ).entries()) {
+  for (const [k, z] of roughZ.entries()) {
+    const nodes = levelTree(z)
+    if (nodes.length === 0) continue
+    if (nodes === tree) leaves = treeLeaves.unwrap()
+    else {
+      if (fullLeaves === undefined) {
+        const got = leafMap(fullTree)
+        if (got.isErr()) return Err(got.unwrapErr())
+        fullLeaves = got.unwrap()
+      }
+      leaves = fullLeaves
+    }
     const s = pass(k)
     if (s.isErr()) return Err(s.unwrapErr())
     b.pass('rough')
-    const left = [...tree]
+    const left = [...nodes]
     let visited = 0
     while (left.length > 0) {
       // an abort point per group of pieces within a level (patterns P1: a level of 2 000 cells)
@@ -440,7 +470,7 @@ export function restInside(
   R: number,
 ): AppResult<Region> {
   return port
-    .offset(region, rough.radius + rough.allowance)
+    .offset(region, rough.radius + rough.wall)
     .andThen((centres) =>
       centres.pieces.length === 0
         ? Ok(centres)

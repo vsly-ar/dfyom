@@ -5,7 +5,7 @@
  */
 import { None, Option, Some } from '../../shared/result'
 import { partIssueText } from '../design/issue-text'
-import type { Operation } from '../design/operation'
+import { roughingOwnerId, type Operation } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
@@ -323,6 +323,38 @@ function markToolFindings(
 }
 
 /**
+ * DF122 `plan.roughingWallThin` (warning, on the roughing): a wall margin set below its pocket's
+ * resolved finishing allowance (the pocket's finishing pass then cuts the roughing's scallops at
+ * the thinner margin). Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
+ */
+function roughingFindings(plan: LoadedPlan): PlanWarning[] {
+  const out: PlanWarning[] = []
+  const byId = new Map(plan.part.operations.map((o) => [o.id, o]))
+  for (const p of plan.operations) {
+    const d = byId.get(p.designOperationIds[0] ?? '')
+    if (d?.kind !== 'pocket' || d.roughing !== true || d.leave?.wall === undefined) continue
+    const ownerId = roughingOwnerId(d)
+    const owner = plan.operations.find(
+      (q) => ownerId !== undefined && q.designOperationIds.includes(ownerId),
+    )
+    if (owner === undefined) continue
+    const s = evaluateOperation(plan, owner).strategy
+    const wall = d.leave.wall.canonical
+    if (s.kind !== 'pocket' || wall >= s.finishAllowance - 1e-9) continue
+    out.push({
+      code: 'plan.roughingWallThin',
+      severity: 'warning',
+      message: `the roughing leaves ${+wall.toFixed(4)} mm on the walls, less than the pocket's finishing allowance (${+s.finishAllowance.toFixed(4)} mm)`,
+      planOperationId: p.id,
+      field: 'roughing.wall',
+      rule: 'roughingWallThin',
+      params: { wall, finishAllowance: s.finishAllowance, ownerId: ownerId! },
+    })
+  }
+  return out
+}
+
+/**
  * Every finding of the plan: per operation, then order (across setups; `plan.loosePiece` left out
  * in a setup held on a surface, W5), then setups, then machine
  * (stock vs. travel per setup, `params.setupId` when the plan has several setups; the Z headroom
@@ -348,6 +380,7 @@ export function planFindings(
         stickout: e.stickout.unwrap(),
       })
   }
+  out.push(...roughingFindings(plan))
   // W5: an operation in a setup held on a surface (tape, vacuum, glue) works on held pieces
   const surface = new Set(
     plan.setups.filter(holdsOnSurface).flatMap((s) => s.operations.map((o) => o.id)),
