@@ -12,6 +12,10 @@
  * v0.3 shapes (K4, docs/modes/design-v0.3.md#dfm-checks-for-shapes): general shapes (named,
  * rotated, `on`) read their resolved loops through `ShapeMeasure` (shape-measure.ts, the 2D port
  * in `region2d`); without a port their region rules are skipped.
+ *
+ * DFM in waste (D4, docs/modes/design-llm-first.md#dfm-in-waste): corners, rest material and the
+ * corner fit rule skip what lies only in the face's offcut or frame (`waste.ts`); an operation
+ * whose whole removal lies there gets no corner, width, rest or reach findings (`WASTE_SILENT`).
  */
 import type { ToolType } from '../library/tool.dto'
 import type { Region2dPort } from './2d/port'
@@ -49,8 +53,8 @@ import {
   type AnalyticOperation,
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
-import { rectangleWallCorner } from './open-sides'
-import { profileChain } from './outline'
+import { rectangleCorners, rectangleWallCorner } from './open-sides'
+import { pocketRegion, profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
@@ -66,6 +70,8 @@ import {
 } from './line'
 import { LINE_MERGE_WALL, lineMerges } from './line-merge'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
+import { holeRegion } from './through-depth'
+import { faceWaste, type FaceWaste } from './waste'
 
 /** A library tool as the DFM rules see it (mm). */
 export interface DfmTool {
@@ -168,6 +174,43 @@ function library(tools: readonly DfmTool[]): Library {
   }
 }
 
+/**
+ * Findings that do not fire for an operation whose whole removal lies in waste (D4): its inside
+ * corners, its width against the tools, rest material and reach. `dfm.toolUnfit` only for the
+ * geometric rules in `WASTE_SILENT_RULES` (a wrong tool type still is one).
+ */
+const WASTE_SILENT: ReadonlySet<DfmWarningCode> = new Set<DfmWarningCode>([
+  'dfm.cornerSharp',
+  'dfm.cornerTooSmall',
+  'dfm.pocketNoToolFits',
+  'dfm.pocketDeepNarrow',
+  'dfm.restMaterial',
+  'dfm.reach',
+  'dfm.toolUnfit',
+])
+const WASTE_SILENT_RULES: ReadonlySet<string> = new Set([
+  'cornerRadius',
+  'width',
+  'reach',
+  'flutes',
+])
+const wasteSilent = (w: DfmWarning): boolean =>
+  WASTE_SILENT.has(w.code) &&
+  (w.code !== 'dfm.toolUnfit' || WASTE_SILENT_RULES.has(String(w.params['rule'])))
+
+/** Whether the operation's removal lies wholly in waste (pockets and drillings; D4). */
+function whollyInWaste(
+  op: OperationGeometry,
+  waste: FaceWaste,
+  stock: StockGeometry,
+  port: Region2dPort | undefined,
+): boolean {
+  if (op.kind === 'pocket') return waste.holds(pocketRegion(op).region)
+  if (op.kind !== 'drilling' || port === undefined) return false
+  const hole = holeRegion(op, stock, port)
+  return hole !== undefined && waste.holds(hole)
+}
+
 /** Every parameter and tool warning of the part, in operation order. */
 export function parameterChecks(
   input: PartGeometryInput,
@@ -176,8 +219,25 @@ export function parameterChecks(
   const lib = library(options.tools)
   const notInLibrary = new Set<string>()
   const tools = options.operationTools ?? {}
+  // the waste of each face, built on first use (D4)
+  const wastes = new Map<Direction, FaceWaste | undefined>()
+  const wasteOf = (d: Direction): FaceWaste | undefined => {
+    if (!wastes.has(d)) wastes.set(d, faceWaste(input.operations, d, input.stock, options.region2d))
+    return wastes.get(d)
+  }
   const perOperation = input.operations.flatMap((op): DfmWarning[] => {
+    const found = operationChecks(op)
+    const waste = wasteOf(directionOf(op))
+    if (waste === undefined || !found.some(wasteSilent)) return found
+    return whollyInWaste(op, waste, input.stock, options.region2d)
+      ? found.filter((w) => !wasteSilent(w))
+      : found
+  })
+  return [...perOperation, ...setups(input)]
+
+  function operationChecks(op: OperationGeometry): DfmWarning[] {
     const stock = localStock(directionOf(op), input.stock)
+    const waste = wasteOf(directionOf(op))
     const own = Object.hasOwn(tools, op.id) ? tools[op.id] : undefined
     // general shapes only: v0.1 contours keep their analytic rules
     const measure =
@@ -187,7 +247,7 @@ export function parameterChecks(
           : shapeMeasure(options.region2d, op, stock)
         : undefined
     const tool =
-      own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure)
+      own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure, waste)
     // `dfm.shapeHeavy`: a general shape's chords over the evaluation budget (G1, D29)
     // DF108: a pattern's roughing pocket leaves rest on purpose; the pattern's pocket reports the
     // shape's corners, width and size
@@ -204,8 +264,8 @@ export function parameterChecks(
           ...(roughing
             ? []
             : isAnalyticOperation(op)
-              ? pocket(op, stock, lib)
-              : shapePocket(op, stock, lib, measure)),
+              ? pocket(op, stock, lib, waste)
+              : shapePocket(op, stock, lib, measure, waste)),
           ...reach(op, stock, lib, own, options.unitSystem, measure),
           ...heavy,
           ...tool,
@@ -227,17 +287,16 @@ export function parameterChecks(
       case 'profile':
         return [
           ...(isAnalyticOperation(op)
-            ? profile(op, stock, lib, options.unitSystem)
+            ? profile(op, stock, lib, options.unitSystem, waste)
             : options.region2d === undefined
               ? []
-              : shapeProfile(op, stock, lib, options.unitSystem, measure)),
+              : shapeProfile(op, stock, lib, options.unitSystem, measure, waste)),
           ...reach(op, stock, lib, own, options.unitSystem),
           ...heavy,
           ...tool,
         ]
     }
-  })
-  return [...perOperation, ...setups(input)]
+  }
 }
 
 /** A Line shallower than this is a hairline a stock height error erases (mm). */
@@ -357,9 +416,10 @@ function ownTool(
   options: ParameterCheckOptions,
   notInLibrary: Set<string>,
   measure: ShapeMeasure | undefined,
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
-  const unfit = toolFit(own.tool, op, stock, options.unitSystem, measure)
+  const unfit = toolFit(own.tool, op, stock, options.unitSystem, measure, waste)
   if (unfit !== undefined)
     out.push(
       warning(
@@ -375,7 +435,7 @@ function ownTool(
   // rest material needs a tool of the right type that enters the region (corners are their rule's)
   const roughing = op.kind === 'pocket' && op.roughing === true
   if (measure !== undefined && !roughing && (unfit === undefined || !NO_REST_RULES.has(unfit.rule)))
-    out.push(...restMaterial(op, own, measure))
+    out.push(...restMaterial(op, own, measure, waste))
   if (own.generalized && matching(own.tool, lib).length === 0) {
     const t = own.tool
     const key = `${t.type}:${t.diameter}:${t.cornerRadius ?? ''}`
@@ -541,17 +601,21 @@ const narrowest = (op: Op<'pocket'> | Op<'profile'>): number =>
 /**
  * Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius.
  * With `stock` (a pocket's local stock) corners on or beyond the stock edge are open and do not
- * count (DF61 follow-up): a pocket without a wall corner gets no corner warning.
+ * count (DF61 follow-up): a pocket without a wall corner gets no corner warning. Corners whose
+ * leftover lies wholly in `waste` do not count either (D4).
  */
 function corners(
   op: Op<'pocket'> | Op<'profile'>,
   lib: Library,
-  stock?: StockGeometry,
+  stock: StockGeometry | undefined,
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   const c = op.shape.contour
   if (c.kind !== 'rectangle') return []
-  if (stock !== undefined && !rectangleWallCorner(op.shape.center, c, stock)) return []
   const min = lib.minEndMill === undefined ? undefined : lib.minEndMill / 2
+  const onPart = (p: readonly [number, number]) => !(waste?.covers(p, min ?? 0) ?? false)
+  if (stock !== undefined && !rectangleWallCorner(op.shape.center, c, stock, onPart)) return []
+  if (stock === undefined && !rectangleCorners(op.shape.center, c).some(onPart)) return []
   const suggestion = min === undefined ? undefined : atLeast(min)
   if (c.cornerRadius <= EPSILON)
     return [
@@ -580,7 +644,12 @@ function corners(
   return []
 }
 
-function pocket(op: AnalyticOperation<'pocket'>, stock: StockGeometry, lib: Library): DfmWarning[] {
+function pocket(
+  op: AnalyticOperation<'pocket'>,
+  stock: StockGeometry,
+  lib: Library,
+  waste: FaceWaste | undefined,
+): DfmWarning[] {
   const out: DfmWarning[] = []
   const size = narrowest(op)
   if (lib.minEndMill !== undefined && size < lib.minEndMill - TOOL_MATCH_TOLERANCE)
@@ -608,7 +677,7 @@ function pocket(op: AnalyticOperation<'pocket'>, stock: StockGeometry, lib: Libr
         { suggestion: atMost(deepest) },
       ),
     )
-  out.push(...corners(op, lib, stock), ...floorRadiusRule(op, lib))
+  out.push(...corners(op, lib, stock, waste), ...floorRadiusRule(op, lib))
   return out
 }
 
@@ -981,11 +1050,12 @@ function profile(
   stock: StockGeometry,
   lib: Library,
   unitSystem: 'metric' | 'inch',
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   const covers = slotCoversOpening(op)
   if (op.side === 'outside') out.push(...slotStock(op, margins(op, stock)))
-  else out.push(...corners(op, lib))
+  else out.push(...corners(op, lib, undefined, waste))
   out.push(...slotTool(op, lib))
   out.push(...tabRules(op, op.tabs.count, covers, () => narrowest(op), unitSystem, stock.thickness))
   if (!covers && op.tabs.count > 0) out.push(...tabHold(op, stock, out))
@@ -1192,10 +1262,12 @@ function shapeCorners(
   m: ShapeMeasure,
   lib: Library,
   stock: StockGeometry,
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   const min = lib.minEndMill === undefined ? undefined : lib.minEndMill / 2
-  // corners whose leftover lies beyond the stock are open (DF53): only air is left there
-  const bad = wallCorners(m, op.shape.center, stock, min ?? 0).filter(
+  // corners whose leftover lies beyond the stock are open (DF53): only air is left there; in
+  // the offcut or frame only waste (D4)
+  const bad = wallCorners(m, op.shape.center, stock, min ?? 0, waste).filter(
     (c) => c.radius <= EPSILON || (min !== undefined && c.radius < min - TOOL_MATCH_TOLERANCE),
   )
   const suggestion = min === undefined ? {} : { suggestion: atLeast(min) }
@@ -1254,6 +1326,7 @@ function shapePocket(
   stock: StockGeometry,
   lib: Library,
   m: ShapeMeasure | undefined,
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   if (m === undefined) return []
   const out = outsideFace(op, stock, m.bounds)
@@ -1286,7 +1359,7 @@ function shapePocket(
       ),
     )
   }
-  out.push(...shapeCorners(op, m, lib, stock), ...floorRadiusRule(op, lib))
+  out.push(...shapeCorners(op, m, lib, stock, waste), ...floorRadiusRule(op, lib))
   return out
 }
 
@@ -1356,13 +1429,14 @@ function shapeProfile(
   lib: Library,
   unitSystem: 'metric' | 'inch',
   m: ShapeMeasure | undefined,
+  waste: FaceWaste | undefined,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   if (m !== undefined) {
     // a step (blind, DF53) running off the stock is a rebate, and has no tabs to hold
     if (op.side === 'outside' && op.depth === undefined)
       out.push(...slotStock(op, boxMargins(op, placed(m.bounds, op.shape.center), stock)))
-    out.push(...shapeCorners(op, m, lib, stock))
+    out.push(...shapeCorners(op, m, lib, stock, waste))
   }
   out.push(...slotTool(op, lib))
   const { closed } = profileChain(op)
@@ -1383,11 +1457,20 @@ function shapeProfile(
  * `dfm.restMaterial`: the operation's own tool leaves material away from the corners (necks
  * narrower than the tool between two parts of the region, narrow notches of an outside loop).
  * One warning per operation: the total area, the largest piece's marker at `at`, every marker in
- * `points` (flat u, v pairs).
+ * `points` (flat u, v pairs). Pieces within the tool radius of waste only are left out (D4).
  */
-function restMaterial(op: OperationGeometry, own: OperationTool, m: ShapeMeasure): DfmWarning[] {
+function restMaterial(
+  op: OperationGeometry,
+  own: OperationTool,
+  m: ShapeMeasure,
+  waste: FaceWaste | undefined,
+): DfmWarning[] {
   if (op.kind !== 'pocket' && op.kind !== 'profile') return []
-  const pieces = m.rest(own.tool.diameter / 2 - FIT_SLACK)
+  const r = own.tool.diameter / 2 - FIT_SLACK
+  const center = op.shape.center
+  const pieces = m
+    .rest(r)
+    .filter((p) => !(waste?.covers([p.at[0] + center[0], p.at[1] + center[1]], r) ?? false))
   if (pieces.length === 0) return []
   const area = pieces.reduce((s, p) => s + p.area, 0)
   const at = atFace(pieces[0]!.at, op.shape.center)

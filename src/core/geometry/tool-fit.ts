@@ -21,8 +21,9 @@ import {
 } from './model'
 import { inradius } from './operations'
 import { lineMaxDepth } from './line'
-import { rectangleWallCorner } from './open-sides'
+import { rectangleCorners, rectangleWallCorner } from './open-sides'
 import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
+import type { FaceWaste } from './waste'
 
 /** Sizes compare within this (mm), as the DFM tool rules (`TOOL_MATCH_TOLERANCE` in dfm.ts). */
 const TOL = 0.01
@@ -147,7 +148,9 @@ const endMill = (t: DfmTool) => t.type === 'flatEndMill' || t.type === 'bullNose
  * The first failed fit rule of `tool` for `op`, or undefined when it fits. `reach` and `flutes`
  * are checked only for a tool with lengths (a specific tool); a generalized tool has none and
  * passes. `flutes` (DF89) applies to the wall-following cuts: pocket, profile and hole.
- * `measure` holds a general shape's width and inside corners (`shapeMeasure`).
+ * `measure` holds a general shape's width and inside corners (`shapeMeasure`). With `waste` (the
+ * face's offcut and frame, D4: docs/modes/design-llm-first.md#dfm-in-waste) corners whose leftover
+ * lies wholly in waste do not count for the `cornerRadius` rule.
  */
 export function toolFit(
   tool: DfmTool,
@@ -155,8 +158,10 @@ export function toolFit(
   stock: StockGeometry,
   unitSystem: 'metric' | 'inch',
   measure?: ShapeMeasure,
+  waste?: FaceWaste,
 ): ToolUnfit | undefined {
   const dc = tool.diameter
+  const onPart = (p: readonly [number, number]): boolean => !(waste?.covers(p, dc / 2) ?? false)
   const corner = (cornerRadius: number): ToolUnfit | undefined =>
     dc / 2 <= cornerRadius + TOL
       ? undefined
@@ -179,7 +184,7 @@ export function toolFit(
   // corners whose leftover lies beyond the stock do not count (DF53)
   const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined => {
     if (!('shape' in op)) return undefined
-    const r = smallestWallCorner(m, op.shape.center, stock, dc / 2)
+    const r = smallestWallCorner(m, op.shape.center, stock, dc / 2, waste)
     return Number.isFinite(r) ? corner(r) : undefined
   }
   let unfit: ToolUnfit | undefined
@@ -220,7 +225,7 @@ export function toolFit(
           c.kind === 'rectangle' || c.kind === 'circle'
             ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
               // a corner on or beyond the stock edge is open (DF61 follow-up)
-              (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock)
+              (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock, onPart)
                 ? corner(c.cornerRadius)
                 : undefined))
             : measure === undefined
@@ -294,7 +299,9 @@ export function toolFit(
         wider(op.slotWidth, 'slot', 'slot') ??
         (measure !== undefined
           ? shapeCorner(measure)
-          : op.side === 'inside' && op.shape.contour.kind === 'rectangle'
+          : op.side === 'inside' &&
+              op.shape.contour.kind === 'rectangle' &&
+              rectangleCorners(op.shape.center, op.shape.contour).some(onPart)
             ? corner(op.shape.contour.cornerRadius)
             : undefined)
       if (unfit !== undefined) return unfit

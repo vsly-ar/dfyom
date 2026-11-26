@@ -48,24 +48,51 @@ export function partWarnings(
   shapes: readonly ShapeDTO[] = [],
 ): AppResult<DfmWarning[]> {
   return toGeometryInput(part, stock, region2d, snapshots).map((input) =>
-    insertInOrder(
+    namedMessages(
       part.operations,
-      parameterChecks(input, {
-        tools,
-        unitSystem: units === 'inch' ? 'inch' : 'metric',
-        operationTools: operationTools(part.operations, snapshots),
-        ...(region2d !== undefined && { region2d }),
-      }),
-      [
-        ...featureWarnings(part.operations, features, stock, units, shapes, {
-          operations: input.operations,
-          region2d,
+      insertInOrder(
+        part.operations,
+        parameterChecks(input, {
+          tools,
+          unitSystem: units === 'inch' ? 'inch' : 'metric',
+          operationTools: operationTools(part.operations, snapshots),
+          ...(region2d !== undefined && { region2d }),
         }),
-        ...noToolWarnings(part, input, stock, units, tools, snapshots, features, region2d),
-        ...stockLimitWarnings(part, stock, region2d),
-      ],
+        [
+          ...featureWarnings(part.operations, features, stock, units, shapes, {
+            operations: input.operations,
+            region2d,
+          }),
+          ...noToolWarnings(part, input, stock, units, tools, snapshots, features, region2d),
+          ...stockLimitWarnings(part, stock, region2d),
+        ],
+      ),
     ),
   )
+}
+
+/**
+ * Messages name their operation by name and id (D4, docs/modes/design-llm-first.md#dfm-in-waste):
+ * a message that starts with its operation's id ("pocket1: …", "pocket1.depth: …") starts with
+ * "Pocket 1 (pocket1)" instead. Others are left as they are; applying it twice changes nothing.
+ */
+export function namedMessages(
+  operations: readonly { readonly id: string; readonly name: string }[],
+  warnings: readonly DfmWarning[],
+): DfmWarning[] {
+  const names = new Map(operations.map((o) => [o.id, o.name]))
+  return warnings.map((w) => {
+    const name = names.get(w.operation)
+    const next = w.message.charAt(w.operation.length)
+    if (
+      name === undefined ||
+      name === w.operation ||
+      !w.message.startsWith(w.operation) ||
+      (next !== ':' && next !== '.')
+    )
+      return w
+    return { ...w, message: `${name} (${w.operation})${w.message.slice(w.operation.length)}` }
+  })
 }
 
 /**

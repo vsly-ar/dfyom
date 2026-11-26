@@ -10,7 +10,7 @@ import type { AppResult } from '../../shared/result'
 import { Ok } from '../../shared/result'
 import { line, regionArea, type Region } from './2d/model'
 import type { Region2dPort } from './2d/port'
-import type { StockGeometry } from './model'
+import type { StockGeometry, Vec2 } from './model'
 
 /** A wall this close to the stock edge (mm) lies on it: the side is open. */
 export const ON_EDGE = 1e-3
@@ -140,15 +140,25 @@ export function rectangleWallCorner(
   center: readonly [number, number],
   rect: { readonly length: number; readonly width: number; readonly cornerRadius: number },
   face: Pick<StockGeometry, 'length' | 'width'>,
+  onPart: (p: Vec2) => boolean = () => true,
 ): boolean {
+  return rectangleCorners(center, rect).some(
+    ([u, v]) => Math.min(u, v, face.length - u, face.width - v) > ON_EDGE && onPart([u, v]),
+  )
+}
+
+/**
+ * The four corner points of a v0.1 rectangle in the face frame: the middle of each corner arc,
+ * the vertex when sharp. `onPart` of `rectangleWallCorner` (D4: corners in waste do not count).
+ */
+export function rectangleCorners(
+  center: readonly [number, number],
+  rect: { readonly length: number; readonly width: number; readonly cornerRadius: number },
+): Vec2[] {
   const inset = rect.cornerRadius * (1 - Math.SQRT1_2)
   const du = rect.length / 2 - inset
   const dv = rect.width / 2 - inset
-  for (const su of [-1, 1])
-    for (const sv of [-1, 1]) {
-      const u = center[0] + su * du
-      const v = center[1] + sv * dv
-      if (Math.min(u, v, face.length - u, face.width - v) > ON_EDGE) return true
-    }
-  return false
+  return [-1, 1].flatMap((su) =>
+    [-1, 1].map((sv): Vec2 => [center[0] + su * du, center[1] + sv * dv]),
+  )
 }
