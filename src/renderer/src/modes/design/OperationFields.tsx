@@ -3,9 +3,13 @@
 // choice) whose commit is one update command through `ctx.send`, with its warnings and errors at
 // the field. Shared by the Design inspector (`design.<kind>.update`) and the plan inspector's
 // "Part (plan copy)" group (`plan.design.operation.update`, task E3b), never copied. The tool
-// field (task F5, design only) comes in as `tool`, shown as the group after the one with `on`.
+// field (task F5, design only) comes in as `tool`. Layout per kind (DF110, S3): the target table of
+// inspector-layout.md – rarely used fields (Anchor, Rotation, Floor fillet radius, tab positions)
+// behind a More row, Corners / Tabs / Slot as accordions; a hidden field with an error or a
+// finding opens its More row or accordion (`problemAt`), so nothing is hidden with a problem.
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #selection-and-picking,
-// #design-and-plan-controls-v02; docs/modes/design.md#operations-v01
+// #design-and-plan-controls-v02; docs/modes/design.md#operations-v01;
+// docs/conventions/inspector-layout.md#per-inspector-target-layout
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { STOCK_FACE } from '../../../../core/geometry/face'
@@ -15,7 +19,7 @@ import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { useShell, useUi } from '../../shell/ShellContext'
+import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
 import {
   Icon,
   AnchorPicker,
@@ -29,12 +33,14 @@ import {
   Switch,
   type FieldIconName,
   type FieldMessage,
+  type GroupSeverity,
   type StepKind,
 } from '../../ui'
 import { ChamferInspector } from './ChamferInspector'
 import { isOpenNamed } from './operation-shape'
 import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
 import { TabPositions } from './TabsFields'
+import { profileTabs } from './tabs-model'
 import styles from './Design.module.css'
 import {
   axisNames,
@@ -141,6 +147,22 @@ const QUANTITY_KIND: Record<FieldKind, QuantityKind> = {
   scalar: 'scalar',
 }
 
+/**
+ * The worst problem at these field paths (an error at the path or below it, a finding shown
+ * there): a More row or accordion holding them opens while there is one (DF110 "never hides a
+ * problem"); `undefined` = none.
+ */
+export function problemAt(
+  ctx: OperationFieldsContext,
+  paths: readonly string[],
+): GroupSeverity | undefined {
+  const at = (p: string | undefined) =>
+    p !== undefined && paths.some((x) => p === x || p.startsWith(`${x}.`))
+  if (ctx.errors.some((e) => at(e.path))) return 'error'
+  if (ctx.warnings.some((w) => at(warningPath(w, ctx.op)))) return 'warning'
+  return undefined
+}
+
 /** One edited parameter as an update command. */
 const commit = (ctx: OperationFieldsContext, path: string, source: string, gesture?: string) =>
   ctx.send(updateArgs(ctx.op, path, source), path, gesture)
@@ -204,29 +226,7 @@ export function OperationFields({
             </>,
           )}
           {toolGroup}
-          {g(
-            t.groups.corners,
-            <>
-              {op.shape.kind === 'rectangle' ? (
-                <ParamField
-                  ctx={ctx}
-                  path="shape.cornerRadius"
-                  stepKind="small"
-                  label={t.cornerRadius}
-                  kind="length"
-                  icon="corner"
-                />
-              ) : null}
-              <ParamField
-                ctx={ctx}
-                path="floorRadius"
-                stepKind="small"
-                label={t.floorRadius}
-                kind="length"
-                icon="floorRadius"
-              />
-            </>,
-          )}
+          <CornersGroup ctx={ctx} level={level} />
         </>
       )
     case 'drilling':
@@ -254,7 +254,6 @@ export function OperationFields({
               <OnField ctx={ctx} />
             </>,
           )}
-          {toolGroup}
           {g(
             t.groups.hole,
             <>
@@ -309,6 +308,7 @@ export function OperationFields({
               ) : null}
             </>,
           )}
+          {toolGroup}
         </>
       )
     case 'profile': {
@@ -340,26 +340,38 @@ export function OperationFields({
       ]
       return (
         <>
-          <ShapeGroup ctx={ctx} level={level}>
-            <OnField ctx={ctx} />
-            <Field label={t.side} kind="toggle" messages={sideMessages} readOnly={ctx.readOnly}>
-              <SegmentedControl<'outside' | 'inside' | 'on'>
-                label={t.side}
-                options={(['outside', 'inside', 'on'] as const).map((s) => ({
-                  value: s,
-                  label: t.sides[s],
-                  disabled: open && s !== 'on',
-                }))}
-                value={op.side}
-                disabled={ctx.readOnly}
-                onValueChange={(side) => ctx.send({ side }, 'side')}
-              />
-            </Field>
-            <GrooveDepthField ctx={ctx} />
-          </ShapeGroup>
-          {toolGroup}
+          <ShapeGroup ctx={ctx} level={level} />
           {g(
-            t.groups.slot,
+            t.groups.cut,
+            <>
+              <OnField ctx={ctx} />
+              <Field label={t.side} kind="toggle" messages={sideMessages} readOnly={ctx.readOnly}>
+                <SegmentedControl<'outside' | 'inside' | 'on'>
+                  label={t.side}
+                  options={(['outside', 'inside', 'on'] as const).map((s) => ({
+                    value: s,
+                    label: t.sides[s],
+                    disabled: open && s !== 'on',
+                  }))}
+                  value={op.side}
+                  disabled={ctx.readOnly}
+                  onValueChange={(side) => ctx.send({ side }, 'side')}
+                />
+              </Field>
+              <GrooveDepthField ctx={ctx} />
+            </>,
+          )}
+          {toolGroup}
+          <TabsGroup ctx={ctx} level={level} />
+          <InspectorGroup
+            title={t.groups.slot}
+            level={level}
+            collapsible
+            rememberKey="profile.slot"
+            summary={op.slotWidth.source}
+            severity={problemAt(ctx, ['slotWidth'])}
+            forceOpen={problemAt(ctx, ['slotWidth']) !== undefined}
+          >
             <ParamField
               ctx={ctx}
               path="slotWidth"
@@ -367,40 +379,8 @@ export function OperationFields({
               label={t.slotWidth}
               kind="length"
               icon="slotWidth"
-            />,
-          )}
-          {g(
-            t.groups.tabs,
-            <>
-              {op.tabs.positions === undefined ? (
-                <ParamField
-                  ctx={ctx}
-                  path="tabs.count"
-                  stepKind="count"
-                  label={t.tabsCount}
-                  kind="scalar"
-                  icon="tabs"
-                />
-              ) : null}
-              <ParamField
-                ctx={ctx}
-                path="tabs.width"
-                stepKind="small"
-                label={t.tabsWidth}
-                kind="length"
-                icon="tabWidth"
-              />
-              <ParamField
-                ctx={ctx}
-                path="tabs.thickness"
-                stepKind="depth"
-                label={t.tabsThickness}
-                kind="length"
-                icon="tabThickness"
-              />
-              <TabPositions ctx={ctx} />
-            </>,
-          )}
+            />
+          </InspectorGroup>
         </>
       )
     }
@@ -414,21 +394,20 @@ export function OperationFields({
 function ShapeGroup({
   ctx,
   level,
-  children,
 }: {
   ctx: OperationFieldsContext
   level: 3 | 4
-  children?: React.ReactNode
 }): React.JSX.Element | null {
   const op = ctx.op
   if (!('shape' in op)) return null
   const shape = op.shape
   const names = axes(ctx)
+  const rotates = shape.kind !== 'circle'
+  // Anchor and Rotation are set once, if ever (inspector-layout.md § Per-inspector target layout)
+  const problem = problemAt(ctx, rotates ? ['anchor', 'shape.rotation'] : ['anchor'])
   return (
     <InspectorGroup title={t.groups.shape} level={level}>
       <ShapePicker ctx={ctx} actions={ctx.shapeActions} />
-      {children}
-      <AnchorField ctx={ctx} />
       <ParamField
         ctx={ctx}
         path="shape.center.0"
@@ -484,7 +463,6 @@ function ShapeGroup({
           icon="corner"
         />
       ) : null}
-      {shape.kind !== 'circle' ? <RotationField ctx={ctx} /> : null}
       {shape.kind === 'named' ? (
         // a toggle Field as every inspector switch: label and switch on one row (U9 Q130)
         <Field label={t.picker.mirror} kind="toggle" readOnly={ctx.readOnly}>
@@ -499,6 +477,142 @@ function ShapeGroup({
             }}
           />
         </Field>
+      ) : null}
+      <InspectorGroup.More
+        fields={rotates ? [t.anchor, t.picker.rotation] : [t.anchor]}
+        rememberKey={`${op.kind}.shape.more`}
+        forceOpen={problem !== undefined}
+      >
+        <AnchorField ctx={ctx} />
+        {rotates ? <RotationField ctx={ctx} /> : null}
+      </InspectorGroup.More>
+    </InspectorGroup>
+  )
+}
+
+/**
+ * A pocket's Corners accordion (open by default): Corner radius of a rectangle, the Floor fillet
+ * radius behind More (directly, when it is the group's only field).
+ */
+function CornersGroup({
+  ctx,
+  level,
+}: {
+  ctx: OperationFieldsContext
+  level: 3 | 4
+}): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'pocket') return null
+  const corner = op.shape.kind === 'rectangle' ? op.shape.cornerRadius : undefined
+  const problem = problemAt(ctx, ['shape.cornerRadius', 'floorRadius'])
+  const floor = (
+    <ParamField
+      ctx={ctx}
+      path="floorRadius"
+      stepKind="small"
+      label={t.floorRadius}
+      kind="length"
+      icon="floorRadius"
+    />
+  )
+  return (
+    <InspectorGroup
+      title={t.groups.corners}
+      level={level}
+      collapsible
+      defaultOpen
+      rememberKey="pocket.corners"
+      summary={t.summaries.corners(corner?.source, op.floorRadius.source)}
+      severity={problem}
+      forceOpen={problem !== undefined}
+    >
+      {corner !== undefined ? (
+        <>
+          <ParamField
+            ctx={ctx}
+            path="shape.cornerRadius"
+            stepKind="small"
+            label={t.cornerRadius}
+            kind="length"
+            icon="corner"
+          />
+          <InspectorGroup.More
+            fields={[t.floorRadius]}
+            rememberKey="pocket.corners.more"
+            forceOpen={problemAt(ctx, ['floorRadius']) !== undefined}
+          >
+            {floor}
+          </InspectorGroup.More>
+        </>
+      ) : (
+        floor
+      )}
+    </InspectorGroup>
+  )
+}
+
+/**
+ * A profile's Tabs accordion (open by default): count, width, thickness; the entered positions
+ * ("Add tab" while there are none) behind More. Entered positions replace the count, so once there
+ * are some they show in the group itself.
+ */
+function TabsGroup({
+  ctx,
+  level,
+}: {
+  ctx: OperationFieldsContext
+  level: 3 | 4
+}): React.JSX.Element | null {
+  const port = useRegion2d()
+  const op = ctx.op
+  if (op.kind !== 'profile') return null
+  const entered = op.tabs.positions
+  const problem = problemAt(ctx, ['tabs'])
+  // no More row that would open on nothing (a plan copy, a blind profile: no "Add tab")
+  const addable = !ctx.readOnly && profileTabs(ctx.part, op.id, port)?.allowed === true
+  return (
+    <InspectorGroup
+      title={t.groups.tabs}
+      level={level}
+      collapsible
+      defaultOpen
+      rememberKey="profile.tabs"
+      summary={t.summaries.tabs(op.tabs.count.source, entered?.length)}
+      severity={problem}
+      forceOpen={problem !== undefined}
+    >
+      {entered === undefined ? (
+        <ParamField
+          ctx={ctx}
+          path="tabs.count"
+          stepKind="count"
+          label={t.tabsCount}
+          kind="scalar"
+          icon="tabs"
+        />
+      ) : null}
+      <ParamField
+        ctx={ctx}
+        path="tabs.width"
+        stepKind="small"
+        label={t.tabsWidth}
+        kind="length"
+        icon="tabWidth"
+      />
+      <ParamField
+        ctx={ctx}
+        path="tabs.thickness"
+        stepKind="depth"
+        label={t.tabsThickness}
+        kind="length"
+        icon="tabThickness"
+      />
+      {entered !== undefined ? (
+        <TabPositions ctx={ctx} />
+      ) : addable ? (
+        <InspectorGroup.More fields={[t.tabPositions]} rememberKey="profile.tabs.more">
+          <TabPositions ctx={ctx} />
+        </InspectorGroup.More>
       ) : null}
     </InspectorGroup>
   )

@@ -762,7 +762,21 @@ export const designMessages = {
       tabs: 'Tabs',
       tolerance: 'Tolerance',
       tool: 'Tool',
+      /** A profile's On, Side and Depth (DF110 target layout). */
+      cut: 'Cut',
     },
+    /**
+     * Closed accordions' summaries (inspector-layout.md § Accordions): the values that matter, so
+     * nothing hides silently.
+     */
+    summaries: {
+      corners: (corner: string | undefined, floor: string) =>
+        corner === undefined ? `Floor r ${floor}` : `r ${corner} · Floor r ${floor}`,
+      tabs: (count: string, entered: number | undefined) =>
+        entered !== undefined ? `${entered} entered` : count === '1' ? '1 tab' : `${count} tabs`,
+    },
+    /** The More row of the Tabs group: the entered positions ("Add tab" while there are none). */
+    tabPositions: 'Tab positions',
     generalTolerance: 'General tolerance (length)',
     /** The empty field's placeholder: no scope sets one, so untoleranced lengths are exact. */
     generalToleranceNone: 'None: lengths are exact',

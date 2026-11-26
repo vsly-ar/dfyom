@@ -46,6 +46,9 @@ export const chamferMessages = {
   edgeLoopOption: (name: string, role: 'rim' | 'opening' | 'outline') => `${name} · ${role}`,
   /** E4a: the Loops group of a general edge with several loops, one checkbox per loop. */
   loops: 'Loops',
+  /** The Loops accordion's summary while closed: how many loops are bevelled. */
+  loopsSummary: (chosen: number, all: number) =>
+    chosen === all ? `All ${all}` : `${chosen} of ${all}`,
   /** A piece's outer loop by the edge's role: "Rim", "Rim 2", "Opening", "Outline". */
   loopRole:
     (role: 'rim' | 'opening' | 'outline') =>

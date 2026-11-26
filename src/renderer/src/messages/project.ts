@@ -2,12 +2,40 @@
 // keyboard shortcut list (task 3.6). Doc: docs/conventions/ui.md#project-files, #keyboard-shortcuts
 import type { UnitSystem } from '../../../core/project/document'
 
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
+
+/** "Just now", "5 min ago", "3 h ago", "Yesterday", "4 days ago", else the date ("12 Nov 2026"). */
+export function relativeTime(at: number, now: number): string {
+  const d = Math.max(0, now - at)
+  if (d < MINUTE) return 'Just now'
+  if (d < HOUR) return `${Math.floor(d / MINUTE)} min ago`
+  if (d < DAY) return `${Math.floor(d / HOUR)} h ago`
+  if (d < 2 * DAY) return 'Yesterday'
+  if (d < 7 * DAY) return `${Math.floor(d / DAY)} days ago`
+  return new Date(at).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export const projectMessages = {
   start: {
     title: 'No project open',
     description: 'Create a project, or open a project file.',
     new: 'New project',
     open: 'Open project',
+    /** DF114: above the unsaved changes. */
+    recentTitle: 'Recent projects',
+    recentOpen: (name: string, folder: string) => `Open ${name} from ${folder}`,
+    recentMissing: 'File not found',
+    recentRemove: 'Remove from list',
+    recentRemoveLabel: (name: string) => `Remove ${name} from the recent projects`,
+    /** When a recent project was last opened or saved, relative to `now` (epoch ms). */
+    recentWhen: (at: number, now: number) => relativeTime(at, now),
+    recentWhenTitle: (at: number) => `Last opened or saved ${new Date(at).toLocaleString('en-GB')}`,
     recoverTitle: 'Unsaved changes from an earlier session',
     untitled: 'Untitled project',
     restore: 'Restore',

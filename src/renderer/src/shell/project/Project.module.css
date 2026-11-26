@@ -25,6 +25,127 @@
   gap: var(--space-2);
 }
 
+/* Recent projects (DF114): quiet rows, the name with the time, the folder below */
+.recent {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.recentList {
+  display: grid;
+  gap: 1px;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0;
+  list-style: none;
+}
+
+.recentItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.recentRow,
+.recentMissing {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-2);
+  row-gap: 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: start;
+}
+
+.recentRow {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.recentRow:hover:enabled {
+  background: var(--bg-hover);
+}
+
+.recentRow:active:enabled {
+  background: var(--bg-active);
+}
+
+.recentRow:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+.recentRow:disabled {
+  opacity: 0.6;
+}
+
+.recentMissing {
+  align-items: center;
+  color: var(--text-faint);
+}
+
+.recentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--weight-medium);
+}
+
+/* a missing file: "File not found ·" stays whole, the folder shrinks */
+.recentMissingLine {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.35em;
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.recentNote {
+  flex: none;
+}
+
+.recentMissingLine .recentFolder {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.recentWhen {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* the end of a long folder stays visible: the ellipsis goes at the start (rtl box, ltr text) */
+.recentFolder {
+  grid-column: 1 / -1;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.recentMissing .recentFolder {
+  color: var(--text-faint);
+}
+
 .recover {
   display: grid;
   gap: var(--space-2);

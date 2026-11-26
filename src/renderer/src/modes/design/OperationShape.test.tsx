@@ -270,6 +270,8 @@ describe('operation inspector for shapes', () => {
     const { user, part, bridge } = await renderOps()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add profile' }))
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
+    // "Add tab" sits behind the Tabs group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Tab positions)' }))
     const add = await within(inspector()).findByRole('button', { name: 'Add tab' })
     await user.click(add)
     await waitFor(() => {
@@ -294,6 +296,8 @@ describe('operation inspector for shapes', () => {
     const { user } = await renderOps()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add profile' }))
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
+    // "Add tab" sits behind the Tabs group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Tab positions)' }))
     await user.click(await within(inspector()).findByRole('button', { name: 'Add tab' }))
     await waitFor(() => expect(scene.tabs?.markers.length).toBeGreaterThan(0))
     const before = scene.tabs!.markers[0]!.label
@@ -307,6 +311,8 @@ describe('operation inspector for shapes', () => {
     const { user, part, bridge } = await renderOps()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add profile' }))
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
+    // "Add tab" sits behind the Tabs group's More row (DF110 S3)
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Tab positions)' }))
     await user.click(await within(inspector()).findByRole('button', { name: 'Add tab' }))
     await waitFor(() => {
       const op = part().operations[0]!

@@ -68,6 +68,67 @@ describe('project files', () => {
     expect(screen.queryByRole('dialog', { name: 'New project' })).not.toBeInTheDocument()
   })
 
+  it('lists recent projects above the unsaved changes: open, missing greyed and removable (DF114)', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () =>
+      ok({ projects: [{ key: 'old-1', filePath: '/p/old.dfyom' }] }),
+    )
+    const now = Date.now()
+    bridge.setRecentProjects([
+      {
+        path: '/u/parts/Lid.dfyom',
+        name: 'Lid',
+        folder: '~/parts',
+        openedAt: now - 5 * 60_000,
+        missing: false,
+      },
+      {
+        path: '/u/gone/Box.dfyom',
+        name: 'Box',
+        folder: '~/gone',
+        openedAt: now - 3 * 86_400_000,
+        missing: true,
+      },
+    ])
+    bridge.handle('project.open', () => {
+      bridge.bind(fixtureDispatcher('Lid'), 'lid-1', { file: '/u/parts/Lid.dfyom' })
+      return ok({ key: 'lid-1', revision: 0 })
+    })
+    const { user } = renderApp(bridge)
+    const recent = await screen.findByRole('region', { name: 'Recent projects' })
+    const recover = screen.getByRole('region', { name: 'Unsaved changes from an earlier session' })
+    // above the unsaved changes
+    expect(recent.compareDocumentPosition(recover) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const lid = within(recent).getByRole('button', { name: 'Open Lid from ~/parts' })
+    expect(lid).toHaveTextContent('5 min ago')
+    expect(within(recent).queryByRole('button', { name: /Open Box/ })).not.toBeInTheDocument()
+    expect(recent).toHaveTextContent('BoxRemove from listFile not found ·~/gone')
+    await expectNoAxeViolations()
+    // ↓ moves to the next control (the missing file's Remove)
+    lid.focus()
+    await user.keyboard('{ArrowDown}')
+    const remove = within(recent).getByRole('button', {
+      name: 'Remove Box from the recent projects',
+    })
+    expect(remove).toHaveFocus()
+    await user.click(remove)
+    expect(bridge.forgottenRecent).toEqual(['/u/gone/Box.dfyom'])
+    await waitFor(() => expect(recent).not.toHaveTextContent('Box'))
+    await user.click(lid)
+    expect(bridge.calls.find((c) => c.name === 'project.open')?.args).toEqual({
+      file: '/u/parts/Lid.dfyom',
+    })
+    await waitFor(() => expect(document.title).toBe('Lid'))
+  })
+
+  it('shows no recent projects section while the list is empty (DF114)', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () => ok({ projects: [] }))
+    renderApp(bridge)
+    await screen.findByRole('button', { name: 'Open project' })
+    expect(screen.queryByRole('region', { name: 'Recent projects' })).not.toBeInTheDocument()
+  })
+
   it('opens a file: the recovery prompt restores unsaved changes', async () => {
     const bridge = createFakeBridge()
     bridge.handle('project.recovery.list', () => ok({ projects: [] }))

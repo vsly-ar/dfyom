@@ -343,6 +343,29 @@ export async function zeroXyz(page: Page): Promise<void> {
 }
 
 /**
+ * Shows an inspector field kept behind a closed More row, accordion or tab (DF110: Anchor,
+ * Rotation, Floor fillet radius, Slot width, tab positions) the way a message's target is shown:
+ * the field sends the reveal event (`revealInInspector`), every closed disclosure around it opens.
+ * `label` is the field's accessible name (an input's label, a radiogroup's name). Specs call this
+ * before setting a rarely used field, never ad-hoc clicks on "More (…)".
+ * Doc: docs/conventions/inspector-layout.md#inspector-structure-df110
+ */
+export async function revealField(scope: Locator, label: string): Promise<void> {
+  await scope
+    .getByLabel(label, { exact: true })
+    .first()
+    .evaluate((el) => {
+      // runs in the renderer; this tsconfig has no DOM lib, hence the structural types
+      const Event = (globalThis as unknown as { CustomEvent: new (n: string, o: object) => object })
+        .CustomEvent
+      ;(el as unknown as { dispatchEvent(e: object): boolean }).dispatchEvent(
+        new Event('dfyom-inspector-reveal', { bubbles: true }),
+      )
+    })
+  await expect(scope.getByLabel(label, { exact: true }).first()).toBeVisible()
+}
+
+/**
  * Selects inspector tab `name` ("Feeds") in `scope` unless it is selected (DF110 S5: hidden tab
  * panels stay mounted, but role queries skip them). Doc: docs/conventions/inspector-layout.md
  */
@@ -359,12 +382,6 @@ export async function openInspectorGroup(scope: Locator, title: string): Promise
   if ((await toggle.count()) > 0 && (await toggle.getAttribute('aria-expanded')) === 'false')
     await toggle.click()
   return region
-}
-
-/** Opens the inspector More row in `scope` whose button names `field` ("Overshoot"). */
-export async function openInspectorMore(scope: Locator, field: string): Promise<void> {
-  const button = scope.getByRole('button', { name: new RegExp(`^More \\(.*${field}`) })
-  if ((await button.getAttribute('aria-expanded')) === 'false') await button.click()
 }
 
 export { expect } from '@playwright/test'

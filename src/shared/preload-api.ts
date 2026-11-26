@@ -83,6 +83,13 @@ export const IPC = {
   runFileRead: 'dfyom:run.fileRead',
   /** Renderer → main (invoke): the recently run gCode files, newest first (DF93). */
   runFileRecent: 'dfyom:run.fileRecent',
+  /**
+   * Renderer → main (invoke): the recent projects for the start panel (`RecentProjectView[]`,
+   * DF114). Doc: docs/conventions/ui.md#project-files
+   */
+  fileRecent: 'dfyom:file.recent',
+  /** Renderer → main (invoke): remove a project file from the recent projects (DF114). */
+  fileForgetRecent: 'dfyom:file.forgetRecent',
   /** Renderer → main (invoke): the native "Open project" dialog; the chosen path or null. */
   fileChooseOpen: 'dfyom:file.chooseOpen',
   /** Renderer → main (invoke): the native "Save project" dialog; the chosen path or null. */
@@ -276,6 +283,22 @@ export interface ReferenceCompareViewRequest {
 export interface RunFileOpened {
   readonly path: string
   readonly window: 'this' | 'new'
+}
+
+/**
+ * A recent project as the start panel lists it (DF114, docs/conventions/ui.md#project-files):
+ * window plumbing like the dialog folders, not an agent capability (agents name files).
+ */
+export interface RecentProjectView {
+  readonly path: string
+  /** The file name without `.dfyom`. */
+  readonly name: string
+  /** The file's folder, the home folder shortened to `~`. */
+  readonly folder: string
+  /** When it was last opened or saved (epoch ms). */
+  readonly openedAt: number
+  /** The file is gone (moved, renamed or deleted): listed greyed, with "Remove from list". */
+  readonly missing: boolean
 }
 
 /** `run.readFile`'s answer: the file's text, or the error (DF93). */
@@ -490,6 +513,10 @@ export interface PreloadApi {
     chooseSvg(): Promise<string | null>
     /** Reveals an exported file (a path from `chooseExport`) in Finder (DF48); whether it did. */
     showInFolder(path: string): Promise<boolean>
+    /** The recently opened or saved projects, newest first (DF114). */
+    recent(): Promise<readonly RecentProjectView[]>
+    /** Removes `path` from the recent projects (DF114). */
+    forgetRecent(path: string): Promise<void>
   }
   /**
    * Reference models of the window's project: the ghost's triangles (R3), a section (U3), the

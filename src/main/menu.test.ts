@@ -160,4 +160,29 @@ describe('menu actions', () => {
     item?.click?.()
     expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'window.shapeEditor')
   })
+
+  it('File → Open Recent lists the recent projects and clears them (DF114)', () => {
+    const open = vi.fn()
+    const clear = vi.fn()
+    const fileItems = (recent?: Parameters<typeof menuTemplate>[2]) =>
+      (menuTemplate('darwin', false, recent).find((m) => m.label === 'File')?.submenu ?? []) as {
+        label?: string
+        enabled?: boolean
+        submenu?: unknown
+        click?: () => void
+      }[]
+    const empty = fileItems().find((i) => i.label === 'Open Recent')
+    expect(empty?.enabled).toBe(false)
+    const recent = fileItems({
+      noWindow: vi.fn(),
+      openLibrary: vi.fn(),
+      recent: { items: [{ label: 'Lid', path: '/w/Lid.dfyom' }], open, clear },
+    }).find((i) => i.label === 'Open Recent')
+    const sub = recent?.submenu as { label?: string; click?: () => void }[]
+    expect(sub.map((i) => i.label)).toEqual(['Lid', undefined, 'Clear Menu'])
+    sub[0]?.click?.()
+    sub[2]?.click?.()
+    expect(open).toHaveBeenCalledWith('/w/Lid.dfyom')
+    expect(clear).toHaveBeenCalledOnce()
+  })
 })

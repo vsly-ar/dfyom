@@ -10,7 +10,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { UnitSystem } from '../../../../core/project/document'
 import { isIncompatibleProject } from '../../../../core/project/layout'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
+import type { CallReply, PreloadApi, RecentProjectView } from '../../../../shared/preload-api'
 import type { ReplicaState } from '../../state/replica'
 
 /** A lock of another computer's instance can be taken over after this long (persistence.md#lock). */
@@ -44,6 +44,10 @@ export interface FilesState {
   readonly busy: boolean
   /** Projects with unsaved changes of an earlier session (start screen). */
   readonly recoverable: readonly RecoverableView[]
+  /** Recently opened or saved projects, newest first (start screen, DF114). */
+  readonly recent: readonly RecentProjectView[]
+  /** When `recent` was listed (clock ms): its relative times count from here. */
+  readonly recentAt: number
   closeDialog(): void
   /** "New project…": the new-project dialog. */
   newProject(): void
@@ -60,6 +64,9 @@ export interface FilesState {
   /** Retry the locked open now, or schedule it after `LOCK_RETRY_MS`. */
   retryLocked(later: boolean): void
   refreshRecoverable(): Promise<void>
+  refreshRecent(): Promise<void>
+  /** "Remove from list" (DF114). */
+  forgetRecent(path: string): Promise<void>
 }
 
 export type ProjectFiles = StoreApi<FilesState>
@@ -134,6 +141,8 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
       dialog: null,
       busy: false,
       recoverable: [],
+      recent: [],
+      recentAt: 0,
       closeDialog() {
         clearTimeout(retryTimer)
         set({ dialog: null })
@@ -207,6 +216,15 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
             .filter((p) => p.key !== open)
             .map((p) => ({ key: p.key, filePath: p.filePath })),
         })
+      },
+      async refreshRecent() {
+        const recent = await bridge.files.recent()
+        set({ recent, recentAt: now() })
+      },
+      async forgetRecent(path) {
+        set({ recent: get().recent.filter((p) => p.path !== path) })
+        await bridge.files.forgetRecent(path)
+        await get().refreshRecent()
       },
     }
   })
