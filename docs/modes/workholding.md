@@ -103,6 +103,7 @@ One union-style tool keeps the agent API small ([llm-api.md](../architecture/llm
 Rules go to a [ui.md](../conventions/ui.md) amendment (plan task 1.6):
 
 - **Setup inspector:** a "Workholding" section: the item list (icon, name, one-line summary), an Add menu (Toe clamp, Vise, Screw, Block, Spoilboard / fixture plate, Tape / vacuum), the margin, and per item its fields; the derived clearance height shows "from Toe clamp 2 + 2 mm".
+- **Copy from another setup** (v0.4-llm-first X2-5, the agent's `copyFrom`): "Copy from…" beside "Arrange automatically" lists the plan's other setups; choosing one replaces this setup's list with that setup's items (new ids, same edges and positions: a flipped setup keeps "front X45"), one undo step. Decided over "Same as Bottom" (the plan's first wording) so it works with any number of setups, and over a second "Arrange automatically" (it keeps clear of this setup's toolpaths only, so the clamps of the two sides of a flip would land on different pads). Visuals: [ui.md § Workholding](../conventions/ui.md#workholding).
 - **Plan viewport:** items drawn as neutral solid geometry (not the accent, not the stock colour), keep-out zones as a faint dashed halo while an item is selected; toe clamps drag along their edge with snap to the stock corners and the edge midpoint; a colliding move draws red with a marker at the first hit, and the finding selects it.
 - **Run scene and setup-change picture:** the same items, so the operator sees what to place.
 

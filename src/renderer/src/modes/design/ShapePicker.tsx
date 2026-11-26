@@ -1,10 +1,10 @@
 // The shape picker of a pocket or profile (task U2): one Select with the inline kinds (Rectangle,
 // Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…" and "Import
-// SVG…" (DF49: imports and uses the first shape, one undo step); under it
-// "Edit shape" for a named shape or "Convert to shape" for an inline one, and the shape's issues
-// and corner warnings with "Round corners to ≥ r" (or to the largest radius each corner takes).
-// The placement fields (rotation, mirror) follow the anchor and position in the Shape group
-// (OperationFields.tsx). A choice is one command on `shape`; an open path picked on a profile
+// SVG…" (DF49: imports and uses the first shape, one undo step); under it "Edit shape" and "Place
+// as drawn" (X2-2: at its own coordinates, a section's shape where the section lies) for a named
+// shape or "Convert to shape" for an inline one, and the shape's issues and corner warnings with
+// "Round corners to ≥ r" (or to the largest radius each corner takes). The placement
+// fields (rotation, mirror) follow the anchor and position in the Shape group (OperationFields.tsx). A choice is one command on `shape`; an open path picked on a profile
 // cutting Outside or Inside sets side On in the same command, with a notice.
 // Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, #import-svg-where-it-is-looked-for-df49,
 // docs/modes/design-v0.3.md#dfm-checks-for-shapes
@@ -29,6 +29,7 @@ import {
   NEW_SHAPE,
   pickerValue,
   cornerRadiusFor,
+  drawnPlacement,
   roundCornerFixes,
   shapeChoiceArgs,
   shapePlacement,
@@ -56,6 +57,8 @@ export interface ShapeActions {
   updateItems(shapeId: string, fixes: readonly ItemFix[]): void
   /** A profile's open path picked while cutting Outside or Inside: shape and side On, one step. */
   pickOnLine(shape: Record<string, unknown>): void
+  /** X2-2 "Place as drawn": anchor min/min, then the position `center` (mm), one undo step. */
+  placeAsDrawn(center: readonly [number, number]): void
 }
 
 /** A named shape's loops resolved by the renderer's port (shape frame, mm). */
@@ -199,6 +202,13 @@ export function ShapePicker({
     (loadedOp.kind === 'pocket' || loadedOp.kind === 'profile')
       ? shapePlacement(port, loadedOp.shape, ctx.part.loaded?.part.shapes)
       : undefined
+  // X2-2: the shape at its own coordinates (a section's shape where the section lies)
+  const drawn =
+    port !== undefined &&
+    loadedOp !== undefined &&
+    (loadedOp.kind === 'pocket' || loadedOp.kind === 'profile')
+      ? drawnPlacement(port, loadedOp.shape, ctx.part.loaded?.part.shapes)
+      : undefined
   // the fix rounds each corner to the tool radius, or as far as the corner takes (X2 finding)
   const cornerFix = (w: DfmWarning): { fix?: FieldMessage['fix']; note?: string } | undefined => {
     if (ctx.readOnly || !isCornerWarning(w) || w.suggestion === undefined) return undefined
@@ -283,13 +293,32 @@ export function ShapePicker({
       {actions && !ctx.readOnly ? (
         <div className={styles['pickerActions']}>
           {shape.kind === 'named' ? (
-            <Button
-              size="sm"
-              icon={<Icon name="edit" />}
-              onClick={() => actions.editShape(shape.shapeId)}
-            >
-              {p.editShape}
-            </Button>
+            <>
+              <Button
+                size="sm"
+                icon={<Icon name="edit" />}
+                onClick={() => actions.editShape(shape.shapeId)}
+              >
+                {p.editShape}
+              </Button>
+              {drawn === undefined ? null : (
+                <Button
+                  size="sm"
+                  icon={<Icon name="move-to" />}
+                  disabled={drawn.kind === 'oriented' || drawn.already}
+                  title={
+                    drawn.kind === 'oriented'
+                      ? p.placeAsDrawnOriented
+                      : drawn.already
+                        ? p.placeAsDrawnAlready
+                        : p.placeAsDrawnTip
+                  }
+                  onClick={() => drawn.kind === 'place' && actions.placeAsDrawn(drawn.center)}
+                >
+                  {p.placeAsDrawn}
+                </Button>
+              )}
+            </>
           ) : (
             <Button size="sm" icon={<Icon name="shapes" />} onClick={actions.convert}>
               {p.convert}

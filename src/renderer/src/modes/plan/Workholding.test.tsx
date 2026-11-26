@@ -162,4 +162,34 @@ describe('Workholding in the setup inspector', () => {
       ),
     ).toBeInTheDocument()
   })
+
+  it('copies another setup’s workholding with "Copy from…" (X2-5, the agent’s copyFrom)', async () => {
+    let other = ''
+    const t = await renderInspector(async (s, planId) => {
+      const top = s.plan(planId).setups[0]!
+      other = (
+        (await s.run('plan.setup.split', {
+          planId,
+          setupId: top.id,
+          planOperationIds: [top.operations.at(-1)!.id],
+        })) as { setupId: string }
+      ).setupId
+      await s.run('plan.workholding.set', { planId, setupId: other, items: [clamp] })
+    })
+    const name = t.s.plan(t.planId).setups.find((x) => x.id === other)!.name
+    await t.user.click(within(t.section()).getByRole('button', { name: 'Copy from…' }))
+    const entry = await screen.findByRole('menuitem', { name: new RegExp(`^${name}`) })
+    expect(entry).toHaveTextContent('1 item')
+    await t.user.click(entry)
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toEqual({
+        planId: t.planId,
+        setupId: t.setupId,
+        copyFrom: other,
+      }),
+    )
+    const row = await within(t.section()).findByRole('button', { name: /^Toe clamp 1/ })
+    expect(row).toHaveTextContent('front X30 grip 10 top Z20')
+    await expectNoAxeViolations()
+  })
 })

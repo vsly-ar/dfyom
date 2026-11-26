@@ -441,6 +441,37 @@ describe('reference model UI', () => {
     })
     expect(d.history.undoable).toHaveLength(undoable + 1)
     expect(Object.values(d.doc.parts)[0]!.shapes!.map((s) => s.name)).toEqual(['Section 3 mm'])
+
+    // X2-1: a level's depth at full precision as its tooltip
+    expect(underside).toHaveAttribute('title', 'Depth 15 mm')
+    // X2-3: the section's outline lies 2 mm inside a shape 2 mm larger all round; Create offset
+    // makes that shape's inward offset by the inset, one undo step
+    const partId = Object.keys(d.doc.parts)[0]!
+    await d.dispatch(
+      'design.shape.add',
+      {
+        partId,
+        name: 'Larger',
+        items: [{ kind: 'offset', shapeId: 'shape1', distance: '2', direction: 'outward' }],
+      },
+      { kind: 'ui', id: 'test' },
+    )
+    const insetFrom = await within(section).findByRole('combobox', { name: 'Inset from' })
+    insetFrom.focus()
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByRole('option', { name: 'Larger' }))
+    await waitFor(() =>
+      expect(within(section).getByText('2 mm inside Larger (sides 2–2 mm)')).toBeVisible(),
+    )
+    await expectNoAxeViolations()
+    const before = d.history.undoable.length
+    await user.click(within(section).getByRole('button', { name: 'Create offset' }))
+    await waitFor(() => expect(within(section).getByText('Larger offset created.')).toBeVisible())
+    expect(d.history.undoable).toHaveLength(before + 1)
+    expect(Object.values(d.doc.parts)[0]!.shapes!.at(-1)).toMatchObject({
+      name: 'Larger offset',
+      items: [{ kind: 'offset', shapeId: 'shape2', direction: 'inward' }],
+    })
   })
 
   it('the fitted loops and the hovered level go to the viewport; closing the panel clears them (DF60)', async () => {
@@ -616,6 +647,33 @@ describe('reference model UI', () => {
       ['30 mm', '30 mm'],
       ['47 mm', '21 mm'],
     ])
+
+    // X2-1: full precision on hover, where the holes are, and the floor at a mouth below the face
+    const grid = within(holes).getByText(/^4 × Ø 2.45 mm/)
+    expect(grid).toHaveAttribute(
+      'title',
+      '4 × Ø 2.447 mm countersunk Ø 4.861 mm 82.9°, through, grid 2 × 2',
+    )
+    expect(within(holes).getByText('First at X 10 mm Y 10 mm · pitch 80 mm × 40 mm')).toBeVisible()
+    expect(within(holes).getByText('At X 30 mm Y 30 mm; X 47 mm Y 21 mm')).toBeVisible()
+    const facing = await d.dispatch(
+      'design.facing.add',
+      { partId: part().id, on: 'stock.top', depth: '4' },
+      { kind: 'ui', id: 'test' },
+    )
+    const facingId = (facing.unwrap().value as { operationId: string }).operationId
+    const onFloor = await within(holes).findByRole('button', {
+      name: /^Add as Bolt hole on Facing 1 floor: 1 × Ø 3.4 mm/,
+    })
+    expect(onFloor).toBeEnabled()
+    expect(within(holes).queryByText(/The mouth is 4 mm below top/)).toBeNull()
+    await user.click(onFloor)
+    await waitFor(() => expect(within(holes).getByText('Bolt hole added.')).toBeVisible())
+    expect(commandsOf(bridge).at(-1)).toMatchObject({
+      name: 'design.hole.add',
+      args: { on: `${facingId}.floor`, center: ['70 mm', '30 mm'] },
+    })
+    await expectNoAxeViolations()
   })
 
   it('Read from offers the setups of the part plans; a setup sends face: { setupId } (DF60 P2)', async () => {

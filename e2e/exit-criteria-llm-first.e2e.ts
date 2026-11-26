@@ -5,17 +5,21 @@
 // on the 250 × 200 × 40 hardwood block; the enclosure base STL imported in the Reference panel
 // (its default fit); the levels read from both faces, each section in the middle of its band;
 // "Create shape" of the outline and the cavity from the top and of the outline from the bottom;
-// the cavity pocket and the outline profile with tabs placed at the sections' corners; the bottom
-// facing; the two steps as outside profiles of "Offset…" shapes of the bottom outline; the four
-// countersunk foot holes as a Bolt hole on the facing's floor with a Make Clones… grid (the
-// panel's "Add as Bolt hole" is off for a mouth below the face, as reference-tools.md says);
-// plan mode: toolpaths, "Arrange automatically" on both setups (four toe clamps where the
-// black-box test put them), toolpaths again, both programs exported and byte for byte X1's
-// goldens; "Compare with reference" in the plan inspector shows the deviation: no unexplained
-// region. Windows stay hidden (app.fixture.ts sets DFYOM_HIDE_WINDOWS=1); the native file dialogs
-// are stubbed in the main process.
+// the cavity pocket and the outline profile with tabs, each "Place as drawn" (where the section
+// lies, X1's `placeAt`); the bottom facing; the two steps as outside profiles of offsets of the
+// bottom outline made by the Section's "Inset from" → "Create offset" (X1's mean inset of the
+// bounds); the four countersunk foot holes by the Holes row's "Add as Bolt hole on Facing 1
+// floor" (the suggestion with its Clones grid); plan mode: toolpaths, "Arrange automatically" on
+// Bottom (four toe clamps where the black-box test put them) and "Copy from…" Bottom on Top
+// (X1's `copyFrom`), toolpaths again, both programs exported and byte for byte X1's goldens;
+// "Compare with reference" in the plan inspector shows the deviation: no unexplained region.
+// Every number typed is read in the app (the levels' full-precision tooltips) or is the user's own
+// (stock, tools, tabs, the deliberately low clearance); X2's known issues X2-1–X2-3 and X2-5 are
+// closed by the UI (plans/v0.4-llm-first.md § X2 measured). Windows stay hidden (app.fixture.ts
+// sets DFYOM_HIDE_WINDOWS=1); the native file dialogs are stubbed in the main process. With
+// DFYOM_RENDERS=1 dark renders of the X2 controls go to DFYOM_RENDERS_DIR (x2-*-dark.png).
 // Docs: docs/plans/v0.4-llm-first.md#exit-criteria, docs/conventions/testing.md#end-to-end
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import {
@@ -25,7 +29,7 @@ import {
   EXIT_STOCK,
 } from '../src/core/design/enclosure-exit.testing'
 import { withoutAppVersion } from '../src/core/post/plan-export'
-import { expect, openPartSetup, openReferencePanel, revealField, test } from './app.fixture'
+import { expect, openReferencePanel, revealField, test } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 /** X1's golden programs, in machining order: the same part through the UI exports the same bytes. */
@@ -33,6 +37,29 @@ const GOLDENS = [
   resolve('src/main/cli/__golden__/exit-criteria-llm-first-1-bottom.nc'),
   resolve('src/main/cli/__golden__/exit-criteria-llm-first-2-top.nc'),
 ] as const
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir =
+  process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
+
+/** A dark render of the window (DFYOM_RENDERS=1; the theme is set once, at the start). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: `${rendersDir}/x2-${name}-dark.png` })
+}
+
+/** Switches the window to the dark theme for the renders. */
+async function darkTheme(page: Page): Promise<void> {
+  if (!RENDERS) return
+  mkdirSync(rendersDir, { recursive: true })
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await settings.getByRole('radio', { name: 'Dark' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await settings.getByRole('button', { name: 'Done' }).click()
+  await expect(settings).toBeHidden()
+}
 
 /**
  * Native dialogs: "Import reference" opens the STL, any other open the project; "Export gCode"
@@ -170,26 +197,6 @@ async function libraryTool(lib: Page, tool: ToolSpec): Promise<void> {
   await expect(grid.getByRole('row', { name: /Unsaved/ })).toHaveCount(0)
 }
 
-/**
- * Values X1 reads from the reference tools at 0.001 mm that the app's panels do not show (X2
- * finding, plans/v0.4-llm-first.md § Known issues): the section shapes' min corners (`placeAt`
- * of `design.shape.import { from }`; the operations default to the stock centre), the two steps'
- * insets from the outline (X1: the mean gap of their sections' bounds) and their offsets' corners,
- * and the countersink's diameter and angle as the `holes` suggestion gives them. The user types
- * them as X1 sent them.
- */
-const X1_VALUES = {
-  cavityAt: ['7.487', '18.713'],
-  outlineAt: ['0.252', '11.474'],
-  steps: [
-    { inset: '4.821', at: ['5.077', '16.292'] },
-    { inset: '0.796', at: ['1.052', '12.267'] },
-  ],
-  csDiameter: '4.861',
-  csAngle: '82',
-  grid: ['177.062', '88.531'],
-} as const
-
 /** The middle of a band between two levels, as X1 computes it (mm, 0.001). */
 const mid = (a: number, b: number) => Math.round(((a + b) / 2) * 1000) / 1000
 
@@ -243,6 +250,7 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await lib.close()
 
   // ── New project on the 250 × 200 × 40 hardwood block ─────────────────────────────────────
+  await darkTheme(page)
   await navigator.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Enclosure base')
@@ -268,22 +276,40 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await expect(input(panel, 'Position Z')).toHaveValue('-39 mm')
 
   // ── Levels from both faces: the bands' middles are where the sections go ─────────────────
+  // each row shows its depth to 0.01 mm and holds it at 0.001 mm as its tooltip (X2-1): the user
+  // reads that, as X1 reads the find result
   const levels = panel.getByRole('region', { name: 'Levels' })
-  const fromTop = EXIT_LEVELS.filter((l) => l.facing === 'face')
-  const fromBottom = EXIT_LEVELS.filter((l) => l.facing === 'opposite')
-  // the panel shows them to 0.01 mm (X1 reads 0.001 from the tool): the user types X0's values,
-  // a known issue of the plan (X2 finding)
-  for (const l of EXIT_LEVELS) {
-    const shown = l.facing === 'face' ? l.depth : l.depthFromOpposite!
-    const near = [Math.floor(shown * 100) / 100, Math.ceil(shown * 100) / 100]
-      .map((v) => String(v).replace('.', '\\.'))
-      .join('|')
-    await expect(
-      levels.getByRole('button', { name: new RegExp(`^Depth (${near}) mm, area`) }).first(),
-    ).toBeVisible({ timeout: 30_000 })
+  await expect(levels.getByRole('button').first()).toBeVisible({ timeout: 30_000 })
+  const readLevels = async (heading: string) => {
+    const rows = levels
+      .getByRole('heading', { name: heading, exact: true })
+      .locator('xpath=following-sibling::ul[1]')
+      .getByRole('button')
+    return (
+      await rows.evaluateAll((bs) =>
+        bs.map((b) => [b.getAttribute('title') ?? '', b.getAttribute('aria-label') ?? '']),
+      )
+    ).map(([title, name]) => ({
+      depth: Number(/^Depth ([\d.]+) mm/.exec(title!)![1]),
+      area: Number(/, area ([\d\s]+) mm²/.exec(name!)![1]!.replace(/\s/g, '')),
+    }))
   }
+  const fromTop = await readLevels('From top')
+  const fromBottom = (await readLevels('From bottom')).sort((a, b) => a.depth - b.depth)
+  // the same levels X0 recorded (X1 asserts its find result against them too)
+  expect(fromTop.map((l) => l.depth).sort((a, b) => a - b)).toEqual(
+    EXIT_LEVELS.filter((l) => l.facing === 'face')
+      .map((l) => l.depth)
+      .sort((a, b) => a - b),
+  )
+  expect(fromBottom.map((l) => l.depth)).toEqual(
+    EXIT_LEVELS.filter((l) => l.facing === 'opposite')
+      .map((l) => l.depthFromOpposite!)
+      .sort((a, b) => a - b),
+  )
   const cavityFloor = Math.max(...fromTop.map((l) => l.depth))
-  const rimUnderside = Math.max(...fromBottom.map((l) => l.depthFromOpposite!))
+  const rimUnderside = Math.max(...fromBottom.map((l) => l.depth))
+  // the stock the user set up
   const thickness = Number(EXIT_STOCK.thickness)
   const topBand = mid(0, cavityFloor)
   const wallBand = mid(rimUnderside, thickness)
@@ -314,15 +340,17 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
     await page.getByRole('listbox').getByRole('option', { name, exact: true }).nth(nth).click()
     await expect(picker).toContainText(name)
   }
-  const anchorAt = async (point: string, x: string, y: string) => {
+  /** X2-2: "Place as drawn" puts a section's shape where the section lies (X1's `placeAt`). */
+  const placeAsDrawn = async (point: string) => {
+    const place = inspector.getByRole('button', { name: 'Place as drawn' })
+    await place.click()
+    await expect(place).toBeDisabled()
+    await expect(place).toHaveAttribute('title', 'Already where it was drawn.')
+    // anchor min/min: "Front left" on the top, "Back left" seen from below
     await revealField(inspector, 'Anchor')
-    const anchor = inspector.getByRole('radiogroup', { name: 'Anchor' })
-    await anchor.getByRole('radio', { name: point }).click()
-    await expect(anchor.getByRole('radio', { name: point })).toBeChecked()
-    // the face frame's axes: X/Y on the top, u/v on the bottom
-    const [u, v] = point.startsWith('Back') ? ['u', 'v'] : ['X', 'Y']
-    await setField(inspector, `Position ${u}`, x)
-    await setField(inspector, `Position ${v}`, y)
+    await expect(
+      inspector.getByRole('radiogroup', { name: 'Anchor' }).getByRole('radio', { name: point }),
+    ).toBeChecked()
   }
   const pickOn = async (option: RegExp) => {
     await inspector.getByRole('combobox', { name: 'On', exact: true }).click()
@@ -340,13 +368,13 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await addFromMenu('Pocket')
   await expect(heading('Pocket 1')).toBeVisible()
   await pickShape(`${topName} cavity`)
-  await anchorAt('Front left', ...X1_VALUES.cavityAt)
+  await placeAsDrawn('Front left')
   await setField(inspector, 'Depth', String(cavityFloor))
 
   await addFromMenu('Profile')
   await expect(heading('Profile 1')).toBeVisible()
   await pickShape(`${topName} outline`)
-  await anchorAt('Front left', ...X1_VALUES.outlineAt)
+  await placeAsDrawn('Front left')
   await inspector
     .getByRole('radiogroup', { name: 'Side' })
     .getByRole('radio', { name: 'Outside' })
@@ -359,37 +387,46 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await addFromMenu('Facing')
   await expect(heading('Facing 1')).toBeVisible()
   await pickOn(/^Stock bottom/)
-  const facingDepth = Math.min(...fromBottom.map((l) => l.depthFromOpposite!))
+  const facingDepth = fromBottom[0]!.depth
   await setField(inspector, 'Depth', String(facingDepth))
 
-  // the steps' depths: the levels from the bottom but the facing and the holes' ends
+  // the steps' depths: the large floors from the bottom but the facing (the four tiny ones are
+  // the holes' flat ends); each step's section in the band from the floor below it to the next
+  const holeEnds = fromBottom.filter((l) => l.area < 100).map((l) => l.depth)
   const stepDepths = fromBottom
-    .map((l) => l.depthFromOpposite!)
-    .filter((d) => d !== facingDepth && d !== EXIT_HOLES.bottom.group.size.depth)
-    .sort((a, b) => a - b)
-  for (const [k, step] of X1_VALUES.steps.entries()) {
-    const shapes = await openPartSetup(page, 'Shapes')
-    await shapes
-      .getByRole('button', { name: new RegExp(`^${bottomName}(?! offset)`) })
-      .click({ button: 'right' })
-    await page
-      .getByRole('menu', { name: `Actions for ${bottomName}` })
-      .getByRole('menuitem', { name: /^Offset…/ })
+    .map((l) => l.depth)
+    .filter((d) => d !== facingDepth && !holeEnds.includes(d))
+  const bands = [facingDepth, ...stepDepths.slice(0, -1)].map((lo) =>
+    mid(lo, fromBottom.find((l) => l.depth > lo)!.depth),
+  )
+  for (const [k, band] of bands.entries()) {
+    // X2-3: the step's section, its outline read against the bottom outline: "Create offset"
+    panel = await openReferencePanel(page)
+    await choose(page, panel, 'Read from', 'Bottom')
+    const stepSection = panel.getByRole('region', { name: 'Section' })
+    await setField(stepSection, 'Section depth', String(band))
+    await stepSection
+      .getByRole('radiogroup', { name: 'Loops' })
+      .getByRole('radio', { name: 'Outlines' })
       .click()
-    const offset = page.getByRole('dialog', { name: `Offset ${bottomName}` })
-    const distance = input(offset, 'Distance')
-    await distance.fill(step.inset)
-    await distance.press('Enter')
-    await offset.getByRole('radio', { name: 'Inward' }).click()
-    await offset.getByRole('button', { name: 'Create offset' }).click()
-    await expect(offset).toBeHidden()
-    await expect(shapes).toBeHidden()
+    await expect(stepSection.getByText(/^Outline /)).toBeVisible({ timeout: 30_000 })
+    await choose(page, stepSection, 'Inset from', bottomName)
+    await expect(stepSection.getByText(new RegExp(` inside ${bottomName} \\(sides `))).toBeVisible({
+      timeout: 30_000,
+    })
+    if (k === 0) {
+      await stepSection.scrollIntoViewIfNeeded()
+      await render(page, 'inset-from')
+    }
+    await stepSection.getByRole('button', { name: 'Create offset' }).click()
+    await expect(stepSection.getByText(`${bottomName} offset created.`)).toBeVisible()
 
     await addFromMenu('Profile')
     await expect(heading(`Profile ${k + 2}`)).toBeVisible()
     await pickOn(/^Stock bottom/)
     await pickShape(`${bottomName} offset`, k)
-    await anchorAt('Back left', step.at[0], step.at[1])
+    await placeAsDrawn('Back left')
+    if (k === 0) await render(page, 'place-as-drawn')
     await inspector
       .getByRole('radiogroup', { name: 'Side' })
       .getByRole('radio', { name: 'Outside' })
@@ -405,45 +442,24 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   panel = await openReferencePanel(page)
   await choose(page, panel, 'Read from', 'Bottom')
   const holes = panel.getByRole('region', { name: 'Holes' })
-  // to 0.01 mm, without the centres or the grid's pitch: the user types X0's values (X2 finding)
-  await expect(
-    holes.getByText('4 × Ø 2.45 mm countersunk Ø 4.86 mm 83°, 3.94 mm deep, grid 2 × 2'),
-  ).toBeVisible({ timeout: 30_000 })
-  // a mouth below the face: the panel says to add a Bolt hole on the facing's floor by hand
-  await expect(holes.getByRole('button', { name: /^Add as Bolt hole/ })).toBeDisabled()
-
+  const text = '4 × Ø 2.45 mm countersunk Ø 4.86 mm 83°, 3.94 mm deep, grid 2 × 2'
+  await expect(holes.getByText(text)).toBeVisible({ timeout: 30_000 })
+  // X2-1: the full precision on hover and where the holes are (the face frame, 0.001 mm)
   const hole = EXIT_HOLES.bottom.group
-  await addFromMenu('Bolt hole')
-  await expect(heading('Bolt hole 1')).toBeVisible()
-  await pickOn(/^Facing 1 floor/)
-  await setField(inspector, 'Centre u', String(hole.holes[0][0]))
-  await setField(inspector, 'Centre v', String(hole.holes[0][1]))
-  const type = inspector.getByRole('radio', { name: 'Countersink', exact: true })
-  await type.click()
-  await expect(type).toHaveAttribute('aria-checked', 'true')
-  await setField(inspector, 'Diameter', String(hole.size.diameter))
-  await choose(page, inspector, 'Bottom', 'Flat')
-  await expect(inspector.getByRole('combobox', { name: 'Bottom' })).toHaveText('Flat')
-  // the depth from the mouth, which is the facing's floor; typed before the countersink, it holds
-  // (X2-8: the starting countersink follows the diameter and leaves its cone room)
-  const holeDepth = String(Math.round((hole.size.depth - hole.size.top) * 1000) / 1000)
-  await setField(inspector, 'Depth', holeDepth)
-  await setField(inspector, 'Countersink Ø', X1_VALUES.csDiameter)
-  await setField(inspector, 'Countersink angle', X1_VALUES.csAngle)
-  await expect(input(inspector, 'Depth')).toHaveValue(new RegExp(`^${holeDepth}`))
-  await expect(input(inspector, 'Diameter')).toHaveValue(/^2\.447/)
-
-  await navigator.getByRole('button', { name: /^Bolt hole 1,/ }).click({ button: 'right' })
-  await page.getByRole('menu').getByRole('menuitem', { name: 'Make Clones…' }).click()
-  await expect(inspector.getByText('New Clones')).toBeVisible()
-  await inspector.getByRole('button', { name: 'Add row' }).click()
-  await page.getByRole('menuitem', { name: 'Grid' }).click()
-  await inspector.getByRole('button', { name: 'Remove row 1' }).click()
-  await setField(inspector, 'Columns', '2')
-  await setField(inspector, 'Rows', '2')
-  await setField(inspector, 'Column spacing (u)', X1_VALUES.grid[0])
-  await setField(inspector, 'Row spacing (v)', X1_VALUES.grid[1])
-  await inspector.getByRole('button', { name: 'Make clones' }).click()
+  await expect(holes.getByText(text)).toHaveAttribute(
+    'title',
+    '4 × Ø 2.447 mm countersunk Ø 4.861 mm 82.8°, 3.944 mm deep, grid 2 × 2',
+  )
+  await expect(
+    holes.getByText(
+      `First at u ${hole.holes[0][0]} mm v ${hole.holes[0][1]} mm · pitch 177.062 mm × 88.531 mm`,
+    ),
+  ).toBeVisible()
+  // a mouth below the face, and the facing makes that floor: the suggestion goes on it (X2-1)
+  await holes.scrollIntoViewIfNeeded()
+  await render(page, 'holes-row')
+  await holes.getByRole('button', { name: /^Add as Bolt hole on Facing 1 floor: 4 ×/ }).click()
+  await expect(holes.getByText('4 Bolt holes added.')).toBeVisible()
   await expect(navigator.getByRole('button', { name: /^Clones 1, ×4/ })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect(page.getByRole('button', { name: /^Apply \d+ change/ })).toHaveCount(0)
@@ -474,21 +490,14 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   for (const i of [0, 1]) {
     await pickSetup(i)
     const holding = inspector.getByRole('region', { name: /^Workholding/ })
-    await holding.getByRole('button', { name: 'Arrange automatically' }).click()
-    await expect(holding).toContainText('4 items')
-    if (i === 1) {
-      // no "copy from another setup" in the UI (X1 sends `copyFrom`), and Top's own arrangement
-      // keeps clear of Top's toolpaths only (front X42, …): the clamps are moved to Bottom's
-      // positions by hand (X2 finding)
-      for (const [n, c] of EXIT_CLAMPS.entries()) {
-        const row = holding.getByRole('button', { name: new RegExp(`^Toe clamp ${n + 1}`) })
-        await row.click()
-        await expect(row).toHaveAttribute('aria-expanded', 'true')
-        await setField(holding, 'Position along the edge', c.at)
-        await row.click()
-        await expect(row).toHaveAttribute('aria-expanded', 'false')
-      }
+    if (i === 0) await holding.getByRole('button', { name: 'Arrange automatically' }).click()
+    else {
+      // X2-5: Bottom's clamps on Top (X1's `copyFrom`): the same pads seen from either side
+      await holding.getByRole('button', { name: 'Copy from…' }).click()
+      await render(page, 'copy-from')
+      await page.getByRole('menuitem', { name: /^Bottom/ }).click()
     }
+    await expect(holding).toContainText('4 items')
     for (const [n, summary] of summaries.entries())
       await expect(
         holding.getByRole('button', { name: new RegExp(`^Toe clamp ${n + 1}`) }),

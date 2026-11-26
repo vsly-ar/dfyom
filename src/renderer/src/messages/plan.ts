@@ -309,6 +309,12 @@ export const planMessages = {
       `Generate the toolpaths of ${setup} first: the clamps go where no toolpath passes.`,
     arrangeHint:
       'Four toe clamps in the waste, clear of the generated toolpaths; replaces the toe clamps, keeps the other items.',
+    // v0.4-llm-first X2-5: the agent's `copyFrom` (workholding.md#ui-summary)
+    copyFrom: 'Copy from…',
+    copyFromMenu: 'Copy workholding from',
+    copyFromHint:
+      'Replaces this setup’s workholding with another setup’s, same edges and positions.',
+    copyNothing: 'Nothing to copy',
     kinds: {
       toeClamp: 'Toe clamp',
       vise: 'Vise',
