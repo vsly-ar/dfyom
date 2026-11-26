@@ -10,7 +10,6 @@ import type { ProjectDoc } from '../project/document'
 import { DEFAULT_LINE_CUTTER } from '../geometry/line'
 import { resolveDesignTool } from './tool-choice'
 import type { Quantity } from '../quantity/quantity'
-import { arc, line, type Element, type Loop } from '../geometry/2d/model'
 import { definitionOf, requirePort } from './shape'
 import { pathLevelProfile } from './shape-items'
 import type { EngravingRecord, ShapeItem } from './shape.dto'
@@ -329,10 +328,8 @@ function operationGeometry(
             >
           return shapeGeometry(p, shapes, port).map(
             (g): { shape: ShapeGeometry; levels: LinePathLevels | null | undefined }[] => [
-              {
-                shape: p.scale === undefined || p.scale === 1 ? g : scaledShape(g, p),
-                levels: undefined,
-              },
+              // E2's `scale` is the placement's (placement.ts `shapeOrientation`)
+              { shape: g, levels: undefined },
             ],
           )
         }),
@@ -386,36 +383,6 @@ function engravingPaths(
         levels: l.levels,
       })),
     )
-}
-
-/**
- * A Line path's placed geometry scaled by its `scale` (E2) about its anchor point (`center`):
- * the contour about its own centre, the centre away from the anchor point.
- */
-function scaledShape(g: ShapeGeometry, p: LinePath): ShapeGeometry {
-  const k = p.scale!
-  const at: Vec2 = [p.center[0].canonical, p.center[1].canonical]
-  const sp = (q: Vec2): Vec2 => [q[0] * k, q[1] * k]
-  const el = (e: Element): Element =>
-    e.kind === 'line' ? line(sp(e.a), sp(e.b)) : arc(sp(e.a), sp(e.b), sp(e.centre), e.ccw)
-  const loop = (l: Loop): Loop => ({ elements: l.elements.map(el) })
-  const center: Vec2 = [at[0] + (g.center[0] - at[0]) * k, at[1] + (g.center[1] - at[1]) * k]
-  const c = g.contour
-  if (c.kind === 'path') return { center, contour: { kind: 'path', path: loop(c.path) } }
-  if (c.kind === 'region')
-    return {
-      center,
-      contour: {
-        kind: 'region',
-        region: {
-          pieces: c.region.pieces.map((pc) => ({
-            outer: loop(pc.outer),
-            holes: pc.holes.map(loop),
-          })),
-        },
-      },
-    }
-  return { center, contour: c }
 }
 
 /**

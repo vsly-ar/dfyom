@@ -67,6 +67,7 @@ export function shapeChoiceArgs(
       center,
       ...rotation,
       ...(current.kind === 'named' && current.mirror === true ? { mirror: true } : {}),
+      ...(current.kind === 'named' && current.scale !== undefined ? { scale: current.scale } : {}),
     }
   const kind = choice as 'rectangle' | 'circle'
   if (current.kind !== 'named') {
@@ -113,6 +114,7 @@ export function shapePlacement(
     cos: Math.cos(r),
     sin: Math.sin(r),
     mirror: o.mirror,
+    ...(o.scale === undefined ? {} : { scale: o.scale }),
     offset: [centre[0] - mid[0], centre[1] - mid[1]],
   }
 }

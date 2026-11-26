@@ -1,6 +1,6 @@
 # Design additions for the v0.4 follow-up: shape offset, placement scale, partial-depth profiles
 
-Status: accepted by delegation (D70, 2026-11-26; the user can veto: [readiness review](../plans/v0.4-llm-first.md#readiness-review-2026-11-26); proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), findings F6, F7, F10; milestone: the v0.4 follow-up, after v0.4 and before v0.5; [Q45–Q46](../plans/v0.4-llm-first.md#questions-for-the-user) take their recommendations). Built: DL-A ([Implementation (LF1)](#implementation-lf1)), DL-C (hardening DF53) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [design-v0.3.md](design-v0.3.md) (shapes, placement, profiles), [shapes.md](../architecture/shapes.md) (2D port, resolution) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted by delegation (D70, 2026-11-26; the user can veto: [readiness review](../plans/v0.4-llm-first.md#readiness-review-2026-11-26); proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), findings F6, F7, F10; milestone: the v0.4 follow-up, after v0.4 and before v0.5; [Q45–Q46](../plans/v0.4-llm-first.md#questions-for-the-user) take their recommendations). Built: DL-A ([Implementation (LF1)](#implementation-lf1)), DL-B ([Implementation (D2)](#implementation-d2)), DL-C (hardening DF53) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [design-v0.3.md](design-v0.3.md) (shapes, placement, profiles), [shapes.md](../architecture/shapes.md) (2D port, resolution) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 Small design gaps the black-box test hit while recreating the enclosure base. The two-step bottom edge relief needs the outline inset by 0.81 and 4.83 mm: no shape item did that, so the agent read the resolved arcs and computed concentric arcs itself (a 5.5 KB path). The step itself is a partial-depth outside cut, which profiles cannot do, so it became pockets of "rectangle minus inset outline", which then hit F3 and 16 noisy DFM warnings in the waste.
 
@@ -46,6 +46,19 @@ Built 2026-11-26 (slice LF1, plan task [D1](../plans/v0.4-llm-first.md#5-design)
 
 `shape: { kind: 'named', shapeId, center, rotation?, mirror?, scale? }` on pockets and profiles: `scale` is a positive scalar quantity (default 1), applied about the shape's anchor point before rotation and mirror ([shapes.md § Resolving a shape](../architecture/shapes.md#resolving-a-shape), step 4). Lines and arcs scale exactly (centres and radii times the factor). Tab positions given as distances along the loop scale with it. Rule `positive` (`model.invariant`). This covers "the same outline 2 % larger" and reference models in the wrong unit without a new shape; non-uniform scale stays out (it turns arcs into ellipses).
 
+### Implementation (D2)
+
+Built 2026-11-26 (plan task [D2](../plans/v0.4-llm-first.md#5-design)); core, agent API and a plain inspector field.
+
+- **Model:** `scale` (a plain number, 0 < scale ≤ 1000, absent = 1) moved from the Line path into the `named` placement itself (`part.dto.ts`, `operation.ts`), so a Line path, a pocket and a profile share it; a number rather than a scalar quantity, as the Line path's (DF113 E2) already was. Written only when set and not 1: unscaled records stay byte-identical; no `schemaVersion` change.
+- **Placement:** the scale is part of the orientation (`Orientation.scale` in `geometry/2d/place.ts`, `shapeOrientation` in `placement.ts`): the resolved shape is scaled about the shape frame's origin with the mirror and rotation, centres and radii times k (exact arcs), then anchored by its placed box as before, so the anchor point stays at `center`. Every reader of the placed shape (solids, surfaces, DFM and tool fit, toolpaths, `placed` bounds, re-anchoring, the Shape Editor's placement) gets it from there; the Line's separate post-placement scaling is gone (the same geometry; Line tests and goldens unchanged). Oriented shapes are cached per scale too.
+- **Commands:** `design.pocket.*` / `design.profile.*` `shape: { kind: 'named', …, scale? }`. Refusals are `model.invariant` at `shape.scale`: `positive` (≤ 0) and `max` (> 1000). An update whose shape arg leaves `scale` out drops it, as for `mirror`. A shape that no longer fits the tool after scaling gets the usual DFM warnings (nothing scale-specific).
+- **Tabs:** stored `tabs.positions` stay distances along the placed loop; a profile update that changes the scale (and gives no positions) multiplies them by new / old scale, so the tabs stay at the same places on the shape.
+- **Split:** a scaled pocket or profile crossing a split line keeps its scale in the piece; the clip rectangle and key items are written in the shape frame (÷ k).
+- **UI (minimum until [U3](../plans/v0.4-llm-first.md#8-ui)):** a Scale field under Mirror in the Shape group of a pocket or profile placing a named shape (empty or 1 = unscaled); the Shape Editor's handles follow the scale (`ShapePlacement.scale`).
+- **`tools/list`:** 112,496 → 112,636 chars (+140): `scale` ("About the anchor; default 1") on the add tools' named shape; the update tools sketch `shape`.
+- **Tests:** `placement-scale.test.ts`: exact arcs and the fixed anchor (centre; corner with rotation and mirror), scale 1 not stored, the refusals, tab distances scaling, a tool-fit warning on a shape scaled down, a split of a scaled pocket equal to the same shape drawn larger.
+
 ## Partial-depth profiles
 
 - `depth` (length, `null` = through) is allowed for every profile side, not only `on` ([design-v0.3.md § Cut side](design-v0.3.md#cut-side-and-open-shapes)). The removal solid is the existing slot band (loop to its offset by the slot width, outward for `outside`, inward for `inside`) from `on` down to `depth`; a blind profile adds a `profile.floor` surface at its depth, like a blind groove.
@@ -75,7 +88,7 @@ Code: `src/core/geometry/waste.ts` (`faceWaste`), used by `dfm.ts`, `tool-fit.ts
 ## Testing
 
 - Offset items: the offset oracle ("every output point lies exactly |d| from the input", the port's existing oracle) on the enclosure outline at 0.81, 4.80, 4.83, 4.85 and 5.00 mm inward and 3 mm outward; follow-edit (edit the source, the offset shape's region changes, operations go stale); cycle, open path and empty refusals; remove refused while referenced.
-- Scale: exact arcs after scale; anchor stays fixed; tab distances scale.
+- Scale: exact arcs after scale; anchor stays fixed; tab distances scale (`src/core/design/placement-scale.test.ts`, [Implementation (D2)](#implementation-d2)).
 - Partial-depth profiles: removal solid volume, floor surface, toolpath levels stop at depth (golden), `tabsOnBlind`.
 - DFM in waste: the black-box test's bottom pockets with keep-outs produce no `cornerSharp` in waste; corners on the part still warn. Unit tests per finding (in waste silent, on the part warns) in `src/core/geometry/dfm-waste.test.ts`; the enclosure flow itself follows with X1 (it needs D1's offset items).
 

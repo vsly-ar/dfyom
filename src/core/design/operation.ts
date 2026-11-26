@@ -72,6 +72,11 @@ export type Shape =
       readonly rotation: Option<Quantity>
       /** Flips the shape frame's x before rotating. */
       readonly mirror: boolean
+      /**
+       * Uniform scale about the anchor point, before rotation and mirror; absent = 1 (a Line
+       * path's E2, a pocket's or profile's D2: docs/modes/design-llm-first.md#placement-scale).
+       */
+      readonly scale?: number
     }
 
 /** The rotation of a shape in degrees (0 for circles and absent rotations). */
@@ -213,7 +218,7 @@ export interface ChamferSourceEdge {
 export type NamedPlacement = Extract<Shape, { kind: 'named' }>
 
 /** A Line's path: a named placement, E2 `scale`d about its anchor point (absent = 1). */
-export type LinePath = NamedPlacement & { readonly scale?: number }
+export type LinePath = NamedPlacement
 
 /**
  * A Line's depth below `on` (engraved-patterns.md E1, E2): constant, linear from `start` to `end`
@@ -588,6 +593,7 @@ function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
       shapeId: s.shapeId,
       rotation: rotation.unwrap(),
       mirror: s.mirror === true,
+      ...(s.scale === undefined ? {} : { scale: s.scale }),
     }))
   if (s.kind === 'circle')
     return collect<unknown>([center, q(s.diameter, 'shape', 'diameter')]).map(() => ({
@@ -796,10 +802,7 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
       const paths = collect(
         dto.paths.map((p, i) =>
           shapeFromDTO(p)
-            .map((s): LinePath => ({
-              ...(s as NamedPlacement),
-              ...(p.scale === undefined ? {} : { scale: p.scale }),
-            }))
+            .map((s): LinePath => s as NamedPlacement)
             .mapErr((e) => e.prefixIssues('paths', i)),
         ),
       )
@@ -845,6 +848,8 @@ function shapeToDTO(s: Shape): OperationShapeDTO {
       ...anchor,
       ...rotation,
       ...(s.mirror ? { mirror: true } : {}),
+      // left out when absent, so records without a scale stay byte-identical
+      ...(s.scale === undefined ? {} : { scale: s.scale }),
     } as OperationShapeDTO
   return (
     s.kind === 'circle'
@@ -957,10 +962,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         kind: 'line',
         ...base,
         on: op.on,
-        paths: op.paths.map((p) => ({
-          ...shapeToDTO(p),
-          ...(p.scale === undefined ? {} : { scale: p.scale }),
-        })),
+        paths: op.paths.map((p) => shapeToDTO(p)),
         depth:
           op.depth.kind === 'constant'
             ? op.depth.depth.toDTO()

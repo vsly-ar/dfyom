@@ -17,6 +17,7 @@ import type { OperationDTO } from '../../../../core/design/part.dto'
 import { derivedLength } from '../../../../core/design/hole'
 import { STOCK_FACE } from '../../../../core/geometry/face'
 import { Rational } from '../../../../core/quantity/rational'
+import { Quantity } from '../../../../core/quantity/quantity'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityKind } from '../../../../core/quantity/units'
@@ -500,6 +501,7 @@ function ShapeGroup({
           />
         </Field>
       ) : null}
+      {shape.kind === 'named' ? <ScaleField ctx={ctx} /> : null}
       <InspectorGroup.More
         fields={rotates ? [t.anchor, t.picker.rotation] : [t.anchor]}
         rememberKey={`${op.kind}.shape.more`}
@@ -691,6 +693,44 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
         placeholder={t.picker.rotationNone}
       />
     </div>
+  )
+}
+
+/**
+ * A named placement's uniform Scale about the anchor point (D2,
+ * docs/modes/design-llm-first.md#placement-scale); empty or 1 = unscaled. The full placement UI
+ * is U3.
+ */
+function ScaleField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') return null
+  const shape = op.shape
+  const k = shape.scale ?? 1
+  const messages: FieldMessage[] = ctx.errors
+    .filter((e) => e.path === 'shape.scale')
+    .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text }))
+  const value = Quantity.parse(String(k), {
+    kind: 'scalar',
+    defaultUnit: defaultUnit('scalar', ctx.units),
+  })
+  return (
+    <QuantityInput
+      label={t.picker.scale}
+      kind="scalar"
+      defaultUnit={defaultUnit('scalar', ctx.units)}
+      value={value.isOk() ? value.unwrap() : undefined}
+      stepKind="scale"
+      stepKey="shape.scale"
+      illustration={<FieldIcon name="length" />}
+      messages={messages}
+      readOnly={ctx.readOnly}
+      onCommit={(q, gesture) => {
+        const { scale: _was, ...rest } = shapeArgs(shape)
+        const next = q?.canonical ?? 1
+        ctx.send({ shape: next === 1 ? rest : { ...rest, scale: next } }, 'shape.scale', gesture)
+      }}
+      onCancelGesture={ctx.cancelGesture}
+    />
   )
 }
 

@@ -75,6 +75,11 @@ export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
     rotation: quantityDto('angle').optional(),
     /** Flips the shape frame's x before rotating; absent = not mirrored. */
     mirror: z.literal(true).optional(),
+    /**
+     * Uniform scale about the anchor point, before rotation and mirror; absent = 1 (Line paths
+     * E2; pockets and profiles D2, docs/modes/design-llm-first.md#placement-scale).
+     */
+    scale: z.number().positive().max(1000).optional(),
   }),
 ])
 export type OperationShapeDTO = z.output<typeof OperationShapeDtoSchema>
@@ -212,12 +217,10 @@ export const ChamferDtoSchema = z.object({
 export const LINE_PATHS_MAX = 50
 
 /**
- * A named shape a Line places, as a pocket's `named` shape; E2: `scale` (absent = 1) about its
- * anchor point.
+ * A named shape a Line places, as a pocket's `named` shape (E2: with its `scale`, absent = 1,
+ * about its anchor point).
  */
-export const LinePathDtoSchema = OperationShapeDtoSchema.options[2].extend({
-  scale: z.number().positive().max(1000).optional(),
-})
+export const LinePathDtoSchema = OperationShapeDtoSchema.options[2]
 
 /**
  * A Line's depth below `on`: one length (constant), `{ start, end }` (linear along each line by

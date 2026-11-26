@@ -118,6 +118,9 @@ import { derivedLength } from './hole'
 import { placedOperation, PlacedSchema } from './placed'
 import { AdjustedSchema, ROUND, settleRound, type Adjusted, type RoundPrev } from './round'
 
+/** The largest placement scale (as the record schema's, part.dto.ts). */
+const SCALE_MAX = 1000
+
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
 /** A quantity as entered: literal or formula (the primer explains both once, size budget). */
@@ -143,6 +146,8 @@ const ShapeArg = z.discriminatedUnion('kind', [
     center: PointArg,
     rotation: RotationArg,
     mirror: z.literal(true).optional(),
+    // D2 (design-llm-first.md § Placement scale): ≤ 0 is the model's `positive` rule
+    scale: z.number().optional().describe('About the anchor; default 1'),
   }),
 ])
 export const AnchorArg = AnchorDtoSchema
@@ -388,6 +393,8 @@ export class Fields {
         shapeId: a.shapeId,
         rotation,
         mirror: a.mirror === true,
+        // 1 is not stored, so an unscaled record stays byte-identical
+        ...(a.scale === undefined || a.scale === 1 ? {} : { scale: this.scale(a.scale) }),
       }
     }
     const length = this.q('shape.length', 'length', a.length)
@@ -449,6 +456,38 @@ export class Fields {
       mirror: a.mirror === true,
       ...(a.scale === undefined ? {} : { scale: a.scale }),
     }
+  }
+
+  /**
+   * A named placement's `scale` (D2): 0 < scale ≤ 1000, as a Line path's (`model.invariant` at
+   * `shape.scale`, rules `positive` and `max`; the value is kept, the command fails).
+   */
+  private scale(k: number): number {
+    if (!(k > 0)) this.issue('shape.scale', 'positive', 'must be greater than 0')
+    else if (k > SCALE_MAX) this.issue('shape.scale', 'max', `must be ${SCALE_MAX} or less`)
+    return k
+  }
+
+  /**
+   * Kept tab positions when the placement's `scale` changes (D2): distances along the loop scale
+   * with it, so the tabs stay where they were on the shape (design-llm-first.md § Placement scale).
+   */
+  rescaledTabs(
+    positions: Option<readonly Quantity[]>,
+    prev: Shape | undefined,
+    shape: Shape,
+  ): Option<readonly Quantity[]> {
+    const k = (s: Shape | undefined) => (s?.kind === 'named' ? (s.scale ?? 1) : 1)
+    const ratio = k(shape) / k(prev)
+    if (positions.isNone() || prev === undefined || ratio === 1) return positions
+    return Some(
+      positions.unwrap().map((p, i) => {
+        const mm = p.canonical * ratio
+        const source =
+          this.units === 'inch' ? `${+(mm / 25.4).toFixed(5)}"` : `${+mm.toFixed(4)} mm`
+        return this.q(`tabs.positions.${i}`, 'length', source)
+      }),
+    )
   }
 
   /** `source` if given (null: None), else `prev`, else None. */
@@ -904,34 +943,37 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
   params: profileParams,
   required: ['shape'],
   updateListed: { shape: listedAs('object', 'design.profile.add shape') },
-  build: (a, prev, { f, id, name }) => ({
-    kind: 'profile',
-    id,
-    name,
-    generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-    on: a.on ?? prev?.on ?? STOCK_TOP,
-    shape: f.placedShape(a.shape, a.anchor, prev?.shape),
-    side: a.side ?? prev?.side ?? 'outside',
-    slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),
-    depth: f.opt('depth', 'length', a.depth, prev?.depth),
-    tabs: {
-      count: f.pick('tabs.count', 'scalar', a.tabs?.count, prev?.tabs.count, 'tabCount'),
-      width: f.pick('tabs.width', 'length', a.tabs?.width, prev?.tabs.width, 'tabWidth'),
-      thickness: f.pick(
-        'tabs.thickness',
-        'length',
-        a.tabs?.thickness,
-        prev?.tabs.thickness,
-        'tabThickness',
-      ),
-      positions:
-        a.tabs?.positions === undefined
-          ? (prev?.tabs.positions ?? None)
-          : a.tabs.positions === null
-            ? None
-            : Some(a.tabs.positions.map((p, i) => f.q(`tabs.positions.${i}`, 'length', p))),
-    },
-  }),
+  build: (a, prev, { f, id, name }) => {
+    const shape = f.placedShape(a.shape, a.anchor, prev?.shape)
+    return {
+      kind: 'profile',
+      id,
+      name,
+      generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+      on: a.on ?? prev?.on ?? STOCK_TOP,
+      shape,
+      side: a.side ?? prev?.side ?? 'outside',
+      slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),
+      depth: f.opt('depth', 'length', a.depth, prev?.depth),
+      tabs: {
+        count: f.pick('tabs.count', 'scalar', a.tabs?.count, prev?.tabs.count, 'tabCount'),
+        width: f.pick('tabs.width', 'length', a.tabs?.width, prev?.tabs.width, 'tabWidth'),
+        thickness: f.pick(
+          'tabs.thickness',
+          'length',
+          a.tabs?.thickness,
+          prev?.tabs.thickness,
+          'tabThickness',
+        ),
+        positions:
+          a.tabs?.positions === undefined
+            ? f.rescaledTabs(prev?.tabs.positions ?? None, prev?.shape, shape)
+            : a.tabs.positions === null
+              ? None
+              : Some(a.tabs.positions.map((p, i) => f.q(`tabs.positions.${i}`, 'length', p))),
+      },
+    }
+  },
 }
 
 /**

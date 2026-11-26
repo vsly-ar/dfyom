@@ -120,28 +120,33 @@ export function dragStepMm(scale: number): number {
 // ── placement (task U2: the face-on view) ────────────────────────────────────────────────
 
 /**
- * Where the shape frame lies in the face frame: `face = R·M·p + offset` (M flips x when
- * mirrored, R turns counter-clockwise; design-v0.3.md#placing-a-shape-on-a-face).
+ * Where the shape frame lies in the face frame: `face = R·M·k·p + offset` (k the placement's
+ * scale, absent = 1, D2; M flips x when mirrored, R turns counter-clockwise;
+ * design-v0.3.md#placing-a-shape-on-a-face).
  */
 export interface ShapePlacement {
   readonly cos: number
   readonly sin: number
   readonly mirror: boolean
+  readonly scale?: number
   readonly offset: Vec2
 }
 
 /** A shape-frame point in the face frame. */
 export function placePoint(t: ShapePlacement, p: readonly [number, number]): Vec2 {
-  const x = t.mirror ? -p[0] : p[0]
-  return [t.cos * x - t.sin * p[1] + t.offset[0], t.sin * x + t.cos * p[1] + t.offset[1]]
+  const k = t.scale ?? 1
+  const x = (t.mirror ? -p[0] : p[0]) * k
+  const y = p[1] * k
+  return [t.cos * x - t.sin * y + t.offset[0], t.sin * x + t.cos * y + t.offset[1]]
 }
 
 /** A face-frame point in the shape frame. */
 export function unplacePoint(t: ShapePlacement, q: readonly [number, number]): Vec2 {
+  const k = t.scale ?? 1
   const dx = q[0] - t.offset[0]
   const dy = q[1] - t.offset[1]
-  const x = t.cos * dx + t.sin * dy
-  const y = -t.sin * dx + t.cos * dy
+  const x = (t.cos * dx + t.sin * dy) / k
+  const y = (-t.sin * dx + t.cos * dy) / k
   return [t.mirror ? -x : x, y]
 }
 
