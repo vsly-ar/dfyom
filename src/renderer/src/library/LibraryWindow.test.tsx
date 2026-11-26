@@ -76,7 +76,7 @@ describe('Library window', () => {
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(document.title).toBe('Library')
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent)
-    expect(tabs).toEqual(['Machines', 'Tools', 'Stock'])
+    expect(tabs).toEqual(['Machines', 'Tools', 'Stock', 'Workholding'])
     expect(screen.getByRole('tab', { name: 'Tools' })).toHaveAttribute('aria-selected', 'true')
     // the first item is selected; its stored source keeps its unit system (L5)
     await waitFor(() => expect(row(/Drill 1\/4/)).toHaveAttribute('aria-selected', 'true'))

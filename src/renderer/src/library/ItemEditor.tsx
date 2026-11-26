@@ -1,10 +1,12 @@
 // The Library window's item editor: every field of the selected item's kind (ToolFields /
-// MachineFields / StockFields, `full`), validated as typed by the core models (L3), the draft's
+// MachineFields / StockFields / WorkholdingFields, `full`), validated as typed by the core models (L3), the draft's
 // "Unsaved" state, a variant's parent (DF13), a conflict note with Reload / Overwrite, and the
-// actions Duplicate, New variant (stock), Remove…,
+// actions Duplicate, New variant (stock), Remove…; a built-in workholding device (WL3) is
+// read-only with the "Built-in" chip and note, and offers only Duplicate and its Default switch;
 // Import $$… (machines), Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryTabKind } from '../../../core/library/item'
+import { isBuiltinWorkholding } from '../../../core/library/workholding-builtins'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
 import {
@@ -24,6 +26,7 @@ import {
   type MachineDraft,
   type StockDraft,
   type ToolDraft,
+  type WorkholdingDraft,
 } from './form'
 import { GrblImportDialog } from './GrblImportDialog'
 import { issueMessages } from './LibraryForm'
@@ -31,13 +34,17 @@ import type { LibraryStore } from './library-store'
 import { MACHINE_FIELDS, MachineFields } from './MachineFields'
 import { STOCK_FIELDS, StockFields } from './StockFields'
 import { TOOL_FIELDS, ToolFields } from './ToolFields'
+import { WORKHOLDING_FIELDS, WorkholdingFields } from './WorkholdingFields'
+import { isDefaultRow } from './workholding-view'
 import styles from './LibraryWindow.module.css'
 
 const w = libraryMessages.window
+const wh = libraryMessages.workholding
 const FIELDS: Record<LibraryTabKind, readonly string[]> = {
   tool: TOOL_FIELDS,
   machine: MACHINE_FIELDS,
   stock: STOCK_FIELDS,
+  workholding: WORKHOLDING_FIELDS,
 }
 
 export function ItemEditor({
@@ -95,6 +102,9 @@ export function ItemEditor({
   }
 
   const name = s.draftName()
+  // a built-in workholding device: shown read-only, duplicated to change it (WL3)
+  const builtIn = d.kind === 'workholding' && d.id !== null && isBuiltinWorkholding(d.id)
+  const listed = d.id === null ? undefined : s.lists[d.kind].items.find((i) => i.id === d.id)
   // stock variants (DF13): the parent's name, and the variants that block removing a parent
   const parent =
     d.parentId === undefined ? undefined : s.lists.stock.items.find((i) => i.id === d.parentId)
@@ -113,6 +123,7 @@ export function ItemEditor({
       <div className={styles['editorHead']}>
         <h2 className={styles['editorTitle']}>{name}</h2>
         {dirty ? <StatusChip tone="warning">{w.unsaved}</StatusChip> : null}
+        {builtIn ? <StatusChip tone="neutral">{wh.builtIn}</StatusChip> : null}
         {d.id !== null && used.has(d.id) ? (
           <span title={projectName === undefined ? undefined : w.usedHint(projectName)}>
             <StatusChip tone="neutral">{w.used}</StatusChip>
@@ -130,6 +141,7 @@ export function ItemEditor({
           </button>
         </p>
       ) : null}
+      {builtIn ? <p className={styles['builtInNote']}>{wh.builtInNote}</p> : null}
       {s.conflict !== null ? (
         <div role="alert" className={styles['conflict']}>
           <p>{s.conflict === 'stale' ? w.conflictStale : w.conflictRemoved}</p>
@@ -181,6 +193,34 @@ export function ItemEditor({
               detailsOpen={s.toolDetailsOpen}
               onDetailsOpenChange={(open) => s.setToolDetailsOpen(open)}
             />
+          ) : d.values.kind === 'workholding' ? (
+            <WorkholdingFields
+              // a fresh form per item: Range opens when the item has one (WL3)
+              key={d.id ?? 'new'}
+              {...form}
+              values={d.values}
+              readOnly={builtIn}
+              onChange={(v: WorkholdingDraft) => s.edit(v)}
+              defaultSwitch={
+                builtIn
+                  ? {
+                      checked: listed !== undefined && isDefaultRow(listed),
+                      // a built-in default cannot be switched off: nothing else would be it
+                      disabled: listed === undefined || isDefaultRow(listed),
+                      onChange: (on) => {
+                        if (on) void s.makeBuiltinDefault()
+                      },
+                    }
+                  : {
+                      checked: d.values.default === true,
+                      disabled: false,
+                      onChange: (on) => {
+                        const { default: _default, ...rest } = d.values as WorkholdingDraft
+                        s.edit(on ? { ...rest, default: true } : rest)
+                      },
+                    }
+              }
+            />
           ) : d.values.kind === 'machine' ? (
             <MachineFields {...form} values={d.values} onChange={(v: MachineDraft) => s.edit(v)} />
           ) : (
@@ -209,26 +249,28 @@ export function ItemEditor({
             {w.newVariant}
           </Button>
         ) : null}
-        <ConfirmDialog
-          title={w.removeTitle(name)}
-          description={w.removeDescription}
-          confirmLabel={w.removeConfirm(d.kind)}
-          destructive
-          open={s.removing}
-          onOpenChange={(o) => s.setRemoving(o)}
-          onConfirm={() => void s.remove()}
-          trigger={
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Icon name="delete" />}
-              disabled={d.id === null || hasVariants}
-              title={hasVariants ? w.hasVariants : undefined}
-            >
-              {w.remove}
-            </Button>
-          }
-        />
+        {builtIn ? null : (
+          <ConfirmDialog
+            title={w.removeTitle(name)}
+            description={w.removeDescription}
+            confirmLabel={w.removeConfirm(d.kind)}
+            destructive
+            open={s.removing}
+            onOpenChange={(o) => s.setRemoving(o)}
+            onConfirm={() => void s.remove()}
+            trigger={
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Icon name="delete" />}
+                disabled={d.id === null || hasVariants}
+                title={hasVariants ? w.hasVariants : undefined}
+              >
+                {w.remove}
+              </Button>
+            }
+          />
+        )}
         {d.kind === 'machine' ? (
           <GrblImportDialog
             id={d.id}
@@ -238,23 +280,27 @@ export function ItemEditor({
           />
         ) : null}
         <span className={styles['spacer']} />
-        <Button
-          size="sm"
-          icon={<Icon name="rotate-ccw" />}
-          disabled={!dirty || s.saving}
-          onClick={() => s.revert()}
-        >
-          {w.revert}
-        </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<Icon name="save" />}
-          disabled={!dirty || s.saving}
-          onClick={() => void s.save()}
-        >
-          {w.save}
-        </Button>
+        {builtIn ? null : (
+          <>
+            <Button
+              size="sm"
+              icon={<Icon name="rotate-ccw" />}
+              disabled={!dirty || s.saving}
+              onClick={() => s.revert()}
+            >
+              {w.revert}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Icon name="save" />}
+              disabled={!dirty || s.saving}
+              onClick={() => void s.save()}
+            >
+              {w.save}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   )

@@ -88,6 +88,7 @@ export function QuantityField<K extends QuantityKind>({
   stepMax,
   optional = false,
   placeholder,
+  readOnly = false,
   onChange,
   onFocusField,
 }: {
@@ -108,10 +109,13 @@ export function QuantityField<K extends QuantityKind>({
   optional?: boolean
   /** Shown while empty (an optional field: what empty means, "0: pointed"). */
   placeholder?: string | undefined
+  /** Shown, not editable (a built-in workholding device, WL3). */
+  readOnly?: boolean
   onChange: (value: QDto<K> | undefined) => void
   onFocusField?: ((field: string | undefined) => void) | undefined
 }): React.JSX.Element {
   const common = {
+    readOnly,
     label,
     kind,
     defaultUnit: libraryUnit(kind, units),
@@ -144,15 +148,22 @@ export function NameField({
   onChange,
   messages,
   label = libraryMessages.name,
+  readOnly = false,
 }: {
   value: string
   onChange: (name: string) => void
   messages: FieldMessage[]
   label?: string
+  readOnly?: boolean
 }): React.JSX.Element {
   return (
-    <Field label={label} messages={messages}>
-      <FieldInput value={value} maxLength={120} onChange={(e) => onChange(e.target.value)} />
+    <Field label={label} messages={messages} readOnly={readOnly}>
+      <FieldInput
+        value={value}
+        maxLength={120}
+        readOnly={readOnly}
+        onChange={(e) => onChange(e.target.value)}
+      />
     </Field>
   )
 }
@@ -161,15 +172,23 @@ export function NotesField({
   value,
   onChange,
   messages,
+  readOnly = false,
 }: {
   value: string | undefined
   onChange: (notes: string | undefined) => void
   messages: FieldMessage[]
+  readOnly?: boolean
 }): React.JSX.Element {
   return (
-    <Field label={libraryMessages.notes} messages={messages} info={libraryMessages.notesHint}>
+    <Field
+      label={libraryMessages.notes}
+      messages={messages}
+      info={libraryMessages.notesHint}
+      readOnly={readOnly}
+    >
       <textarea
         className={styles['notes']}
+        readOnly={readOnly}
         rows={4}
         maxLength={4000}
         value={value ?? ''}

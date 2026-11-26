@@ -6,6 +6,7 @@
 import type { LibraryTabKind, MaterialClass } from '../../../core/library/item'
 import type { HomingCorner, Rigidity } from '../../../core/library/machine.dto'
 import type { ToolMaterial, ToolType } from '../../../core/library/tool.dto'
+import type { BaseType, SurfaceType, WorkholdingType } from '../../../core/library/workholding.dto'
 
 const classes = {
   softwood: 'Softwood',
@@ -22,6 +23,16 @@ const kindWord: Record<LibraryTabKind, string> = {
   tool: 'tool',
   machine: 'machine',
   stock: 'stock',
+  workholding: 'workholding device',
+}
+
+const workholdingPlural: Record<WorkholdingType, string> = {
+  toeClamp: 'Toe clamps',
+  vise: 'Vises',
+  screw: 'Screws',
+  block: 'Blocks',
+  base: 'Bases',
+  surface: 'Surface holds',
 }
 
 export const libraryMessages = {
@@ -45,22 +56,32 @@ export const libraryMessages = {
     title: 'Library',
     toolbar: 'Library',
     tabsLabel: 'Library items',
-    tabs: { machine: 'Machines', tool: 'Tools', stock: 'Stock' } satisfies Record<
-      LibraryTabKind,
-      string
-    >,
+    tabs: {
+      machine: 'Machines',
+      tool: 'Tools',
+      stock: 'Stock',
+      workholding: 'Workholding',
+    } satisfies Record<LibraryTabKind, string>,
     search: 'Search',
     searchPlaceholder: (kind: LibraryTabKind) =>
-      `Search ${kind === 'stock' ? 'stock' : `${kindWord[kind]}s`} by name or notes`,
+      `Search ${kind === 'stock' ? 'stock' : kind === 'workholding' ? 'workholding' : `${kindWord[kind]}s`} by name or notes`,
     units: 'Units',
     unitOptions: { mm: 'mm', inch: 'in' },
-    newItem: { tool: 'New tool', machine: 'New machine', stock: 'New stock' } satisfies Record<
-      LibraryTabKind,
-      string
-    >,
+    newItem: {
+      tool: 'New tool',
+      machine: 'New machine',
+      stock: 'New stock',
+      workholding: 'New workholding',
+    } satisfies Record<LibraryTabKind, string>,
     newShortcut: 'New',
     list: (kind: LibraryTabKind) =>
-      kind === 'tool' ? 'Tools' : kind === 'machine' ? 'Machines' : 'Stock',
+      kind === 'tool'
+        ? 'Tools'
+        : kind === 'machine'
+          ? 'Machines'
+          : kind === 'stock'
+            ? 'Stock'
+            : 'Workholding',
     editor: 'Item editor',
     used: 'Used in this project',
     /** the item grid's short form of `used` (its tooltip is `used`) */
@@ -74,7 +95,9 @@ export const libraryMessages = {
     count: (kind: LibraryTabKind, n: number) =>
       kind === 'stock'
         ? `${n} stock ${n === 1 ? 'item' : 'items'}`
-        : `${n} ${kindWord[kind]}${n === 1 ? '' : 's'}`,
+        : kind === 'workholding'
+          ? `${n} ${n === 1 ? 'device' : 'devices'}`
+          : `${n} ${kindWord[kind]}${n === 1 ? '' : 's'}`,
     unreadableCount: (n: number) => `${n} unreadable ${n === 1 ? 'file' : 'files'}`,
     shown: (n: number) => `${n} shown`,
     noProject: 'No project',
@@ -98,6 +121,8 @@ export const libraryMessages = {
       shape: 'Shape',
       size: 'L × W × T',
       material: 'Material',
+      deviceSize: 'Size',
+      deviceDetails: 'Details',
     },
     sortBy: (column: string) => `Sort by ${column}`,
     /** Header tooltips where the header is short (DF48). */
@@ -149,6 +174,8 @@ export const libraryMessages = {
       controller: 'Controller',
       size: 'Size',
       material: 'Material',
+      device: 'Device',
+      range: 'Range',
     },
     /** The full machine form's tabs (DF110, inspector-layout.md § Per-inspector target layout). */
     machineTabs: {
@@ -402,5 +429,104 @@ export const libraryMessages = {
     thicknessNote: 'Its tolerance is the real stock variation.',
     materialName: 'Material name',
     materialClass: 'Material class',
+  },
+
+  // ── workholding devices (workholding-library.md § Library window tab, WL3) ─────────────────
+  workholding: {
+    types: {
+      toeClamp: 'Toe clamp',
+      vise: 'Vise',
+      screw: 'Screw',
+      block: 'Block',
+      base: 'Base',
+      surface: 'Surface hold',
+    } satisfies Record<WorkholdingType, string>,
+    /** List group headings (plural). */
+    groups: workholdingPlural,
+    /** A new device's suggested name (made unique among the library's and built-in names). */
+    defaultNames: {
+      toeClamp: 'Toe clamp',
+      vise: 'Machine vise',
+      screw: 'Screw',
+      block: 'Block',
+      base: 'Spoilboard',
+      surface: 'Double-sided tape',
+    } satisfies Record<WorkholdingType, string>,
+    baseTypes: { spoilboard: 'Spoilboard', fixturePlate: 'Fixture plate' } satisfies Record<
+      BaseType,
+      string
+    >,
+    surfaceTypes: {
+      tape: 'Double-sided tape',
+      vacuum: 'Vacuum table',
+      glue: 'Glue',
+    } satisfies Record<SurfaceType, string>,
+    newMenu: 'New workholding device',
+    typeFilter: 'Device type',
+    type: 'Type',
+    width: 'Strap width',
+    length: 'Strap length',
+    top: 'Top above the stock',
+    topInfo:
+      'The clamp’s highest point above the stock top: it stands the same height on thin and thick stock.',
+    gripMin: 'Grip from',
+    gripMax: 'Grip to',
+    gripRange: 'Grip range',
+    gripInfo: 'How far the toe may reach onto the stock. Empty: any grip.',
+    stud: 'Stud',
+    studInfo: 'The stud thread, shown in the setup summary (M8).',
+    jawWidth: 'Jaw width',
+    jawThickness: 'Jaw thickness',
+    jawHeight: 'Jaw height',
+    jawHeightInfo: 'Drawn, and the gripped depth in the summary. Optional.',
+    maxOpening: 'Max opening',
+    maxOpeningInfo: 'The widest stock the jaws take. Empty: not checked.',
+    soft: 'Soft jaws',
+    headDiameter: 'Head diameter',
+    headHeight: 'Head height',
+    headHeightInfo: 'Above the stock top; 0 for a flush or countersunk head.',
+    thread: 'Thread',
+    threadInfo: 'Shown in the setup summary (4 × 40 wood, M5).',
+    blockLength: 'Length',
+    blockWidth: 'Width',
+    blockHeight: 'Height',
+    baseType: 'Base',
+    sacrificial: 'Sacrificial',
+    sacrificialHint: 'Through cuts may go into it.',
+    thickness: 'Thickness',
+    thicknessInfo: 'Shown only; the machine’s spoilboard thickness sets the Z headroom.',
+    surfaceType: 'Hold',
+    rangeEmpty: 'None',
+    defaultFor: (type: WorkholdingType) =>
+      `Default for ${workholdingPlural[type].toLocaleLowerCase()}`,
+    defaultHint: (type: WorkholdingType) =>
+      type === 'block'
+        ? 'Add uses the default block. Without one, Add makes an own block (blocks have no built-in).'
+        : type === 'toeClamp'
+          ? 'Add and Arrange automatically use the default. Without one of yours, the built-in is the default.'
+          : 'Add uses the default. Without one of yours, the built-in is the default.',
+    builtIn: 'Built-in',
+    builtInNote: 'Built-in: duplicate it to change the sizes.',
+    defaultChip: 'Default',
+    drawing: (name: string | undefined) =>
+      name === undefined ? 'Device drawing' : `Device drawing: ${name} highlighted`,
+    legend: 'Dimensions in the drawing',
+    plan: 'Plan',
+    side: 'Side',
+    stock: 'Stock',
+    /** The list's size cell ("30 × 60, top 25 mm"). */
+    size: {
+      toeClamp: (w: string, l: string, top: string, unit: string) =>
+        `${w} × ${l}, top ${top} ${unit}`,
+      vise: (jaws: string, unit: string) => `jaws ${jaws} ${unit}`,
+      screw: (d: string, unit: string) => `head Ø ${d} ${unit}`,
+      block: (l: string, w: string, h: string, unit: string) => `${l} × ${w} × ${h} ${unit}`,
+    },
+    details: {
+      grip: (min: string, max: string, unit: string) => `grip ${min}–${max} ${unit}`,
+      soft: 'soft jaws',
+      opening: (max: string, unit: string) => `opens ${max} ${unit}`,
+      sacrificial: 'sacrificial',
+    },
   },
 }
