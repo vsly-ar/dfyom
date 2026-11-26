@@ -19,6 +19,7 @@ import type { Tool } from '../library/tool'
 import type { ProjectDoc } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { evaluateOperation, planFindings } from './evaluate'
+import { namedPlanMessages } from './labels'
 import type { ResolvedFeeds } from './feeds'
 import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
@@ -132,8 +133,13 @@ export function planOperationInputs(
   if (loaded.isErr()) return loaded
   const plan = loaded.unwrap()
   const wanted = (id: string) => planOperationIds === undefined || planOperationIds.includes(id)
-  const errors = planFindings(plan, undefined, port).filter(
-    (f) => f.severity === 'error' && (f.planOperationId === undefined || wanted(f.planOperationId)),
+  // D4: the failure names the operation ("Pocket 1 (op3): no tool assigned")
+  const errors = namedPlanMessages(
+    plan.dto,
+    planFindings(plan, undefined, port).filter(
+      (f) =>
+        f.severity === 'error' && (f.planOperationId === undefined || wanted(f.planOperationId)),
+    ),
   )
   const first = errors[0]
   if (first !== undefined)

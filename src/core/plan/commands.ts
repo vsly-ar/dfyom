@@ -42,6 +42,7 @@ import {
   type BuildContext,
 } from './build'
 import { PlanWarningSchema, type PlanWarning } from './checks'
+import { namedPlanMessages } from './labels'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
 import { planThroughDepth } from './through'
@@ -1964,7 +1965,10 @@ const warningList = defineQuery({
       }
     }
     return Ok({
-      warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),
+      warnings: namedPlanMessages(dto.unwrap(), findings).map((w) => ({
+        ...w,
+        params: { ...w.params },
+      })),
       pendingApply: planPendingApply(dto.unwrap(), ctx.apply?.pending() ?? []),
       zRefs: runs
         .filter((r) => r.run >= 0)

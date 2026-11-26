@@ -212,8 +212,10 @@ describe('the first hardwood cut (DF73–DF76)', () => {
     })
     // the spindle would need about 2750 rpm, below its 6200 rpm minimum: not offered
     expect(rub[0]!.params['spindleSpeedForMinimum']).toBeUndefined()
+    // D4: plan.warning.list names the operation first
     expect(rub[0]!.message).toBe(
-      "Finishing pass rubs: radial chip thinning at the 0.2 mm finishing allowance leaves 0.055 mm chips, under the 0.127 mm minimum, and the machine's 3000 mm/min feed limit (X/Y) stops a faster finishing feed. A finishing allowance of at least 1.3 mm or a tool with 1 flute at this spindle speed makes a real chip.",
+      `Pocket 1 (${rub[0]!.planOperationId}): ` +
+        "Finishing pass rubs: radial chip thinning at the 0.2 mm finishing allowance leaves 0.055 mm chips, under the 0.127 mm minimum, and the machine's 3000 mm/min feed limit (X/Y) stops a faster finishing feed. A finishing allowance of at least 1.3 mm or a tool with 1 flute at this spindle speed makes a real chip.",
     )
   })
 

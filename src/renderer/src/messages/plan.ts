@@ -2,6 +2,7 @@
 // docs/glossary.md. Doc: docs/conventions/ui.md#internationalization, #plan-mode-task-37
 import type { OperationKind } from '../../../core/design/part.dto'
 import type { PlanWarning } from '../../../core/plan/checks'
+import { withoutOperationName } from '../../../core/plan/labels'
 import type { FeedField, PlanStatus } from '../../../core/plan/plan.dto'
 import type { StrategyKey } from '../../../core/plan/strategy'
 import type { UnitSystem } from '../../../core/project/document'
@@ -799,19 +800,21 @@ export function findingText(
     typeof p[k] === 'string' ? (p[k] as string) : undefined
   const tool = String(p['designTool'] ?? 'tool')
   const check = CHECK[String(p['check'])] ?? 'fails a plan check'
+  // D4: the core names the operation for agents; here the finding sits at its operation
+  const message = withoutOperationName(w.message, w.planOperationId)
   switch (w.code) {
     case 'plan.alignment': {
       // DF78: the span in project units; the other rules' core text has no lengths
       const x = p['spanX']
       const y = p['spanY']
       if (w.rule !== 'outsideTravel' || typeof x !== 'number' || typeof y !== 'number')
-        return sentence(w.message)
+        return sentence(message)
       return `The work zero and alignment points span X ${lengthText(x, units)} × Y ${lengthText(y, units)}, more than the machine travel.`
     }
     case 'plan.aid': {
       // DF78 S17: the depth into the table in project units; the other rules carry no length
       const depth = p['depth']
-      if (w.rule !== 'noBase' || typeof depth !== 'number') return sentence(w.message)
+      if (w.rule !== 'noBase' || typeof depth !== 'number') return sentence(message)
       return `Add a spoilboard to ${String(p['setup'])}: ${String(p['aid'])} goes ${lengthText(depth, units)} into the table.`
     }
     case 'plan.designToolReplaced':
@@ -823,13 +826,13 @@ export function findingText(
     case 'plan.stepoverClamped': {
       // ui.md#info-notes: the effective value in project units; the core's text says which limit
       const effective = p['effective']
-      if (typeof effective !== 'number') return sentence(w.message)
-      const limit = w.message.includes('flat radius') ? 'the flat radius' : 'half the tool'
+      if (typeof effective !== 'number') return sentence(message)
+      const limit = message.includes('flat radius') ? 'the flat radius' : 'half the tool'
       return `Clamped to ${lengthText(effective, units)} (${limit}) for offset clearing.`
     }
     case 'plan.order': {
       const before = str('dependsOn')
-      if (before === undefined) return sentence(w.message)
+      if (before === undefined) return sentence(message)
       return w.rule === 'edgeBefore'
         ? `This operation chamfers an edge of ${names.planOperation(before)}, which comes later.`
         : `This operation starts from a surface of ${names.planOperation(before)}, which comes later.`
@@ -837,7 +840,7 @@ export function findingText(
     case 'plan.loosePiece': {
       const profile = str('profile')
       const inside = str('operation')
-      if (profile === undefined || inside === undefined) return sentence(w.message)
+      if (profile === undefined || inside === undefined) return sentence(message)
       // DF57: an operation after the cut that releases the part
       if (w.rule === 'releaseFirst')
         return `${capital(names.design(profile))} releases the part before ${names.design(inside)}: the part is held only by its tabs.`
@@ -848,7 +851,7 @@ export function findingText(
       const setup = str('setupId')
       const next = str('nextSetupId')
       if (profile === undefined || setup === undefined || next === undefined)
-        return sentence(w.message)
+        return sentence(message)
       return `${capital(names.design(profile))} cuts through in setup ${names.setup(setup)} before setup ${names.setup(next)}: held only by its tabs while re-fixtured.`
     }
     case 'plan.restMaterial': {
@@ -860,7 +863,7 @@ export function findingText(
         typeof u !== 'number' ||
         typeof v !== 'number'
       )
-        return sentence(w.message)
+        return sentence(message)
       return `${areaText(area, units)} of ${names.design(op)} near (${lengthText(u, units)}, ${lengthText(v, units)}) stays uncut: a neck is narrower than the tool.`
     }
     case 'plan.check': {
@@ -868,7 +871,7 @@ export function findingText(
         const op = str('operation')
         const [radius, corner] = [p['radius'], p['cornerRadius']]
         if (op === undefined || typeof radius !== 'number' || typeof corner !== 'number')
-          return sentence(w.message)
+          return sentence(message)
         return `Tool radius ${lengthText(radius, units)} is above the smallest inside corner of ${names.design(op)} (${corner === 0 ? 'sharp' : lengthText(corner, units)}): that corner keeps the tool radius.`
       }
       // the width rules carry the tool diameter and the narrowest width (mm) in their params
@@ -876,7 +879,7 @@ export function findingText(
       const width = p[target]
       const diameter = p['diameter']
       if (target === '' || typeof width !== 'number' || typeof diameter !== 'number')
-        return sentence(w.message)
+        return sentence(message)
       return `The tool (${lengthText(diameter, units)}) is too wide for the ${target}: it is ${lengthText(width, units)} at its narrowest.`
     }
     case 'plan.workholding.none':
@@ -887,16 +890,16 @@ export function findingText(
       const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : undefined)
       const len = (k: string) => lengthText(num(k) ?? 0, units)
       const named = str('tool')
-      if (named === undefined || num('stickout') === undefined) return sentence(w.message)
+      if (named === undefined || num('stickout') === undefined) return sentence(message)
       const head = `${named} at ${len('stickout')} stickout`
       if (w.rule === 'zHeadroom' && num('needed') !== undefined && num('available') !== undefined)
         return `${head}: the clearance height ${len('clearanceHeight')} needs ${len('needed')} above the stock top, but with Z homed the tool tip is only ${len('available')} above it. Retracts and tool changes would hit the Z+ limit: lower the clearance height or use a shorter stickout${num('spoilboardThickness') === undefined ? ', and enter the spoilboard thickness (checked as 0)' : ''}.`
       if (w.rule === 'zReach' && num('zMin') !== undefined && num('lowest') !== undefined)
         return `${head} cannot reach Z${len('zMin')}: the Z travel ends at Z${len('lowest')}. Use a longer stickout or raise the stock on a thicker spoilboard.`
-      return sentence(w.message)
+      return sentence(message)
     }
     default:
-      return sentence(w.message)
+      return sentence(message)
   }
 }
 

@@ -11,7 +11,7 @@ import { deg, flatEndMillValues, len, libraryInput, stockValues } from '../libra
 import { createMemoryLibraryStorage } from '../library/memory-storage'
 import type { ToolType } from '../library/tool.dto'
 import { designSetup, type DesignSetup } from './design.fixture'
-import { DfmWarningSchema, libraryTools } from './warnings'
+import { DfmWarningSchema, libraryTools, namedMessages } from './warnings'
 
 const ui = uiSource()
 
@@ -217,5 +217,47 @@ describe('design command results carry the warnings of the edited part', () => {
     ).value as { warnings: DfmWarning[] }
     expect(codes(r.warnings)).toEqual(['pocket1 dfm.cornerSharp', 'pocket1 dfm.noFittingTool'])
     expect(r.warnings[0]?.suggestion).toBeUndefined()
+  })
+})
+
+describe('namedMessages (D4: messages name operations by name and id)', () => {
+  const ops = [
+    { id: 'profile1', name: 'Profile 1' },
+    { id: 'pocket2', name: 'Pocket 2' },
+    { id: 'pocket20', name: 'Pocket 20' },
+  ]
+  const removed: DfmWarning = {
+    code: 'dfm.retainedRemoved',
+    severity: 'warning',
+    message:
+      'profile1: pocket2 lowers tab 1 from 3 mm to 0.5 mm (120.0 mm³); change pocket2: make ' +
+      'it shallower or move it off the tabs',
+    operation: 'profile1',
+    parameter: 'tabs',
+    params: { by: 'pocket2', regions: ['tab[0]'], volume: 120 },
+  }
+
+  it('names the owner and the remover (`params.by`) wherever its bare id stands, once', () => {
+    const [named] = namedMessages(ops, [removed])
+    expect(named!.message).toBe(
+      'Profile 1 (profile1): Pocket 2 (pocket2) lowers tab 1 from 3 mm to 0.5 mm (120.0 mm³); ' +
+        'change Pocket 2 (pocket2): make it shallower or move it off the tabs',
+    )
+    expect(namedMessages(ops, [named!])).toEqual([named])
+  })
+
+  it('leaves longer ids and unknown removers alone', () => {
+    const other = {
+      ...removed,
+      message: 'profile1: pocket20 and pocket2x',
+      params: { by: 'pocket2' },
+    }
+    expect(namedMessages(ops, [other])[0]!.message).toBe(
+      'Profile 1 (profile1): pocket20 and pocket2x',
+    )
+    const unknown = { ...removed, params: { by: 'gone1' } }
+    expect(namedMessages(ops, [unknown])[0]!.message).toMatch(
+      /^Profile 1 \(profile1\): pocket2 lowers/,
+    )
   })
 })

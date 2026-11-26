@@ -74,10 +74,17 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['offcut'] === true
       ? 'An offcut is not held and comes loose. Add tabs or make them thicker.'
       : 'A piece of the part is not held and comes loose. Check the cut that separates it.',
-  'dfm.retainedRemoved': (p, _L, name) => {
+  // D4: what remains of lowered tabs and which operation to change (design-llm-first.md § DFM in waste)
+  'dfm.retainedRemoved': (p, L, name) => {
     const by = typeof p['by'] === 'string' ? name.item(p['by']) : 'Another operation'
     const regions = ((p['regions'] as readonly string[] | undefined) ?? []).map(regionName)
-    return `${by} cuts away ${regions.length > 0 ? list(regions) : 'retained regions'} of this operation. Move one of them.`
+    const what = regions.length > 0 ? list(regions) : 'retained regions'
+    const remains = p['remains']
+    if (typeof remains === 'number' && typeof p['height'] === 'number')
+      return remains <= 1e-3
+        ? `${by} cuts through ${what} of this operation. Move ${by} off the tabs.`
+        : `${by} lowers ${what} of this operation from ${L(p['height'])} to ${L(remains)}. Make ${by} shallower or move it off the tabs.`
+    return `${by} cuts away ${what} of this operation. Move ${by}.`
   },
   // DF118: only a non-dependant cut raises it (docs/modes/construction-surfaces.md#check-dfmsurfacecutaway)
   'dfm.surfaceCutAway': (p, _L, name) => {

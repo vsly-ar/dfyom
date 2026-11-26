@@ -4,6 +4,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
+import { tabList } from './checks'
 import { evaluatePart, type PartEvaluation } from './evaluate'
 import { loadManifold } from './manifold'
 import type { DfmWarning, OperationGeometry, PartGeometryInput } from './model'
@@ -288,7 +289,13 @@ describe('evaluatePart: retainedRemoved', () => {
       floorRadius: 0,
     })
     // measured from the raw bottom the 3 mm tabs lie inside the relief
-    expect(only(evaluate(part(profile(), relief)), 'dfm.retainedRemoved')).toHaveLength(1)
+    const raw = only(evaluate(part(profile(), relief)), 'dfm.retainedRemoved')
+    expect(raw).toHaveLength(1)
+    // D4: the relief reaches over the whole tab height: through, named remover to change
+    expect(raw[0]!.message).toMatch(
+      /^profile1: pocket2 cuts through tabs 1–4 \([\d.]+ mm³\); change pocket2: move it off the tabs$/,
+    )
+    expect(raw[0]!.params).toMatchObject({ height: 3, remains: 0 })
     const e = evaluate(part(profile({ throughDepth: 15 }), relief))
     expect(only(e, 'dfm.retainedRemoved')).toEqual([])
     expect(e.pieces).toBe(1) // the tabs hold the part
@@ -321,6 +328,13 @@ describe('evaluatePart: retainedRemoved', () => {
     })
     // tab 8 × 6 cut from its top (−17) down to the pocket floor (−19.5)
     expect(w[0]!.params['volume'] as number).toBeCloseTo(8 * 6 * 2.5, 2)
+    // D4: what remains of the tab (−20 up to the floor −19.5) and which operation to change
+    expect(w[0]!.params['height'] as number).toBeCloseTo(3, 3)
+    expect(w[0]!.params['remains'] as number).toBeCloseTo(0.5, 3)
+    expect(w[0]!.message).toBe(
+      'profile1: pocket2 lowers tab 1 from 3 mm to 0.5 mm (120.0 mm³); change pocket2: make it ' +
+        'shallower or move it off the tabs',
+    )
     expect(e.pieces).toBe(1) // the other three tabs still hold
   })
 
@@ -346,6 +360,10 @@ describe('evaluatePart: retainedRemoved', () => {
       parameter: 'floorRadius',
       params: { by: 'pocket2', regions: ['floorFillet'] },
     })
+    expect(w[0]!.params).not.toHaveProperty('remains')
+    expect(w[0]!.message).toMatch(
+      /^pocket1: pocket2 cuts into the floor fillet \([\d.]+ mm³\); change pocket2: move it off the fillet$/,
+    )
     // the fillet zone (f² − πf²/4 per length) along 10 mm of wall[1]; the inscribed fillet
     // keeps up to ≈ 0.7 · (π/2 · 2) · 0.01 mm² per length more
     const exact = 10 * (4 - Math.PI)
@@ -542,5 +560,15 @@ describe('evaluatePart: seeded random parts keep a valid status', { timeout: 60_
       }
     }
     expect(kernel.liveObjects()).toBe(0)
+  })
+})
+
+describe('tabList (D4: retainedRemoved names the tabs it lowers)', () => {
+  it('numbers tabs from 1 and folds runs of three or more', () => {
+    expect(tabList(['tab[1]'])).toBe('tab 2')
+    expect(tabList(['tab[3]', 'tab[0]', 'tab[1]', 'tab[2]'])).toBe('tabs 1–4')
+    expect(tabList(['tab[0]', 'tab[2]', 'tab[4]'])).toBe('tabs 1, 3 and 5')
+    expect(tabList(['tab[0]', 'tab[1]', 'tab[2]', 'tab[5]'])).toBe('tabs 1–3 and 6')
+    expect(tabList(['tab[0]', 'tab[1]'])).toBe('tabs 1 and 2')
   })
 })

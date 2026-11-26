@@ -59,9 +59,28 @@ describe('dfm messages', () => {
       names,
     )
     expect(removed).toBe(
-      'Drilling 1 cuts away the floor fillet and tab 2 of this operation. Move one of them.',
+      'Drilling 1 cuts away the floor fillet and tab 2 of this operation. Move Drilling 1.',
     )
     for (const text of [missing, removed]) expect(text).not.toMatch(/pocket1|drill1|\[|floorFillet/)
+  })
+
+  it('says what remains of lowered tabs and which operation to change (D4)', () => {
+    const tabs = (remains: number, units: 'mm' | 'inch' = 'mm') =>
+      dfmMessages.text(
+        w({
+          code: 'dfm.retainedRemoved',
+          params: { by: 'drill1', regions: ['tab[0]', 'tab[1]'], height: 3, remains },
+        }),
+        units,
+        names,
+      )
+    expect(tabs(0.5)).toBe(
+      'Drilling 1 lowers tab 1 and tab 2 of this operation from 3 mm to 0.5 mm. Make Drilling 1 shallower or move it off the tabs.',
+    )
+    expect(tabs(0.5, 'inch')).toContain('0.118"')
+    expect(tabs(0)).toBe(
+      'Drilling 1 cuts through tab 1 and tab 2 of this operation. Move Drilling 1 off the tabs.',
+    )
   })
 
   it('suggests a value that satisfies the check, in the project units', () => {

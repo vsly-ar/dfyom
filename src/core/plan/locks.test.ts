@@ -231,8 +231,10 @@ describe('locks', () => {
       }
     ).warnings.find((x) => x.code === 'feeds.lockInactive' && x.planOperationId === pocket)
     expect(w).toMatchObject({ field: 'stepdown', rule: 'toolLength' })
+    // D4: plan.warning.list names the operation first
     expect(w?.message).toBe(
-      'Stepdown lock is inactive: Stepdown 20 mm is deeper than the stickout (15 mm).',
+      `Pocket 1 (${pocket}): ` +
+        'Stepdown lock is inactive: Stepdown 20 mm is deeper than the stickout (15 mm).',
     )
     expect(view(pocket).feeds['stepdown']).toMatchObject({
       locked: true,
