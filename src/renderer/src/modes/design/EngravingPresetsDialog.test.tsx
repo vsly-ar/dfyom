@@ -50,6 +50,11 @@ describe('EngravingPresetsDialog (E3)', () => {
     expect(rosette).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(onApply).not.toHaveBeenCalled()
+    // P11: the shared shell's footer Close, as the pattern's
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(onApply).not.toHaveBeenCalled()
     await user.click(trigger)
     await user.keyboard('{ArrowRight}{Enter}')
     expect(onApply).toHaveBeenCalledTimes(1)

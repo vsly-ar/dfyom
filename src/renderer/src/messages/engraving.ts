@@ -49,6 +49,7 @@ export const engravingMessages = {
   presetsDescription:
     'Pick a motif. Round motifs fit the boundary; the others keep their size and you can scale them.',
   presetCurrent: 'Current',
+  presetsClose: 'Close',
   presetGroups: { tile: 'Tiles', single: 'Motifs', round: 'Round' } as Record<string, string>,
   presetNames: {
     waves: 'Waves',

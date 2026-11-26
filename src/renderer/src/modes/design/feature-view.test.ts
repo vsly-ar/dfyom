@@ -8,6 +8,7 @@ import { designDispatcher } from '../../test/bridge'
 import { addableFeatures, sourceWith, sourceWithout } from './clones-view'
 import {
   clonesSource,
+  countsAsWarning,
   cloneInstances,
   featureFieldOf,
   featureReadout,
@@ -57,6 +58,15 @@ const warning = (operation: string, code = 'dfm.x', severity: 'warning' | 'info'
   ({ code, severity, message: '', operation, params: {} }) as unknown as DfmWarning
 
 describe('feature view', () => {
+  it('counts errors and hard warnings, never notes or what Apply may change (ui.md § Severity)', () => {
+    // the status bar and the viewport summary count with it: an engraving's
+    // dfm.toolNotInLibrary (info) is listed, not counted (engraving e2e)
+    expect(countsAsWarning(warning('engraving1_line', 'dfm.toolNotInLibrary', 'info'))).toBe(false)
+    expect(countsAsWarning(warning('pocket1', 'dfm.toolUnfit'))).toBe(true)
+    const pending = { ...warning('pocket1', 'dfm.toolUnfit'), pendingApply: true } as DfmWarning
+    expect(countsAsWarning(pending)).toBe(false)
+  })
+
   it('groups a hole block as one unit and moves units over whole neighbours', async () => {
     const p = await part(async (d, partId) => {
       await ok(d, 'design.drilling.add', { partId, center: ['10', '10'], diameter: '5' })

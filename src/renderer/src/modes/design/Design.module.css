@@ -2013,7 +2013,7 @@
 
 /* The engraved pattern's Presets dialog and motif thumbnail (engraved-patterns.md E3): the
    pattern dialog's cards with a heading per group and the motif drawn as its grooves. */
-.engravingPresetGroup {
+.presetGroup {
   grid-column: 1 / -1;
   margin: 6px 0 0;
   color: var(--text-muted);
