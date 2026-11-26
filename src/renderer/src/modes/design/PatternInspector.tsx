@@ -6,9 +6,13 @@
 // switch, then width, angle and the chamfer's tool). P4: on another pattern's floor the
 // Boundary's face option names its cells. DF107: Presets… opens the Presets dialog.
 // Every edit is one `design.pattern.update` (one undo step); errors
-// and findings show at their field, the rest under Findings.
+// and findings show at their field, the rest under Findings. DF110 S4: rarely used fields (cell
+// Rotation; Origin U/V and Flip; Boundary cells and Invert; Roughing) sit behind their group's More
+// row, shown open while one holds a non-default value or a problem; Chamfer is an accordion,
+// closed unless on.
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1,
-// docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#implementation-df107df109
+// docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#implementation-df107df109,
+// docs/conventions/inspector-layout.md#s4-implementation-notes
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
@@ -31,6 +35,7 @@ import {
   Switch,
   WarningList,
   type FieldMessage,
+  type GroupSeverity,
   type StepKind,
 } from '../../ui'
 import { warningLabels, warningView } from './DesignInspector'
@@ -212,6 +217,33 @@ export function PatternInspector({
   const note = (id: string, text: string | undefined): FieldMessage[] =>
     text === undefined ? [] : [{ id: `note-${id}`, severity: 'note', text }]
 
+  /** The worst problem at these field paths: a More row or accordion holding them opens. */
+  const problemAt = (paths: readonly string[]): GroupSeverity | undefined => {
+    const ms = paths.flatMap(messagesAt)
+    if (ms.some((x) => x.severity === 'error')) return 'error'
+    if (ms.some((x) => x.severity === 'hard' || x.severity === 'soft')) return 'warning'
+    return undefined
+  }
+  /**
+   * A group's More row (DF110): its rarely used fields, shown open while one of them holds a
+   * non-default value (`set`, a More row has no summary) or a problem, so nothing hides silently.
+   */
+  const more = (
+    id: string,
+    fields: readonly string[],
+    paths: readonly string[],
+    set: boolean,
+    children: React.ReactNode,
+  ) => (
+    <InspectorGroup.More
+      fields={fields}
+      rememberKey={`pattern.${id}.more`}
+      forceOpen={set || problemAt(paths) !== undefined}
+    >
+      {children}
+    </InspectorGroup.More>
+  )
+
   const quantityField = (
     path: string,
     label: string,
@@ -268,6 +300,13 @@ export function PatternInspector({
   // P5: the through cells' bottom edges, from a flipped setup
   const bottomChamferOp = owned.find((o) => o.id === `${feature.id}_bottomChamfer`)
   const flip = feature['alternate'] === 'flip'
+  // DF110: the rare fields' non-default values keep their More row open
+  const rotated = !['0', '0°', '0 deg', ''].includes(
+    (sourceOf(cell['rotation']) ?? '').replace(/\s+/g, ' ').trim(),
+  )
+  const clip = feature['fit'] === 'clip'
+  const inverted = feature['invert'] === true
+  const chamferProblem = problemAt(['chamfer', 'chamfer.width', 'chamfer.angle', 'chamfer.side'])
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -345,13 +384,19 @@ export function PatternInspector({
               />
             </Field>
           ) : null}
-          {quantityField(
-            'cell.rotation',
-            p.rotation,
-            'angle',
-            cell['rotation'],
-            (source) => ({ cell: cellArgs(cell, { rotation: source }) }),
-            '0°',
+          {more(
+            'cell',
+            [p.rotation],
+            ['cell.rotation'],
+            rotated,
+            quantityField(
+              'cell.rotation',
+              p.rotation,
+              'angle',
+              cell['rotation'],
+              (source) => ({ cell: cellArgs(cell, { rotation: source }) }),
+              '0°',
+            ),
           )}
         </InspectorGroup>
 
@@ -405,50 +450,58 @@ export function PatternInspector({
                 ),
               )}
           {quantityField('angle', p.angle, 'angle', feature['angle'], (angle) => ({ angle }))}
-          {([0, 1] as const).map((i) => (
-            <div key={`origin.${i}`} data-feature-field={`origin.${i}`}>
-              <QuantityInput
-                label={p.origin(i)}
-                stepKind="xy"
-                kind="length"
-                defaultUnit={defaultUnit('length', units)}
-                value={origin === undefined ? undefined : quantityOf(origin[i])}
-                placeholder={p.originCentre}
-                optional
-                onCommit={(q, gesture) => {
-                  if (q === undefined) return void update({ origin: null }, 'origin', gesture)
-                  const c = areaCentre()
-                  const next = [
-                    sourceOf(origin?.[0]) ?? lengthSource(c[0], units),
-                    sourceOf(origin?.[1]) ?? lengthSource(c[1], units),
-                  ]
-                  next[i] = q.source
-                  void update({ origin: next }, 'origin', gesture)
-                }}
-                onCancelGesture={cancelGesture}
-                messages={messagesAt(`origin.${i}`)}
-              />
-            </div>
-          ))}
-          <div data-feature-field="alternate">
-            <Field
-              label={p.alternate}
-              kind="toggle"
-              messages={[
-                ...messagesAt('alternate'),
-                ...note('alternate', flip ? p.alternateNote : undefined),
-              ]}
-            >
-              <Switch
-                label={p.alternate}
-                hideLabel
-                checked={flip}
-                onCheckedChange={(on) =>
-                  void update({ alternate: on ? 'flip' : 'none' }, 'alternate')
-                }
-              />
-            </Field>
-          </div>
+          {more(
+            'layout',
+            [p.originShort, p.alternate],
+            ['origin', 'origin.0', 'origin.1', 'alternate'],
+            origin !== undefined || flip,
+            <>
+              {([0, 1] as const).map((i) => (
+                <div key={`origin.${i}`} data-feature-field={`origin.${i}`}>
+                  <QuantityInput
+                    label={p.origin(i)}
+                    stepKind="xy"
+                    kind="length"
+                    defaultUnit={defaultUnit('length', units)}
+                    value={origin === undefined ? undefined : quantityOf(origin[i])}
+                    placeholder={p.originCentre}
+                    optional
+                    onCommit={(q, gesture) => {
+                      if (q === undefined) return void update({ origin: null }, 'origin', gesture)
+                      const c = areaCentre()
+                      const next = [
+                        sourceOf(origin?.[0]) ?? lengthSource(c[0], units),
+                        sourceOf(origin?.[1]) ?? lengthSource(c[1], units),
+                      ]
+                      next[i] = q.source
+                      void update({ origin: next }, 'origin', gesture)
+                    }}
+                    onCancelGesture={cancelGesture}
+                    messages={messagesAt(`origin.${i}`)}
+                  />
+                </div>
+              ))}
+              <div data-feature-field="alternate">
+                <Field
+                  label={p.alternate}
+                  kind="toggle"
+                  messages={[
+                    ...messagesAt('alternate'),
+                    ...note('alternate', flip ? p.alternateNote : undefined),
+                  ]}
+                >
+                  <Switch
+                    label={p.alternate}
+                    hideLabel
+                    checked={flip}
+                    onCheckedChange={(on) =>
+                      void update({ alternate: on ? 'flip' : 'none' }, 'alternate')
+                    }
+                  />
+                </Field>
+              </div>
+            </>,
+          )}
         </InspectorGroup>
 
         <InspectorGroup title={p.groups.area}>
@@ -528,26 +581,39 @@ export function PatternInspector({
           {quantityField('margin', p.margin, 'length', feature['margin'], (margin) => ({
             margin,
           }))}
-          <div data-feature-field="fit">
-            <Field label={p.fit} kind="toggle" messages={messagesAt('fit')} info={p.fitDescription}>
-              <SegmentedControl<string>
-                label={p.fit}
-                options={['whole', 'clip'].map((v) => ({ value: v, label: p.fits[v] ?? v }))}
-                value={(feature['fit'] as string | undefined) ?? 'whole'}
-                onValueChange={(fit) => void update({ fit }, 'fit')}
-              />
-            </Field>
-          </div>
-          <div data-feature-field="invert">
-            <Field label={p.invert} kind="toggle" messages={messagesAt('invert')}>
-              <Switch
-                label={p.invert}
-                hideLabel
-                checked={feature['invert'] === true}
-                onCheckedChange={(invert) => void update({ invert }, 'invert')}
-              />
-            </Field>
-          </div>
+          {more(
+            'area',
+            [p.fit, p.invertShort],
+            ['fit', 'invert'],
+            clip || inverted,
+            <>
+              <div data-feature-field="fit">
+                <Field
+                  label={p.fit}
+                  kind="toggle"
+                  messages={messagesAt('fit')}
+                  info={p.fitDescription}
+                >
+                  <SegmentedControl<string>
+                    label={p.fit}
+                    options={['whole', 'clip'].map((v) => ({ value: v, label: p.fits[v] ?? v }))}
+                    value={(feature['fit'] as string | undefined) ?? 'whole'}
+                    onValueChange={(fit) => void update({ fit }, 'fit')}
+                  />
+                </Field>
+              </div>
+              <div data-feature-field="invert">
+                <Field label={p.invert} kind="toggle" messages={messagesAt('invert')}>
+                  <Switch
+                    label={p.invert}
+                    hideLabel
+                    checked={inverted}
+                    onCheckedChange={(invert) => void update({ invert }, 'invert')}
+                  />
+                </Field>
+              </div>
+            </>,
+          )}
         </InspectorGroup>
 
         <InspectorGroup title={p.groups.cut}>
@@ -581,36 +647,61 @@ export function PatternInspector({
               />
             </div>
           )}
-          <div data-feature-field="roughing">
-            <Field
-              label={p.roughing}
-              kind="toggle"
-              messages={[
-                ...messagesAt('roughing'),
-                ...note('roughing', roughing ? p.roughingNote : undefined),
-              ]}
-            >
-              <Switch
-                label={p.roughing}
-                hideLabel
-                checked={roughing}
-                onCheckedChange={(on) => void update({ roughing: on }, 'roughing')}
-              />
-            </Field>
-          </div>
-          {roughingOp === undefined ? null : (
-            <div data-feature-field="roughing.tool">
-              <ToolField
-                part={part}
-                op={roughingOp}
-                warnings={warnings.warnings.filter((w) => w.operation === roughingOp.id)}
-                label={p.roughingTool}
-              />
-            </div>
+          {more(
+            'cut',
+            [p.roughing],
+            ['roughing'],
+            roughing,
+            <>
+              <div data-feature-field="roughing">
+                <Field
+                  label={p.roughing}
+                  kind="toggle"
+                  messages={[
+                    ...messagesAt('roughing'),
+                    ...note('roughing', roughing ? p.roughingNote : undefined),
+                  ]}
+                >
+                  <Switch
+                    label={p.roughing}
+                    hideLabel
+                    checked={roughing}
+                    onCheckedChange={(on) => void update({ roughing: on }, 'roughing')}
+                  />
+                </Field>
+              </div>
+              {roughingOp === undefined ? null : (
+                <div data-feature-field="roughing.tool">
+                  <ToolField
+                    part={part}
+                    op={roughingOp}
+                    warnings={warnings.warnings.filter((w) => w.operation === roughingOp.id)}
+                    label={p.roughingTool}
+                  />
+                </div>
+              )}
+            </>,
           )}
         </InspectorGroup>
 
-        <InspectorGroup title={p.groups.chamfer}>
+        {/* closed unless on: its open state is remembered apart for on and off (DF110) */}
+        <InspectorGroup
+          title={p.groups.chamfer}
+          collapsible
+          rememberKey={chamfer === undefined ? 'pattern.chamfer.off' : 'pattern.chamfer.on'}
+          defaultOpen={chamfer !== undefined}
+          summary={
+            chamfer === undefined
+              ? p.chamferOff
+              : p.chamferSummary(
+                  sourceOf(chamfer.width),
+                  sourceOf(chamfer.angle),
+                  through ? (p.chamferSides[chamfer.side ?? 'top'] ?? chamfer.side) : undefined,
+                )
+          }
+          severity={chamferProblem}
+          forceOpen={chamferProblem !== undefined}
+        >
           <div data-feature-field="chamfer">
             <Field
               label={p.chamfer}

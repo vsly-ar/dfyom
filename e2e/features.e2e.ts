@@ -12,7 +12,14 @@
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { closeDialog, expect, openPartSetup, openReferencePanel, test } from './app.fixture'
+import {
+  closeDialog,
+  expect,
+  openPartSetup,
+  openReferencePanel,
+  revealField,
+  test,
+} from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -266,6 +273,8 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await inspector.getByRole('radio', { name: 'Stepped' }).click()
   await expect(section).toHaveAccessibleName(/stepped in 2 steps of 0\.93 mm/)
   await expect(tools.getByText(/no tool change/)).toBeVisible()
+  // the stepdown sits in the closed Defaults accordion (DF110 S4)
+  await revealField(inspector, 'Stepdown')
   const stepdown = inspector.getByLabel('Stepdown', { exact: true }).and(inspector.locator('input'))
   await stepdown.focus()
   await expect(section.locator('[data-part="csStepdown"]')).toHaveAttribute('data-state', 'active')

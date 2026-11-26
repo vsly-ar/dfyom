@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { ENCLOSURE_STOCK, enclosureCommands } from '../src/core/design/split/split.fixture'
-import { expect, test } from './app.fixture'
+import { expect, openInspectorGroup, test } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
@@ -173,7 +173,8 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
   const partRow = navigator.getByRole('region', { name: 'Part' })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
-  const split = inspector.getByRole('region', { name: 'Split' })
+  // the split editor: the Split group and its Joints and Blanks accordions (DF110 S4)
+  const split = inspector
   const openParts = async () => {
     await partRow.getByRole('button', { name: /^Parts/ }).click()
     return page.getByRole('menu', { name: /^Parts/ })
@@ -327,6 +328,7 @@ test('split parts: split the enclosure in the UI; every piece plans and runs', a
       thickness: '40',
     },
   })
+  await openInspectorGroup(split, 'Blanks')
   await split.getByRole('button', { name: 'Split to fit…' }).click()
   await page.getByRole('menuitem', { name: /^Block 200 × 100\.1 × 40 · / }).click()
   await expect(split.getByRole('switch', { name: 'Use library stocks' })).toBeChecked()

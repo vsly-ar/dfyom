@@ -89,8 +89,13 @@ const section = () => within(insp()).getByRole('img', { name: /^Section:/ })
 describe('hole inspector (U2)', () => {
   it('shows the groups and the section, refills from a fastener and says what it replaced', async () => {
     const { user, hole1, field, setField, choose } = await renderHole()
-    for (const g of ['Position', 'Type', 'Fastener', 'Sizes', 'Tools'])
+    // DF110 S4: Type holds the fastener; Defaults is a closed accordion after Tools
+    for (const g of ['Position', 'Type', 'Sizes', 'Tools', 'Defaults'])
       expect(within(insp()).getByRole('region', { name: g })).toBeInTheDocument()
+    expect(within(insp()).getByRole('button', { name: /^Defaults/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
     expect(within(insp()).getByRole('radio', { name: 'Simple' })).toHaveAttribute(
       'aria-checked',
       'true',
@@ -212,6 +217,10 @@ describe('hole inspector (U2)', () => {
     ).toBeInTheDocument()
     await expectNoAxeViolations()
 
+    // the stepdown sits in the closed Defaults accordion (DF110 S4), its summary names it
+    const defaults = within(insp()).getByRole('button', { name: /^Defaults/ })
+    expect(defaults).toHaveTextContent('stepdown 1 mm')
+    await user.click(defaults)
     await setField('Stepdown', '0.5')
     await waitFor(() => expect(src(hole1()['csStepdown'])).toBe('0.5'))
     await waitFor(() => expect(section()).toHaveAccessibleName(/stepped in 4 steps of 0\.465 mm/))

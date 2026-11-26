@@ -9,7 +9,7 @@
 // #implementation-p5, #implementation-df107df109,
 // docs/conventions/ui.md
 import type { Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { expect, revealField, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -104,6 +104,8 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await page.keyboard.press('Escape')
 
   // ── DF108: Roughing adds the roughing tool's field; off removes it ─────────────────────────
+  // Roughing, Boundary cells and Invert sit behind More rows, Chamfer in an accordion (DF110 S4)
+  await revealField(inspector, 'Roughing')
   const roughing = inspector.getByRole('switch', { name: 'Roughing' })
   const roughingTool = inspector.locator('[data-feature-field="roughing.tool"]')
   await expect(roughing).not.toBeChecked()
@@ -119,6 +121,7 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   // ── Polar rings, cells clipped at the border, then inverted (islands) ──────────────────────
   await inspector.getByRole('radio', { name: 'Polar' }).click()
   await expect(navigator.getByRole('button', { name: /^Pattern 1, polar circle/ })).toBeVisible()
+  await revealField(inspector, 'Boundary cells')
   await inspector.getByRole('radio', { name: 'Clip' }).click()
   await expect(inspector.getByRole('radio', { name: 'Clip' })).toBeChecked()
   const invert = inspector.getByRole('switch', { name: 'Invert (cells as islands)' })
@@ -127,6 +130,7 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(readout).toHaveText(/^\d+ cells/)
 
   // ── P3: the chamfer round every island, then narrower ──────────────────────────────────────
+  await revealField(inspector, 'Chamfer every cell')
   const chamfer = inspector.getByRole('switch', { name: 'Chamfer every cell' })
   await expect(chamfer).not.toBeChecked()
   await chamfer.click()
@@ -166,6 +170,7 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(depth).toBeVisible()
 
   // ── P5: the Triangles preset turns every other cell (Flip) ─────────────────────────────────
+  await revealField(inspector, 'Flip every other cell')
   const flip = inspector.getByRole('switch', { name: 'Flip every other cell' })
   await expect(flip).not.toBeChecked()
   await inspector.getByRole('button', { name: 'Presets…' }).click()
