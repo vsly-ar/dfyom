@@ -847,3 +847,43 @@
   justify-self: start;
   margin-top: calc(-1 * var(--space-1));
 }
+
+/* DF106: items off for this plan, after the setups, muted; the marker as Design's "Off" */
+.offList {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.offTitle {
+  margin: 0;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.op[data-off] .opName {
+  color: var(--text-muted);
+}
+
+.op[data-off] .opSelect > svg {
+  opacity: 0.5;
+}
+
+.opOff {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* off in design: not switchable here, so dashed */
+.opOff[data-where='design'] {
+  border-style: dashed;
+}

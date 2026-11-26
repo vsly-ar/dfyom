@@ -1683,6 +1683,9 @@ const staleList = defineQuery({
         operationId: OperationIdSchema,
         changedInDesign: z.boolean(),
         removedFromDesign: z.boolean(),
+        disabledInDesign: z
+          .boolean()
+          .describe('Switched off in Design (DF106): a rebuild leaves it out until enabled there'),
         editedInPlan: z.boolean(),
         designToolChanged: z
           .boolean()

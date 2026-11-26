@@ -5,6 +5,7 @@
  */
 import { z } from 'zod'
 import {
+  OperationDtoSchema,
   PartDtoSchema,
   PartIdSchema,
   OperationIdSchema,
@@ -250,6 +251,24 @@ export const SetupDtoSchema = z.object({
 })
 export type SetupDTO = z.output<typeof SetupDtoSchema>
 
+/**
+ * A plan operation set aside while every design operation it machines is off (hardening DF106
+ * follow-up, docs/modes/plan-v0.4.md#disabling-in-a-plan-df106): switched off in the design or in
+ * this plan. A rebuild that brings them back restores it (its tool, preset, overrides, strategy,
+ * Z reference) at its place instead of adding a new plan operation; one whose design operations
+ * are gone from the design is dropped.
+ */
+export const ParkedOperationDtoSchema = z.object({
+  setupId: z.string().min(1).describe('The setup it was in'),
+  index: z.number().int().min(0).describe('Its index in that setup'),
+  operation: PlanOperationDtoSchema,
+  edits: z
+    .array(OperationDtoSchema)
+    .optional()
+    .describe("The plan's own edits of its design operations (settled plans)"),
+})
+export type ParkedOperationDTO = z.output<typeof ParkedOperationDtoSchema>
+
 export const PlanDtoSchema = z.object({
   id: PlanIdSchema,
   name: z.string().min(1).max(NAME_MAX),
@@ -272,5 +291,9 @@ export const PlanDtoSchema = z.object({
     .array(OperationIdSchema)
     .optional()
     .describe('Design operation/feature ids switched off in this plan only'),
+  parked: z
+    .array(ParkedOperationDtoSchema)
+    .optional()
+    .describe('Plan operations kept aside while their design operations are off (DF106)'),
 })
 export type PlanDTO = z.output<typeof PlanDtoSchema>

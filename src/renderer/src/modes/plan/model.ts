@@ -4,7 +4,8 @@
 // setups (v0.2 task F6): the window's setup, its WCS corner and frame, same-direction moves.
 // Commands do the checking; this only builds what the UI shows and sends.
 // Doc: docs/modes/plan-v0.1.md#commands-and-queries-v01, docs/conventions/ui.md#plan-mode-task-37
-import type { OperationKind } from '../../../../core/design/part.dto'
+import { disabledState, unitOfOperation } from '../../../../core/design/disabled'
+import type { OperationKind, PartDTO } from '../../../../core/design/part.dto'
 import { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Direction, StockSize } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
@@ -429,6 +430,8 @@ export interface PlanStale {
     operationId: string
     changedInDesign: boolean
     removedFromDesign: boolean
+    /** Switched off in Design (DF106); absent from plans read before it. */
+    disabledInDesign?: boolean
     editedInPlan: boolean
     /** The design's tool field changed (E4); absent from plans read before it. */
     designToolChanged?: boolean
@@ -447,17 +450,73 @@ export function designStale(s: PlanStale): boolean {
   return (
     s.partRemoved ||
     s.partChanged.length > 0 ||
-    s.operations.some((o) => o.changedInDesign || o.removedFromDesign)
+    s.operations.some((o) => o.changedInDesign || o.removedFromDesign || o.disabledInDesign)
   )
 }
+
+/** An item listed under "Off" in the plan navigator (DF106). */
+export interface OffItem {
+  /** The design operation or feature id (a top-level unit). */
+  readonly id: string
+  readonly name: string
+  /** Switched off in this plan only (can be enabled here) or in Design (read-only here). */
+  readonly where: 'plan' | 'design'
+  /** The part the item is read from, and its first operation (the row icon). */
+  readonly part: PartDTO
+  readonly operation: PartDTO['operations'][number] | undefined
+}
+
+/**
+ * The items switched off for this plan (DF106, plan-v0.4.md § Disabling in a plan): its own list,
+ * then the design's own list (items it still copies – a settled plan from before – show in their
+ * row with "Off in design" instead).
+ */
+export function offItems(doc: ProjectDoc, plan: PlanDTO): OffItem[] {
+  const record = Object.hasOwn(doc.parts, plan.design.partId)
+    ? doc.parts[plan.design.partId]
+    : undefined
+  const item = (part: PartDTO, id: string, where: OffItem['where']): OffItem | undefined => {
+    const operation = part.operations.find((o) => o.id === id || o.featureId === id)
+    const name =
+      part.operations.find((o) => o.id === id)?.name ??
+      part.features?.find((f) => f.id === id)?.name
+    return name === undefined ? undefined : { id, name, where, part, operation }
+  }
+  const mine = plan.disabled ?? []
+  const own = mine.flatMap((id) => item(plan.design.taken, id, 'plan') ?? [])
+  const copied = (id: string) =>
+    plan.design.part.operations.some((o) => o.id === id || o.featureId === id)
+  const design =
+    record === undefined
+      ? []
+      : [...disabledState(record).roots]
+          .filter((id) => !mine.includes(id) && !copied(id))
+          .flatMap((id) => item(record, id, 'design') ?? [])
+  return [...own, ...design]
+}
+
+/**
+ * The plan's disabled list with the design items plan operation `op` machines switched off too
+ * (their top-level units: an owned operation switches its feature, DF106); undefined for an
+ * alignment aid.
+ */
+export function disableInPlanList(plan: PlanDTO, op: PlanOperationDTO): string[] | undefined {
+  if (op.aid !== undefined) return undefined
+  const units = op.designOperationIds.map((id) => unitOfOperation(plan.design.taken, id))
+  return [...new Set([...(plan.disabled ?? []), ...units])]
+}
+
+/** A plan operation row's stale flag. */
+export type RowStale = 'removed' | 'offInDesign' | 'changed' | 'edited'
 
 /** The stale flag of a plan operation row (the first that applies). */
 export function rowStale(
   s: PlanStale | undefined,
   designOperationIds: readonly string[],
-): 'removed' | 'changed' | 'edited' | undefined {
+): RowStale | undefined {
   const mine = s?.operations.filter((o) => designOperationIds.includes(o.operationId)) ?? []
   if (mine.some((o) => o.removedFromDesign)) return 'removed'
+  if (mine.some((o) => o.disabledInDesign === true)) return 'offInDesign'
   if (mine.some((o) => o.changedInDesign)) return 'changed'
   if (mine.some((o) => o.editedInPlan)) return 'edited'
   return undefined

@@ -85,6 +85,9 @@ export const planMessages = {
     kinds: { stock: 'stock', tool: 'tool', machine: 'machine' } as Record<string, string>,
     rowChanged: 'Changed in design',
     rowRemoved: 'Removed from design',
+    /** DF106 (c): a settled plan's row whose design item was switched off there. */
+    rowOffInDesign:
+      'Off in design: switched off there. Rebuild leaves it out; enable it in Design to keep it.',
     rowEdited: 'Edited in plan',
     /** A copy whose snapshot has no name (never its library id, DF43). */
     unnamed: 'unnamed',
@@ -391,6 +394,23 @@ export const planMessages = {
     warnings: (n: number) => plural(n, 'warning', 'warnings'),
     /** A row's error or warning count: its tooltip (DF67, the count shows the findings). */
     findingsTip: (count: string) => `${count}: click to show them in the inspector`,
+    /** DF106: switch the design items a row machines off in this plan only (one way). */
+    disableInPlan: 'Disable in this plan',
+    enableInPlan: 'Enable in this plan',
+    disabledInPlan: (name: string) => `${name} is off in this plan`,
+    enabledInPlan: (name: string) => `${name} is back in this plan`,
+  },
+
+  /** Items switched off for this plan (DF106, plan-v0.4.md § Disabling in a plan). */
+  off: {
+    listLabel: 'Off in this plan or in design',
+    title: 'Off',
+    inPlan: 'Off in this plan',
+    inPlanTitle:
+      'Switched off in this plan only: no toolpath, kept in the design. Right-click to enable it.',
+    inDesign: 'Off in design',
+    inDesignTitle: 'Switched off in Design: enable it there to plan it.',
+    actions: (name: string) => `Actions for ${name} (off)`,
   },
 
   toolpaths: {

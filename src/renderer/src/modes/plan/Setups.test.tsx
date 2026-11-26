@@ -261,6 +261,57 @@ describe('Setup panel', () => {
     })
   })
 
+  it('disables an operation in this plan only and enables it back; lists what Design switched off (DF106)', async () => {
+    const t = await renderSetups()
+    const top = () => t.plan().setups.find((s) => s.name === 'Top')!
+    const drilling = top().operations[1]!
+    const designId = drilling.designOperationIds[0]!
+    const row = () =>
+      within(t.opsOf('Top')).getAllByRole('button', { name: new RegExp(`^${'Drilling 1'}`) })[0]!
+    await openMenu(t, row())
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Disable in this plan' }))
+    await waitFor(() => expect(t.plan().disabled).toEqual([designId]))
+    // the row left the setup; it is listed muted under "Off", its menu enables it again
+    const off = () => within(t.nav()).getByRole('list', { name: 'Off in this plan or in design' })
+    const offRow = within(off()).getByRole('button', { name: /^Drilling 1/ })
+    expect(offRow).toHaveTextContent('Off in this plan')
+    expect(within(t.opsOf('Top')).queryByRole('button', { name: /^Drilling 1\b/ })).toBeNull()
+    expect(await screen.findByText('Drilling 1 is off in this plan')).toBeInTheDocument()
+    await openMenu(t, offRow)
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Enable in this plan' }))
+    await waitFor(() => expect(t.plan()).not.toHaveProperty('disabled'))
+    // back at its place, with the same plan operation
+    expect(top().operations[1]!.id).toBe(drilling.id)
+    expect(
+      within(t.nav()).queryByRole('list', { name: 'Off in this plan or in design' }),
+    ).toBeNull()
+
+    // switched off in Design: listed read-only (no menu), "Off in design"
+    await act(async () => {
+      await t.bridge.call('design.part.update', { partId: t.s.partId, disabled: [designId] })
+      await t.bridge.call('project.apply', {})
+    })
+    const inDesign = await within(t.nav()).findByRole('list', {
+      name: 'Off in this plan or in design',
+    })
+    expect(within(inDesign).queryByRole('button')).toBeNull()
+    expect(inDesign).toHaveTextContent('Drilling 1')
+    expect(inDesign).toHaveTextContent('Off in design')
+    await expectNoAxeViolations()
+  })
+
+  it('shows a design-disabled operation of a settled plan as "Off in design", not removed (DF106)', async () => {
+    const t = await renderSetups(async (s, planId) => {
+      await s.toStatus(planId, 'settledDesign')
+      const id = s.plan(planId).setups[1]!.operations[1]!.designOperationIds[0]!
+      await s.run('design.part.update', { partId: s.partId, disabled: [id] })
+      await s.run('project.apply', {})
+    })
+    const row = within(t.opsOf('Top')).getAllByRole('button', { name: /^Drilling 1/ })[0]!
+    await waitFor(() => expect(row).toHaveTextContent('Off in design'))
+    expect(row).not.toHaveTextContent('Removed from design')
+  })
+
   it('splits an operation into a new setup, moves operations across setups of one direction and merges them', async () => {
     const t = await renderSetups()
     const top = t.plan().setups[1]!

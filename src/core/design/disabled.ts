@@ -143,6 +143,15 @@ function unitResolver(features: readonly FeatureDTO[]): (id: string) => string {
   }
 }
 
+/**
+ * The top-level unit (the row a disable list names) of operation `id`: the operation itself, or
+ * the outermost feature owning or nesting it (a plan's "Disable in this plan", DF106).
+ */
+export function unitOfOperation(part: PartDTO, id: string): string {
+  const unitOf = unitResolver(part.features ?? [])
+  return unitOf(opIdOwner(part, id) ?? id)
+}
+
 /** The top-level units of a part in design order: plain operations and outermost features. */
 export function topLevelUnits(part: PartDTO): string[] {
   const unitOf = unitResolver(part.features ?? [])

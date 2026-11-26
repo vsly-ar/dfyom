@@ -146,3 +146,86 @@ describe('disabling in a plan only (DF106)', () => {
     expect(e.issues.map((i) => i.rule)).toEqual(['unknownItem'])
   })
 })
+
+/** The plan operation machining design operation `id`, with its setup and index. */
+function opOf(s: PlanSetup, planId: string, id: string) {
+  for (const setup of s.plan(planId).setups) {
+    const index = setup.operations.findIndex((o) => o.designOperationIds.includes(id))
+    if (index >= 0) return { setupId: setup.id, index, op: setup.operations[index]! }
+  }
+  return undefined
+}
+
+describe('plan operations of switched-off items are kept (DF106 follow-up)', () => {
+  it('a design-disabled pocket keeps its plan operation settings and place when enabled', async () => {
+    const { s, planId } = await setupWithChamfer()
+    const before = opOf(s, planId, 'pocket2')!
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: before.op.id,
+      overrides: { feedRate: '444 mm/min' },
+      strategy: { direction: 'conventional' },
+    })
+    const edited = opOf(s, planId, 'pocket2')!
+    await s.run('design.part.update', { partId: s.partId, disabled: ['pocket2'] })
+    await s.run('project.apply', {})
+    expect(opOf(s, planId, 'pocket2')).toBeUndefined()
+    expect(s.plan(planId).parked?.map((p) => p.operation.id)).toEqual(
+      expect.arrayContaining([edited.op.id]),
+    )
+    // its tool copy stays for it
+    const tool = edited.op.tool
+    expect(s.plan(planId).snapshots.some((x) => x.id === tool)).toBe(true)
+
+    await s.run('design.part.update', { partId: s.partId, disabled: [] })
+    await s.run('project.apply', {})
+    expect(opOf(s, planId, 'pocket2')).toEqual(edited)
+    expect(s.plan(planId)).not.toHaveProperty('parked')
+  })
+
+  it('a plan-only disable keeps the plan operation and its plan edits', async () => {
+    const { s, planId } = await setupWithChamfer()
+    await s.toStatus(planId, 'settledDesign')
+    const before = opOf(s, planId, 'pocket2')!
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: before.op.id,
+      overrides: { plungeRate: '111 mm/min' },
+    })
+    await s.run('plan.design.operation.update', { planId, operationId: 'pocket2', depth: '2.5' })
+    const edited = opOf(s, planId, 'pocket2')!
+    const part = s.plan(planId).design.part
+    await s.run('plan.update', { planId, disabled: ['pocket2'] })
+    expect(opOf(s, planId, 'pocket2')).toBeUndefined()
+    await s.run('plan.update', { planId, disabled: [] })
+    expect(opOf(s, planId, 'pocket2')).toEqual(edited)
+    expect(s.plan(planId).design.part).toEqual(part)
+    expect(hasPlanEdits(s.plan(planId))).toBe(true)
+  })
+
+  it('drops a parked plan operation on the next rebuild after its item left the design', async () => {
+    const { s, planId } = await setupWithChamfer()
+    await s.run('design.part.update', { partId: s.partId, disabled: ['chamfer1'] })
+    await s.run('project.apply', {})
+    expect(s.plan(planId).parked).toHaveLength(1)
+    await s.run('design.operation.remove', { partId: s.partId, operationId: 'chamfer1' })
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '5' })
+    await s.run('project.apply', {})
+    expect(s.plan(planId)).not.toHaveProperty('parked')
+  })
+
+  it('a settled plan reports a design-disabled item as off in design, not removed', async () => {
+    const { s, planId } = await setupWithChamfer()
+    await s.toStatus(planId, 'settledDesign')
+    await s.run('design.part.update', { partId: s.partId, disabled: ['pocket2'] })
+    await s.run('project.apply', {})
+    const st = s.query('plan.stale.list', { planId }) as {
+      operations: { operationId: string; removedFromDesign: boolean; disabledInDesign: boolean }[]
+    }
+    const pocket = st.operations.find((o) => o.operationId === 'pocket2')!
+    expect(pocket).toMatchObject({ removedFromDesign: false, disabledInDesign: true })
+    // its chamfer follows it off
+    const chamfer = st.operations.find((o) => o.operationId === 'chamfer1')!
+    expect(chamfer).toMatchObject({ removedFromDesign: false, disabledInDesign: true })
+  })
+})

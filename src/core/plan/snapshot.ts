@@ -4,7 +4,7 @@
  * Doc: docs/modes/plan-v0.1.md#plans-are-snapshots
  */
 import { fail, Ok, type AppResult } from '../../shared/result'
-import { enabledPart } from '../design/disabled'
+import { disabledState, enabledPart } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { LibraryItemKind } from '../library/item'
 import {
@@ -94,8 +94,13 @@ export interface OperationStale {
   readonly operationId: string
   /** The design's version differs from the one the plan copied. */
   readonly changedInDesign: boolean
-  /** The design no longer has the operation. */
+  /** The design no longer has the operation (one switched off there is not removed). */
   readonly removedFromDesign: boolean
+  /**
+   * The design has it but switched off (DF106; itself or an item it builds on): a rebuild leaves
+   * it out, and enabling it in Design brings it back.
+   */
+  readonly disabledInDesign: boolean
   /** Edited in the plan (`plan.design.operation.update`). */
   readonly editedInPlan: boolean
   /**
@@ -160,20 +165,32 @@ export function planStale(
   }
   const takenById = byId(plan.design.taken.operations)
   const nowById = byId(current?.operations)
+  const record = Object.hasOwn(doc.parts, plan.design.partId)
+    ? doc.parts[plan.design.partId]
+    : undefined
+  const offInDesign = record === undefined ? undefined : disabledState(record).operations
   for (const op of plan.design.part.operations) {
     const taken = takenById.get(op.id)
     const now = nowById.get(op.id)
+    const off = now === undefined && offInDesign?.has(op.id) === true
     const s: OperationStale = {
       operationId: op.id,
       changedInDesign:
         now !== undefined &&
         (!sameValue(taken, now) || shapeChanged(now, plan.design.taken, current)),
-      removedFromDesign: now === undefined,
+      removedFromDesign: now === undefined && !off,
+      disabledInDesign: off,
       editedInPlan: !sameValue(taken, op),
       designToolChanged:
         kept.has(op.id) || (now !== undefined && !sameDesignToolField(field(taken), field(now))),
     }
-    if (s.changedInDesign || s.removedFromDesign || s.editedInPlan || s.designToolChanged)
+    if (
+      s.changedInDesign ||
+      s.removedFromDesign ||
+      s.disabledInDesign ||
+      s.editedInPlan ||
+      s.designToolChanged
+    )
       operations.push(s)
   }
   const libraryCopies: LibraryCopyStale[] = []
