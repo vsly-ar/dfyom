@@ -57,6 +57,7 @@ import {
   operationStep,
   planOperationName,
   planStockSize,
+  roughingBefore,
   rowStale,
   sameDirectionSetups,
   setupZeroWords,
@@ -536,6 +537,9 @@ function OperationRow({
   const state = toolpathState(data?.toolpaths[op.id], failure)
   const stale = rowStale(data?.stale, op.designOperationIds)
   const tool = snapshotName(plan, op.tool)
+  // DF122: after its roughing the operation cuts only the rest
+  const roughing = roughingBefore(plan, op)
+  const rest = roughing === undefined ? undefined : planOperationName(plan, roughing)
   const others = sameDirectionSetups(plan, setup)
   const menu: MenuEntry[] = [
     {
@@ -605,6 +609,12 @@ function OperationRow({
             </span>
             <span className={styles['opMeta']}>
               <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
+              {rest === undefined ? null : (
+                <span className={styles['restChip']} title={m.operations.restTip(rest)}>
+                  {m.operations.restChip}
+                  <span className={styles['srOnly']}>{`: ${m.operations.restTip(rest)}`}</span>
+                </span>
+              )}
             </span>
           </span>
           <span className={styles['opStatus']}>

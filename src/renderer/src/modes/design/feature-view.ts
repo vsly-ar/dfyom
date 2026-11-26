@@ -25,6 +25,12 @@ export interface OperationRowUnit {
   readonly kind: 'operation'
   readonly id: string
   readonly op: OperationDTO
+  /**
+   * DF122: the pocket's roughing pocket `<id>_roughing` (right before it in the design list): it
+   * nests under the pocket's row and moves with it, so the unit spans both.
+   * Doc: docs/modes/roughing.md#ui
+   */
+  readonly roughing?: OperationDTO | undefined
   readonly start: number
   readonly end: number
 }
@@ -46,6 +52,17 @@ export interface FeatureUnit {
   readonly end: number
 }
 
+/** DF122: `op` is the roughing pocket of the plain pocket `owner`. */
+function isRoughingOf(op: OperationDTO, owner: OperationDTO | undefined): owner is OperationDTO {
+  return (
+    op.kind === 'pocket' &&
+    op.roughing === true &&
+    owner !== undefined &&
+    op.roughingOf === owner.id &&
+    owner.featureId === undefined
+  )
+}
+
 /** Groups `[from, to)` of `ops` by owner: plain operations and owned blocks (no spans). */
 function blockUnits(
   ops: readonly OperationDTO[],
@@ -59,6 +76,13 @@ function blockUnits(
     const feature =
       op.featureId === undefined ? undefined : features.find((f) => f.id === op.featureId)
     if (feature === undefined) {
+      // DF122: a roughing pocket right before its owner joins the owner's unit
+      const owner = ops[i + 1]
+      if (isRoughingOf(op, owner) && i + 1 < to) {
+        out.push({ kind: 'operation', id: owner.id, op: owner, roughing: op, start: i, end: i + 2 })
+        i += 2
+        continue
+      }
       out.push({ kind: 'operation', id: op.id, op, start: i, end: i + 1 })
       i++
       continue
@@ -140,7 +164,8 @@ function spanUnitsIn(
 
 /** Every operation of a unit's span in design order: nested ones (recursively), then owned. */
 export function unitOperations(u: OperationUnit): OperationDTO[] {
-  return u.kind === 'operation' ? [u.op] : [...u.nested.flatMap(unitOperations), ...u.ops]
+  if (u.kind === 'operation') return u.roughing === undefined ? [u.op] : [u.roughing, u.op]
+  return [...u.nested.flatMap(unitOperations), ...u.ops]
 }
 
 /** The instance rows of a Clones feature (ui.md § Clones in the navigator), from its path. */
@@ -205,6 +230,16 @@ export function unitDropIndex(
   if (from < 0 || to < 0 || to >= units.length || to === from) return undefined
   const rest = units.filter((u) => u.id !== id)
   return rest.slice(0, to).reduce((n, u) => n + (u.end - u.start), 0)
+}
+
+/**
+ * The `toIndex` of `design.operation.move` that puts plain unit `unit`'s block at `at` (its new
+ * start, `unitDropIndex`). DF122: a pocket with a roughing pocket moves alone and its roughing
+ * follows it (the core's `syncRoughing`), so moving down counts the roughing pocket still before
+ * it. Doc: docs/modes/roughing.md#implementation-r2
+ */
+export function operationMoveIndex(unit: OperationRowUnit, at: number): number {
+  return unit.roughing !== undefined && at > unit.start ? at + 1 : at
 }
 
 /**
@@ -288,7 +323,11 @@ export const countsAsWarning = (w: DfmWarning): boolean =>
  * keep their own badges.
  */
 export function unitWarnings(unit: OperationUnit, warnings: readonly DfmWarning[]): DfmWarning[] {
-  const ids = new Set(unit.kind === 'feature' ? [unit.id, ...unit.ops.map((o) => o.id)] : [unit.id])
+  const ids = new Set(
+    unit.kind === 'feature'
+      ? [unit.id, ...unit.ops.map((o) => o.id)]
+      : [unit.id, ...(unit.roughing === undefined ? [] : [unit.roughing.id])],
+  )
   return warnings.filter((w) => ids.has(w.operation))
 }
 

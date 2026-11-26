@@ -139,6 +139,33 @@ export const planEditCount = (plan: PlanDTO): number => editedOperations(plan).s
 export const allPlanOperations = (plan: PlanDTO): PlanOperationDTO[] =>
   plan.setups.flatMap((s) => s.operations)
 
+/**
+ * DF122: the roughing plan operation `op` cuts only the rest of (roughing.md § Rest by the
+ * operation): the plan operation of its design pocket's roughing pocket (a plain pocket's
+ * `<id>_roughing`, a pattern pocket's `<feature>_roughing`) when it comes earlier in the
+ * machining order; undefined without one (off, or moved after its owner: the owner cuts all).
+ * Doc: docs/modes/roughing.md#implementation-r2
+ */
+export function roughingBefore(plan: PlanDTO, op: PlanOperationDTO): PlanOperationDTO | undefined {
+  const ops = plan.design.part.operations
+  const d = ops.find((o) => o.id === op.designOperationIds[0])
+  if (d?.kind !== 'pocket' || d.roughing === true) return undefined
+  const rough = ops.find(
+    (o) =>
+      o.kind === 'pocket' &&
+      o.roughing === true &&
+      (o.roughingOf === d.id ||
+        (o.roughingOf === undefined &&
+          d.featureRole === 'pocket' &&
+          o.featureRole === 'roughing' &&
+          o.featureId === d.featureId)),
+  )
+  if (rough === undefined) return undefined
+  const order = allPlanOperations(plan)
+  const at = order.findIndex((p) => p.designOperationIds.includes(rough.id))
+  return at >= 0 && at < order.indexOf(op) ? order[at] : undefined
+}
+
 /** The setup a plan operation belongs to. */
 export const setupOf = (plan: PlanDTO, planOperationId: string | null): SetupDTO | undefined =>
   plan.setups.find((s) => s.operations.some((o) => o.id === planOperationId))

@@ -1,8 +1,8 @@
 // The pattern inspector's layout (DF110 S4) against the fake bridge bound to a real design
 // runtime: the rarely used fields behind their group's More row (cell Rotation; Origin and Flip;
-// Boundary cells and Invert; Roughing), a More row shown open while a field in it holds a
-// non-default value, the Chamfer accordion closed unless on, with its summary; axe. The canvas
-// is stubbed.
+// Boundary cells and Invert), a More row shown open while a field in it holds a non-default
+// value, the Roughing (DF122 R2) and Chamfer accordions closed unless on, with their summaries;
+// axe. The canvas is stubbed.
 // Doc: docs/conventions/inspector-layout.md#s4-implementation-notes
 import { screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -92,11 +92,13 @@ describe('pattern inspector layout (DF110 S4)', () => {
       'More (Rotation)',
       'More (Origin, Flip every other cell)',
       'More (Boundary cells, Invert)',
-      'More (Roughing)',
     ])
       expect(more(name)).toHaveAttribute('aria-expanded', 'false')
     expect(within(insp()).getByLabelText('Origin U', { selector: 'input' })).not.toBeVisible()
-    // Chamfer: a closed accordion, its summary "Off"
+    // Roughing (DF122 R2) and Chamfer: closed accordions, their summary "Off"
+    const roughing = within(insp()).getByRole('button', { name: /^Roughing/ })
+    expect(roughing).toHaveAttribute('aria-expanded', 'false')
+    expect(roughing).toHaveTextContent('Off')
     const chamfer = within(insp()).getByRole('button', { name: /^Chamfer/ })
     expect(chamfer).toHaveAttribute('aria-expanded', 'false')
     expect(chamfer).toHaveTextContent('Off')

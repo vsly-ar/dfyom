@@ -111,7 +111,8 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(readout).toHaveText(grilleCells!)
 
   // ── DF108: Roughing adds the roughing tool's field; off removes it ─────────────────────────
-  // Roughing, Boundary cells and Invert sit behind More rows, Chamfer in an accordion (DF110 S4)
+  // Boundary cells and Invert sit behind More rows, Chamfer in an accordion (DF110 S4), Roughing
+  // in its own accordion (DF122 R2, roughing.md#implementation-r2)
   await revealField(inspector, 'Roughing')
   const roughing = inspector.getByRole('switch', { name: 'Roughing' })
   const roughingTool = inspector.locator('[data-feature-field="roughing.tool"]')
@@ -120,7 +121,9 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await roughing.click()
   await expect(roughing).toBeChecked()
   await expect(roughingTool).toBeVisible()
-  await expect(inspector.getByText(/A bigger tool clears the cells first/)).toBeVisible()
+  await expect(
+    inspector.getByLabel('Leave on walls', { exact: true }).and(inspector.locator('input')),
+  ).toBeVisible()
   await roughing.click()
   await expect(roughing).not.toBeChecked()
   await expect(roughingTool).toBeHidden()

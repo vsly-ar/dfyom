@@ -12,13 +12,16 @@ import {
   cloneInstances,
   featureFieldOf,
   featureReadout,
+  operationMoveIndex,
   operationUnits,
+  unitOperations,
   rolledUpCount,
   roleLabel,
   unitDropIndex,
   unitMoveIndex,
   warningFeatureField,
   type FeatureUnit,
+  type OperationRowUnit,
 } from './feature-view'
 import { designPart } from './model'
 
@@ -58,6 +61,48 @@ const warning = (operation: string, code = 'dfm.x', severity: 'warning' | 'info'
   ({ code, severity, message: '', operation, params: {} }) as unknown as DfmWarning
 
 describe('feature view', () => {
+  it('DF122: a pocket and its roughing pocket are one unit; moves land as the core moves them', async () => {
+    const pocket = {
+      shape: { kind: 'rectangle', center: ['50', '30'], length: '40', width: '30' },
+      depth: '5',
+    }
+    let dispatcher: Dispatcher | undefined
+    let id = ''
+    const build = async (d: Dispatcher, partId: string) => {
+      dispatcher = d
+      id = partId
+      await ok(d, 'design.drilling.add', { partId, center: ['10', '10'], diameter: '5' })
+      await ok(d, 'design.pocket.add', { partId, ...pocket, roughing: true })
+      await ok(d, 'design.drilling.add', { partId, center: ['90', '10'], diameter: '5' })
+    }
+    const p = await part(build)
+    const units = operationUnits(p)
+    expect(units.map((u) => u.id)).toEqual(['drill1', 'pocket1', 'drill2'])
+    const owner = units[1] as OperationRowUnit
+    expect(owner).toMatchObject({ start: 1, end: 3 })
+    expect(owner.roughing?.id).toBe('pocket1_roughing')
+    expect(unitOperations(owner).map((o) => o.id)).toEqual(['pocket1_roughing', 'pocket1'])
+    expect(rolledUpCount(owner, [warning('pocket1_roughing'), warning('pocket1')])).toBe(2)
+    // down past drill2, then up to the top: the core's syncRoughing keeps the pair together
+    const ids = () => Object.values(dispatcher!.doc.parts)[0]!.operations.map((o) => o.id)
+    const move = async (to: number) => {
+      const now = operationUnits(designPart(dispatcher!.doc)!)
+      const u = now.find((x) => x.id === 'pocket1') as OperationRowUnit
+      const at = unitDropIndex(now, 'pocket1', to)!
+      await ok(dispatcher!, 'design.operation.move', {
+        partId: id,
+        operationId: 'pocket1',
+        toIndex: operationMoveIndex(u, at),
+      })
+    }
+    await move(2)
+    expect(ids()).toEqual(['drill1', 'drill2', 'pocket1_roughing', 'pocket1'])
+    await move(0)
+    expect(ids()).toEqual(['pocket1_roughing', 'pocket1', 'drill1', 'drill2'])
+    await move(1)
+    expect(ids()).toEqual(['drill1', 'pocket1_roughing', 'pocket1', 'drill2'])
+  })
+
   it('counts errors and hard warnings, never notes or what Apply may change (ui.md § Severity)', () => {
     // the status bar and the viewport summary count with it: an engraving's
     // dfm.toolNotInLibrary (info) is listed, not counted (engraving e2e)

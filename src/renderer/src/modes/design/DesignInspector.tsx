@@ -32,6 +32,7 @@ import {
   StatusChip,
   WarningList,
   type WarningView,
+  type FieldMessage,
   StepScaleProvider,
   stockStepScale,
   InspectorGroup,
@@ -52,6 +53,8 @@ import { ReferencePanel } from './ReferencePanel'
 import { useOpenShape } from './useOpenShape'
 import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
 import { ToolField } from './ToolField'
+import { RoughingGroup, RoughingInspector, roughingOwnerOf } from './RoughingGroup'
+import { pocketRoughing, roughingOperationOf } from './roughing-view'
 import {
   defaultUnit,
   pendingApply,
@@ -206,6 +209,19 @@ function DesignInspectorBody({ part }: { part: DesignPart | undefined }): React.
       <PieceOperationNote key={op.id} part={part} operationId={op.id} />
     )
   if (op === undefined) return <PartInspector part={part} warnings={warnings} />
+  // DF122: a roughing pocket's short inspector (its own or a pattern's; roughing.md § UI)
+  const rough = roughingOwnerOf(part, op)
+  if (rough !== undefined)
+    return (
+      <RoughingInspector
+        key={op.id}
+        part={part}
+        op={op}
+        owner={rough.owner}
+        margins={rough.margins}
+        warnings={warnings}
+      />
+    )
   const owner = ownerFeature(part.dto, op)
   return owner !== undefined ? (
     <OwnedOperationInspector key={op.id} part={part} op={op} feature={owner} warnings={warnings} />
@@ -597,7 +613,32 @@ function OperationInspector({
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />
-        <OperationFields ctx={ctx} tool={<ToolField part={part} op={op} warnings={opWarnings} />} />
+        <OperationFields
+          ctx={ctx}
+          tool={<ToolField part={part} op={op} warnings={opWarnings} />}
+          roughing={
+            op.kind === 'pocket' ? (
+              <RoughingGroup
+                part={part}
+                margins={pocketRoughing(op)}
+                roughingOp={roughingOperationOf(part, op)}
+                warnings={warnings.warnings}
+                messagesAt={(path) =>
+                  errors
+                    .filter((e) => e.path === path)
+                    .map((e, i): FieldMessage => ({
+                      id: `error-${i}`,
+                      severity: 'error',
+                      text: e.text,
+                    }))
+                }
+                send={(roughing, path, gesture) => void send({ roughing }, path, gesture)}
+                rememberKey="pocket"
+                info={designMessages.roughing.groupInfo}
+              />
+            ) : undefined
+          }
+        />
         {unplaced.length > 0 ? (
           <WarningList
             labels={warningLabels}

@@ -283,6 +283,22 @@ export function useDesignScene(): SceneProps {
   const selectedDto = part?.dto.operations.find((o) => o.id === shown)
   const tabs = useTabMarkers(part, selectedDto)
   const clones = useClonesScene(part, shown, warnings)
+  // DF122 R2: a pocket and its roughing pocket cut one region, so either selected draws both (the
+  // roughing pocket has no faces of its own; roughing.md § UI, "Design viewport: nothing new")
+  const roughingAlso = useMemo(() => {
+    const op = part?.dto.operations.find((o) => o.id === shown)
+    if (op?.kind !== 'pocket') return null
+    const owner =
+      op.roughing === true
+        ? (op.roughingOf ?? (op.featureId === undefined ? undefined : `${op.featureId}_pocket`))
+        : op.id
+    const rough = part?.dto.operations.find(
+      (o) =>
+        o.kind === 'pocket' && o.roughing === true && (o.id === op.id || o.roughingOf === op.id),
+    )
+    if (owner === undefined || rough === undefined) return null
+    return new Set([owner, rough.id, ...(clones.selectedAlso ?? [])])
+  }, [part, shown, clones.selectedAlso])
   // the exploded split preview while the part inspector (its Split section) shows (4a polish)
   const clonesDraft = useUi((s) => s.clonesDraft)
   const splitScene = useSplitScene(
@@ -358,7 +374,7 @@ export function useDesignScene(): SceneProps {
     construction,
     highlight,
     clonePath: clones.clonePath,
-    selectedAlso: clones.selectedAlso,
+    selectedAlso: roughingAlso ?? clones.selectedAlso,
     outlineOnly,
     announcement,
     ghosts,
