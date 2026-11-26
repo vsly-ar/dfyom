@@ -124,6 +124,13 @@ export interface UiState {
    */
   readonly splitFocus: SplitFocus | null
   setSplitFocus(focus: SplitFocus | null): void
+  /**
+   * A surface the inspector points at outside the viewport: the `On` list's highlighted option
+   * (DF118 follow-up). The viewport highlights it as a pointer hover does, a construction surface
+   * by its dashed outline. View state only.
+   */
+  readonly surfaceHighlight: string | null
+  setSurfaceHighlight(surface: string | null): void
   /** DF117: refused field texts per `<partId>:<operationId>` (never in the document). */
   readonly fieldDrafts: Readonly<Record<string, FieldDrafts>>
   /** Sets (null: drops) one operation's refused field texts. */
@@ -365,6 +372,9 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
           ? {}
           : { splitFocus },
       ),
+    surfaceHighlight: null,
+    setSurfaceHighlight: (surfaceHighlight) =>
+      set((s) => (s.surfaceHighlight === surfaceHighlight ? {} : { surfaceHighlight })),
     fieldDrafts: {},
     setFieldDrafts: (key, drafts) =>
       set((s) => {

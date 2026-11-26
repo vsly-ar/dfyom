@@ -2,7 +2,8 @@
 // (core plan fixture): the "Part (plan copy)" group from the shared Design field components,
 // "Edited in plan" and "Revert to design", read-only in draft with the hint, the rebuild that
 // discards plan edits confirmed with their count, and the snapshot scene drawing the plan's own
-// part (its evaluation pushed per plan). The viewport canvas is stubbed.
+// part (its evaluation pushed per plan). The viewport canvas is stubbed. DF118 follow-up: a
+// construction surface of the plan's part shows the design inspector's note in the plan copy.
 // Doc: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
 // docs/conventions/ui.md#design-and-plan-controls-v02
 import { act, render, screen, waitFor, within } from '@testing-library/react'
@@ -58,7 +59,7 @@ async function renderPlan(setup?: (s: PlanSetup, planId: string) => Promise<void
     await openInspectorTab(r.user, inspector(), 'Design')
     return within(inspector()).getByRole('region', { name: 'Part (plan copy)' })
   }
-  return { ...r, s, planId, bridge, nav, inspector, callsOf, facingCopy }
+  return { ...r, s, planId, bridge, nav, inspector, callsOf, rows, facingCopy }
 }
 
 describe('Plan-only edits', () => {
@@ -131,6 +132,52 @@ describe('Plan-only edits', () => {
       expect(
         within(t.nav()).queryByText('The design changed since this plan was made.'),
       ).toBeNull(),
+    )
+  })
+})
+
+describe('Construction surfaces in the plan copy (DF118 follow-up)', () => {
+  it("shows the On note from the plan part's own evaluation", async () => {
+    const t = await renderPlan()
+    const pocket = t.s.part().operations.find((o) => o.kind === 'pocket')!
+    const drilling = t.s.part().operations.find((o) => o.kind === 'drilling')!
+    // the plan part's evaluation: the pocket's face (the facing floor) cut away by a drilling
+    act(() =>
+      t.bridge.emitEvaluation({
+        key: 'p1',
+        partId: t.s.partId,
+        planId: t.planId,
+        status: 'done',
+        inputHash: 'p',
+        mesh: {
+          positions: new Float32Array(9),
+          indices: new Uint32Array([0, 1, 2]),
+          triangleSurface: new Uint32Array([0]),
+          surfaces: ['stock.top'],
+          construction: [
+            {
+              surface: pocket.on,
+              consumedBy: [drilling.id],
+              referencedBy: [{ operationId: pocket.id, param: 'on' }],
+              patch: { direction: '+z', z: -0.5, loops: [] },
+            },
+          ],
+        },
+      }),
+    )
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    const row = [...t.rows()].find((b) => b.textContent?.includes(pocket.name))!
+    await t.user.click(row)
+    await within(t.inspector()).findByRole('heading', { name: pocket.name })
+    await openInspectorTab(t.user, t.inspector(), 'Design')
+    const group = within(t.inspector()).getByRole('region', { name: 'Part (plan copy)' })
+    expect(
+      await within(group).findByText(
+        `Cut away by ${drilling.name} · still measured from its level`,
+      ),
+    ).toBeVisible()
+    expect(within(group).getByRole('combobox', { name: /^On/ })).toHaveAccessibleDescription(
+      /A construction surface: later cuts remove it/,
     )
   })
 })
