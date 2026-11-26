@@ -40,6 +40,11 @@
   width: min(720px, calc(100% - 32px));
 }
 
+/* a focused or scrolled-to item stops above the sticky footer, never under it (P11: the presets' last row) */
+.content:has(> .footer) {
+  scroll-padding-bottom: 64px;
+}
+
 .content:focus-visible {
   outline: none;
 }

@@ -70,6 +70,17 @@ test('engraving: add an engraved pattern, pick a preset, see it in Plan (E3)', a
   await expect(dialog).toBeHidden()
   await expect(inspector.locator('[data-engraving-preset]')).toHaveText('Sunburst')
   await expect(inspector.locator('[data-engraving-readout]')).toContainText('38 lines')
+  // the e2e library has no V-bit: the Line's 60° chamfer mill is a note (dfm.toolNotInLibrary,
+  // info), listed in the status bar but not counted as a warning (ui.md § Severity)
+  const status = page.getByRole('contentinfo', { name: 'Status bar' })
+  await status.getByRole('button', { name: /warning/ }).click()
+  const findings = page.getByRole('dialog', { name: 'Warnings' })
+  await expect(
+    findings.getByText(/^Plan needs a 60° chamfer mill .*: add one to the library\.$/),
+  ).toBeVisible()
+  await expect(status.getByRole('button', { name: '0 warnings' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(findings).toBeHidden()
   // the margin is an ordinary field: one update
   await setField(inspector, 'Margin', '5')
   await expect(

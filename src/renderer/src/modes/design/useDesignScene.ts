@@ -37,6 +37,7 @@ import { useTabMarkers } from './useTabMarkers'
 import { useReferenceCompare } from './useReferenceCompare'
 import { deviationView, worstRegion } from './reference-compare-state'
 import { lengthSource } from './reference-view'
+import { countsAsWarning } from './feature-view'
 import { useClonesScene } from './useClonesScene'
 import { useSplitScene } from './useSplitScene'
 import { instanceId, instanceOfOperation } from './clones-view'
@@ -306,7 +307,7 @@ export function useDesignScene(): SceneProps {
           summary: [
             designMessages.viewportSummary({
               operations: part.dto.operations.length,
-              warnings: warnings.length,
+              warnings: warnings.filter(countsAsWarning).length,
               status,
             }),
             overlays?.describe,

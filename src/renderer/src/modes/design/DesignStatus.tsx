@@ -9,7 +9,7 @@ import { Icon, Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
 import { warningLabels, warningView } from './DesignInspector'
 import { useFixIn } from './FeatureInspector'
-import { pendingApply } from './model'
+import { countsAsWarning } from './feature-view'
 import styles from './Design.module.css'
 import { failingOperation } from './model'
 import {
@@ -49,8 +49,9 @@ export function DesignStatus(): React.JSX.Element | null {
   const failedAt =
     status === 'failed' && evaluation?.error ? failingOperation(evaluation.error, ids) : undefined
   const failedName = part.dto.operations.find((o) => o.id === failedAt)?.name
-  // warnings Apply may change are not counted until applied (apply.md#stale-derived-results)
-  const n = warnings.warnings.filter((w) => !pendingApply(w)).length
+  // errors and hard warnings only: notes (core `info`) are listed, never counted (ui.md § Warnings
+  // and DFM, Severity); warnings Apply may change wait for it (apply.md#stale-derived-results)
+  const n = warnings.warnings.filter(countsAsWarning).length
 
   return (
     <>
