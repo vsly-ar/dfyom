@@ -206,7 +206,20 @@ describe('holeSection', () => {
     ])
     const travel = measure(s.primitives, 'slotLength')!
     expect(travel.value).toBe('10 mm')
-    expect(travel.paths[0]!.map(([x]) => x)).toEqual([-5, 5])
+    // R15: the dimension line above the face (and the bounds' top), extension lines up from the
+    // end centres past it; the chip above the line, centred
+    const [left, rightExt, line] = travel.paths
+    expect(line!.map(([x]) => x)).toEqual([-5, 5])
+    const dimY = line![0]![1]
+    expect(dimY).toBeLessThan(0)
+    expect(line![1]![1]).toBe(dimY)
+    expect(s.bounds.minY).toBeLessThan(dimY)
+    expect(left!.map(([x]) => x)).toEqual([-5, -5])
+    expect(rightExt!.map(([x]) => x)).toEqual([5, 5])
+    expect(left![0]![1]).toBeGreaterThan(0)
+    expect(left![1]![1]).toBeLessThan(dimY)
+    expect(travel.chip).toEqual([0, dimY])
+    expect(travel.side).toBe('above')
     expect(measure(round.primitives, 'slotLength')).toBeUndefined()
     // the screw stays at mid-travel
     expect(lines(s.primitives, 'silhouette')).toEqual(lines(round.primitives, 'silhouette'))

@@ -221,6 +221,8 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   // ── material and outline ──
   const top = Math.min(0, headTop ?? 0)
   const height = bottomY - top
+  /** A slot's travel dimension line, above the face and the head (R15). */
+  const slotDimY = top - height * 0.16
   const W = Math.max(outer * 1.7, outer + height * 0.9)
   const mirror = (pts: readonly SketchPoint[]) => pts.map(([x, y]): SketchPoint => [0 - x || 0, y])
   const primitives: SketchPrimitive[] = []
@@ -413,19 +415,29 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
         'left',
       )
   }
-  // the travel: between the end centres, in the bore below the mouth
+  // the travel: between the end centres, dimensioned above the drawing with extension lines up
+  // from the end centres (design review R15: on the bore's centre line the label hid the hole)
   if (o > 0) {
     const yt = boreTop + (boreEnd - boreTop) * 0.25
+    const over = height * 0.04
     measure(
       'slotLength',
       [
         [
           [-o, yt],
+          [-o, slotDimY - over],
+        ],
+        [
           [o, yt],
+          [o, slotDimY - over],
+        ],
+        [
+          [-o, slotDimY],
+          [o, slotDimY],
         ],
       ],
       L(2 * o),
-      [0, yt],
+      [0, slotDimY],
       'above',
     )
   }
@@ -444,7 +456,7 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     )
 
   return {
-    bounds: { minX: -W, minY: top, maxX: W, maxY: bottomY },
+    bounds: { minX: -W, minY: o > 0 ? slotDimY - height * 0.04 : top, maxX: W, maxY: bottomY },
     primitives,
     label: sectionLabel(values, sink, L, terraces),
   }
