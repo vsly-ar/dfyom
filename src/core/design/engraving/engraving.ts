@@ -27,7 +27,10 @@ import { Rational } from '../../quantity/rational'
 import { derivedLength } from '../hole'
 import type { ExpandedOperation, ExpansionContext, FeatureBase, FeatureKindSpec } from '../feature'
 import { FeatureDtoSchema, type FeatureDTO } from '../feature.dto'
-import type { Anchor, LineDepth, Operation, Point } from '../operation'
+import { lineDeepest, type Anchor, type LineDepth, type Operation, type Point } from '../operation'
+import { grooveWidth } from '../../geometry/line'
+import type { ProjectDoc } from '../../project/document'
+import { lineCutter } from '../tool-choice'
 import {
   faceRect,
   type PatternAlternate,
@@ -609,14 +612,29 @@ function engravingWarnings(
   return out
 }
 
+/**
+ * Results of `design.engraving.add/update` (engraved-patterns.md § Agent API): lines, length,
+ * size, tiles, crossings, and `maxWidth`, the owned Line's groove at its deepest (the read-out's
+ * groove width, `grooveWidth`).
+ */
 function engravingResult(
   e: Engraving,
   shapes: readonly ShapeDTO[],
   port: Region2dPort | undefined,
+  owned: {
+    readonly operations: readonly Operation[]
+    readonly snapshots?: ProjectDoc['snapshots']
+  },
 ): Record<string, number> {
   const r = engravingResolved(e.id, shapes, port)
   if (r === undefined) return {}
+  const line = owned.operations.find((o) => o.id === `${e.id}_line`)
+  const maxWidth =
+    line?.kind === 'line'
+      ? grooveWidth(lineCutter(line, owned.snapshots), lineDeepest(line.depth))
+      : undefined
   return {
+    ...(maxWidth === undefined ? {} : { maxWidth: Math.round(maxWidth * 100) / 100 }),
     lines: r.facts.lines,
     length: Math.round(r.facts.length * 10) / 10,
     size: Math.round(r.facts.size * 100) / 100,

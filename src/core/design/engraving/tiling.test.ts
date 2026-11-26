@@ -310,3 +310,69 @@ describe('tiles on a lattice (E4)', () => {
     )
   })
 })
+
+// Spec: docs/modes/engraved-patterns.md#dryrun-and-maxwidth
+describe('dryRun and maxWidth in results', () => {
+  const state = (s: DesignSetup) => ({
+    doc: s.d.doc,
+    revision: s.d.revision,
+    undoable: s.d.history.undoable,
+  })
+
+  it('a dry run returns what the real call returns and changes nothing', async () => {
+    const s = await setup(LID)
+    const before = state(s)
+    const dry = await add(s, { dryRun: true })
+    expect(state(s)).toEqual(before)
+    expect(s.d.doc).toBe(before.doc)
+    expect(s.part().features).toBeUndefined()
+    const real = await add(s)
+    expect(dry).toEqual(real)
+    expect(real.lines).toBeGreaterThan(0)
+    // the default 60° V-bit at the deepest 1 mm: the read-out's "grooves ≤ 1.15 mm wide"
+    expect((real as Result & { maxWidth?: number }).maxWidth).toBe(1.15)
+
+    const changes = {
+      motif: { preset: 'scales' },
+      layout: { lattice: 'staggered', spacing: { gap: '1' } },
+      depth: { min: '0.3', max: '2' },
+    }
+    const after = state(s)
+    const dryUpdate = await update(s, { ...changes, dryRun: true })
+    expect(state(s)).toEqual(after)
+    expect(s.d.doc).toBe(after.doc)
+    const realUpdate = await update(s, changes)
+    expect(dryUpdate).toEqual(realUpdate)
+    expect((realUpdate as Result & { maxWidth?: number }).maxWidth).toBe(2.31)
+    expect(realUpdate).not.toEqual(real)
+  })
+
+  it('a dry run is refused as the real call is', async () => {
+    const s = await setup(LID)
+    await add(s)
+    const before = state(s)
+    for (const [args, code] of [
+      [{ layout: { lattice: 'square', spacing: { gap: '-1' } } }, 'model.invariant'],
+      [{ rotation: 'radial' }, 'model.invariant'],
+      [{ featureId: 'engraving9' }, 'input.malformed'],
+    ] as const) {
+      const call = { partId: s.partId, featureId: 'engraving1', ...args }
+      const dry = await s.fail('design.engraving.update', { ...call, dryRun: true }, code)
+      expect(state(s)).toEqual(before)
+      const real = await s.fail('design.engraving.update', call, code)
+      expect(dry.toWireData()).toEqual(real.toWireData())
+    }
+    const dryAdd = await s.fail(
+      'design.engraving.add',
+      { partId: s.partId, size: '0.05', dryRun: true },
+      'model.invariant',
+    )
+    const realAdd = await s.fail(
+      'design.engraving.add',
+      { partId: s.partId, size: '0.05' },
+      'model.invariant',
+    )
+    expect(dryAdd.issues).toEqual(realAdd.issues)
+    expect(state(s)).toEqual(before)
+  })
+})

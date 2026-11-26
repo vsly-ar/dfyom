@@ -77,6 +77,8 @@ const spec: FeatureCommandSpec<typeof params, Engraving> = {
   ...engravingSpec,
   params,
   required: [],
+  // `dryRun: true` returns the result without changing the part (engraved-patterns.md § Agent API)
+  dryRun: true,
   addParams: {
     layout: z.unknown().describe(LAYOUT_SKETCH),
     boundary: z.unknown().describe('As design.pattern.add boundary'),
