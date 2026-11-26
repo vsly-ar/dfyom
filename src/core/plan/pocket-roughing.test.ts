@@ -148,7 +148,7 @@ describe('pocket roughing DF122 R1 exit', () => {
     await expect(rough.lines.join('\n') + '\n').toMatchFileSnapshot('__golden__/pocket-roughing.nc')
     // measured (docs/modes/roughing.md#implementation-r3): the Ø 3 alone 17,345 mm in 575 s;
     // the Ø 8 2,571 mm in 38 s, then the Ø 3 1,704 mm in 60 s: 98 s (R1's ring skipping: 126 s)
-  })
+  }, 60_000) // plans and simulates two pockets; slow under the check-under-load criterion
 
   it('margins: the roughing strategy takes no finishing keys; a thin wall warns; a floor margin', async () => {
     const r = await lid({ wall: '0.1', floor: '1' })
@@ -188,5 +188,5 @@ describe('pocket roughing DF122 R1 exit', () => {
     )
     expect(cov.gouge).toBe(0)
     expect(cov.leftover).toBeLessThan(0.05)
-  })
+  }, 60_000) // plans and simulates two pockets; slow under the check-under-load criterion
 })
