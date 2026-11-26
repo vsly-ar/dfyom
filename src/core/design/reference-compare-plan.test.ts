@@ -29,7 +29,7 @@ import {
   type PlanCompareResult,
 } from './reference-compare-plan'
 import { compareSetup, SOURCES, type CompareSetup } from './reference-compare.testing'
-import { enclosureStl } from './stl.testing'
+import { asciiStl, boxSoup, enclosureStl } from './stl.testing'
 
 // ── synthetic maps: a 20 × 20 × 10 stock, 0.5 mm cells, a block on 2..18 with a pocket ────────
 
@@ -138,6 +138,30 @@ describe('comparePlanMaps', () => {
       [13.5, 13.5],
     ])
     expect(r.unexplained).toBe(0)
+  })
+
+  it('touching over-cuts of different operations are separate regions, each its own worst (R6)', () => {
+    const cut = cutMap()
+    // toolpath 1 faces 0.5 mm too deep everywhere on the top; toolpath 2 (inside the pocket,
+    // touching the facing's over-cut through the pocket's floor edge) cuts 2.5 mm too deep
+    for (let c = 0; c < N * N; c++) {
+      if (cut.h[c] === 0) cut.h[c] = -0.5
+      else if (cut.h[c] === -3) {
+        cut.h[c] = -5.5
+        cut.by[c] = 2
+      }
+    }
+    // a strip of the pocket operation joining the floor to the top (no reference step there)
+    for (let v = 3; v < 5; v += CELL) cut.h[at(10, v)] = -2.5
+    for (let v = 3; v < 5; v += CELL) cut.by[at(10, v)] = 2
+    const owners = [...OWNERS, { operationId: 'pop2', toolRadius: 3, tabs: false }]
+    const r = compare(cut, { owners })
+    const over = r.regions.filter((g) => g.sign === 'overcut')
+    expect(over.map((g) => [g.operationId, g.maxDev]).sort()).toEqual([
+      ['pop1', 0.5],
+      ['pop2', 2.5],
+      ['pop2', 2.5],
+    ])
   })
 
   it('toolRadius: material left in a pocket corner within the tool radius of the walls', () => {
@@ -551,4 +575,63 @@ describe('design.reference.compare { source: plan } (headless, the enclosure)', 
     const otherPlan = expectErrCode(await s.d.job(jobId).unwrap().result, 'input.malformed')
     expect(otherPlan.issues[0]).toMatchObject({ rule: 'otherPart' })
   })
+})
+
+// ── U4's block (e2e/deviation.e2e.ts) headless: a facing and two pockets against the stock box ──
+
+describe('design.reference.compare { source: plan } (headless, U4 block)', () => {
+  it(
+    'the facing and each pocket are their own over-cut regions with their own values (R6)',
+    { timeout: 60_000 },
+    async () => {
+      const BOX = '/models/u4-block.stl'
+      SOURCES[BOX] ??= asciiStl(boxSoup(100, 60, 20), 'block')
+      const s = await compareSetup(
+        {
+          name: 'Block',
+          shape: 'block',
+          length: '100',
+          width: '60',
+          thickness: '20',
+          material: { name: '6061-T6', class: 'aluminum' },
+        },
+        undefined,
+        { toolpaths: createToolpathCache() },
+      )
+      const partId = s.partId
+      await s.run('design.facing.add', { partId, on: 'stock.top', depth: '0.5' })
+      for (const x of ['25', '75'])
+        await s.run('design.pocket.add', {
+          partId,
+          on: 'facing1.floor',
+          shape: { kind: 'circle', center: [x, '30'], diameter: '16' },
+          depth: '2',
+        })
+      await s.run('design.reference.import', { partId, path: BOX, sourceUnit: 'mm' })
+      const add = async (kind: string, values: object) =>
+        ((await s.run(`library.${kind}.add`, { values: libraryInput(values) })) as { id: string })
+          .id
+      const tool = await add('tool', flat6())
+      const { kind: _, ...m } = machineValues()
+      const machine = await add('machine', m)
+      await s.run('project.apply', {})
+      const { planId } = (await s.run('plan.create', {
+        partId,
+        machineLibraryItemId: machine,
+      })) as { planId: string }
+      const plan = s.d.doc.plans[planId]!
+      const ops = plan.setups.flatMap((x) => x.operations)
+      for (const op of ops)
+        await s.run('plan.tool.assign', { planId, planOperationId: op.id, toolLibraryItemId: tool })
+      const r = expectOk(await comparePlan(s, { planId })) as PlanCompareResult
+      const opOf = (design: string) => ops.find((o) => o.designOperationIds[0] === design)!.id
+      const over = r.regions.filter((g) => g.sign === 'overcut')
+      expect(over.map((g) => [g.operationId, g.maxDev])).toEqual([
+        [opOf('facing1'), 0.5],
+        [opOf('pocket1'), 2.5],
+        [opOf('pocket2'), 2.5],
+      ])
+      expect(r.regions).toHaveLength(3)
+    },
+  )
 })
