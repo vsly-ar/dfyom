@@ -64,6 +64,7 @@ import {
   lineMinDepth,
   vBitEdgeHeight,
 } from './line'
+import { LINE_MERGE_WALL, lineMerges } from './line-merge'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -245,10 +246,33 @@ export const LINE_SHALLOW = 0.05
 /**
  * A Line's findings (engraved-patterns.md § DFM): `dfm.lineTooDeep` when its deepest point is
  * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2), an end
- * mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm.
+ * mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm,
+ * `dfm.lineMerge` (E4) where two grooves leave a wall under 0.3 mm (markers at up to 10 places).
  */
 function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[] {
   const out: DfmWarning[] = []
+  const merges = lineMerges(op)
+  if (merges.length > 0) {
+    const thin = merges[0]!
+    const wall = Math.round(thin.wall * 1000) / 1000
+    out.push(
+      warning(
+        'dfm.lineMerge',
+        op,
+        'depth',
+        wall > 0
+          ? `two grooves leave a ${mm(wall)} wall between them (under ${mm(LINE_MERGE_WALL)}): it breaks away`
+          : `two grooves overlap: the wall between them is gone`,
+        {
+          wall,
+          limit: LINE_MERGE_WALL,
+          count: merges.length,
+          at: [thin.at[0], thin.at[1]],
+          points: merges.flatMap((m) => [m.at[0], m.at[1]]),
+        },
+      ),
+    )
+  }
   const deepest = lineMaxDepth(op)
   const cuts = op.cutter.kind === 'vBit' ? vBitEdgeHeight(op.cutter) : own?.tool.fluteLength
   if (cuts !== undefined && deepest > cuts + EPSILON) {

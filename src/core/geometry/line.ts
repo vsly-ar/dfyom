@@ -77,7 +77,7 @@ export function profileAt(p: LineProfile, s: number): number {
 export const profileMax = (p: LineProfile): number => Math.max(...p.d)
 
 /** The profile between `a` and `b` (a < b), from s = 0. */
-function sliceProfile(p: LineProfile, a: number, b: number): { s: number[]; d: number[] } {
+export function sliceProfile(p: LineProfile, a: number, b: number): { s: number[]; d: number[] } {
   const s = [0]
   const d = [profileAt(p, a)]
   p.s.forEach((x, k) => {
@@ -242,10 +242,12 @@ function rawLines(op: LineChainsInput) {
 /**
  * Open lines whose ends meet (within `COINCIDENT_TOLERANCE`, either orientation) chained into
  * one, greedily in order (engraved-patterns.md § SVG encoding 5): their profiles joined, a level
- * change at a junction a step (blended afterwards). Loops are kept as they are.
+ * change at a junction a step (blended afterwards). Loops are kept as they are. The ends are
+ * bucketed on a grid (E4: thousands of tile lines), and of the candidates near the chain's ends
+ * the earliest in order is taken, so the result is the plain greedy scan's.
  */
-function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
-  const left = lines.filter((l) => !l.closed)
+export function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
+  const open = lines.filter((l) => !l.closed)
   const out: ResolvedLine[] = []
   const rev = (l: ResolvedLine): ResolvedLine => ({
     elements: [...l.elements].reverse().map(reverseElement),
@@ -262,14 +264,38 @@ function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
       d: [...a.profile.d, ...b.profile.d],
     },
   })
-  while (left.length > 0) {
-    let chain = left.shift()!
+  // ends bucketed by a grid of twice the tolerance: a point's neighbours lie in the 3 × 3 cells
+  const G = COINCIDENT_TOLERANCE * 2
+  const grid = new Map<string, number[]>()
+  const keyOf = (p: Vec2, dx = 0, dy = 0) =>
+    `${Math.floor(p[0] / G) + dx},${Math.floor(p[1] / G) + dy}`
+  open.forEach((l, k) => {
+    for (const p of [l.elements[0]!.a, l.elements.at(-1)!.b]) {
+      const key = keyOf(p)
+      const list = grid.get(key)
+      if (list === undefined) grid.set(key, [k])
+      else if (list.at(-1) !== k) list.push(k)
+    }
+  })
+  const used = open.map(() => false)
+  const candidates = (p: Vec2, into: Set<number>) => {
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (const k of grid.get(keyOf(p, dx, dy)) ?? []) if (!used[k]) into.add(k)
+  }
+  for (let first = 0; first < open.length; first++) {
+    if (used[first]) continue
+    used[first] = true
+    let chain = open[first]!
     for (let grew = true; grew;) {
       grew = false
-      for (let k = 0; k < left.length; k++) {
-        const c = left[k]!
-        const end = chain.elements.at(-1)!.b
-        const start = chain.elements[0]!.a
+      const start = chain.elements[0]!.a
+      const end = chain.elements.at(-1)!.b
+      const close = new Set<number>()
+      candidates(end, close)
+      candidates(start, close)
+      for (const k of [...close].sort((x, y) => x - y)) {
+        const c = open[k]!
         const cs = c.elements[0]!.a
         const ce = c.elements.at(-1)!.b
         if (near(end, cs)) chain = join(chain, c)
@@ -277,7 +303,7 @@ function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
         else if (near(start, ce)) chain = join(c, chain)
         else if (near(start, cs)) chain = join(rev(c), chain)
         else continue
-        left.splice(k, 1)
+        used[k] = true
         grew = true
         break
       }
@@ -297,7 +323,39 @@ function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
 export function lineChains(op: LineChainsInput): LineChains {
   const hit = chainsMemo.get(op)
   if (hit !== undefined) return hit
-  const lines = rawLines(op)
+  const { lines: out, coincident } = dropCoincident(rawLines(op))
+  const blend = op.blend ?? DEFAULT_LINE_BLEND
+  const lines2 = isLevelDepth(op.depth)
+    ? chainOpen(out).map((l) => ({ ...l, profile: blendSteps(l.profile, l.length, blend) }))
+    : out
+  const result = { lines: lines2, coincident }
+  chainsMemo.set(op, result)
+  return result
+}
+
+/** A line before coincident removal: its elements, whether a loop, and its profile. */
+export interface RawLine {
+  readonly elements: readonly Element[]
+  readonly closed: boolean
+  readonly profile: LineProfile
+}
+
+/**
+ * Coincident elements removed from lines (the deeper kept; equal: the later dropped), which
+ * splits a line into open runs with their sliced profiles; a line that loses nothing is kept as
+ * it is. Shared with the engraved pattern's tiles (engraving/resolve.ts, E4: there the profile
+ * is the level, so the higher level stays).
+ */
+export function dropCoincident(input: readonly RawLine[]): LineChains {
+  const lines = input.map((l) => {
+    const starts: number[] = []
+    let L = 0
+    for (const e of l.elements) {
+      starts.push(L)
+      L += elementLength(e)
+    }
+    return { elements: l.elements, closed: l.closed, starts, length: L, profile: l.profile }
+  })
   // coincident elements: a grid of their middles, then ends and middle compared
   const GRID = 0.05
   const cells = new Map<string, { li: number; ei: number }[]>()
@@ -377,13 +435,7 @@ export function lineChains(op: LineChainsInput): LineChains {
     }
     flush()
   })
-  const blend = op.blend ?? DEFAULT_LINE_BLEND
-  const lines2 = isLevelDepth(op.depth)
-    ? chainOpen(out).map((l) => ({ ...l, profile: blendSteps(l.profile, l.length, blend) }))
-    : out
-  const result = { lines: lines2, coincident }
-  chainsMemo.set(op, result)
-  return result
+  return { lines: out, coincident }
 }
 
 /** The deepest depth of a Line below its face (mm); with levels (E2), of its resolved lines. */

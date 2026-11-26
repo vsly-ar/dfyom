@@ -208,6 +208,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `The line is ${L(p['depth'])} deep but the tool cuts only ${L(p['cuts'])} deep. Make it shallower or pick a longer tool.`,
   'dfm.lineShallow': (p, L) =>
     `The line is only ${L(p['depth'])} deep at its shallowest: an uneven stock top can erase it.`,
+  // engraved patterns E4 (engraved-patterns.md § DFM)
+  'dfm.lineMerge': (p, L) =>
+    `${num(p['wall']) > 0 ? `Two grooves leave only ${L(p['wall'])} between them` : 'Two grooves overlap'} (under ${L(p['limit'])}): the wall breaks away${num(p['count']) > 1 ? ` at ${num(p['count'])} places` : ''}. Make it shallower, use a narrower tool or space the lines further apart.`,
   // engraved pattern E3 (engraved-patterns.md § DFM)
   'dfm.engravingEmpty': () =>
     'No line lies inside the boundary less the margin: make the margin smaller or move the motif.',

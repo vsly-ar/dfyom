@@ -1,14 +1,16 @@
-// The engraved pattern inspector (engraved-patterns.md E3): name, the read-out (lines · width ·
-// groove length) with the motif's thumbnail and Presets…, then the groups Motif (Preset or Shapes;
-// the shapes as Selects of the part's shapes), Area (On, Boundary: Whole face or a closed shape
-// with its centre and rotation, Margin), Placement (Fit: Size or Fit to boundary, Width; Centre
-// and Rotation behind More), Depth (From levels: Deepest and Shallowest, or Constant) and Cut (the
+// The engraved pattern inspector (engraved-patterns.md E3, E4): name, the read-out ([tiles ·]
+// lines · width · groove length) with the motif's thumbnail and Presets…, then the groups Motif
+// (Preset or Shapes; the shapes as Selects of the part's shapes), Layout (E4: Single or a lattice;
+// a lattice's Gap or pitches and Angle, Face out on polar; Spacing, Origin and Flip behind More),
+// Area (On, Boundary: Whole face or a closed shape with its centre and rotation, Margin), Placement
+// (Fit: Size, Fit to boundary or Clip, single; Clip or Whole tiles, tiles; Width; Centre and
+// Rotation behind More), Depth (From levels: Deepest and Shallowest, or Constant) and Cut (the
 // owned Line's tool). The conventions of the S1–S6 inspectors (inspector-layout.md): groups, a More
 // row shown open while it holds a value or a problem, (i) tips on the fields that need one,
 // `stepKind` on every quantity, errors and findings at their field, the rest under Findings.
 // Every edit is one `design.engraving.update` (one undo step).
 // Doc: docs/modes/engraved-patterns.md#ui, docs/modes/engraved-patterns.md#implementation-e3,
-// docs/conventions/inspector-layout.md
+// docs/modes/engraved-patterns.md#implementation-e4, docs/conventions/inspector-layout.md
 import { useMemo, useState } from 'react'
 import { engravingResolved } from '../../../../core/design/engraving/engraving'
 import { engravingPreset } from '../../../../core/design/engraving/presets'
@@ -31,6 +33,7 @@ import {
   QuantityInput,
   SegmentedControl,
   Select,
+  Switch,
   WarningList,
   type FieldMessage,
   type GroupSeverity,
@@ -57,6 +60,15 @@ const e = engravingMessages
 const FACE = 'face'
 
 type Motif = { preset: string } | { shapeIds: string[] }
+/** E4: the feature's layout (absent: single). */
+type Layout = {
+  lattice: string
+  spacing: { gap: QuantityDTO } | { pitch: [QuantityDTO, QuantityDTO] }
+  angle?: QuantityDTO
+  origin?: [QuantityDTO, QuantityDTO]
+  alternate?: 'flip'
+}
+const LAYOUTS = ['single', 'square', 'staggered', 'hex', 'polar'] as const
 type Depth =
   QuantityDTO | { min: QuantityDTO; max: QuantityDTO } | { start: QuantityDTO; end: QuantityDTO }
 
@@ -73,6 +85,12 @@ const STEP: Record<string, StepKind> = {
   'center.0': 'xy',
   'center.1': 'xy',
   rotation: 'rotation',
+  'layout.spacing.gap': 'small',
+  'layout.spacing.pitch.0': 'xy',
+  'layout.spacing.pitch.1': 'xy',
+  'layout.angle': 'rotation',
+  'layout.origin.0': 'xy',
+  'layout.origin.1': 'xy',
   'depth.max': 'depth',
   'depth.min': 'depth',
   depth: 'depth',
@@ -129,6 +147,11 @@ export function EngravingInspector({
     { shapeId: string; center: [QuantityDTO, QuantityDTO]; rotation: QuantityDTO } | undefined
   const center = feature['center'] as [QuantityDTO, QuantityDTO] | undefined
   const fit = (feature['fit'] as string | undefined) ?? 'whole'
+  const layout = feature['layout'] as Layout | undefined
+  const radial = feature['radial'] === true
+  const layoutGap = layout !== undefined && 'gap' in layout.spacing
+  const layoutPitch =
+    layout !== undefined && 'pitch' in layout.spacing ? layout.spacing.pitch : undefined
   const depth = feature['depth'] as Depth
   const levels = typeof depth === 'object' && 'min' in depth
   const lineOp = owned.find((o) => o.id === `${feature.id}_line`)
@@ -141,6 +164,8 @@ export function EngravingInspector({
   }
   const shown = new Set([
     'motif',
+    'layout',
+    'radial',
     'on',
     'boundary',
     'margin',
@@ -291,6 +316,7 @@ export function EngravingInspector({
                   facts.lines,
                   lengthSource(Math.round(facts.size * 10) / 10, units),
                   lengthSource(Math.round(facts.length), units),
+                  layout === undefined ? undefined : facts.tiles,
                 )}
           </p>
           <EngravingPresetsDialog
@@ -314,7 +340,7 @@ export function EngravingInspector({
                   const first = named[0]
                   if (k === 'shapes' && first !== undefined)
                     void update({ motif: { shapeIds: [first.id] } }, 'motif')
-                  else if (k === 'preset') void update({ motif: { preset: 'rosette' } }, 'motif')
+                  else if (k === 'preset') void update({ motif: { preset: 'waves' } }, 'motif')
                 }}
               />
             </Field>
@@ -344,6 +370,155 @@ export function EngravingInspector({
                 </div>
               )
             })
+          )}
+        </InspectorGroup>
+
+        <InspectorGroup title={e.groups.layout}>
+          <div data-feature-field="layout">
+            <Field label={e.layout} messages={messagesAt('layout')} info={e.layoutNote}>
+              <Select
+                options={LAYOUTS.map((v) => ({ value: v, label: e.layouts[v] ?? v }))}
+                value={layout?.lattice ?? 'single'}
+                onValueChange={(v) => {
+                  if (v === (layout?.lattice ?? 'single')) return
+                  void update({ layout: v === 'single' ? 'single' : { lattice: v } }, 'layout')
+                }}
+              />
+            </Field>
+          </div>
+          {layout === undefined ? null : (
+            <>
+              {layoutGap
+                ? quantityField(
+                    'layout.spacing.gap',
+                    e.gap,
+                    'length',
+                    'gap' in layout.spacing ? layout.spacing.gap : undefined,
+                    (gap) => ({
+                      layout: { lattice: layout.lattice, spacing: { gap: gap ?? '0' } },
+                    }),
+                    { info: e.gapNote },
+                  )
+                : ([0, 1] as const).map((i) =>
+                    quantityField(
+                      `layout.spacing.pitch.${i}`,
+                      e.pitch(i, layout.lattice === 'polar'),
+                      'length',
+                      layoutPitch?.[i],
+                      (s) => {
+                        const pitch = [
+                          sourceOf(layoutPitch?.[0]) ?? s ?? '10',
+                          sourceOf(layoutPitch?.[1]) ?? s ?? '10',
+                        ]
+                        pitch[i] = s ?? pitch[i]!
+                        return { layout: { lattice: layout.lattice, spacing: { pitch } } }
+                      },
+                    ),
+                  )}
+              {quantityField(
+                'layout.angle',
+                e.angle,
+                'angle',
+                layout.angle,
+                (angle) => ({ layout: { lattice: layout.lattice, angle: angle ?? '0' } }),
+                { placeholder: '0°' },
+              )}
+              {layout.lattice !== 'polar' ? null : (
+                <div data-feature-field="radial">
+                  <Field
+                    label={e.radial}
+                    kind="toggle"
+                    messages={messagesAt('radial')}
+                    info={e.radialNote}
+                  >
+                    <Switch
+                      label={e.radial}
+                      hideLabel
+                      checked={radial}
+                      onCheckedChange={(on) =>
+                        void update({ rotation: on ? 'radial' : '0' }, 'radial')
+                      }
+                    />
+                  </Field>
+                </div>
+              )}
+              <InspectorGroup.More
+                fields={[e.spacing, e.originShort, e.alternateShort]}
+                rememberKey="engraving.layout.more"
+                forceOpen={
+                  !layoutGap ||
+                  layout.origin !== undefined ||
+                  layout.alternate === 'flip' ||
+                  problemAt(['layout.origin.0', 'layout.origin.1', 'layout.alternate']) !==
+                    undefined
+                }
+              >
+                <div data-feature-field="layout.spacing">
+                  <Field label={e.spacing} kind="toggle" messages={messagesAt('layout.spacing')}>
+                    <SegmentedControl<string>
+                      label={e.spacing}
+                      options={['gap', 'pitch'].map((v) => ({
+                        value: v,
+                        label: e.spacings[v] ?? v,
+                      }))}
+                      value={layoutGap ? 'gap' : 'pitch'}
+                      onValueChange={(v) => {
+                        if ((v === 'gap') === layoutGap) return
+                        const w = lengthSource(Math.round((facts?.size ?? 10) * 10) / 10, units)
+                        void update(
+                          {
+                            layout: {
+                              lattice: layout.lattice,
+                              spacing: v === 'gap' ? { gap: '0' } : { pitch: [w, w] },
+                            },
+                          },
+                          'layout.spacing',
+                        )
+                      }}
+                    />
+                  </Field>
+                </div>
+                {([0, 1] as const).map((i) =>
+                  quantityField(
+                    `layout.origin.${i}`,
+                    e.origin(i),
+                    'length',
+                    layout.origin?.[i],
+                    (s) => {
+                      if (s === undefined)
+                        return { layout: { lattice: layout.lattice, origin: null } }
+                      const c = areaCentre()
+                      const next = [
+                        sourceOf(layout.origin?.[0]) ?? lengthSource(c[0], units),
+                        sourceOf(layout.origin?.[1]) ?? lengthSource(c[1], units),
+                      ]
+                      next[i] = s
+                      return { layout: { lattice: layout.lattice, origin: next } }
+                    },
+                    { optional: true, placeholder: e.originPlaceholder },
+                  ),
+                )}
+                <div data-feature-field="layout.alternate">
+                  <Field
+                    label={e.alternate}
+                    kind="toggle"
+                    messages={messagesAt('layout.alternate')}
+                  >
+                    <Switch
+                      label={e.alternate}
+                      hideLabel
+                      checked={layout.alternate === 'flip'}
+                      onCheckedChange={(on) =>
+                        void update(
+                          { layout: { lattice: layout.lattice, alternate: on ? 'flip' : 'none' } },
+                          'layout.alternate',
+                        )
+                      }
+                    />
+                  </Field>
+                </div>
+              </InspectorGroup.More>
+            </>
           )}
         </InspectorGroup>
 
@@ -413,10 +588,22 @@ export function EngravingInspector({
 
         <InspectorGroup title={e.groups.placement}>
           <div data-feature-field="fit">
-            <Field label={e.fit} kind="toggle" messages={messagesAt('fit')} info={e.fitNote}>
+            <Field
+              label={e.fit}
+              kind="toggle"
+              messages={messagesAt('fit')}
+              info={layout === undefined ? e.fitNote : e.tileFitNote}
+            >
               <SegmentedControl<string>
                 label={e.fit}
-                options={['whole', 'boundary'].map((v) => ({ value: v, label: e.fits[v] ?? v }))}
+                options={
+                  layout === undefined
+                    ? ['whole', 'boundary', 'clip'].map((v) => ({
+                        value: v,
+                        label: e.fits[v] ?? v,
+                      }))
+                    : ['clip', 'whole'].map((v) => ({ value: v, label: e.tileFits[v] ?? v }))
+                }
                 value={fit}
                 onValueChange={(next) => next !== fit && void update({ fit: next }, 'fit')}
               />
@@ -426,7 +613,7 @@ export function EngravingInspector({
             ? null
             : quantityField(
                 'size',
-                e.size,
+                layout === undefined ? e.size : e.tileSize,
                 'length',
                 feature['size'],
                 (s) => ({ size: s ?? null }),
@@ -439,13 +626,13 @@ export function EngravingInspector({
                 },
               )}
           <InspectorGroup.More
-            fields={[e.centerShort, e.rotation]}
+            fields={layout === undefined ? [e.centerShort, e.rotation] : [e.rotation]}
             rememberKey="engraving.placement.more"
             forceOpen={
               placementMore || problemAt(['center.0', 'center.1', 'rotation']) !== undefined
             }
           >
-            {fit === 'boundary'
+            {fit === 'boundary' || layout !== undefined
               ? null
               : ([0, 1] as const).map((i) =>
                   quantityField(

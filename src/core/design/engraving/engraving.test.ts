@@ -103,9 +103,9 @@ describe('engraving presets (EP-G)', () => {
 })
 
 describe('design.engraving.add', () => {
-  it('owns a lines shape and one Line; the default Rosette fits the face less the margin', async () => {
+  it('owns a lines shape and one Line; the Rosette fits the face less the margin', async () => {
     const s = await setup()
-    const out = await add(s)
+    const out = await add(s, { motif: { preset: 'rosette' } })
     expect(out).toMatchObject({
       featureId: 'engraving1',
       operationIds: ['engraving1_line'],
@@ -166,6 +166,7 @@ describe('design.engraving.add', () => {
     })
     const circle = await circleShape(s, '90')
     const out = await add(s, {
+      motif: { preset: 'rosette' },
       boundary: { shapeId: circle, center: ['50', '50'] },
       depth: { min: '0.2', max: '1' },
     })
@@ -205,6 +206,7 @@ describe('design.engraving.add', () => {
     const s = await setup()
     const out = await add(s, {
       motif: { preset: 'waves' },
+      layout: 'single',
       center: ['30', '20'],
       size: '40',
       rotation: '90',
@@ -258,7 +260,7 @@ describe('design.engraving.add', () => {
 describe('design.engraving.update', () => {
   it('a new motif takes its own default fit; a given fit wins', async () => {
     const s = await setup()
-    await add(s)
+    await add(s, { motif: { preset: 'rosette' } })
     await update(s, { motif: { preset: 'vine' } })
     expect(s.part().features![0]!['fit']).toBeUndefined()
     await update(s, { fit: 'boundary' })
@@ -309,7 +311,11 @@ describe('design.engraving.update', () => {
 describe('engraving findings, disable and follow', () => {
   it('dfm.engravingEmpty when the motif sits outside the area', async () => {
     const s = await setup()
-    const out = await add(s, { motif: { preset: 'scales' }, center: ['-50', '30'] })
+    const out = await add(s, {
+      motif: { preset: 'scales' },
+      layout: 'single',
+      center: ['-50', '30'],
+    })
     expect(out.warnings.map((w) => [w.code, w.operation, w.parameter])).toContainEqual([
       'dfm.engravingEmpty',
       'engraving1',
@@ -319,7 +325,7 @@ describe('engraving findings, disable and follow', () => {
 
   it('a disabled engraving is out of the geometry (DF106); the stock change re-places it', async () => {
     const s = await setup()
-    await add(s)
+    await add(s, { motif: { preset: 'rosette' } })
     await s.run('design.part.update', { partId: s.partId, disabled: ['engraving1'] })
     const g = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
     expect(g.operations.some((o) => o.id === 'engraving1_line')).toBe(false)

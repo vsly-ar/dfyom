@@ -298,7 +298,11 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
  * is the face rectangle (face frame), `area` a named closed boundary shape placed as a pattern's.
  * The motif's frame centre goes to `center` (absent: the centre of the boundary less the margin),
  * turned by `rotation`, at `size` (the frame's width; absent: its own) or, with `fit: 'boundary'`,
- * scaled so its lines fit the boundary less the margin, centred. Layout `single` only (E3).
+ * scaled so its lines fit the boundary less the margin, centred. E4: with `layout` the motif is a
+ * tile repeated at the nodes of Pattern's lattice (the frame's centre on each node, the pitch the
+ * frame plus the gap), `radial` turns each polar tile to face away from the origin, and
+ * `fit: 'clip'` cuts lines at the boundary less the margin (absent fit with a lattice: whole
+ * tiles only).
  */
 export interface EngravingRecord {
   motif: { preset: string } | { shapeIds: string[] }
@@ -308,7 +312,22 @@ export interface EngravingRecord {
   center?: [number, number] | undefined
   size?: number | undefined
   rotation: number
-  fit?: 'boundary' | undefined
+  fit?: 'boundary' | 'clip' | undefined
+  /** E4: absent = `single`. */
+  layout?: EngravingLayoutRecord | undefined
+  /** E4: polar tiles turned to face away from the origin. */
+  radial?: true | undefined
+}
+
+/** An engraved pattern's lattice (E4): Pattern's fields; a gap may be 0 (tiles touch). */
+export interface EngravingLayoutRecord {
+  lattice: PatternLattice
+  /** Degrees: the lattice (tiles included) turns about `origin`; polar: the rings' start. */
+  angle: number
+  /** Face frame; absent = the centre of the boundary less the margin. */
+  origin?: [number, number] | undefined
+  spacing: { gap: number } | { pitch: [number, number] }
+  alternate?: 'flip' | undefined
 }
 
 export const EngravingRecordSchema: z.ZodType<EngravingRecord> = z.object({
@@ -322,7 +341,17 @@ export const EngravingRecordSchema: z.ZodType<EngravingRecord> = z.object({
   center: pair.optional(),
   size: num.optional(),
   rotation: num,
-  fit: z.literal('boundary').optional(),
+  fit: z.enum(['boundary', 'clip']).optional(),
+  layout: z
+    .object({
+      lattice: z.enum(PATTERN_LATTICES),
+      angle: num,
+      origin: pair.optional(),
+      spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),
+      alternate: z.literal('flip').optional(),
+    })
+    .optional(),
+  radial: z.literal(true).optional(),
 }) as unknown as z.ZodType<EngravingRecord>
 
 /**

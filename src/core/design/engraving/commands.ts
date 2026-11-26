@@ -3,9 +3,11 @@
  * arguments and how they build one. Kept lean for `tools/list` (E1–E3 share ≤ 3.0 K, EP-H): the
  * preset ids are in the primer, not an enum; `boundary` and `depth` are listed as sketches of
  * `design.pattern.add` and `design.line.add` (validated in full, the doc's first listed cut: the
- * depth union described once); `update` sketches every structured arg. Layout `single` only: the
- * lattice args come with E4, as sketches of `design.pattern.add`'s.
- * Doc: docs/modes/engraved-patterns.md#agent-api, docs/modes/engraved-patterns.md#implementation-e3
+ * depth union described once); `update` sketches every structured arg. E4: the lattice is one
+ * `layout` arg ('single' or Pattern's lattice fields), listed as a sketch of `design.pattern.add`'s
+ * (the tools/list budget), and `rotation: 'radial'` turns polar tiles to face out.
+ * Doc: docs/modes/engraved-patterns.md#agent-api, docs/modes/engraved-patterns.md#implementation-e3,
+ * docs/modes/engraved-patterns.md#implementation-e4
  */
 import { z } from 'zod'
 import { None, Some, type Option } from '../../../shared/result'
@@ -14,11 +16,37 @@ import { LineDepthArg, lineDepthOf, PointArg, Src } from '../commands'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import type { Point } from '../operation'
 import type { PatternBoundary } from '../pattern/pattern'
-import { ShapeIdSchema } from '../shape.dto'
-import { defaultFit, engravingSpec, type Engraving, type EngravingMotif } from './engraving'
+import { PATTERN_LATTICES, ShapeIdSchema } from '../shape.dto'
+import {
+  defaultFit,
+  defaultLayout,
+  engravingSpec,
+  type Engraving,
+  type EngravingLayout,
+  type EngravingMotif,
+} from './engraving'
 
-/** The motif a new engraved pattern takes (E3: the round Rosette, fitted; doc default `waves` is E4's). */
-export const DEFAULT_ENGRAVING_PRESET = 'rosette'
+/** The motif a new engraved pattern takes (E4: the Waves tile, clipped to the face). */
+export const DEFAULT_ENGRAVING_PRESET = 'waves'
+
+/** The `rotation` value that turns polar tiles to face away from the origin (E4). */
+const RADIAL = 'radial'
+
+/** E4: 'single', or Pattern's lattice fields (a gap may be 0: the tiles join). */
+const LayoutArg = z.union([
+  z.literal('single'),
+  z
+    .object({
+      lattice: z.enum(PATTERN_LATTICES),
+      spacing: z.union([z.object({ gap: Src }), z.object({ pitch: PointArg })]).optional(),
+      angle: Src.optional(),
+      origin: PointArg.nullable().optional(),
+      alternate: z.enum(['none', 'flip']).optional(),
+    })
+    .strict(),
+])
+const LAYOUT_SKETCH =
+  "As design.pattern.add lattice, spacing (gap ≥ 0, default 0), angle, origin, alternate in one object {lattice, …}, or 'single'; default the preset's"
 
 const BoundaryArg = z
   .object({ shapeId: ShapeIdSchema, center: PointArg, rotation: Src.optional() })
@@ -30,13 +58,16 @@ const params = {
       z.object({ preset: z.string().min(1).max(64) }),
       z.object({ shapeIds: z.array(ShapeIdSchema).min(1).max(50) }),
     ])
-    .describe('preset id (primer), or shapes with levels; default rosette'),
+    .describe('preset id (primer), or shapes with levels; default waves'),
   center: PointArg.nullable().describe('Motif centre; null = area centre'),
   size: Src.nullable().describe('Motif width; null = its own'),
-  rotation: Src.describe('Default 0°'),
+  rotation: Src.describe('Default 0°; radial: polar tiles face out'),
+  layout: LayoutArg,
   boundary: BoundaryArg,
   margin: Src.describe('Default 3 mm'),
-  fit: z.enum(['whole', 'boundary']).describe('boundary: scaled to fit, centred (round: default)'),
+  fit: z
+    .enum(['whole', 'boundary', 'clip'])
+    .describe('boundary: single scaled to fit (round default); clip: lines cut (tiles default)'),
   depth: LineDepthArg,
 }
 
@@ -47,12 +78,14 @@ const spec: FeatureCommandSpec<typeof params, Engraving> = {
   params,
   required: [],
   addParams: {
+    layout: z.unknown().describe(LAYOUT_SKETCH),
     boundary: z.unknown().describe('As design.pattern.add boundary'),
     depth: z.unknown().describe('As design.line.add depth; default {min 0.2, max 1 mm}'),
   },
   updateParams: {
     motif: z.unknown().describe('As design.engraving.add motif'),
     center: z.unknown().describe('As design.engraving.add center'),
+    layout: z.unknown().describe('As design.engraving.add layout'),
     boundary: z.unknown().describe('As design.pattern.add boundary'),
     depth: z.unknown().describe('As design.line.add depth'),
   },
@@ -89,9 +122,53 @@ const spec: FeatureCommandSpec<typeof params, Engraving> = {
         rotation: f.q('boundary.rotation', 'angle', b.rotation ?? '0'),
       })
     }
-    // a new motif takes its own default fit unless one is given (a round preset fits)
+    // a new motif takes its own default layout, size and fit unless given (a tile preset tiles)
     const motifChanged =
       a.motif !== undefined && JSON.stringify(motif) !== JSON.stringify(prev?.motif)
+    const zero = {
+      gap: f.q('layout.spacing.gap', 'length', '0'),
+      angle: f.q('layout.angle', 'angle', '0'),
+    }
+    const layout = ((): EngravingLayout => {
+      const l = a.layout
+      if (l === undefined)
+        return prev !== undefined && !motifChanged ? prev.layout : defaultLayout(motif, zero)
+      if (l === 'single') return { kind: 'single' }
+      const was = prev?.layout.kind === 'lattice' ? prev.layout : undefined
+      const sp = l.spacing
+      return {
+        kind: 'lattice',
+        lattice: l.lattice,
+        spacing:
+          sp === undefined
+            ? (was?.spacing ?? { kind: 'gap', gap: zero.gap })
+            : 'gap' in sp
+              ? { kind: 'gap', gap: f.q('layout.spacing.gap', 'length', sp.gap) }
+              : {
+                  kind: 'pitch',
+                  pitch: [
+                    f.q('layout.spacing.pitch.0', 'length', sp.pitch[0]),
+                    f.q('layout.spacing.pitch.1', 'length', sp.pitch[1]),
+                  ],
+                },
+        angle:
+          l.angle === undefined
+            ? (was?.angle ?? zero.angle)
+            : f.q('layout.angle', 'angle', l.angle),
+        origin:
+          l.origin === undefined
+            ? (was?.origin ?? None)
+            : l.origin === null
+              ? None
+              : Some([
+                  f.q('layout.origin.0', 'length', l.origin[0]),
+                  f.q('layout.origin.1', 'length', l.origin[1]),
+                ]),
+        alternate: l.alternate ?? was?.alternate ?? 'none',
+      }
+    })()
+    const radial = a.rotation !== undefined ? a.rotation.trim() === RADIAL : (prev?.radial ?? false)
+    const polar = layout.kind === 'lattice' && layout.lattice === 'polar'
     return {
       kind: 'engraving',
       id,
@@ -99,14 +176,25 @@ const spec: FeatureCommandSpec<typeof params, Engraving> = {
       on,
       motif,
       center,
-      size,
+      size: motifChanged && a.size === undefined ? None : size,
       rotation:
-        a.rotation !== undefined
+        a.rotation !== undefined && !radial
           ? f.q('rotation', 'angle', a.rotation)
-          : (prev?.rotation ?? f.q('rotation', 'angle', '0')),
+          : a.rotation !== undefined
+            ? f.q('rotation', 'angle', '0')
+            : (prev?.rotation ?? f.q('rotation', 'angle', '0')),
+      layout,
+      // radial is kept only while the lattice is polar (a lattice change drops it)
+      radial: radial && (polar || a.rotation !== undefined),
       boundary: boundary(),
       margin: f.pick('margin', 'length', a.margin, prev?.margin, 'engravingMargin'),
-      fit: a.fit ?? (prev !== undefined && !motifChanged ? prev.fit : defaultFit(motif)),
+      fit:
+        a.fit ??
+        (prev !== undefined && !motifChanged && a.layout === undefined
+          ? prev.fit === 'boundary' && layout.kind === 'lattice'
+            ? 'clip'
+            : prev.fit
+          : defaultFit(motif, layout)),
       depth: lineDepthOf(f, a.depth, prev?.depth, () => ({
         kind: 'levels',
         min: f.pick('depth.min', 'length', undefined, undefined, 'lineLevelMin'),
