@@ -890,15 +890,30 @@ const shapeImport = defineCommand({
           ],
           where,
         })
-      const base = args.name ?? sectionName(prepared.depth, loaded.units)
+      // X2-4: the loop kind in the default name, and a number when the part already has the
+      // name, so two sections at one depth (outline and cavity, top and bottom) read apart
+      const kind = from.loops === 'outer' ? ' outline' : from.loops === 'holes' ? ' cavity' : ''
+      const base = args.name ?? `${sectionName(prepared.depth, loaded.units)}${kind}`
+      const taken = new Set(shapes.map((x) => x.name))
+      let serial = 1
+      const nextName = (): string => {
+        for (;;) {
+          const name = (serial === 1 ? base : `${base} ${serial}`).slice(0, NAME_MAX)
+          serial++
+          if (!taken.has(name)) {
+            taken.add(name)
+            return name
+          }
+        }
+      }
       const rows: z.output<typeof SectionReportSchema>['shapes'] = []
-      for (const [k, s] of m.shapes.entries()) {
+      for (const s of m.shapes) {
         const items = sectionShapeItems(s.items, loaded.units)
         if (items.isErr()) return Err(items.unwrapErr().withContext(where))
         const id = `shape${n++}`
         const dtos = settleItems(port, items.unwrap(), where, shapes, id)
         if (dtos.isErr()) return dtos
-        const name = (k === 0 ? base : `${base} ${k + 1}`).slice(0, NAME_MAX)
+        const name = nextName()
         added.push({ id, name, items: dtos.unwrap() })
         rows.push({
           shapeId: id,

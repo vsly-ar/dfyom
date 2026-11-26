@@ -400,6 +400,28 @@ describe('design.shape.import { from }', () => {
     expect(s.d.doc.parts[s.partId]!.shapes ?? []).toEqual(before.parts[s.partId]!.shapes ?? [])
   })
 
+  it('X2-4: sections at one depth get names unique in the part, with the loop kind', async () => {
+    const s = await setup()
+    await importRef(s, FRAME)
+    const names: string[] = []
+    for (const loops of ['outer', 'holes', 'all', 'all', 'holes'])
+      for (const id of (
+        (await s.run('design.shape.import', {
+          partId: s.partId,
+          from: { depth: '5', loops },
+        })) as { shapeIds: string[] }
+      ).shapeIds)
+        names.push(shapeGet(s, id).shape.name)
+    expect(names).toEqual([
+      'Section 5 mm outline',
+      'Section 5 mm cavity',
+      'Section 5 mm',
+      'Section 5 mm 2',
+      'Section 5 mm cavity 2',
+    ])
+    expect(new Set(s.d.doc.parts[s.partId]!.shapes!.map((x) => x.name)).size).toBe(5)
+  })
+
   it('reads the placed reference: after scale 0.5 the loops are half size', async () => {
     const s = await setup()
     const { referenceId } = await importRef(s, FRAME)

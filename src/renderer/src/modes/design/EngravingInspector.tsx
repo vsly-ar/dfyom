@@ -45,7 +45,7 @@ import { EngravingPresetsDialog, MotifPreview } from './EngravingPresetsDialog'
 import { motifThumb, presetThumb } from './engraving-thumbs'
 import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
-import { placeErrors, type FieldError } from './OperationFields'
+import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
 import { ToolField } from './ToolField'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
@@ -299,7 +299,7 @@ export function EngravingInspector({
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField
           label={t.name}
           name={feature.name}

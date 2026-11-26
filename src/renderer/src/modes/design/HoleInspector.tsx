@@ -53,6 +53,7 @@ import {
   customSizeNote,
   enteredSizesReplaced,
   fastenerSources,
+  followingHead,
   holeRecord,
   sectionValues,
   sharedToolNote,
@@ -68,7 +69,7 @@ import {
   type HoleType,
 } from './hole-view'
 import { NameField } from './NameField'
-import { placeErrors, type FieldError } from './OperationFields'
+import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { sameTool, ToolField } from './ToolField'
 import {
   axisNames,
@@ -340,7 +341,19 @@ export function HoleInspector({
           kind={angle ? 'angle' : 'length'}
           defaultUnit={defaultUnit(angle ? 'angle' : 'length', units)}
           value={dto === undefined ? undefined : quantityOf(dto)}
-          onCommit={(q, gesture) => void update({ [field]: q.source }, field, gesture)}
+          onCommit={(q, gesture) =>
+            void update(
+              {
+                [field]: q.source,
+                // X2-8: a starting head follows the new diameter or depth
+                ...(field === 'diameter' || field === 'depth'
+                  ? followingHead(hole, { [field]: q.canonical }, units, stockBelow(part, hole.on))
+                  : {}),
+              },
+              field,
+              gesture,
+            )
+          }
           stepKind={FIELD_STEP[field]}
           stepKey={`hole.${field}`}
           onCancelGesture={cancelGesture}
@@ -515,7 +528,7 @@ export function HoleInspector({
     <div ref={rootRef} className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField
           label={t.name}
           name={feature.name}

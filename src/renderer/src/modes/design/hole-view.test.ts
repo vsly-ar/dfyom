@@ -8,6 +8,7 @@ import {
   customSizeNote,
   enteredSizesReplaced,
   fastenerSources,
+  followingHead,
   headDefaults,
   holeRecord,
   sectionValues,
@@ -86,6 +87,40 @@ describe('hole view', () => {
     expect(headDefaults(custom, 'recessedCountersink', 'mm', 4)).toEqual({
       csDiameter: '8 mm',
       cbDepth: '1 mm',
+    })
+  })
+
+  it('starting head sizes follow a Diameter or Depth edit until entered (X2-8)', () => {
+    // a custom countersink started at twice the default 6 mm, on 20 mm of material
+    const cs = hole({
+      fastener: undefined,
+      type: 'countersink',
+      sizes: { diameter: q('6 mm'), csDiameter: q('12 mm') },
+    })
+    expect(followingHead(cs, { diameter: 2.447 }, 'mm', 20)).toEqual({ csDiameter: '4.89 mm' })
+    // blind: the head stays within half the new depth
+    const blind = hole({
+      fastener: undefined,
+      type: 'countersink',
+      bottom: 'flat',
+      sizes: { diameter: q('2.447 mm'), depth: q('3.67 mm'), csDiameter: q('4.89 mm') },
+    })
+    expect(followingHead(blind, { depth: 3.944 }, 'mm')).toEqual({})
+    expect(followingHead(blind, { depth: 1 }, 'mm')).toEqual({ csDiameter: '3.45 mm' })
+    // an entered head, a fastener's or a simple hole: nothing follows
+    const entered = { ...blind, sizes: { ...blind.sizes, csDiameter: q('4.861 mm') } }
+    expect(followingHead(entered, { depth: 1 }, 'mm')).toEqual({})
+    expect(followingHead({ ...cs, fastener: 'M3' }, { diameter: 3 }, 'mm', 20)).toEqual({})
+    expect(followingHead(hole(), { diameter: 3 }, 'mm', 20)).toEqual({})
+    // a counterbore: both sizes follow
+    const cb = hole({
+      fastener: undefined,
+      type: 'counterbore',
+      sizes: { diameter: q('6 mm'), cbDiameter: q('10.8 mm'), cbDepth: q('6 mm') },
+    })
+    expect(followingHead(cb, { diameter: 5 }, 'mm')).toEqual({
+      cbDiameter: '9 mm',
+      cbDepth: '5 mm',
     })
   })
 

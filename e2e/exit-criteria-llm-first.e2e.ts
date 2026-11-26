@@ -307,7 +307,7 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await createShape(wallBand, 'Outlines')
 
   // ── Top: the cavity pocket and the outline profile with tabs, at the sections' corners ───
-  /** Picks shape `name` (the `nth` of that name: two sections at one depth share it). */
+  /** Picks shape `name` (the `nth` of that name: the steps' offsets share theirs). */
   const pickShape = async (name: string, nth = 0) => {
     const picker = inspector.getByRole('combobox', { name: 'Shape', exact: true })
     await picker.click()
@@ -333,19 +333,19 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
     await navigator.getByRole('button', { name: 'Add', exact: true }).click()
     await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
   }
+  // the loop kind names the section's shape (X2-4: the outline and the cavity read apart)
   const topName = `Section ${topBand} mm`
-  const bottomName = `Section ${wallBand} mm`
+  const bottomName = `Section ${wallBand} mm outline`
 
   await addFromMenu('Pocket')
   await expect(heading('Pocket 1')).toBeVisible()
-  // the cavity: the second shape of that name (X2 finding: both sections are named alike)
-  await pickShape(topName, 1)
+  await pickShape(`${topName} cavity`)
   await anchorAt('Front left', ...X1_VALUES.cavityAt)
   await setField(inspector, 'Depth', String(cavityFloor))
 
   await addFromMenu('Profile')
   await expect(heading('Profile 1')).toBeVisible()
-  await pickShape(topName)
+  await pickShape(`${topName} outline`)
   await anchorAt('Front left', ...X1_VALUES.outlineAt)
   await inspector
     .getByRole('radiogroup', { name: 'Side' })
@@ -424,11 +424,12 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await setField(inspector, 'Diameter', String(hole.size.diameter))
   await choose(page, inspector, 'Bottom', 'Flat')
   await expect(inspector.getByRole('combobox', { name: 'Bottom' })).toHaveText('Flat')
-  await setField(inspector, 'Countersink Ø', X1_VALUES.csDiameter)
-  await setField(inspector, 'Countersink angle', X1_VALUES.csAngle)
-  // the depth from the mouth, which is the facing's floor
+  // the depth from the mouth, which is the facing's floor; typed before the countersink, it holds
+  // (X2-8: the starting countersink follows the diameter and leaves its cone room)
   const holeDepth = String(Math.round((hole.size.depth - hole.size.top) * 1000) / 1000)
   await setField(inspector, 'Depth', holeDepth)
+  await setField(inspector, 'Countersink Ø', X1_VALUES.csDiameter)
+  await setField(inspector, 'Countersink angle', X1_VALUES.csAngle)
   await expect(input(inspector, 'Depth')).toHaveValue(new RegExp(`^${holeDepth}`))
   await expect(input(inspector, 'Diameter')).toHaveValue(/^2\.447/)
 

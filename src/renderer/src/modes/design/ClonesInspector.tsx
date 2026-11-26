@@ -54,7 +54,7 @@ import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import { operationUnits, unitOperations } from './feature-view'
 import { NameField } from './NameField'
-import { OperationFields, placeErrors, type FieldError } from './OperationFields'
+import { OperationFields, placeErrors, refusalText, type FieldError } from './OperationFields'
 import { axisNames, surfaceDirection, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
@@ -246,7 +246,7 @@ export function ClonesDraft({
     <div className={styles['draftInspector']} onKeyDown={onKeyDown}>
       <PanelHeader title={c.draftTitle} meta={c.draftMeta} />
       <div className={`${styles['fields']} ${styles['draftBody']}`}>
-        {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <InspectorGroup title={c.source}>
           <ul className={styles['cloneSources']}>
             {draft.options.map((o) =>
@@ -424,7 +424,7 @@ export function ClonesInspector({
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField
           label={m.inspector.name}
           name={feature.name}
