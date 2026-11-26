@@ -49,6 +49,11 @@ export type Shape =
       readonly length: Quantity
       readonly width: Quantity
       readonly cornerRadius: Quantity
+      /**
+       * DF120 Round: `cornerRadius` is half the narrowest side, kept so by the commands (absent =
+       * off; docs/modes/hole-slots-and-round-corners.md#model).
+       */
+      readonly round?: true
       /** Counter-clockwise about the anchor point; None = 0 (v0.1). */
       readonly rotation: Option<Quantity>
     }
@@ -601,6 +606,7 @@ function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
       length: length!,
       width: width!,
       cornerRadius: cornerRadius!,
+      ...(s.round === true ? { round: true as const } : {}),
       rotation: rotation.unwrap(),
     }
   })
@@ -846,6 +852,8 @@ function shapeToDTO(s: Shape): OperationShapeDTO {
           length: s.length.toDTO(),
           width: s.width.toDTO(),
           cornerRadius: s.cornerRadius.toDTO(),
+          // DF120: left out when off, so records without Round stay byte-identical
+          ...(s.round === true ? { round: true } : {}),
           ...rotation,
         }
   ) as OperationShapeDTO

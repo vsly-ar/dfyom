@@ -54,6 +54,7 @@ import type { ShapeDTO } from './shape.dto'
 import { shapeFacts } from './placement'
 import { checkReferences, recalculate, SurfaceTable } from './surfaces'
 import { checkOperations } from './validate'
+import { AdjustedSchema, type Adjusted } from './round'
 import { knownIssues, withoutKnown } from './known-issues'
 
 const FeatureArg = { partId: PartIdSchema, featureId: FeatureIdSchema }
@@ -68,6 +69,7 @@ const FeatureResult = z.object({
   lines: z.number().int().optional().describe('engraving: lines placed'),
   length: z.number().optional().describe('engraving: total line length (mm)'),
   size: z.number().optional().describe("engraving: the motif's width as placed (mm)"),
+  adjusted: AdjustedSchema.optional(),
   warnings: Warnings,
 })
 
@@ -410,7 +412,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      return finish(draft, args.partId, l, spec, feature, undefined, where, ctx)
+      return finish(draft, args.partId, l, spec, feature, undefined, where, ctx, f.adjusted)
     },
   })
 
@@ -468,7 +470,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      return finish(draft, args.partId, l, spec, feature, prev, where, ctx)
+      return finish(draft, args.partId, l, spec, feature, prev, where, ctx, f.adjusted)
     },
   })
   return Ok([add, update])
@@ -483,6 +485,8 @@ function finish<F extends FeatureBase>(
   prev: F | undefined,
   where: string,
   ctx: CommandContext,
+  /** What the DF120 apply rule changed while building the feature (pattern cells). */
+  adjusted: readonly Adjusted[] = [],
 ) {
   const placed = placeFeature(
     loaded,
@@ -499,6 +503,7 @@ function finish<F extends FeatureBase>(
     featureId: feature.id,
     operationIds: placed.unwrap().owned.map((o) => o.id),
     ...(spec.resultOf?.(feature, shapes as readonly ShapeDTO[], ctx.services.region2d) ?? {}),
+    ...(adjusted.length > 0 ? { adjusted: [...adjusted] } : {}),
   }
   return withWarnings(result, loaded, placed.unwrap().ops, ctx, where, placed.unwrap().features)
 }

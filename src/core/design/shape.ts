@@ -80,6 +80,7 @@ export function mapItem<A, B>(item: ShapeItem<A>, f: (a: A, path: ParamPath) => 
         length: f(item.length, ['length']),
         width: f(item.width, ['width']),
         cornerRadius: f(item.cornerRadius, ['cornerRadius']),
+        ...(item.round === true ? { round: true as const } : {}),
         ...opt('rotation', item.rotation),
       }
     case 'circle':

@@ -378,12 +378,30 @@ describe('design mode', () => {
     const { user, part } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
     const radius = await within(inspector()).findByLabelText('Corner radius', { selector: 'input' })
-    await retype(user, radius, '50{Enter}') // > half the narrowest side
+    await retype(user, radius, '-1{Enter}') // a negative radius is still refused (DF120)
     expect(
-      await within(inspector()).findByText(/The change was not applied|must be/i),
+      (await within(inspector()).findAllByText(/The change was not applied|must be/i))[0],
     ).toBeVisible()
     expect(part().operations[0]).toMatchObject({ shape: { cornerRadius: { source: '3 mm' } } })
     expect(radius).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('applies a radius above half the narrowest side as Round (DF120 R1)', async () => {
+    const { user, part } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    const radius = await within(inspector()).findByLabelText('Corner radius', { selector: 'input' })
+    await retype(user, radius, '50{Enter}')
+    await waitFor(() => expect(part().operations[0]).toMatchObject({ shape: { round: true } }))
+    const shape = (part().operations[0] as unknown as { shape: unknown }).shape as {
+      width: { exact: { num: string } }
+      length: { exact: { num: string } }
+      cornerRadius: { exact: { num: string; den: string } }
+    }
+    const half = Math.min(Number(shape.width.exact.num), Number(shape.length.exact.num)) / 2
+    const r = shape.cornerRadius.exact
+    expect(Number(r.num) / Number(r.den)).toBe(half)
+    // the inspector shows the resolved radius
+    await waitFor(() => expect(radius).not.toHaveAttribute('aria-invalid', 'true'))
   })
 
   it('changes the stock of a part in the Stock dialog as one undo step (DF95)', async () => {

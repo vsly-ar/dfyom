@@ -13,6 +13,7 @@ import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { bottomEdgeFace, chamferEdgeKind, type Operation, type Part, type Shape } from './operation'
+import { roundRadiusHolds } from './round'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -65,7 +66,8 @@ function factsOf(op: { id: string; shape: Shape }, table?: ShapeFactsTable): Sha
 }
 
 /**
- * Shape size > 0 and 0 ≤ cornerRadius ≤ min(length, width)/2; returns whether it is valid. A named
+ * Shape size > 0 and 0 ≤ cornerRadius ≤ min(length, width)/2 (= with Round, `roundRadius`);
+ * returns whether it is valid. A named
  * shape's own values are checked by the shape commands (shapes.md).
  */
 function checkShape(c: Checker, s: Shape): boolean {
@@ -84,6 +86,15 @@ function checkShape(c: Checker, s: Shape): boolean {
     'must be between 0 and half the narrowest size',
     { min: 0, max: max.toNumber(), actual: s.cornerRadius.canonical },
   )
+  // DF120: the commands keep a Round radius derived; this guards hand-edited records
+  if (ok && s.round === true) {
+    const held = roundRadiusHolds(s.length, s.width, s.cornerRadius)
+    c.check(held, 'shape.cornerRadius', 'roundRadius', 'must be half the narrowest size (Round)', {
+      expected: max.toNumber(),
+      actual: s.cornerRadius.canonical,
+    })
+    return held
+  }
   return ok
 }
 

@@ -417,7 +417,7 @@ describe('validation errors (model.invariant, design.md constraints)', () => {
     [
       'pocket corner radius > half the width',
       'pocket',
-      { shape: rect('20', '10', { cornerRadius: '6' }), depth: '1' },
+      { shape: rect('20', '10', { cornerRadius: '6', round: false }), depth: '1' },
       ['shape', 'cornerRadius'],
       'cornerRadiusRange',
     ],
@@ -563,7 +563,7 @@ describe('validation errors (model.invariant, design.md constraints)', () => {
       'pocket corner radius too large',
       'pocket',
       { shape: rect('20', '10'), depth: '1' },
-      { shape: rect('20', '10', { cornerRadius: '6' }) },
+      { shape: rect('20', '10', { cornerRadius: '6', round: false }) },
       ['shape', 'cornerRadius'],
       'cornerRadiusRange',
     ],

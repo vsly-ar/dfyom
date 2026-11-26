@@ -75,12 +75,12 @@ With a reference model, the depth that faces down to the reference's closest poi
 
 Blind recess with flat floor; retained regions: inside corner radius and floor fillet ([fillets](../architecture/geometry.md#fillets-as-retained-regions)).
 
-| Parameter            | Kind   | Default     | Constraints                                              | DFM warnings                                                                                               |
-| -------------------- | ------ | ----------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `shape`              | –      | required    | rectangle or circle; size > 0                            | Narrowest size < smallest end-mill diameter in the tool library: "no tool fits".                           |
-| `depth`              | length | required    | > 0; floor above `stock.bottom`                          | Depth > 4 × narrowest size: "deep, narrow pocket – needs a long tool".                                     |
-| `shape.cornerRadius` | length | 3 mm / 1/8″ | rectangle only; 0 ≤ r ≤ min(length, width)/2             | r < radius of the smallest end mill in the library ("no tool can make this corner"); r = 0 always warns.   |
-| `floorRadius`        | length | 0           | 0 ≤ f ≤ depth; f ≤ `cornerRadius` (circle: ≤ diameter/2) | f > 0 and the library has no bull-nose end mill with corner radius f and no ball end mill with radius ≤ f. |
+| Parameter            | Kind   | Default     | Constraints                                                                                                      | DFM warnings                                                                                               |
+| -------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `shape`              | –      | required    | rectangle or circle; size > 0                                                                                    | Narrowest size < smallest end-mill diameter in the tool library: "no tool fits".                           |
+| `depth`              | length | required    | > 0; floor above `stock.bottom`                                                                                  | Depth > 4 × narrowest size: "deep, narrow pocket – needs a long tool".                                     |
+| `shape.cornerRadius` | length | 3 mm / 1/8″ | rectangle only; 0 ≤ r ≤ min(length, width)/2 (above: Round, [DF120](hole-slots-and-round-corners.md#apply-rule)) | r < radius of the smallest end mill in the library ("no tool can make this corner"); r = 0 always warns.   |
+| `floorRadius`        | length | 0           | 0 ≤ f ≤ depth; f ≤ `cornerRadius` (circle: ≤ diameter/2)                                                         | f > 0 and the library has no bull-nose end mill with corner radius f and no ball end mill with radius ≤ f. |
 
 Surfaces: `pocket1.floor`, `pocket1.wall[i]` (rectangle: 0 = front, counter-clockwise; circle: `wall[0]`), `pocket1.corner[i]` (corner cylinders, `i` = following wall), `pocket1.floorFillet`. Tool requirement: end mill with radius ≤ `cornerRadius`; for `floorRadius` > 0 as in [geometry.md](../architecture/geometry.md#fillets-as-retained-regions).
 
@@ -198,7 +198,8 @@ Decisions made with task 2.5, where this doc left room:
 - **`design.referenced`** has one issue per broken reference (path `operations.<id>.<param>`, params `{ operationId, reference }`) and lists the dependants in its data. It also stops an update that removes a referenced surface (fewer tabs, a profile side change, a drill bottom that is no longer flat).
 - **Drilling:** a `depth` for `through` or a `pointAngle` for another bottom than `drillPoint` is invalid (rule `notForBottom`); changing `bottom` drops the unused ones and `drillPoint` defaults the angle to 118°. "Bottom above `stock.bottom`" uses the full-diameter depth.
 - **Profile:** "all tabs fit" is `count × width < perimeter` of the shape, skipped when an `inside` slot covers the opening (no tabs are built); the corner radius rule of a pocket applies to the profile shape too.
-- **Updates** replace `shape` as a whole (an omitted `cornerRadius` takes the default); `tabs` merges field by field.
+- **Updates** replace `shape` as a whole (an omitted `cornerRadius` takes the default, or stays Round on a Round rectangle); `tabs` merges field by field.
+- **Round (DF120):** a rectangle's `round: true` (or `cornerRadius: "round"`) makes `cornerRadius` half the narrowest side, kept so by every edit and recalculation; a radius above that turns Round on and the result reports `adjusted`, unless the edit sets `round: false` ([hole-slots-and-round-corners.md § Apply rule](hole-slots-and-round-corners.md#apply-rule)). Pocket and profile results carry `round` and `adjusted`.
 - **General tolerance** is `{ length?, angle? }`, each a deviation ≥ 0 (`"0.1 mm"` = ±0.1 mm), `null` clears it. `effectiveTolerance` walks operation → part; the project scope comes with project settings.
 - **`design.part.add`** reads the library synchronously (`services.library.lookup`) to take the snapshot ([commands.md](../architecture/commands.md#command-definition)).
 - **Not in 2.5:** DFM warnings and `design.warning.list`; wired after task 2.8 ([below](#dfm-warnings-task-28-wiring)). Constraints are only the hard parameter errors of the tables above.

@@ -57,6 +57,8 @@ export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
     length: length().describe('Size along X'),
     width: length().describe('Size along Y'),
     cornerRadius: length(),
+    // DF120: cornerRadius is half the narrowest side and follows size edits
+    round: z.literal(true).optional(),
     rotation: quantityDto('angle').optional(),
   }),
   z.object({

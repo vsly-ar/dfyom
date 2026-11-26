@@ -284,13 +284,22 @@ describe('shape editor', () => {
     const { user, shape, addShape } = await renderShapes()
     await addShape('Rectangle')
     const before = shape().items[0]
-    await retype(user, field('Corner radius'), '30{Enter}')
+    await retype(user, field('Corner radius'), '-1{Enter}') // too large applies as Round (DF120)
     expect(
       await within(inspector()).findByText('Must be between 0 and half the narrowest size'),
     ).toBeInTheDocument()
     // the flat view marks the item and keeps the last valid outline
     await waitFor(() => expect(within(editor()).getByTestId('shape-invalid')).toBeInTheDocument())
     expect(shape().items[0]).toEqual(before)
+  })
+
+  it('applies a radius above half the narrowest side as Round (DF120 R1)', async () => {
+    const { user, shape, addShape } = await renderShapes()
+    await addShape('Rectangle')
+    await retype(user, field('Corner radius'), '30{Enter}')
+    await waitFor(() => expect(shape().items[0]).toMatchObject({ round: true }))
+    // Rectangle 40 × 20: R 10
+    expect(shape().items[0]).toMatchObject({ cornerRadius: { exact: { num: '10', den: '1' } } })
   })
 
   it('drags a handle as one gesture; one undo step reverts it', async () => {

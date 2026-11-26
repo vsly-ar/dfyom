@@ -53,6 +53,7 @@ import {
 } from './shape.dto'
 import { featuresUsingShape, operationsUsingShape, shapesOffsetting } from './shape-users'
 import { SurfaceTable } from './surfaces'
+import { AdjustedSchema, ROUND, settleRound, type Adjusted } from './round'
 import { ABSOLUTE_PATH } from './reference-commands'
 import { sectionShapeItems, svgShapeItems } from './shape-import'
 import {
@@ -98,6 +99,76 @@ function kindOf(path: ParamPath): FieldKind {
 function shapeResolver(l: LoadedPart): ReferenceResolver {
   return SurfaceTable.build(l.part.operations, l.stock).resolver(0)
 }
+
+/** An item arg's Round intent (DF120): the `round` flag, or `"round"` as its radius. */
+interface RoundIntent {
+  readonly round: boolean | undefined
+  readonly radiusGiven: boolean
+}
+
+/**
+ * Splits a rectangle item arg into the arg without its Round intent (`round` and a `"round"`
+ * radius removed, so the radius takes its default or stored value) and the intent.
+ */
+function takeRound(arg: unknown): [Record<string, unknown>, RoundIntent] {
+  const a = arg as Record<string, unknown>
+  if (a['kind'] !== 'rectangle') return [a, { round: undefined, radiusGiven: false }]
+  const { round, ...rest } = a
+  const sentinel = rest['cornerRadius'] === ROUND
+  if (sentinel) delete rest['cornerRadius']
+  return [
+    rest,
+    {
+      round: sentinel ? true : (round as boolean | undefined),
+      radiusGiven: !sentinel && rest['cornerRadius'] !== undefined,
+    },
+  ]
+}
+
+/**
+ * The DF120 apply rule on parsed items (round.ts `settleRound`): each rectangle's radius and
+ * Round flag from its intent and its previous version (`prevs[k]`, same kind only).
+ */
+function settleItemRounds(
+  items: readonly ShapeItem<Quantity>[],
+  intents: readonly (readonly [unknown, RoundIntent])[],
+  prevs: readonly (ShapeItem<Quantity> | undefined)[],
+  first: number,
+  units: UnitSystem,
+): { items: ShapeItem<Quantity>[]; adjusted: Adjusted[] } {
+  const adjusted: Adjusted[] = []
+  const out = items.map((item, k): ShapeItem<Quantity> => {
+    if (item.kind !== 'rectangle') return item
+    const p = prevs[k]
+    const intent = intents[k]![1]
+    const r = settleRound(
+      {
+        length: item.length,
+        width: item.width,
+        cornerRadius: item.cornerRadius,
+        radiusGiven: intent.radiusGiven,
+        round: intent.round,
+        units,
+        path: `items.${first + k}.cornerRadius`,
+      },
+      p?.kind === 'rectangle'
+        ? {
+            length: p.length,
+            width: p.width,
+            cornerRadius: p.cornerRadius,
+            round: p.round === true,
+          }
+        : undefined,
+    )
+    if (r.adjusted !== undefined) adjusted.push(r.adjusted)
+    const { round: _round, ...rest } = item
+    return { ...rest, cornerRadius: r.cornerRadius, ...(r.round ? { round: true as const } : {}) }
+  })
+  return { items: out, adjusted }
+}
+
+const adjustedOf = (adjusted: readonly Adjusted[]): { adjusted?: Adjusted[] } =>
+  adjusted.length > 0 ? { adjusted: [...adjusted] } : {}
 
 /** Fills the defaults an item arg may leave out (`op` add, rectangle `cornerRadius`, …). */
 function withDefaults(arg: unknown, units: UnitSystem): ShapeItem<Quantity | string> {
@@ -262,30 +333,42 @@ const shapeAdd = defineCommand({
   title: () => 'Add shape',
   machine: false,
   args: z.object({ ...PartArg, name: NameArg.optional(), items: ItemsArg }),
-  result: z.object({ shapeId: ShapeIdSchema, warnings: Warnings }),
+  result: z.object({
+    shapeId: ShapeIdSchema,
+    warnings: Warnings,
+    adjusted: AdjustedSchema.optional(),
+  }),
   run(draft, args, ctx) {
     const where = 'design.shape.add'
     const c = load(draft as ProjectDoc, args.partId, ctx, where)
     if (c.isErr()) return c
     const { loaded, port, shapes } = c.unwrap()
     const units = loaded.units
+    const intents = args.items.map(takeRound)
     const items = parseItems(
-      args.items.map((a) => withDefaults(a, units)),
+      intents.map(([a]) => withDefaults(a, units)),
       0,
       units,
       shapeResolver(loaded),
     )
     if (items.isErr()) return Err(items.unwrapErr().withContext(where))
+    const rounded = settleItemRounds(items.unwrap(), intents, [], 0, units)
     const n = nextShapeNumber(shapes)
     const shapeId = `shape${n}`
-    const dtos = settleItems(port, items.unwrap(), where, shapes, shapeId)
+    const dtos = settleItems(port, rounded.items, where, shapes, shapeId)
     if (dtos.isErr()) return dtos
     draftShapes(draft, args.partId).push({
       id: shapeId,
       name: args.name ?? shapeName(n),
       items: dtos.unwrap(),
     })
-    return withWarnings({ shapeId }, loaded, loaded.part.operations, ctx, where)
+    return withWarnings(
+      { shapeId, ...adjustedOf(rounded.adjusted) },
+      loaded,
+      loaded.part.operations,
+      ctx,
+      where,
+    )
   },
 })
 
@@ -298,7 +381,7 @@ const shapeUpdate = defineCommand({
   args: z.object({ ...ShapeArg, name: NameArg.optional(), items: ItemsArg.optional() }),
   // listed in full on design.shape.add only (tools/list budget, llm-api.md#schemas)
   listedArgs: { items: listedAs('array', 'design.shape.add items') },
-  result: z.object({ warnings: Warnings }),
+  result: z.object({ warnings: Warnings, adjusted: AdjustedSchema.optional() }),
   run(draft, args, ctx) {
     const where = 'design.shape.update'
     const c = load(draft as ProjectDoc, args.partId, ctx, where)
@@ -307,27 +390,36 @@ const shapeUpdate = defineCommand({
     const index = findShape(shapes, args.shapeId, where)
     if (index.isErr()) return index
     const target = draftShapes(draft, args.partId)[index.unwrap()]!
+    let adjusted: readonly Adjusted[] = []
     if (args.items !== undefined) {
       const units = loaded.units
+      const intents = args.items.map(takeRound)
       const items = parseItems(
-        args.items.map((a) => withDefaults(a, units)),
+        intents.map(([a]) => withDefaults(a, units)),
         0,
         units,
         shapeResolver(loaded),
       )
       if (items.isErr()) return Err(items.unwrapErr().withContext(where))
-      const dtos = settleItems(port, items.unwrap(), where, shapes, args.shapeId)
+      // the stored item at the same index is the previous one (a Round item keeps Round)
+      const prevs = shapes[index.unwrap()]!.items.map((dto, k) => {
+        const l = loadItem(dto, k)
+        return l.isOk() ? l.unwrap() : undefined
+      })
+      const rounded = settleItemRounds(items.unwrap(), intents, prevs, 0, units)
+      adjusted = rounded.adjusted
+      const dtos = settleItems(port, rounded.items, where, shapes, args.shapeId)
       if (dtos.isErr()) return dtos
       target.items = dtos.unwrap()
     }
     if (args.name !== undefined) target.name = args.name
-    return withWarnings({}, loaded, loaded.part.operations, ctx, where)
+    return withWarnings(adjustedOf(adjusted), loaded, loaded.part.operations, ctx, where)
   },
 })
 
 /** Parameters of `design.shape.item.update` by item kind (besides `op`). */
 const ITEM_FIELDS: Record<ShapeItem<unknown>['kind'], readonly string[]> = {
-  rectangle: ['center', 'length', 'width', 'cornerRadius', 'rotation'],
+  rectangle: ['center', 'length', 'width', 'cornerRadius', 'round', 'rotation'],
   circle: ['center', 'diameter'],
   obround: ['center', 'length', 'width', 'rotation'],
   polygon: ['center', 'sides', 'diameter', 'across', 'cornerRadius', 'rotation'],
@@ -364,7 +456,7 @@ const itemUpdate = defineCommand({
     segments: listedAs('array', 'design.shape.add path items'),
     fillets: listedAs('array', 'design.shape.add path items'),
   },
-  result: z.object({ warnings: Warnings }),
+  result: z.object({ warnings: Warnings, adjusted: AdjustedSchema.optional() }),
   run(draft, rawArgs, ctx) {
     const where = 'design.shape.item.update'
     const args = rawArgs as { partId: string; shapeId: string; index: number } & Record<
@@ -413,7 +505,9 @@ const itemUpdate = defineCommand({
       )
     const model = loadItem(stored, n)
     if (model.isErr()) return Err(model.unwrapErr().withContext(where))
-    const joined = { ...model.unwrap(), ...given } as ShapeItem<Quantity | string>
+    const intent = takeRound({ kind: stored.kind, ...given })
+    const { kind: _kind, ...givenRest } = intent[0]
+    const joined = { ...model.unwrap(), ...givenRest } as ShapeItem<Quantity | string>
     // E2: per-vertex levels go with the vertices; a path edited to another vertex count drops them
     if (
       joined.kind === 'path' &&
@@ -424,11 +518,12 @@ const itemUpdate = defineCommand({
     const merged = withDefaults(joined, loaded.units)
     const parsed = parseItems([merged], n, loaded.units, shapeResolver(loaded))
     if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
+    const rounded = settleItemRounds(parsed.unwrap(), [intent], [model.unwrap()], n, loaded.units)
     // the other items as stored (loaded once per edit; the resolve is cached by value)
     const all: ShapeItem<Quantity>[] = []
     for (const [k, dto] of shape.items.entries()) {
       if (k === n) {
-        all.push(parsed.unwrap()[0]!)
+        all.push(rounded.items[0]!)
         continue
       }
       const l = loadItem(dto, k)
@@ -438,7 +533,7 @@ const itemUpdate = defineCommand({
     const dtos = settleItems(port, all, where, shapes, args.shapeId)
     if (dtos.isErr()) return dtos
     draftShapes(draft, args.partId)[index.unwrap()]!.items[n] = dtos.unwrap()[n]!
-    return withWarnings({}, loaded, loaded.part.operations, ctx, where)
+    return withWarnings(adjustedOf(rounded.adjusted), loaded, loaded.part.operations, ctx, where)
   },
 })
 
@@ -579,6 +674,7 @@ const shapeConvert = defineCommand({
             length: s.length,
             width: s.width,
             cornerRadius: s.cornerRadius,
+            ...(s.round === true ? { round: true as const } : {}),
           }
     const errors: AppResult<unknown>[] = []
     const item = mapItem(raw, (q, path) => {
