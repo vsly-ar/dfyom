@@ -87,7 +87,7 @@ const PARAMS: Readonly<Record<WorkholdingKind, readonly string[]>> = {
 const ALL_PARAMS = [...new Set(Object.values(PARAMS).flat())]
 
 const ITEMS_HELP =
-  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue. An item with id keeps it (omitted parameters stay).'
+  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue, holds pieces cut free. An item with id keeps it (omitted parameters stay).'
 
 /** The parsed item, or issues at `items.<n>.<param>`. */
 function parseItem(

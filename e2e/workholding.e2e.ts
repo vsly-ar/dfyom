@@ -23,7 +23,8 @@ async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promi
 }
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
-const rendersDir = resolve(__dirname, '../design/features/renders')
+const rendersDir =
+  process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
 
 async function render(page: Page, name: string): Promise<void> {
   if (!RENDERS) return
@@ -42,8 +43,11 @@ async function render(page: Page, name: string): Promise<void> {
   }
 }
 
-/** The user's stock with a top facing (a 6 mm flat), planned. */
-async function hardwoodPlan(page: Page): Promise<{ planId: string }> {
+/** The user's stock with a top facing (a 6 mm flat) and `extra` design operations, planned. */
+async function hardwoodPlan(
+  page: Page,
+  extra: (partId: string) => Promise<unknown> = async () => undefined,
+): Promise<{ planId: string }> {
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   const stock = await call<{ id: string }>('library.stock.add', {
     values: {
@@ -94,6 +98,7 @@ async function hardwoodPlan(page: Page): Promise<{ planId: string }> {
     stockLibraryItemId: stock.id,
   })
   await call('design.facing.add', { partId, depth: '0.5' })
+  await extra(partId)
   await call('project.apply', {})
   return call<{ planId: string }>('plan.create', { partId, machineLibraryItemId: machine.id })
 }
@@ -168,5 +173,66 @@ test('setup inspector: toe clamps added and edited, the facing clears around the
   await expect(fields).toBeVisible()
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'workholding-inspector')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('held pieces (W5): an outline without tabs comes loose under clamps, tape holds it, a screw in the part warns', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  const { planId } = await hardwoodPlan(page, (partId) =>
+    bridgeCall(page, 'design.profile.add', {
+      partId,
+      shape: { kind: 'rectangle', center: ['125', '50'], length: '200', width: '70' },
+      slotWidth: '6',
+      tabs: { count: '0' },
+    }),
+  )
+  const setupId = (
+    await bridgeCall<{ plan: { setups: { id: string }[] } }>(page, 'plan.get', { planId })
+  ).plan.setups[0]!.id
+  await bridgeCall(page, 'plan.workholding.set', {
+    planId,
+    setupId,
+    items: [{ kind: 'toeClamp', edge: 'vMin', grip: '5' }],
+  })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const section = inspector.getByRole('region', { name: /^Workholding/ })
+  const checks = inspector.getByRole('region', { name: 'Setup checks' })
+  await expect(checks).toContainText('cuts the part free in Top without tabs')
+
+  // tape from the Add menu: the part stays held, the open item says so
+  await section.getByRole('button', { name: 'Add' }).click()
+  await page.getByRole('menuitem', { name: /^Tape/ }).click()
+  const tape = section.getByRole('group', { name: 'Item Tape' })
+  await expect(tape).toContainText('pieces cut free stay held')
+  await expect(inspector.getByText('cuts the part free in Top without tabs')).toHaveCount(0)
+  await render(page, 'w5-surface-hold')
+
+  // a screw inside the part from the agent API: its warning under the open screw's centre
+  await bridgeCall(page, 'plan.workholding.set', {
+    planId,
+    setupId,
+    items: [
+      { id: 'wh1', kind: 'toeClamp' },
+      { id: 'wh2', kind: 'surface' },
+      { kind: 'screw', center: ['60', '50'] },
+    ],
+  })
+  await section.getByRole('button', { name: /^Screw 1/ }).click()
+  const screw = section.getByRole('group', { name: 'Item Screw 1' })
+  await expect(screw).toContainText('goes through the part')
+  await expect(checks).toContainText('goes through the part')
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await render(page, 'w5-held-pieces')
   expect(dfyom.rendererErrors).toEqual([])
 })

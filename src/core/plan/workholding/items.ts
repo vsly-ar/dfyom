@@ -404,3 +404,12 @@ export function itemSummary(
       return item.type === 'tape' ? 'double-sided tape' : item.type
   }
 }
+
+/**
+ * The setup holds the stock's bottom face (a `surface` item: tape, vacuum or glue; W5): pieces cut
+ * free stay held, so the loose-piece findings of that setup are left out.
+ * Doc: docs/modes/workholding.md#held-pieces-and-screws-in-the-part-w5
+ */
+export const holdsOnSurface = (setup: {
+  readonly workholding?: readonly { readonly kind: WorkholdingKind }[] | undefined
+}): boolean => (setup.workholding ?? []).some((i) => i.kind === 'surface')

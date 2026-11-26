@@ -12,6 +12,7 @@ import {
   type WorkholdingItemDTO,
 } from '../../../../core/plan/workholding/items'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
+import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
@@ -70,6 +71,7 @@ function newItem(kind: AddKind, items: readonly Item[], stock: { length: number;
       return { kind: 'base', type: kind }
     case 'tape':
     case 'vacuum':
+    case 'glue':
       return { kind: 'surface', type: kind }
   }
 }
@@ -79,7 +81,7 @@ function allowed(kind: AddKind, items: readonly Item[]): boolean {
   const has = (k: Item['kind']) => items.some((i) => i.kind === k)
   if (kind === 'vise') return !has('vise')
   if (kind === 'spoilboard' || kind === 'fixturePlate') return !has('base')
-  if (kind === 'tape' || kind === 'vacuum') return !has('surface')
+  if (kind === 'tape' || kind === 'vacuum' || kind === 'glue') return !has('surface')
   return true
 }
 
@@ -101,16 +103,20 @@ const ADD_ICON = {
   fixturePlate: 'base',
   tape: 'surface-hold',
   vacuum: 'surface-hold',
+  glue: 'surface-hold',
 } as const satisfies Record<AddKind, IconName>
 
 export function Workholding({
   doc,
   plan,
   setup,
+  warnings = [],
 }: {
   doc: ProjectDoc
   plan: PlanDTO
   setup: SetupDTO
+  /** The setup's findings: an item's own ones (W5 `inPart`) show under its fields. */
+  warnings?: readonly PlanWarning[]
 }): React.JSX.Element {
   const call = usePlanCommand()
   const store = usePlanStore()
@@ -232,7 +238,23 @@ export function Workholding({
                       item={item}
                       units={units}
                       readOnly={readOnly}
-                      messages={(param) => issueAt(n, param)}
+                      messages={(param) => [
+                        ...issueAt(n, param),
+                        // W5: a screw in the part warns under its centre
+                        ...(param === 'center'
+                          ? warnings
+                              .filter(
+                                (w) =>
+                                  w.code === 'plan.workholding.inPart' &&
+                                  w.params['itemId'] === item.id,
+                              )
+                              .map((w) => ({
+                                id: w.code,
+                                severity: 'soft' as const,
+                                text: sentence(w.message),
+                              }))
+                          : []),
+                      ]}
                       onCommit={(patch, gesture) => edit(item.id, patch, gesture)}
                       onCancelGesture={cancelGesture}
                     />
@@ -440,12 +462,16 @@ function ItemFields({
       )
     case 'surface':
       return (
-        <Field label={m.type} readOnly={readOnly}>
+        <Field
+          label={m.type}
+          readOnly={readOnly}
+          messages={[{ id: 'surfaceNote', severity: 'note', text: m.surfaceNote }]}
+        >
           <Select
             options={[
               { value: 'tape', label: m.kinds.tape },
               { value: 'vacuum', label: m.kinds.vacuum },
-              { value: 'glue', label: 'Glue' },
+              { value: 'glue', label: m.kinds.glue },
             ]}
             value={item.type}
             disabled={readOnly}
