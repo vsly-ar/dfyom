@@ -1,14 +1,14 @@
 // The hole inspector (v0.4 U2): name, On and Position as a drilling's, Type (Simple / Counterbore
 // / Countersink), Fastener (size, purpose, fit, the sources of the filled sizes), Sizes with the
-// section illustration drawn from the entered values (SketchView over the pure holeSection), a
-// collapsed Defaults group (head sink) and Tools (one tool field per owned operation, each with
-// its lock). A countersink has a Method (Chamfer mill / Stepped, F7) and, stepped, a Stepdown;
+// section illustration drawn from the entered values (SketchView over the pure holeSection),
+// Tools (one tool field per owned operation, each with its lock) and a closed Defaults accordion
+// (head sink, a stepped countersink's stepdown). DF110 S4: Type and Fastener are one Type group. A countersink has a Method (Chamfer mill / Stepped, F7) and, stepped, a Stepdown;
 // the section then draws the terraces and Tools says whether it shares the hole's end mill. Every edit is one `design.hole.update` (one undo step); a refill that overwrote
 // entered sizes says so in the undo toast; errors and findings show at their field, the custom-size
 // note with "Use <table value>". The focused size field's measured part is amber in the drawing;
 // hovering a part highlights its field's label, clicking it focuses the field.
 // Doc: docs/conventions/ui.md#hole-inspector, #section-illustration;
-// docs/modes/design-v0.4.md#implementation-f3
+// docs/modes/design-v0.4.md#implementation-f3, docs/conventions/inspector-layout.md#s4-implementation-notes
 import { useEffect, useRef, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
@@ -33,6 +33,7 @@ import {
   WarningList,
   type FieldIconName,
   type FieldMessage,
+  type GroupSeverity,
   type StepKind,
 } from '../../ui'
 import { holeSection } from '../../viewport/hole-section'
@@ -442,6 +443,16 @@ export function HoleInspector({
       </div>
     ) : null
 
+  const stepped = hole.type === 'countersink' && hole.csMethod === 'stepped'
+  const defaultsMessages = [...messagesAt('headSink'), ...(stepped ? messagesAt('csStepdown') : [])]
+  const defaultsProblem: GroupSeverity | undefined = defaultsMessages.some(
+    (x) => x.severity === 'error',
+  )
+    ? 'error'
+    : defaultsMessages.some((x) => x.severity === 'hard' || x.severity === 'soft')
+      ? 'warning'
+      : undefined
+
   return (
     <div ref={rootRef} className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -475,9 +486,6 @@ export function HoleInspector({
               />
             </Field>
           </div>
-        </InspectorGroup>
-
-        <InspectorGroup title={h.groups.fastener}>
           <div {...track('fastener')}>
             <Field label={h.size} messages={messagesAt('fastener')}>
               <Select
@@ -566,19 +574,6 @@ export function HoleInspector({
           </div>
           {sizeFields(hole).slice(1).map(sizeField)}
           {methodField}
-          {hole.type === 'countersink' && hole.csMethod === 'stepped'
-            ? sizeField('csStepdown')
-            : null}
-          <InspectorGroup
-            title={h.groups.defaults}
-            level={4}
-            collapsible
-            rememberKey="hole.defaults"
-            data-defaults
-          >
-            <p className={styles['muted']}>{h.defaultsHint}</p>
-            {sizeField('headSink')}
-          </InspectorGroup>
         </InspectorGroup>
 
         {owned.length > 0 ? (
@@ -600,6 +595,24 @@ export function HoleInspector({
             ))}
           </InspectorGroup>
         ) : null}
+
+        {/* DF110: set once if ever, a closed accordion after Tools; a problem opens it */}
+        <InspectorGroup
+          title={h.groups.defaults}
+          collapsible
+          rememberKey="hole.defaults"
+          summary={h.defaultsSummary(
+            hole.sizes.headSink?.source,
+            stepped ? hole.sizes.csStepdown?.source : undefined,
+          )}
+          info={h.defaultsHint}
+          severity={defaultsProblem}
+          forceOpen={defaultsProblem !== undefined}
+          data-defaults
+        >
+          {sizeField('headSink')}
+          {stepped ? sizeField('csStepdown') : null}
+        </InspectorGroup>
 
         {unplaced.length > 0 ? (
           <InspectorGroup title={m.features.findings}>

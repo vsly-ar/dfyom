@@ -98,6 +98,9 @@ export const designMessages = {
       fits: { whole: 'Whole', clip: 'Clip' } as Record<string, string>,
       fitDescription: 'Clip cuts the cells crossing the boundary; slivers under 1 mm are dropped.',
       invert: 'Invert (cells as islands)',
+      /** The More rows' names (DF110): "More (Origin, Flip every other cell)". */
+      originShort: 'Origin',
+      invertShort: 'Invert',
       presets: 'Presets',
       /** DF107: the button that opens the Presets dialog. */
       presetsButton: 'Presets…',
@@ -172,6 +175,10 @@ export const designMessages = {
       chamferWidth: 'Chamfer width',
       chamferAngle: 'Chamfer angle',
       chamferTool: 'V-bit',
+      /** The closed Chamfer accordion's summary (DF110). */
+      chamferOff: 'Off',
+      chamferSummary: (width?: string, angle?: string, side?: string) =>
+        [width, angle, side].filter((x) => x !== undefined).join(' · '),
       /** P5: which cell edges (bottom: through cells, from a flipped setup). */
       chamferSide: 'Edges',
       chamferSides: { top: 'Top', bottom: 'Bottom', both: 'Both' } as Record<string, string>,
@@ -420,6 +427,12 @@ export const designMessages = {
       bottom: 'Bottom',
       tapDrillSimple: 'A tap drill hole is a simple hole: change the type to Simple first.',
       defaultsHint: 'How far the head sits below the face when sizes are filled from the table.',
+      /** The closed Defaults accordion's summary (DF110): head sink, a stepped countersink's stepdown. */
+      defaultsSummary: (headSink: string | undefined, stepdown: string | undefined) =>
+        [
+          `Head sink ${headSink ?? '0'}`,
+          ...(stepdown === undefined ? [] : [`stepdown ${stepdown}`]),
+        ].join(' · '),
       showDefaults: 'Show defaults',
       hideDefaults: 'Hide defaults',
       sourcesLabel: 'Sizes from',
@@ -645,6 +658,16 @@ export const designMessages = {
     placeAgainDescription:
       'Spread new holes over every glue face, clear of features. A level whose last hole you remove is placed again.',
     remove: 'Remove split',
+    /** DF110 S4: the Joints and Blanks accordions of the split editor and their summaries. */
+    joints: 'Joints',
+    jointsSummary: (lines: string | undefined, levels: string | undefined) =>
+      [
+        ...(lines === undefined ? [] : [`Lines ${lines}`]),
+        ...(levels === undefined ? [] : [`Levels ${levels}`]),
+      ].join(' · '),
+    blanks: 'Blanks',
+    blanksSummary: (margin: string, useStocks: boolean) =>
+      `Margin ${margin} · ${useStocks ? 'library stocks' : 'own blocks'}`,
     noCuts: 'No lines or levels yet: the part is one piece.',
     pieces: (n: number) => (n === 1 ? '1 piece' : `${n} pieces`),
     preview: 'Split preview',

@@ -9,8 +9,11 @@
 // its blank and opens a menu to change it, "Use library stocks" and "Split to fit…". Since 4e a
 // line can run along an open named shape: "Add curved line" (a new shape and the line, one undo
 // step), "Line along shape", the row's shape picker and "Edit shape"; Top draws the pieces' shapes.
+// DF110 S4: the editor is three groups – Split (preview, pieces, lines and levels, Remove), Joints
+// (an accordion, open) and Blanks (margin, library stocks, Split to fit…; an accordion, closed).
 // Doc: docs/conventions/ui.md#split-part-split-parts-4a, docs/modes/split-parts.md#ui-summary-design,
-// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4e
+// docs/modes/split-parts.md#implementation-4c, docs/modes/split-parts.md#implementation-4e,
+// docs/conventions/inspector-layout.md#s4-implementation-notes
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -286,251 +289,286 @@ export function SplitSection({
         : !isShapeLine(l) && k.axis === l.axis && Math.abs(k.at - mmOf(l.at)) < 1e-6,
     ).length
   }
+  const lineJoint: Record<string, string> = {
+    butt: t.jointButt,
+    puzzle: t.jointPuzzle,
+    dovetail: t.jointDovetail,
+    finger: t.jointFinger,
+    halfLap: t.jointHalfLap,
+  }
   return (
-    <InspectorGroup
-      title={t.title}
-      heading={`${t.title} · ${t.pieces(pieces.length)}`}
-      className={styles['splitSection']}
-    >
-      <p className={styles['muted']}>{t.intro}</p>
-      <SplitPreview
-        part={part}
-        pieces={pieces}
-        holes={holes}
-        knobs={knobs}
-        outlines={info?.outlines}
-        paths={info?.paths}
-      />
-      {/* U9 Q132 (provisional): pieces with the same blank in one row, a small numbered chip per
+    <>
+      <InspectorGroup
+        title={t.title}
+        heading={`${t.title} · ${t.pieces(pieces.length)}`}
+        className={styles['splitSection']}
+        info={t.intro}
+      >
+        <SplitPreview
+          part={part}
+          pieces={pieces}
+          holes={holes}
+          knobs={knobs}
+          outlines={info?.outlines}
+          paths={info?.paths}
+        />
+        {/* U9 Q132 (provisional): pieces with the same blank in one row, a small numbered chip per
           piece (each opens its blank menu, named by the whole chip text) and the blank once */}
-      <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
-        {blankGroups(pieces, (p) => t.blankLine(blankText(p.blank, units), blankName(p))).map(
-          (g) => (
-            <li key={g.pieces[0]!.id} className={styles['splitChipGroup']}>
-              <div className={styles['splitChipNumbers']}>
-                {g.pieces.map((p) => (
-                  <BlankMenu
-                    key={p.id}
-                    piece={p}
-                    need={info?.needs.get(p.n)}
-                    stocks={stocks}
-                    materialClass={stock.material.class}
-                  >
-                    <button
-                      type="button"
-                      className={styles['splitChip']}
-                      aria-label={t.chip(p.n, blankText(p.blank, units), blankName(p))}
-                      title={t.chip(p.n, blankText(p.blank, units), blankName(p))}
+        <ul className={styles['splitChips']} aria-label={t.pieces(pieces.length)}>
+          {blankGroups(pieces, (p) => t.blankLine(blankText(p.blank, units), blankName(p))).map(
+            (g) => (
+              <li key={g.pieces[0]!.id} className={styles['splitChipGroup']}>
+                <div className={styles['splitChipNumbers']}>
+                  {g.pieces.map((p) => (
+                    <BlankMenu
+                      key={p.id}
+                      piece={p}
+                      need={info?.needs.get(p.n)}
+                      stocks={stocks}
+                      materialClass={stock.material.class}
                     >
-                      {p.n}
-                    </button>
-                  </BlankMenu>
-                ))}
-              </div>
-              <span className={styles['splitChipBlank']} aria-hidden="true">
-                {g.blank}
-              </span>
-            </li>
-          ),
-        )}
-      </ul>
-      <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
-        {split.lines.length === 0 && split.levels.length === 0 ? (
-          <p className={styles['muted']}>{t.noCuts}</p>
-        ) : null}
-        {split.lines.map((line, i) =>
-          isShapeLine(line) ? (
+                      <button
+                        type="button"
+                        className={styles['splitChip']}
+                        aria-label={t.chip(p.n, blankText(p.blank, units), blankName(p))}
+                        title={t.chip(p.n, blankText(p.blank, units), blankName(p))}
+                      >
+                        {p.n}
+                      </button>
+                    </BlankMenu>
+                  ))}
+                </div>
+                <span className={styles['splitChipBlank']} aria-hidden="true">
+                  {g.blank}
+                </span>
+              </li>
+            ),
+          )}
+        </ul>
+        <div className={styles['splitGroup']} role="group" aria-label={t.lines}>
+          {split.lines.length === 0 && split.levels.length === 0 ? (
+            <p className={styles['muted']}>{t.noCuts}</p>
+          ) : null}
+          {split.lines.map((line, i) =>
+            isShapeLine(line) ? (
+              <CutRow
+                key={`line-${i}`}
+                onFocus={() => setFocus(null)}
+                onBlur={() => setFocus(null)}
+                {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
+                text={findingText}
+                findings={cutFindings(warnings, {
+                  kind: 'line',
+                  index: i,
+                  axis: 'x',
+                  at: Number.NaN,
+                  shape: line.shape,
+                })}
+              >
+                <Select
+                  aria-label={t.lineAlong}
+                  value={line.shape}
+                  options={openShapes.map((x) => ({
+                    value: x.id,
+                    label: x.name,
+                    disabled: x.id !== line.shape && used.has(x.id),
+                  }))}
+                  onValueChange={(v) =>
+                    void send(withLines(args.lines.map((l, k) => (k === i ? { shape: v } : l))))
+                  }
+                />
+                <IconButton
+                  label={t.editLineShape}
+                  icon={<Icon name="edit" />}
+                  onClick={() => openShape(part.dto.id, line.shape)}
+                />
+                <IconButton
+                  label={t.removeShapeLine(shapeName(line.shape))}
+                  icon={<Icon name="delete" />}
+                  onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
+                />
+              </CutRow>
+            ) : (
+              <CutRow
+                key={`line-${i}`}
+                onFocus={() => setFocus({ kind: 'line', index: i })}
+                onBlur={() => setFocus(null)}
+                {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
+                text={findingText}
+                findings={cutFindings(warnings, {
+                  kind: 'line',
+                  index: i,
+                  axis: line.axis,
+                  at: mmOf(line.at),
+                })}
+              >
+                <QuantityInput
+                  label={t.lineAt(line.axis)}
+                  stepKind="xy"
+                  kind="length"
+                  defaultUnit={unit}
+                  value={quantityOf(line.at)}
+                  onCommit={(q, gesture) =>
+                    void send(
+                      withLines(
+                        args.lines.map((l, k) =>
+                          k === i && !('shape' in l) ? { ...l, at: q.source } : l,
+                        ),
+                      ),
+                      false,
+                      gesture,
+                    )
+                  }
+                />
+                <IconButton
+                  label={t.removeLine(line.axis, line.at.source)}
+                  icon={<Icon name="delete" />}
+                  onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
+                />
+              </CutRow>
+            ),
+          )}
+          {split.levels.map((level, i) => (
             <CutRow
-              key={`line-${i}`}
-              onFocus={() => setFocus(null)}
+              key={`level-${i}`}
+              onFocus={() => setFocus({ kind: 'level', index: i })}
               onBlur={() => setFocus(null)}
-              {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
+              {...(split.joint.dowels === undefined
+                ? {}
+                : { note: t.dowelCount(holes.filter((h) => h.level === i).length) })}
               text={findingText}
               findings={cutFindings(warnings, {
-                kind: 'line',
+                kind: 'level',
                 index: i,
-                axis: 'x',
-                at: Number.NaN,
-                shape: line.shape,
-              })}
-            >
-              <Select
-                aria-label={t.lineAlong}
-                value={line.shape}
-                options={openShapes.map((x) => ({
-                  value: x.id,
-                  label: x.name,
-                  disabled: x.id !== line.shape && used.has(x.id),
-                }))}
-                onValueChange={(v) =>
-                  void send(withLines(args.lines.map((l, k) => (k === i ? { shape: v } : l))))
-                }
-              />
-              <IconButton
-                label={t.editLineShape}
-                icon={<Icon name="edit" />}
-                onClick={() => openShape(part.dto.id, line.shape)}
-              />
-              <IconButton
-                label={t.removeShapeLine(shapeName(line.shape))}
-                icon={<Icon name="delete" />}
-                onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
-              />
-            </CutRow>
-          ) : (
-            <CutRow
-              key={`line-${i}`}
-              onFocus={() => setFocus({ kind: 'line', index: i })}
-              onBlur={() => setFocus(null)}
-              {...(keys === undefined ? {} : { note: t.keyCount(keysOn(i)) })}
-              text={findingText}
-              findings={cutFindings(warnings, {
-                kind: 'line',
-                index: i,
-                axis: line.axis,
-                at: mmOf(line.at),
+                axis: 'z',
+                at: mmOf(level),
               })}
             >
               <QuantityInput
-                label={t.lineAt(line.axis)}
-                stepKind="xy"
+                label={t.levelAt}
+                stepKind="depth"
                 kind="length"
                 defaultUnit={unit}
-                value={quantityOf(line.at)}
+                value={quantityOf(level)}
                 onCommit={(q, gesture) =>
                   void send(
-                    withLines(
-                      args.lines.map((l, k) =>
-                        k === i && !('shape' in l) ? { ...l, at: q.source } : l,
-                      ),
-                    ),
+                    withLevels(args.levels.map((l, k) => (k === i ? q.source : l))),
                     false,
                     gesture,
                   )
                 }
               />
               <IconButton
-                label={t.removeLine(line.axis, line.at.source)}
+                label={t.removeLevel(level.source)}
                 icon={<Icon name="delete" />}
-                onClick={() => void send(withLines(args.lines.filter((_, k) => k !== i)))}
+                onClick={() => void send(withoutLevel(args, i))}
               />
             </CutRow>
-          ),
-        )}
-        {split.levels.map((level, i) => (
-          <CutRow
-            key={`level-${i}`}
-            onFocus={() => setFocus({ kind: 'level', index: i })}
-            onBlur={() => setFocus(null)}
-            {...(split.joint.dowels === undefined
-              ? {}
-              : { note: t.dowelCount(holes.filter((h) => h.level === i).length) })}
-            text={findingText}
-            findings={cutFindings(warnings, {
-              kind: 'level',
-              index: i,
-              axis: 'z',
-              at: mmOf(level),
-            })}
-          >
-            <QuantityInput
-              label={t.levelAt}
-              stepKind="depth"
-              kind="length"
-              defaultUnit={unit}
-              value={quantityOf(level)}
-              onCommit={(q, gesture) =>
-                void send(
-                  withLevels(args.levels.map((l, k) => (k === i ? q.source : l))),
-                  false,
-                  gesture,
-                )
-              }
-            />
-            <IconButton
-              label={t.removeLevel(level.source)}
-              icon={<Icon name="delete" />}
-              onClick={() => void send(withoutLevel(args, i))}
-            />
-          </CutRow>
-        ))}
-        <div className={styles['addRow']}>
-          <Button size="sm" icon={<Icon name="add" />} onClick={() => addLine('x')}>
-            {t.addLine('x')}
-          </Button>
-          <Button size="sm" icon={<Icon name="add" />} onClick={() => addLine('y')}>
-            {t.addLine('y')}
-          </Button>
-          <Button size="sm" icon={<Icon name="add" />} onClick={addLevel}>
-            {t.addLevel}
-          </Button>
-        </div>
-        {/* split lines as shapes (4e) */}
-        <div className={styles['addRow']}>
-          <Button
-            size="sm"
-            icon={<Icon name="add" />}
-            title={t.addCurvedLineDescription}
-            disabled={port === undefined}
-            onClick={() => void addCurvedLine()}
-          >
-            {t.addCurvedLine}
-          </Button>
-          {freeShape === undefined ? null : (
+          ))}
+          <div className={styles['addRow']}>
+            <Button size="sm" icon={<Icon name="add" />} onClick={() => addLine('x')}>
+              {t.addLine('x')}
+            </Button>
+            <Button size="sm" icon={<Icon name="add" />} onClick={() => addLine('y')}>
+              {t.addLine('y')}
+            </Button>
+            <Button size="sm" icon={<Icon name="add" />} onClick={addLevel}>
+              {t.addLevel}
+            </Button>
+          </div>
+          {/* split lines as shapes (4e) */}
+          <div className={styles['addRow']}>
             <Button
               size="sm"
               icon={<Icon name="add" />}
-              title={t.lineAlongDescription}
-              onClick={() => void send(withLines([...args.lines, { shape: freeShape.id }]))}
+              title={t.addCurvedLineDescription}
+              disabled={port === undefined}
+              onClick={() => void addCurvedLine()}
             >
-              {t.addLineAlong}
+              {t.addCurvedLine}
             </Button>
-          )}
+            {freeShape === undefined ? null : (
+              <Button
+                size="sm"
+                icon={<Icon name="add" />}
+                title={t.lineAlongDescription}
+                onClick={() => void send(withLines([...args.lines, { shape: freeShape.id }]))}
+              >
+                {t.addLineAlong}
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
-      <QuantityInput
-        label={t.margin}
-        stepKind="small"
-        kind="length"
-        defaultUnit={unit}
-        value={quantityOf(split.margin)}
-        onCommit={(q, gesture) => void send({ ...args, margin: q.source }, false, gesture)}
-      />
-      {split.lines.length > 0 ? (
-        <KeyFields
-          part={part}
-          args={args}
-          keys={keys}
-          laps={laps}
-          send={(a, g) => void send(a, false, g)}
-        />
-      ) : null}
-      {split.levels.length > 0 ? (
-        <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
-      ) : null}
-      {/* the blanks after the cuts (U9 Q131): how the pieces are cut first, then from what */}
-      <Field label={t.useStocks} kind="toggle" info={t.useStocksHint}>
-        <Switch
-          label={t.useStocks}
-          hideLabel
-          checked={split.useStocks === true}
-          onCheckedChange={(on) => void send({ ...args, useStocks: on })}
-        />
-      </Field>
-      <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
-      <div className={styles['addRow']}>
-        <Button
-          size="sm"
-          variant="danger"
-          icon={<Icon name="delete" />}
-          onClick={() => void send(null)}
+        <div className={styles['addRow']}>
+          <Button
+            size="sm"
+            variant="danger"
+            icon={<Icon name="delete" />}
+            onClick={() => void send(null)}
+          >
+            {t.remove}
+          </Button>
+        </div>
+        {error ? <ErrorMessage error={error} /> : null}
+        {confirmDialog}
+      </InspectorGroup>
+      {split.lines.length > 0 || split.levels.length > 0 ? (
+        // DF110 S4: how the pieces join, an accordion open by default, its summary the joints
+        <InspectorGroup
+          title={t.joints}
+          collapsible
+          defaultOpen
+          rememberKey="split.joints"
+          summary={t.jointsSummary(
+            split.lines.length > 0 ? (lineJoint[split.joint.kind] ?? split.joint.kind) : undefined,
+            split.levels.length > 0
+              ? split.joint.dowels === undefined
+                ? t.jointButt
+                : t.jointDowels
+              : undefined,
+          )}
         >
-          {t.remove}
-        </Button>
-      </div>
-      {error ? <ErrorMessage error={error} /> : null}
-      {confirmDialog}
-    </InspectorGroup>
+          {split.lines.length > 0 ? (
+            <KeyFields
+              part={part}
+              args={args}
+              keys={keys}
+              laps={laps}
+              send={(a, g) => void send(a, false, g)}
+            />
+          ) : null}
+          {split.levels.length > 0 ? (
+            <DowelFields part={part} args={args} send={(a, g) => void send(a, false, g)} />
+          ) : null}
+        </InspectorGroup>
+      ) : null}
+      {/* the blanks after the cuts (U9 Q131): how the pieces are cut first, then from what;
+        DF110 S4: set once if ever, a closed accordion */}
+      <InspectorGroup
+        title={t.blanks}
+        collapsible
+        rememberKey="split.blanks"
+        summary={t.blanksSummary(split.margin.source, split.useStocks === true)}
+      >
+        <QuantityInput
+          label={t.margin}
+          stepKind="small"
+          kind="length"
+          defaultUnit={unit}
+          value={quantityOf(split.margin)}
+          onCommit={(q, gesture) => void send({ ...args, margin: q.source }, false, gesture)}
+        />
+        <Field label={t.useStocks} kind="toggle" info={t.useStocksHint}>
+          <Switch
+            label={t.useStocks}
+            hideLabel
+            checked={split.useStocks === true}
+            onCheckedChange={(on) => void send({ ...args, useStocks: on })}
+          />
+        </Field>
+        <SplitToFit part={part} stocks={stocks} send={(a) => void send(a)} args={args} />
+      </InspectorGroup>
+    </>
   )
 }
 

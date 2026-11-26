@@ -365,4 +365,15 @@ export async function revealField(scope: Locator, label: string): Promise<void> 
   await expect(scope.getByLabel(label, { exact: true }).first()).toBeVisible()
 }
 
+/**
+ * Opens a closed accordion of an inspector by its title (DF110 S4: the split editor's Blanks), the
+ * way a user does: a click on its header. An open one stays open.
+ * Doc: docs/conventions/inspector-layout.md#inspector-structure-df110
+ */
+export async function openGroup(scope: Locator, title: string): Promise<void> {
+  const header = scope.getByRole('button', { name: new RegExp(`^${title}`) }).first()
+  if ((await header.getAttribute('aria-expanded')) === 'false') await header.click()
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
+}
+
 export { expect } from '@playwright/test'
