@@ -18,10 +18,8 @@ const length = () => quantityDto('length')
  */
 export const OPERATION_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*(_\w+)*$/
 
-export const OperationIdSchema = z
-  .string()
-  .regex(OPERATION_ID_PATTERN)
-  .describe('Operation id, e.g. pocket1 (used in surface ids)')
+// No description: the primer says once that pocket1's surfaces are pocket1.floor… (tools/list budget).
+export const OperationIdSchema = z.string().regex(OPERATION_ID_PATTERN)
 
 /**
  * `stock.top`, `stock.side[1]`, `facing1.floor`, `profile1.tab[0].top`, …

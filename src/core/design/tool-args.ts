@@ -19,18 +19,17 @@ import { checkGeneralizedTool, type DesignTool } from './tool'
 
 const Len = z.string().min(1).max(64)
 
-export const ToolArg = z
-  .discriminatedUnion('kind', [
-    z.object({
-      kind: z.literal('generalized'),
-      type: z.enum(TOOL_TYPES),
-      diameter: Len,
-      cornerRadius: Len.optional().describe('Bull nose only: 0 < RE < DC/2'),
-      angle: z.string().min(1).max(64).optional().describe('chamferMill only: included angle'),
-    }),
-    z.object({ kind: z.literal('specific'), toolLibraryItemId: ItemIdSchema }),
-  ])
-  .describe('Generalized tool (type + diameter) or a library tool; locks the tool field')
+export const ToolArg = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('generalized'),
+    type: z.enum(TOOL_TYPES),
+    diameter: Len,
+    cornerRadius: Len.optional(),
+    angle: z.string().min(1).max(64).optional(),
+  }),
+  z.object({ kind: z.literal('specific'), toolLibraryItemId: ItemIdSchema }),
+])
+// No description: the primer's operation-args line explains the tool arg once (tools/list budget).
 export type ToolArgs = z.output<typeof ToolArg>
 
 /**

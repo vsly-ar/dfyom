@@ -318,11 +318,14 @@ describe('agent tools', () => {
       'design.line.update',
       'design.part.update',
       'design.pattern.update',
+      'design.pocket.update',
+      'design.profile.update',
       'design.shape.item.update',
       'design.shape.update',
       'library.machine.update',
       'library.stock.update',
       'library.tool.update',
+      'plan.design.operation.update',
     ])
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       if (def.listedArgs === undefined) continue

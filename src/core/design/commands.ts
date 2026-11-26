@@ -120,45 +120,39 @@ import { placedOperation, PlacedSchema } from './placed'
 
 /** A quantity as entered: literal or formula (the primer explains both once, size budget). */
 export const Src = z.string().min(1).max(256)
-export const PointArg = z.tuple([Src, Src]).describe('[u, v] in the face frame')
-const RotationArg = Src.optional().describe('CCW about the anchor point; default 0°')
-const ShapeArg = z
-  .discriminatedUnion('kind', [
-    z.object({
-      kind: z.literal('rectangle'),
-      center: PointArg,
-      length: Src.describe('Size along u'),
-      width: Src.describe('Size along v'),
-      cornerRadius: Src.optional().describe('Default 3 mm / 1/8"'),
-      rotation: RotationArg,
-    }),
-    z.object({ kind: z.literal('circle'), center: PointArg, diameter: Src }),
-    z.object({
-      kind: z.literal('named'),
-      shapeId: z.string().regex(SHAPE_ID_PATTERN),
-      center: PointArg,
-      rotation: RotationArg,
-      mirror: z.literal(true).optional().describe('Flip x before rotating'),
-    }),
-  ])
-  .describe('center = anchor point; named places a part shape. Replaces the shape on update')
-export const AnchorArg = AnchorDtoSchema.describe(
-  'Placed-box point center gives; default centre; update keeps the feature in place',
-)
-export const ToleranceArg = z
-  .object({
-    length: Src.nullable().optional().describe('null clears'),
-    angle: Src.nullable().optional().describe('null clears'),
-  })
-  .describe('General ± for untoleranced values')
+// PointArg, RotationArg, ShapeArg, AnchorArg, ToleranceArg and StockFaceArg have no description:
+// the primer's operation-args line says it once (llm-api.md#schemas, tools/list budget).
+export const PointArg = z.tuple([Src, Src])
+const RotationArg = Src.optional()
+const ShapeArg = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('rectangle'),
+    center: PointArg,
+    length: Src.describe('Size along u'),
+    width: Src.describe('Size along v'),
+    cornerRadius: Src.optional().describe('Default 3 mm / 1/8"'),
+    rotation: RotationArg,
+  }),
+  z.object({ kind: z.literal('circle'), center: PointArg, diameter: Src }),
+  z.object({
+    kind: z.literal('named'),
+    shapeId: z.string().regex(SHAPE_ID_PATTERN),
+    center: PointArg,
+    rotation: RotationArg,
+    mirror: z.literal(true).optional(),
+  }),
+])
+export const AnchorArg = AnchorDtoSchema
+export const ToleranceArg = z.object({
+  length: Src.nullable().optional(),
+  angle: Src.nullable().optional(),
+})
 // No description: the primer says once that ids come from results and names are labels (llm-api.md#schemas).
 export const NameArg = z.string().min(1).max(NAME_MAX)
 export const OnArg = SurfaceIdSchema.describe(
-  'Start face: stock.top/bottom/side[0..3] or an earlier floor / tab top; default last top facing floor',
+  'Or an earlier floor / tab top; default last top facing floor',
 )
-const StockFaceArg = SurfaceIdSchema.describe(
-  'Stock face it starts from: stock.top (default), stock.bottom or stock.side[0..3]',
-)
+const StockFaceArg = SurfaceIdSchema.describe('A stock face')
 export const PartArg = { partId: PartIdSchema }
 const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
 const TabsArg = z.object({
@@ -796,6 +790,7 @@ const pocketSpec: KindSpec<typeof pocketParams, Extract<Operation, { kind: 'pock
   kind: 'pocket',
   params: pocketParams,
   required: ['shape', 'depth'],
+  updateListed: { shape: listedAs('object', 'design.pocket.add shape') },
   build: (a, prev, { f, id, name, ops }) => ({
     kind: 'pocket',
     id,
@@ -851,6 +846,7 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
   kind: 'profile',
   params: profileParams,
   required: ['shape'],
+  updateListed: { shape: listedAs('object', 'design.profile.add shape') },
   build: (a, prev, { f, id, name }) => ({
     kind: 'profile',
     id,
