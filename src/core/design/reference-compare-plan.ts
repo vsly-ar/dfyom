@@ -231,7 +231,10 @@ function throughColumns(cut: readonly CutMap[], stock: StockSize): Map<Direction
  * The compare (deviation.md § Height map method): per direction, the domain (reference material
  * grown by `DOMAIN_GROW_MM`), the edge band (a reference step over the threshold to any of the 8
  * neighbours, an empty column counting as the stock bottom), the statistics of |dev| over the
- * rest, and 4-connected regions of one sign beyond the threshold.
+ * rest, and 4-connected regions of one sign beyond the threshold. An over-cut region is also of
+ * one operation (the one that last cut its cells), so touching over-cuts of a facing and the
+ * pockets inside it stay apart, each with its own operation and worst value (R6); material left
+ * is not split (no one operation made it; its operation is still the majority's).
  */
 export function comparePlanMaps(input: PlanCompareInput): PlanCompareResult {
   const { threshold } = input
@@ -316,11 +319,13 @@ export function comparePlanMaps(input: PlanCompareInput): PlanCompareResult {
     faces.push({ face: STOCK_FACE[cut.direction], ...statsOf(devs, over, area) })
     for (const d of devs) all.push(d)
     overAll += over
-    // regions: 4-connected cells of one sign
+    // regions: 4-connected cells of one sign; an over-cut also of one operation (R6)
     const seen = new Uint8Array(n)
+    const opOf = (c: number) => opKey(input.owners, cut.by[c]!)
     for (let s0 = 0; s0 < n; s0++) {
       if (sign[s0] === 0 || seen[s0] === 1) continue
       const sg = sign[s0]! as 1 | -1
+      const op = sg < 0 ? opOf(s0) : undefined
       const queue = [s0]
       const cells: number[] = []
       seen[s0] = 1
@@ -348,6 +353,7 @@ export function comparePlanMaps(input: PlanCompareInput): PlanCompareResult {
         w1 = Math.max(w1, cut.h[c]!, refAt(c))
         for (const cc of [i > 0 ? c - 1 : -1, i < nu - 1 ? c + 1 : -1, c - nu, c + nu]) {
           if (cc < 0 || cc >= n || seen[cc] === 1 || sign[cc] !== sg) continue
+          if (op !== undefined && opOf(cc) !== op) continue
           seen[cc] = 1
           queue.push(cc)
         }
@@ -403,6 +409,15 @@ export function comparePlanMaps(input: PlanCompareInput): PlanCompareResult {
     unexplained,
   }
   return capped(result, regions.length)
+}
+
+/**
+ * The operation that last cut a cell (`CutMap.by`), as the key over-cut regions split by: the
+ * plan operation's id, the toolpath index when the plan names none, '' for an uncut cell.
+ */
+function opKey(owners: readonly CutOwner[], by: number): string {
+  if (by === 0) return ''
+  return owners[by - 1]?.operationId ?? `#${by}`
 }
 
 /** The result with regions dropped from the end until its JSON fits `PLAN_RESULT_BYTES_MAX`. */
