@@ -65,6 +65,7 @@ export {
   type MenuGroup,
   type MenuItem,
   type MenuProps,
+  type MenuSub,
 } from './Menu/Menu'
 export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitcher'
 export { motionMs, useReducedMotion } from './motion'

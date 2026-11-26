@@ -180,3 +180,19 @@
   margin-left: auto;
   color: var(--accent-icon);
 }
+
+/* a submenu's trigger (DF121 WL4): the chevron at the end points right; open, it stays
+   highlighted while the pointer is in the submenu */
+.subArrow {
+  display: inline-flex;
+  margin-left: auto;
+  transform: rotate(-90deg);
+}
+
+.item[data-state='open'] {
+  background: var(--bg-hover);
+}
+
+.subContent {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}

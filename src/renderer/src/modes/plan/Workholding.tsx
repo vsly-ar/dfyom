@@ -2,9 +2,18 @@
 // (icon, name, one-line summary), an Add menu, the margin, and the open item's fields. Every
 // change is one `plan.workholding.set` with the whole list ("Copy from…" sends its `copyFrom`,
 // X2-5); items keep their ids, so the open item survives the edit. Opening an item shows its
-// keep-out zone in the viewport (plan store).
-// Doc: docs/conventions/ui.md#workholding
-import { useState } from 'react'
+// keep-out zone in the viewport (plan store). DF121 WL4: the Add menu places the type's library
+// devices (the default first, built-ins included; a submenu when a type has several), an item placed
+// from the library shows its device with "Edit in library", the detach note after a device edit,
+// "Library changed · Update from library" for a stale copy and the range warning under its field.
+// Doc: docs/conventions/ui.md#workholding, docs/modes/workholding-library.md#implementation-wl4
+import { useEffect, useState } from 'react'
+import {
+  builtinWorkholding,
+  isBuiltinWorkholding,
+} from '../../../../core/library/workholding-builtins'
+import type { WorkholdingValuesDTO } from '../../../../core/library/workholding.dto'
+import { deviceLabel } from '../../../../core/plan/workholding/devices'
 import {
   defaultMargin,
   EDGES,
@@ -17,8 +26,11 @@ import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
+import type { LibraryTarget } from '../../../../shared/preload-api'
+import { LibraryLink } from '../../library/LibraryLink'
 import { planMessages, sentence } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
+import { useLibraryVersion, useShell } from '../../shell/ShellContext'
 import {
   Button,
   ErrorMessage,
@@ -32,10 +44,11 @@ import {
   type FieldMessage,
   type IconName,
   type MenuEntry,
+  type MenuItem,
   InspectorGroup,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
-import { allows, planPart } from './model'
+import { allows, planPart, snapshotName, type PlanStale } from './model'
 import { usePlanCommand, usePlanState, usePlanStore } from './plan-store'
 import { NameField } from './PlanInspector'
 import styles from './Workholding.module.css'
@@ -76,6 +89,73 @@ function newItem(kind: AddKind, items: readonly Item[], stock: { length: number;
       return { kind: 'surface', type: kind }
   }
 }
+
+/** A library device as `library.workholding.list` returns it (flat values and flags). */
+export type Device = WorkholdingValuesDTO & {
+  readonly id: string
+  readonly builtIn?: true
+  readonly isDefault?: true
+}
+
+/** Whether `d` is a device the Add entry `kind` places (bases and surfaces by their own type). */
+function devicePlaces(kind: AddKind, d: Device): boolean {
+  switch (kind) {
+    case 'spoilboard':
+    case 'fixturePlate':
+      return d.type === 'base' && d.baseType === kind
+    case 'tape':
+    case 'vacuum':
+    case 'glue':
+      return d.type === 'surface' && d.surfaceType === kind
+    default:
+      return d.type === kind
+  }
+}
+
+/** The Add entry's devices: the type's default first, then the user's, then the built-ins. */
+export function devicesFor(kind: AddKind, devices: readonly Device[]): Device[] {
+  const rank = (d: Device) => (d.isDefault === true ? 0 : d.builtIn === true ? 2 : 1)
+  return devices
+    .filter((d) => devicePlaces(kind, d))
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => rank(a.d) - rank(b.d) || a.i - b.i)
+    .map((x) => x.d)
+}
+
+/**
+ * The library's workholding devices with the built-ins of the project's unit system, read again
+ * on every library write; the built-ins alone until the first read answers (or without a library).
+ */
+function useDevices(units: UnitSystem): readonly Device[] {
+  const { bridge } = useShell()
+  const library = useLibraryVersion()
+  const [devices, setDevices] = useState<readonly Device[] | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    void bridge.call('library.workholding.list', { units }).then((r) => {
+      if (live && r.ok) setDevices((r.value as { items: Device[] }).items)
+    })
+    return () => {
+      live = false
+    }
+  }, [bridge, units, library])
+  return (
+    devices ??
+    builtinWorkholding(units).map((i): Device => ({
+      ...(i.toDTO() as WorkholdingValuesDTO),
+      id: i.id,
+      builtIn: true,
+    }))
+  )
+}
+
+/**
+ * The Library window on a device. Its Workholding tab comes with WL3: until then `LibraryTarget`
+ * has no `workholding` kind and the main process drops it, so the window opens on its last tab
+ * (workholding-library.md § Implementation (WL4)).
+ */
+const deviceTarget = (itemId: string): LibraryTarget =>
+  ({ kind: 'workholding', itemId }) as unknown as LibraryTarget
 
 /** Which Add entries the setup still allows (one vise, one base, one surface). */
 function allowed(kind: AddKind, items: readonly Item[]): boolean {
@@ -134,8 +214,16 @@ export function Workholding({
   const stock = planPart(doc, plan).loaded?.stock
   const holding = stock === undefined ? undefined : setupWorkholding(setup, stock)
   const summaryUnits = units === 'inch' ? 'in' : 'mm'
+  const devices = useDevices(units)
+  const stale = usePlanState((s) =>
+    s.data?.planId === plan.id ? s.data.stale?.libraryCopies : undefined,
+  )
+  /** Items a device edit detached here (Q138), with the device they followed: the note. */
+  const [detached, setDetached] = useState<Readonly<Record<string, string>>>({})
 
-  const set = async (args: object, gesture?: string): Promise<boolean> => {
+  const set = async (args: object, gesture?: string): Promise<boolean> =>
+    (await setReply(args, gesture)).ok
+  const setReply = async (args: object, gesture?: string) => {
     const r = await call(
       'plan.workholding.set',
       { planId: plan.id, setupId: setup.id, ...args },
@@ -144,11 +232,13 @@ export function Workholding({
     setArrangeError(undefined)
     setErrors(r.ok ? [] : r.error.issues)
     setFailed(r.ok || r.error.issues.length > 0 ? undefined : r.error)
-    return r.ok
+    return r
   }
   /** The whole list with item `id` changed by `patch` (every other item by id only). */
-  const edit = (id: string, patch: object, gesture?: string) =>
-    void set(
+  const edit = async (id: string, patch: object, gesture?: string) => {
+    const before = items.find((i) => i.id === id)
+    const device = before?.copyId === undefined ? undefined : snapshotName(plan, before.copyId)
+    const r = await setReply(
       {
         items: items.map((i) =>
           i.id === id ? { id, kind: i.kind, ...patch } : { id: i.id, kind: i.kind },
@@ -156,15 +246,27 @@ export function Workholding({
       },
       gesture,
     )
-  const add = async (kind: AddKind) => {
+    // Q138: an edit of a device value made it an own item (the result no longer names a device)
+    if (!r.ok || device === undefined) return
+    const after = (r.value as { items?: { id: string; libraryItemId?: string }[] }).items
+    const item = after?.find((i) => i.id === id)
+    if (item !== undefined && item.libraryItemId === undefined)
+      setDetached((d) => ({ ...d, [id]: device }))
+  }
+  const add = async (kind: AddKind, libraryItemId?: string) => {
     if (holding === undefined) return
     // ids are per plan: the command gives the new item the next one, which opens it
     const id = nextItemId(plan.setups.flatMap((s) => (s.workholding ?? []).map((i) => i.id)))
+    const placed: Record<string, unknown> = { ...newItem(kind, items, holding.stock) }
+    if (libraryItemId !== undefined) {
+      // the device gives the sizes: a block's own sizes would detach it
+      delete placed['length']
+      delete placed['width']
+      delete placed['top']
+      placed['libraryItemId'] = libraryItemId
+    }
     const ok = await set({
-      items: [
-        ...items.map((i) => ({ id: i.id, kind: i.kind })),
-        newItem(kind, items, holding.stock),
-      ],
+      items: [...items.map((i) => ({ id: i.id, kind: i.kind })), placed],
     })
     if (ok) store.getState().selectWorkholding({ setupId: setup.id, itemId: id })
   }
@@ -217,13 +319,50 @@ export function Workholding({
       .map((i, k) => ({ id: `${param}-${k}`, severity: 'error', text: sentence(i.message) }))
   const listErrors = errors.filter((i) => i.path[0] !== 'items' || typeof i.path[1] !== 'number')
 
-  const addItems: MenuEntry[] = (Object.keys(m.kinds) as AddKind[]).map((kind) => ({
-    label: m.kinds[kind],
-    description: m.kindHints[kind],
-    icon: <Icon name={ADD_ICON[kind]} />,
-    onSelect: () => void add(kind),
-    ...(allowed(kind, items) ? {} : { disabled: true, disabledReason: 'One per setup' }),
-  }))
+  // WL4: each type places its default device; a type with several devices (or a block with the
+  // user's) opens a submenu of them, the default first, and "Own item" last
+  const addItems: MenuEntry[] = (Object.keys(m.kinds) as AddKind[]).map((kind): MenuEntry => {
+    const icon = <Icon name={ADD_ICON[kind]} />
+    const choices = devicesFor(kind, devices)
+    if (!allowed(kind, items))
+      return {
+        label: m.kinds[kind],
+        description: m.kindHints[kind],
+        icon,
+        onSelect: () => undefined,
+        disabled: true,
+        disabledReason: m.onePerSetup,
+      }
+    const only = choices.length === 1 && kind !== 'block' ? choices[0] : undefined
+    if (choices.length === 0 || only !== undefined)
+      return {
+        label: m.kinds[kind],
+        description: m.kindHints[kind],
+        icon,
+        onSelect: () => void add(kind, only?.id),
+      }
+    const sub: MenuItem[] = [
+      ...choices.map((d) => ({
+        id: d.id,
+        label: m.deviceChoice(d.name, d.builtIn === true, d.isDefault === true),
+        onSelect: () => void add(kind, d.id),
+      })),
+      { id: 'own', label: m.ownItem, description: m.ownItemHint, onSelect: () => void add(kind) },
+    ]
+    return { label: m.kinds[kind], icon, sub }
+  })
+  /** An item's findings under its fields: W5 `inPart` under its centre, WL2's range ones. */
+  const findingsAt = (item: Item, param: string): FieldMessage[] =>
+    warnings
+      .filter(
+        (w) =>
+          w.params['itemId'] === item.id &&
+          ((w.code === 'plan.workholding.inPart' && param === 'center') ||
+            (w.code === 'plan.workholding.outOfRange' &&
+              ((w.params['rule'] === 'grip' && param === 'grip') ||
+                (w.params['rule'] === 'opening' && param === 'axis')))),
+      )
+      .map((w) => ({ id: w.code, severity: 'soft' as const, text: sentence(w.message) }))
 
   return (
     <InspectorGroup title={m.title} meta={m.count(items.length)} className={styles['section']}>
@@ -260,7 +399,12 @@ export function Workholding({
                   <Icon name={KIND_ICON[item.kind]} className={styles['icon']} />
                   <span className={styles['name']}>{item.name}</span>
                   <span className={styles['summary']}>
-                    {resolved === undefined ? '' : itemSummary(resolved, summaryUnits)}
+                    {resolved === undefined
+                      ? ''
+                      : withDevice(
+                          itemSummary(resolved, summaryUnits),
+                          deviceLabel(plan.snapshots, item),
+                        )}
                   </span>
                 </button>
                 {expanded ? (
@@ -274,30 +418,24 @@ export function Workholding({
                       label={m.name}
                       name={item.name}
                       readOnly={readOnly}
-                      onCommit={(name) => edit(item.id, { name })}
+                      onCommit={(name) => void edit(item.id, { name })}
+                    />
+                    <DeviceLine
+                      plan={plan}
+                      item={item}
+                      readOnly={readOnly}
+                      stale={stale?.find((c) => c.snapshotId === item.copyId)}
+                      detachedFrom={item.copyId === undefined ? detached[item.id] : undefined}
+                      onUpdate={(snapshotId) =>
+                        void call('plan.libraryItem.update', { planId: plan.id, snapshotId })
+                      }
                     />
                     <ItemFields
                       item={item}
                       units={units}
                       readOnly={readOnly}
-                      messages={(param) => [
-                        ...issueAt(n, param),
-                        // W5: a screw in the part warns under its centre
-                        ...(param === 'center'
-                          ? warnings
-                              .filter(
-                                (w) =>
-                                  w.code === 'plan.workholding.inPart' &&
-                                  w.params['itemId'] === item.id,
-                              )
-                              .map((w) => ({
-                                id: w.code,
-                                severity: 'soft' as const,
-                                text: sentence(w.message),
-                              }))
-                          : []),
-                      ]}
-                      onCommit={(patch, gesture) => edit(item.id, patch, gesture)}
+                      messages={(param) => [...issueAt(n, param), ...findingsAt(item, param)]}
+                      onCommit={(patch, gesture) => void edit(item.id, patch, gesture)}
                       onCancelGesture={cancelGesture}
                     />
                     {readOnly ? null : (
@@ -467,7 +605,7 @@ function ItemFields({
     case 'vise':
       return (
         <>
-          <Field label={m.axis} kind="toggle" readOnly={readOnly}>
+          <Field label={m.axis} kind="toggle" readOnly={readOnly} messages={messages('axis')}>
             <SegmentedControl<string>
               label={m.axis}
               options={[
@@ -548,4 +686,72 @@ function ItemFields({
         </Field>
       )
   }
+}
+
+/** The row's summary with the device of the user's library (WL2's `deviceLabel`; not a built-in). */
+const withDevice = (summary: string, device: string | undefined) =>
+  device === undefined ? summary : `${summary} · ${device}`
+
+/**
+ * Under an open item's name (WL4): the device it follows ("Strap clamp M8 · from library", a
+ * built-in "Toe clamp · built-in") with "Edit in library"; a stale copy's "Library changed" with
+ * "Update from library"; after a device edit here the detach note instead.
+ */
+function DeviceLine({
+  plan,
+  item,
+  readOnly,
+  stale,
+  detachedFrom,
+  onUpdate,
+}: {
+  plan: PlanDTO
+  item: Item
+  readOnly: boolean
+  stale: PlanStale['libraryCopies'][number] | undefined
+  detachedFrom: string | undefined
+  onUpdate: (snapshotId: string) => void
+}): React.JSX.Element | null {
+  if (item.copyId === undefined)
+    return detachedFrom === undefined ? null : (
+      <p className={styles['note']} role="status">
+        {m.detached(detachedFrom)}
+      </p>
+    )
+  const copy = plan.snapshots.find((s) => s.id === item.copyId)
+  const name = snapshotName(plan, item.copyId) ?? m.unnamedDevice
+  const libraryItemId = copy?.libraryItemId
+  const builtIn = libraryItemId !== undefined && isBuiltinWorkholding(libraryItemId)
+  return (
+    <div className={styles['device']}>
+      <div className={styles['deviceRow']}>
+        <span className={styles['deviceName']}>
+          {builtIn ? m.fromBuiltIn(name) : m.fromLibrary(name)}
+        </span>
+        {libraryItemId !== undefined && stale?.status !== 'libraryRemoved' ? (
+          <LibraryLink target={deviceTarget(libraryItemId)} />
+        ) : null}
+      </div>
+      {stale === undefined ? null : (
+        <div className={styles['stale']} role="status">
+          <span>{m.copyStatus[stale.status]}</span>
+          {stale.blocked !== null ? (
+            <span className={styles['why']}>{sentence(stale.blocked)}</span>
+          ) : null}
+          {stale.status === 'libraryChanged' &&
+          stale.blocked === null &&
+          !readOnly &&
+          allows(plan, 'plan.libraryItem.update') ? (
+            <Button
+              size="sm"
+              icon={<Icon name="history" />}
+              onClick={() => onUpdate(stale.snapshotId)}
+            >
+              {m.updateFromLibrary}
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
 }

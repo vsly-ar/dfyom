@@ -465,3 +465,94 @@ test('toe clamp dragged in the viewport onto the profile: the collision in red, 
   await expect(anchor).not.toHaveAttribute('data-colliding')
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+test('workholding library in the setup inspector (WL4): the default clamp, detach and undo, update from library', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  const { planId } = await hardwoodPlan(page)
+  const strap = {
+    type: 'toeClamp',
+    name: 'Strap clamp M8',
+    default: true,
+    width: '30 mm',
+    length: '60 mm',
+    top: '20 mm',
+    gripMin: '5 mm',
+    gripMax: '15 mm',
+    stud: 'M8',
+  }
+  const device = await bridgeCall<{ id: string; revision: number }>(
+    page,
+    'library.workholding.add',
+    { values: strap },
+  )
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const section = inspector.getByRole('region', { name: /^Workholding/ })
+
+  // Add → Toe clamp ▸ the user's default first, the built-in, an own item
+  await section.getByRole('button', { name: 'Add' }).click()
+  await page.getByRole('menuitem', { name: 'Toe clamp' }).hover()
+  const sub = page.getByRole('menu', { name: 'Toe clamp' })
+  await expect(sub.getByRole('menuitem')).toHaveText([
+    'Strap clamp M8 (default)',
+    'Toe clamp (built-in)',
+    /^Own item/,
+  ])
+  await render(page, 'wl-add-menu')
+  await sub.getByRole('menuitem', { name: 'Strap clamp M8 (default)' }).click()
+  const row = section.getByRole('button', { name: /^Toe clamp 1/ })
+  await expect(row).toContainText('grip 10 top Z20 · Strap clamp M8')
+  const fields = section.getByRole('group', { name: 'Item Toe clamp 1' })
+  await expect(fields.getByText('Strap clamp M8 · from library')).toBeVisible()
+  await expect(fields.getByRole('button', { name: 'Edit in library' })).toBeVisible()
+
+  // a size edit makes it an own item, with the note; one undo follows the device again
+  const width = fields.getByLabel('Width', { exact: true })
+  await width.fill('40')
+  await width.press('Enter')
+  await expect(fields.getByText('Edited here: no longer follows Strap clamp M8.')).toBeVisible()
+  await expect(fields.getByText('Strap clamp M8 · from library')).toBeHidden()
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }
+    ).document.activeElement?.blur?.(),
+  )
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(fields.getByText('Strap clamp M8 · from library')).toBeVisible()
+  await expect(fields.getByText(/no longer follows/)).toBeHidden()
+  await expect(width).toHaveValue(/^30/)
+
+  // the device changes in the library: the item says so, Update from library takes it
+  await bridgeCall(page, 'library.workholding.update', {
+    id: device.id,
+    revision: device.revision,
+    values: { ...strap, top: '22 mm' },
+  })
+  await expect(fields.getByText('Library changed')).toBeVisible()
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await render(page, 'wl-inspector')
+  await fields.getByRole('button', { name: 'Update from library' }).click()
+  await expect(fields.getByText('Library changed')).toBeHidden()
+  await expect(row).toContainText('top Z22')
+  const plan = await bridgeCall<{ plan: { setups: { workholding?: { copyId?: string }[] }[] } }>(
+    page,
+    'plan.get',
+    { planId },
+  )
+  expect(plan.plan.setups[0]!.workholding![0]!.copyId).toBeDefined()
+
+  // "Edit in library" opens the Library window (hidden in tests)
+  await fields.getByRole('button', { name: 'Edit in library' }).click()
+  await expect.poll(() => dfyom.app.windows().length).toBe(2)
+  expect(dfyom.rendererErrors).toEqual([])
+})

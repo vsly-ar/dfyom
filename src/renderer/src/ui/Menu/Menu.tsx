@@ -3,6 +3,7 @@
 // reason (`aria-disabled`, still focusable, the reason under the label and in its description).
 // Dogfood DF18: an item's one-line `description` shows as a tooltip beside it while highlighted. DF16:
 // `ContextMenu` (right-click; same entries and look) and `openContextMenu` (Shift+F10 / Menu key).
+// DF121 WL4: a submenu entry (`MenuSub`, one level: the workholding Add menu's devices per type).
 // Doc: docs/conventions/ui.md#radix-wrapping-pattern, #inventory-v01, #feature-rows-and-add
 import { ContextMenu as RadixContextMenu, DropdownMenu } from 'radix-ui'
 import { useId, useState, type ComponentType, type ReactElement, type ReactNode } from 'react'
@@ -46,7 +47,17 @@ export interface MenuGroup {
   items: readonly MenuItem[]
 }
 
-export type MenuEntry = MenuItem | MenuGroup | 'separator'
+/**
+ * An item that opens a submenu of items (one level; ArrowRight or hover opens it, ArrowLeft and
+ * Escape close it). Takes no description: its tooltip would cover the submenu.
+ */
+export interface MenuSub {
+  label: string
+  icon?: ReactNode
+  sub: readonly MenuItem[]
+}
+
+export type MenuEntry = MenuItem | MenuGroup | MenuSub | 'separator'
 
 export interface MenuProps {
   /** One focusable element; it becomes the trigger (Radix `asChild`). */
@@ -165,6 +176,10 @@ interface Parts {
   Group: ComponentType<DropdownMenu.DropdownMenuGroupProps>
   Label: ComponentType<DropdownMenu.DropdownMenuLabelProps>
   Separator: ComponentType<DropdownMenu.DropdownMenuSeparatorProps>
+  Sub: ComponentType<DropdownMenu.DropdownMenuSubProps>
+  SubTrigger: ComponentType<DropdownMenu.DropdownMenuSubTriggerProps>
+  SubContent: ComponentType<DropdownMenu.DropdownMenuSubContentProps>
+  Portal: ComponentType<DropdownMenu.DropdownMenuPortalProps>
 }
 const DROPDOWN: Parts = DropdownMenu
 const CONTEXT = RadixContextMenu as unknown as Parts
@@ -177,6 +192,8 @@ function Entries({ p, items }: { p: Parts; items: readonly MenuEntry[] }): React
           <p.Separator key={`sep-${i}`} className={styles['separator']} />
         ) : 'group' in item ? (
           <Group key={`group-${item.group}`} p={p} group={item} />
+        ) : 'sub' in item ? (
+          <Sub key={`sub-${item.label}`} p={p} sub={item} />
         ) : (
           <Item key={item.id ?? item.label} p={p} item={item} />
         ),
@@ -196,6 +213,34 @@ function Group({ p, group }: { p: Parts; group: MenuGroup }): React.JSX.Element 
         <Item key={item.id ?? item.label} p={p} item={item} />
       ))}
     </p.Group>
+  )
+}
+
+function Sub({ p, sub }: { p: Parts; sub: MenuSub }): React.JSX.Element {
+  const container = usePortalContainer()
+  return (
+    <p.Sub>
+      <p.SubTrigger className={styles['item']}>
+        {sub.icon}
+        <span className={styles['text']}>{sub.label}</span>
+        <span className={styles['subArrow']} aria-hidden="true">
+          <Icon name="chevron-down" size="sm" />
+        </span>
+      </p.SubTrigger>
+      <p.Portal container={container}>
+        <p.SubContent
+          className={`${styles['content']} ${styles['subContent']}`}
+          sideOffset={2}
+          alignOffset={-5}
+          collisionPadding={8}
+          aria-label={sub.label}
+        >
+          {sub.sub.map((item) => (
+            <Item key={item.id ?? item.label} p={p} item={item} />
+          ))}
+        </p.SubContent>
+      </p.Portal>
+    </p.Sub>
   )
 }
 
