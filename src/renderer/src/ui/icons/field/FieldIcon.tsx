@@ -42,6 +42,13 @@ const ICONS = {
       <path data-accent="" d="M2 10H18" />
     </>
   ),
+  // a slotted hole's travel (H3): between the slot's end centres
+  slotTravel: (
+    <>
+      <rect x="2" y="6" width="16" height="8" rx="4" />
+      <path data-accent="" d="M6 10H14M6 8.5V11.5M14 8.5V11.5" />
+    </>
+  ),
   width: (
     <>
       <rect x="2" y="6" width="16" height="8" rx="4" />

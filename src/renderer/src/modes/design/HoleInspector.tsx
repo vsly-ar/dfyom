@@ -7,7 +7,10 @@
 // entered sizes says so in the undo toast; errors and findings show at their field, the custom-size
 // note with "Use <table value>". The focused size field's measured part is amber in the drawing;
 // hovering a part highlights its field's label, clicking it focuses the field.
+// H3: the Slotted switch closes the Type group; a slotted hole's Sizes add Slot length, Rotation and
+// the read-only Overall after Diameter, and the section is drawn along the slot.
 // Doc: docs/conventions/ui.md#hole-inspector, #section-illustration;
+// docs/modes/hole-slots-and-round-corners.md#implementation-h3;
 // docs/modes/design-v0.4.md#implementation-f3, docs/conventions/inspector-layout.md#s4-implementation-notes
 import { useEffect, useRef, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
@@ -21,6 +24,7 @@ import {
   ErrorMessage,
   Field,
   FieldIcon,
+  FieldInput,
   Icon,
   IconButton,
   InspectorGroup,
@@ -29,6 +33,7 @@ import {
   QuantityInput,
   SegmentedControl,
   Select,
+  Switch,
   Term,
   WarningList,
   type FieldIconName,
@@ -43,6 +48,7 @@ import styles from './Design.module.css'
 import { FIXABLE_FIELDS, operationUnits, warningFeatureField } from './feature-view'
 import {
   blindDepth,
+  defaultSlotLength,
   headDefaults,
   customSizeNote,
   enteredSizesReplaced,
@@ -51,6 +57,7 @@ import {
   sectionValues,
   sharedToolNote,
   sizeFields,
+  slotOverall,
   stockBelow,
   type CsMethod,
   type FastenerList,
@@ -205,6 +212,8 @@ export function HoleInspector({
     'tool',
     ...sizeFields(hole),
     'headSink',
+    'slotted',
+    ...(hole.slot !== undefined ? ['slotLength', 'rotation'] : []),
     ...(hole.type === 'countersink' ? ['csMethod'] : []),
     ...(hole.type === 'countersink' && hole.csMethod === 'stepped' ? ['csStepdown'] : []),
   ])
@@ -369,6 +378,51 @@ export function HoleInspector({
       </div>
     )
   }
+
+  // ── the slot (H3) ──
+  const slotField = (field: 'slotLength' | 'rotation') => {
+    const angle = field === 'rotation'
+    const dto = field === 'rotation' ? hole.slot?.rotation : hole.slot?.length
+    return (
+      <div key={field} className={styles['holeField']} {...track(field)}>
+        <QuantityInput
+          label={angle ? h.rotation : h.slotLength}
+          kind={angle ? 'angle' : 'length'}
+          defaultUnit={defaultUnit(angle ? 'angle' : 'length', units)}
+          value={dto === undefined ? undefined : quantityOf(dto)}
+          onCommit={(q, gesture) => void update({ [field]: q.source }, field, gesture)}
+          stepKind={angle ? 'rotation' : 'xy'}
+          stepKey={`hole.${field}`}
+          onCancelGesture={cancelGesture}
+          illustration={<FieldIcon name={angle ? 'rotation' : 'slotTravel'} />}
+          {...(angle ? {} : { info: h.slotLengthInfo })}
+          messages={messagesAt(field)}
+          references={references}
+          {...(resolver ? { resolver } : {})}
+        />
+      </div>
+    )
+  }
+  const overall = slotOverall(hole)
+  const slotFields =
+    hole.slot === undefined ? null : (
+      <>
+        {slotField('slotLength')}
+        {slotField('rotation')}
+        <Field
+          label={h.overall}
+          illustration={<FieldIcon name="length" />}
+          readOnly
+          info={h.overallInfo}
+        >
+          <FieldInput
+            readOnly
+            data-slot-overall
+            value={overall === undefined ? '' : lengthSource(overall, units)}
+          />
+        </Field>
+      </>
+    )
 
   const onOwner = `${feature.id}:on`
   const picking = pick?.owner === onOwner
@@ -541,6 +595,23 @@ export function HoleInspector({
               </Field>
             </div>
           ) : null}
+          <div {...track('slotted')}>
+            <Field
+              label={h.slotted}
+              kind="toggle"
+              info={h.slottedInfo}
+              messages={messagesAt('slotted')}
+            >
+              <Switch
+                label={h.slotted}
+                hideLabel
+                checked={hole.slot !== undefined}
+                onCheckedChange={(on) =>
+                  void update({ slotLength: on ? defaultSlotLength(hole, units) : '0' }, 'slotted')
+                }
+              />
+            </Field>
+          </div>
           {sources.length > 0 ? (
             <p className={styles['muted']}>
               <span className={styles['srOnly']}>{h.sourcesLabel} </span>
@@ -563,6 +634,7 @@ export function HoleInspector({
             className={styles['holeSketch']}
           />
           {sizeField('diameter')}
+          {slotFields}
           <div {...track('bottom')}>
             <Field label={h.bottom} messages={messagesAt('bottom')}>
               <Select
@@ -597,7 +669,9 @@ export function HoleInspector({
                   label={h.roleLabel(
                     hole.type === 'recessedCountersink' && op.featureRole === 'counterbore'
                       ? 'recess'
-                      : (op.featureRole ?? op.kind),
+                      : hole.slot !== undefined && op.featureRole === 'drill'
+                        ? 'slot'
+                        : (op.featureRole ?? op.kind),
                   )}
                 />
                 {toolNote !== undefined && op.featureRole === 'countersink' ? (

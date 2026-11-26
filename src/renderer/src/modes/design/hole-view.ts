@@ -49,6 +49,8 @@ export interface HoleRecord {
   readonly csMethod: CsMethod
   readonly center: readonly [QuantityDTO, QuantityDTO]
   readonly sizes: Partial<Record<HoleSizeField, QuantityDTO>>
+  /** H2/H3: a slotted hole's travel and direction; undefined = round. */
+  readonly slot?: { readonly length: QuantityDTO; readonly rotation: QuantityDTO } | undefined
 }
 
 const SIZE_FIELDS: readonly HoleSizeField[] = [
@@ -78,7 +80,32 @@ export function holeRecord(feature: FeatureDTO): HoleRecord {
     csMethod: d['csMethod'] === 'stepped' ? 'stepped' : 'chamfer',
     center: d['center'] as [QuantityDTO, QuantityDTO],
     sizes,
+    slot:
+      d['slotLength'] === undefined
+        ? undefined
+        : {
+            length: d['slotLength'] as QuantityDTO,
+            rotation: (d['rotation'] ?? { kind: 'angle', source: '0°' }) as QuantityDTO,
+          },
   }
+}
+
+/**
+ * A slotted hole's end-to-end length (mm): the travel + the diameter (H3's Overall read-out);
+ * undefined for a round hole or an unresolved size.
+ */
+export function slotOverall(h: Pick<HoleRecord, 'slot' | 'sizes'>): number | undefined {
+  const travel = mm(h.slot?.length)
+  const d = mm(h.sizes.diameter)
+  return travel === undefined || d === undefined ? undefined : travel + d
+}
+
+/**
+ * The slot length a hole gets when Slotted is switched on: twice its diameter (an M5 clearance
+ * hole: 11 mm), in the project's units.
+ */
+export function defaultSlotLength(h: Pick<HoleRecord, 'sizes'>, units: UnitSystem): string {
+  return lengthSource(2 * (mm(h.sizes.diameter) ?? 6), units)
 }
 
 /**
@@ -178,6 +205,7 @@ export function sectionValues(
     csAngle: mm(h.sizes.csAngle),
     csStepdown: h.csMethod === 'stepped' ? mm(h.sizes.csStepdown) : undefined,
     headSink: mm(h.sizes.headSink) ?? 0,
+    slotLength: mm(h.slot?.length),
     stockDepth: stockBelow(part, h.on),
     fastener,
     invalid,

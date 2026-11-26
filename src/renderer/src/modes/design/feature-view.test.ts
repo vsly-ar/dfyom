@@ -101,6 +101,15 @@ describe('feature view', () => {
     )
 
     expect(featureReadout(hole.feature)).toBe('M3 · counterbore')
+    // H3: a slotted hole adds its travel
+    expect(
+      featureReadout({
+        ...hole.feature,
+        type: 'recessedCountersink',
+        fastener: 'M5',
+        slotLength: { kind: 'length', source: '19.5' },
+      } as never),
+    ).toBe('M5 · recessed countersink, slot 19.5')
     expect(roleLabel('Hole 1', 'Hole 1 · counterbore')).toBe('counterbore')
     expect(roleLabel('Hole 1', 'Spot face')).toBe('Spot face')
     // F3's issue-path mapping: the counterbore's circle diameter is the hole's cbDiameter

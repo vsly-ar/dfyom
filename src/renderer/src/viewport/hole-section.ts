@@ -4,8 +4,10 @@
 // or the countersink cone (its terraces when stepped, F7), the drill point, and with a fastener the screw's head and shank as a
 // dashed silhouette (a picture of the fit, not geometry). One measured part per size field, for
 // SketchView to highlight. Values are mm (resolved quantities); `units` only formats the chips and
-// the accessible name.
-// Doc: docs/conventions/ui.md#section-illustration, docs/modes/design-v0.4.md#hole-feature
+// the accessible name. A slotted hole (H3) is cut along its slot: every wall moves out by half the
+// travel, the screw stays at mid-travel, and the travel is a measured part between the end centres.
+// Doc: docs/conventions/ui.md#section-illustration, docs/modes/design-v0.4.md#hole-feature,
+// docs/modes/hole-slots-and-round-corners.md#implementation-h3
 import { chamferTerraces } from '../../../core/geometry/model'
 import type { UnitSystem } from '../../../core/project/document'
 import type { Sketch, SketchPoint, SketchPrimitive } from './sketch'
@@ -23,6 +25,7 @@ export type HoleSectionPart =
   | 'csAngle'
   | 'csStepdown'
   | 'headSink'
+  | 'slotLength'
 
 export const HOLE_SECTION_PARTS: readonly HoleSectionPart[] = [
   'diameter',
@@ -33,6 +36,7 @@ export const HOLE_SECTION_PARTS: readonly HoleSectionPart[] = [
   'csAngle',
   'csStepdown',
   'headSink',
+  'slotLength',
 ]
 
 /** The chosen screw, from the fastener table (mm, degrees). */
@@ -61,6 +65,8 @@ export interface HoleSectionValues {
   /** Present = a stepped countersink (F7): terraces of at most this height. */
   readonly csStepdown?: number | undefined
   readonly headSink: number
+  /** A slotted hole's travel between its end centres (H3); absent or 0 = round. */
+  readonly slotLength?: number | undefined
   /** Material below the face along the axis (stock extent from the hole's face), if known. */
   readonly stockDepth?: number | undefined
   readonly fastener?: HoleSectionFastener | undefined
@@ -84,6 +90,8 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   const L = (mm: number) => sketchLength(mm, units)
   const invalid = new Set(values.invalid ?? [])
   const r = Math.max(values.diameter, 1e-3) / 2
+  /** Half the slot's travel: the section along the slot moves every wall out by it. */
+  const o = ok(values.slotLength) && values.slotLength > 0 ? values.slotLength / 2 : 0
 
   // ── the mouth (right half, from the face down) ──
   const mouth: SketchPoint[] = []
@@ -152,12 +160,15 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     broken = stock === undefined || stock > deepest + Math.max(r, deepest * 0.35) * 1.5
     bottomY = broken ? below : stock!
   }
-  const right: SketchPoint[] = [...mouth]
-  if (depth === undefined) right.push([r, bottomY])
+  const wall: SketchPoint[] = [...mouth]
+  if (depth === undefined) wall.push([r, bottomY])
   else {
-    right.push([r, depth])
-    right.push([0, depth + tip])
+    wall.push([r, depth])
+    wall.push([0, depth + tip])
   }
+  // a slot: the walls at its ends, half the travel out (a slot has no drill point)
+  const right = wall.map(([x, y]): SketchPoint => [x === 0 ? 0 : x + o, y])
+  outer += o
 
   // ── the screw (head seat and silhouette) ──
   const f = values.fastener
@@ -221,7 +232,9 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     // two pieces either side of the bore
     const piece = (side: 1 | -1): SketchPoint[] => {
       const half = side === 1 ? right : mirror(right)
-      const edge = bottomEdge.filter(([x]) => side * x >= r).map(([x, y]): SketchPoint => [x, y])
+      const edge = bottomEdge
+        .filter(([x]) => side * x >= r + o)
+        .map(([x, y]): SketchPoint => [x, y])
       return [[side * W, 0], ...half, ...(side === 1 ? edge.reverse() : edge), [side * W, bottomY]]
     }
     primitives.push({ kind: 'material', points: piece(1) })
@@ -231,8 +244,8 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     // the stock's bottom face; running on beyond the drawing, no line: it fades out (below)
     if (!broken)
       for (const side of [1, -1] as const) {
-        const kept = bottomEdge.filter(([x]) => side * x >= r)
-        const clip: SketchPoint = [side * r, bottomY]
+        const kept = bottomEdge.filter(([x]) => side * x >= r + o)
+        const clip: SketchPoint = [side * (r + o), bottomY]
         primitives.push({
           kind: 'line',
           style: 'edge',
@@ -307,12 +320,13 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     })
   const boreEnd = depth ?? bottomY
   const yd = boreTop + (boreEnd - boreTop) * 0.55
+  // a slot's diameters are measured across its right end, about that end's centre (x = o)
   measure(
     'diameter',
     [
       [
-        [-r, yd],
-        [r, yd],
+        [o - r, yd],
+        [o + r, yd],
       ],
     ],
     `Ø ${L(values.diameter)}`,
@@ -338,24 +352,24 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
       'cbDiameter',
       [
         [
-          [-cb.R, y],
-          [cb.R, y],
+          [o - cb.R, y],
+          [o + cb.R, y],
         ],
       ],
       `Ø ${L(values.cbDiameter!)}`,
-      [0, 0],
+      [o, 0],
       'above',
     )
     measure(
       'cbDepth',
       [
         [
-          [cb.R, 0],
-          [cb.R, cb.depth],
+          [o + cb.R, 0],
+          [o + cb.R, cb.depth],
         ],
       ],
       L(values.cbDepth!),
-      [cb.R, y],
+      [o + cb.R, y],
       'right',
     )
   }
@@ -365,24 +379,24 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
       'csDiameter',
       [
         [
-          [-cs.R, csTop],
-          [cs.R, csTop],
+          [o - cs.R, csTop],
+          [o + cs.R, csTop],
         ],
       ],
       `Ø ${L(values.csDiameter!)}`,
-      [0, csTop],
+      [o, csTop],
       cb !== undefined ? 'below' : 'above',
     )
     // the cone itself (stepped: the line through the step corners)
     const flank: SketchPoint[] = [
-      [cs.R, csTop],
-      [r, boreTop],
+      [o + cs.R, csTop],
+      [o + r, boreTop],
     ]
     measure(
       'csAngle',
       [flank, mirror(flank)],
       `${+angle.toFixed(2)}°`,
-      [cs.R, (csTop + boreTop) / 2],
+      [o + cs.R, (csTop + boreTop) / 2],
       'right',
     )
     if (terraces !== undefined)
@@ -398,6 +412,22 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
         [-cs.R, terraces.height / 2],
         'left',
       )
+  }
+  // the travel: between the end centres, in the bore below the mouth
+  if (o > 0) {
+    const yt = boreTop + (boreEnd - boreTop) * 0.25
+    measure(
+      'slotLength',
+      [
+        [
+          [-o, yt],
+          [o, yt],
+        ],
+      ],
+      L(2 * o),
+      [0, yt],
+      'above',
+    )
   }
   if (sink !== undefined && sink > 1e-6)
     measure(
@@ -433,6 +463,9 @@ function sectionLabel(
       ? `Ø ${L(v.diameter)} through`
       : `Ø ${L(v.diameter)}, ${L(v.depth)} deep, ${bottoms[v.bottom]}`,
   ]
+  const slot = ok(v.slotLength) && v.slotLength > 0
+  if (slot)
+    parts[0] = `${parts[0]}, slotted: ${L(v.slotLength!)} travel, ${L(v.slotLength! + v.diameter)} overall`
   if (v.type === 'counterbore' && ok(v.cbDiameter) && ok(v.cbDepth))
     parts.push(`counterbore Ø ${L(v.cbDiameter)}, ${L(v.cbDepth)} deep`)
   if (v.type === 'recessedCountersink' && ok(v.cbDiameter) && ok(v.cbDepth))
@@ -451,5 +484,5 @@ function sectionLabel(
     else if (sink > 0) parts.push(`${size} head ${L(sink)} below the face`)
     else parts.push(`${size} head ${L(-sink)} above the face`)
   }
-  return `Section: ${parts.join('; ')}.`
+  return `${slot ? 'Section along the slot' : 'Section'}: ${parts.join('; ')}.`
 }

@@ -9,6 +9,8 @@ describe('field illustrations', () => {
   it('has the shapes of the design system', () => {
     expect(FIELD_ICON_NAMES).toEqual([
       'length',
+      // H3: a slotted hole's travel between its end centres
+      'slotTravel',
       'width',
       'depth',
       'stepdown',

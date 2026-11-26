@@ -56,6 +56,7 @@ import { checkReferences, recalculate, SurfaceTable } from './surfaces'
 import { checkOperations } from './validate'
 import { AdjustedSchema, type Adjusted } from './round'
 import { knownIssues, withoutKnown } from './known-issues'
+import { snapshotTool } from './tool-choice'
 
 const FeatureArg = { partId: PartIdSchema, featureId: FeatureIdSchema }
 
@@ -206,6 +207,10 @@ export function placeFeature<F extends FeatureBase>(
     ops.slice(start, end),
     prev?.name,
     spec.nested !== undefined,
+    (t) =>
+      t.kind === 'generalized'
+        ? t.type
+        : snapshotTool(loaded.snapshots ?? {}, t.snapshotId).mapOr(undefined, (x) => x.type),
   )
   if (owned.isErr()) return Err(owned.unwrapErr().withContext(where))
   const next = [...ops.slice(0, start), ...owned.unwrap(), ...ops.slice(end)]

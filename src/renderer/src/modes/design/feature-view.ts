@@ -338,7 +338,10 @@ export function featureReadout(feature: FeatureDTO, instances?: number): string 
     const fastener = typeof feature['fastener'] === 'string' ? feature['fastener'] : undefined
     const diameter = source(feature['diameter'])
     const size = fastener ?? (diameter === undefined ? undefined : `Ø ${diameter}`)
-    const readout = size === undefined ? type : `${size} · ${type}`
+    // H3: a slotted hole adds its travel ("M5 · recessed countersink, slot 19.5 mm")
+    const slot = source(feature['slotLength'])
+    const kind = slot === undefined ? type : `${type}, slot ${slot}`
+    const readout = size === undefined ? kind : `${size} · ${kind}`
     const custom = fastener === undefined ? undefined : customSize(feature)
     return custom === undefined ? readout : `${readout} ${custom} (custom)`
   }

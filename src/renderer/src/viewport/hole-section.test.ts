@@ -182,6 +182,40 @@ describe('holeSection', () => {
     ])
   })
 
+  it('draws a slotted hole along its slot: walls half the travel out, the travel measured (H3)', () => {
+    const v = {
+      ...base,
+      type: 'recessedCountersink' as const,
+      cbDiameter: 8.12,
+      cbDepth: 2,
+      csDiameter: 7.12,
+      csAngle: 90,
+      fastener: M3,
+    }
+    const round = holeSection(v, 'mm')
+    const s = holeSection({ ...v, slotLength: 10 }, 'mm')
+    // every wall point of the round section, 5 mm further out
+    const wall = lines(s.primitives, 'edge')[0]!.points
+    const was = lines(round.primitives, 'edge')[0]!.points
+    expect(wall).toEqual(was.map(([x, y]) => [x + 5, y]))
+    // diameters across the right end, about its centre; the travel between the end centres
+    expect(measure(s.primitives, 'diameter')!.paths[0]!.map(([x]) => x)).toEqual([3.3, 6.7])
+    expect(measure(s.primitives, 'csDiameter')!.paths[0]).toEqual([
+      [5 - 3.56, 2],
+      [5 + 3.56, 2],
+    ])
+    const travel = measure(s.primitives, 'slotLength')!
+    expect(travel.value).toBe('10 mm')
+    expect(travel.paths[0]!.map(([x]) => x)).toEqual([-5, 5])
+    expect(measure(round.primitives, 'slotLength')).toBeUndefined()
+    // the screw stays at mid-travel
+    expect(lines(s.primitives, 'silhouette')).toEqual(lines(round.primitives, 'silhouette'))
+    expect(s.label).toBe(
+      'Section along the slot: Ø 3.4 mm through, slotted: 10 mm travel, 13.4 mm overall; recess Ø 8.12 mm, 2 mm deep; countersink Ø 7.12 mm, 90°; M3 head 2.2 mm below the face.',
+    )
+    expect(holeSection({ ...v, slotLength: 0 }, 'mm')).toEqual(round)
+  })
+
   it('draws a stepped countersink as terraces with each top step corner on the cone (F7)', () => {
     // M3, 1 mm stepdown: cone 1.86 deep → 2 terraces of 0.93, walls at 3.56 and 2.63
     const s = holeSection(
