@@ -1,7 +1,9 @@
 // Select: one value from a list (strategy, tool). Looks like a Field input in the UI font with a
 // chevron; the list is a raised menu, optionally in labelled groups (`on` by face direction),
 // options optionally with a second line (`description`: a tool's reasons, F5). `muted` shows a
-// value that is about to change (the tool field's "Chosen again on Apply").
+// value that is about to change (the tool field's "Chosen again on Apply"). `onHighlight` reports
+// the option under the pointer or keyboard focus while the list is open (the `On` list highlights
+// that surface in the viewport, DF118 follow-up), and `null` when none is or the list closes.
 // Doc: docs/conventions/ui.md#inventory-v01, #design-and-plan-controls-v02
 import { Icon } from '../icons/Icon'
 import { Select as RadixSelect } from 'radix-ui'
@@ -41,6 +43,11 @@ export interface SelectProps<V extends string> {
   onValueChange?: (value: V) => void
   /** The list opened or closed (e.g. to re-read options that change outside the document). */
   onOpenChange?: (open: boolean) => void
+  /**
+   * The highlighted option (pointer or keyboard) while the list is open; `null` when the pointer
+   * leaves the options or the list closes.
+   */
+  onHighlight?: (value: V | null) => void
   placeholder?: string
   /** Accessible name when no `<label>` points at it (a Field provides one via `id`). */
   'aria-label'?: string
@@ -57,19 +64,34 @@ export interface SelectProps<V extends string> {
   ref?: Ref<HTMLButtonElement>
 }
 
-function item<V extends string>(o: SelectOption<V>): React.JSX.Element {
-  return <SelectItem key={o.value} option={o} />
+function itemOf<V extends string>(onHighlight: ((value: V | null) => void) | undefined) {
+  return (o: SelectOption<V>): React.JSX.Element => (
+    <SelectItem key={o.value} option={o} onHighlight={onHighlight} />
+  )
 }
 
 function SelectItem<V extends string>({
   option: o,
+  onHighlight,
 }: {
   option: SelectOption<V>
+  onHighlight: ((value: V | null) => void) | undefined
 }): React.JSX.Element {
   const id = useId()
   return (
     <RadixSelect.Item
       value={o.value}
+      // Radix focuses the highlighted item (pointer move and arrow keys)
+      {...(onHighlight === undefined
+        ? {}
+        : {
+            onFocus: () => onHighlight(o.value),
+            onBlur: (e: React.FocusEvent) => {
+              // moving to the next option reports that one, without a null in between
+              if ((e.relatedTarget as Element | null)?.getAttribute('role') !== 'option')
+                onHighlight(null)
+            },
+          })}
       disabled={o.disabled ?? false}
       className={styles['item']}
       data-described={o.description !== undefined || undefined}
@@ -116,6 +138,7 @@ export function Select<V extends string>({
   defaultValue,
   onValueChange,
   onOpenChange,
+  onHighlight,
   placeholder,
   disabled = false,
   muted = false,
@@ -125,12 +148,20 @@ export function Select<V extends string>({
   ...aria
 }: SelectProps<V>): React.JSX.Element {
   const container = usePortalContainer()
+  const item = itemOf(onHighlight)
   return (
     <RadixSelect.Root
       {...(value !== undefined ? { value } : {})}
       {...(defaultValue !== undefined ? { defaultValue } : {})}
       {...(onValueChange ? { onValueChange: (v: string) => onValueChange(v as V) } : {})}
-      {...(onOpenChange ? { onOpenChange } : {})}
+      {...(onOpenChange || onHighlight
+        ? {
+            onOpenChange: (open: boolean) => {
+              if (!open) onHighlight?.(null)
+              onOpenChange?.(open)
+            },
+          }
+        : {})}
       disabled={disabled}
     >
       <RadixSelect.Trigger

@@ -169,6 +169,12 @@ export interface ViewportProps {
    * stock face under the pointer.
    */
   stockFaces?: boolean
+  /**
+   * A surface the UI points at outside the viewport (the `On` list's highlighted option, DF118
+   * follow-up): highlighted as a pointer hover is, a construction surface's outline raised. The
+   * pointer's own hover wins.
+   */
+  highlight?: SurfaceId | null
   /** Pointer hover over a surface (for a navigator row highlight); `null` when it leaves. */
   onHover?: (target: SurfaceTarget | null) => void
   /** Pick mode: crosshair, eligible surfaces highlighted, others dimmed. */
@@ -276,6 +282,7 @@ export function Viewport({
   split = null,
   guide = null,
   construction = null,
+  highlight = null,
   ghosts = null,
   referenceOverlay = null,
   deviation = null,
@@ -337,7 +344,7 @@ export function Viewport({
       selectedOperation,
       selectedSurface,
       stockFaces,
-      hovered: hovered?.surface ?? null,
+      hovered: hovered?.surface ?? highlight,
       pickEligible: pick?.eligible ?? null,
       outdated,
       pulse,
@@ -350,6 +357,7 @@ export function Viewport({
       selectedSurface,
       stockFaces,
       hovered,
+      highlight,
       pick,
       outdated,
       pulse,
@@ -769,7 +777,9 @@ export function Viewport({
           marker={status === 'failed' ? marker : null}
           glyphs={glyphs}
           construction={construction}
-          hovered={pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : null}
+          hovered={
+            pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : highlight
+          }
           frame={frame}
           anchor={anchor}
           tabs={pick ? null : tabs}

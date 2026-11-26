@@ -3,14 +3,17 @@
 // settled-design plan each commit is one `plan.design.operation.update` (one undo step); an edited
 // operation shows "Edited in plan" and "Revert to design" (`plan.design.operation.revert`). In
 // draft the group is read-only with the hint to settle the design; finalized and later read-only.
+// A construction surface's note ("Cut away by …", DF118 follow-up) comes from the evaluation of the
+// plan's own part (the snapshot scene's mesh push), so it matches the plan copy, not the design.
 // Doc: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
-// docs/conventions/ui.md#design-and-plan-controls-v02
+// docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/construction-surfaces.md#plan
 import { useState } from 'react'
 import type { PlanDTO, PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
+import { usePlanEvaluation } from '../../shell/ShellContext'
 import { Icon, Button, ErrorMessage, InspectorGroup, StatusChip } from '../../ui'
 import {
   OperationFields,
@@ -38,6 +41,8 @@ export function PlanCopyGroup({
   const cancelGesture = useCancelGesture()
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
+  // the plan part's construction surfaces (last good evaluation), as the design's warning list has them
+  const construction = usePlanEvaluation(plan.id)?.mesh?.construction
   const part = planPart(doc, plan)
   const ops = op.designOperationIds.flatMap((id) => {
     const o = part.dto.operations.find((d) => d.id === id)
@@ -85,6 +90,7 @@ export function PlanCopyGroup({
           op: o,
           units: part.units,
           warnings: [],
+          construction,
           errors,
           readOnly: !canEdit,
           // the plan scene has no pick mode: references come from the field's list

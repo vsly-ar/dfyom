@@ -2,7 +2,8 @@
 // the Design inspector, a countersink's read-only owned chamfer and the plan copy share it. Edge (a
 // Select of the earlier drillings, pockets and outside/inside profiles, "Drilling 2 · Ø 3.4 mm" or
 // a general edge's name and role, "Profile 1 · outline" (edge-chamfers.md E1, E3; no Diameter for
-// it), with pick mode tinting their surfaces in the viewport; `edgeOf`), then the section
+// it), with pick mode tinting their surfaces in the viewport; `edgeOf`; the note "Pocket for M5
+// floor is cut away by …" when the face it stands on is a construction surface, DF118), then the section
 // illustration of the edge with its cone (a general edge: one wall with its bevel, E3) above Width (the stored size, "1.5 × 45°"), Depth (the
 // alternative: a commit sends `depth` and the core turns it into the width through the angle),
 // Angle (60°–120°) and the derived Diameter at the face (read-only, "from the edge and the
@@ -17,6 +18,7 @@
 import { useRef, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { chamferMessages } from '../../messages/chamfer'
+import { designMessages } from '../../messages/design'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { fieldContext } from '../../../../core/design/operation'
@@ -51,7 +53,7 @@ import {
   isLoopEdge,
   wallSectionValues,
 } from './chamfer-view'
-import { defaultUnit, dfmNames } from './model'
+import { constructionAt, defaultUnit, dfmNames } from './model'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
 import { ParamField, warningPath, type OperationFieldsContext } from './OperationFields'
@@ -255,6 +257,18 @@ function EdgeField({
         text: dfmMessages.text(w, ctx.units, dfmNames(ctx.part.dto)),
       })),
   ]
+  // DF118 follow-up: an edge chamfer has no On field; the face it stands on (its edge's) may be a
+  // construction surface: the note, naming the face, sits at the Edge field
+  const cut = constructionAt(ctx.part.dto, ctx.construction, op.id, 'on')
+  if (
+    cut !== undefined &&
+    !ctx.warnings.some((w) => w.parameter === 'on' && w.code === 'dfm.surfaceCutAway')
+  )
+    messages.push({
+      id: 'construction',
+      severity: 'note',
+      text: designMessages.construction.noteOf(cut.label, cut.by),
+    })
   const choose = (edgeOf: string) => {
     if (edgeOf !== op.edgeOf) ctx.send({ edgeOf }, 'edgeOf')
   }
@@ -265,7 +279,12 @@ function EdgeField({
   }
   return (
     <div className={styles['onRow']}>
-      <Field label={t.edge} messages={messages} readOnly={fixed}>
+      <Field
+        label={t.edge}
+        messages={messages}
+        readOnly={fixed}
+        {...(cut !== undefined ? { info: designMessages.construction.info } : {})}
+      >
         <Select options={options} value={op.edgeOf} disabled={fixed} onValueChange={choose} />
       </Field>
       {ctx.pickable && !ctx.readOnly ? (

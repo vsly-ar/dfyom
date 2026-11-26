@@ -2,7 +2,9 @@
 // ("Pocket for M5 floor") away, and the slot and the chamfer still stand on it. Selecting the slot
 // shows the On field's quiet note "Cut away by Chamfer 1" with its (i) tip, and the viewport draws
 // the floor as a dashed construction outline; pick mode offers that floor (an outline and a glyph,
-// no triangles) and a click on it sets another operation's On.
+// no triangles) and a click on it sets another operation's On. Follow-ups: the edge chamfer (no On
+// field) shows the note at its Edge field, and highlighting the floor in the On list raises its
+// outline in the viewport.
 // The scene is stubbed to record its props; the evaluation (mesh push) and the construction list
 // of `design.warning.list` are the core's for this part (construction.test.ts), pushed by the test.
 // Doc: docs/modes/construction-surfaces.md#ui, docs/conventions/ui.md#construction-surfaces-df118
@@ -193,6 +195,37 @@ describe('construction surfaces in the UI (DF118 V3, TG #369)', () => {
       await screen.findByRole('option', { name: 'Pocket for M5 floor (construction)' }),
     ).toBeVisible()
     await user.keyboard('{Escape}')
+  })
+
+  it('an edge chamfer: the note at its Edge field names the cut-away face', async () => {
+    const { select } = await renderClamp()
+    await select('Chamfer 1')
+    expect(
+      await within(inspector()).findByText(
+        'Pocket for M5 floor is cut away by M5 long hole · still measured from its level',
+      ),
+    ).toBeVisible()
+    const edge = within(inspector()).getByRole('combobox', { name: /^Edge/ })
+    expect(edge).toHaveAccessibleDescription(/A construction surface: later cuts remove it/)
+    await expectNoAxeViolations()
+  })
+
+  it('highlighting the floor in the On list raises its outline; closing the list drops it', async () => {
+    const { user, select } = await renderClamp()
+    await select('Spot')
+    expect(scene.props?.construction ?? null).toBeNull()
+    await user.click(within(inspector()).getByRole('combobox', { name: /^On/ }))
+    const option = await screen.findByRole('option', { name: 'Pocket for M5 floor (construction)' })
+    await user.hover(option)
+    await waitFor(() => expect(scene.props?.construction?.[0]?.surface).toBe('pocket1.floor'))
+    // drawn as a read-out (not pickable), hot as under the pointer; the mesh's hover state too
+    expect(scene.props!.construction![0]!.pickable).toBe(false)
+    expect(scene.props!.hovered).toBe('pocket1.floor')
+    expect(scene.props!.surfaceState.hovered).toBe('pocket1.floor')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(scene.props?.construction ?? null).toBeNull())
+    expect(scene.props!.hovered).toBeNull()
+    expect(scene.props!.surfaceState.hovered).toBeNull()
   })
 
   it('pick mode offers the cut-away floor as an outline with a glyph; a click sets On', async () => {

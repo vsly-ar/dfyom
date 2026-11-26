@@ -271,6 +271,9 @@ export function useDesignScene(): SceneProps {
   // pickable; else those the selected operation refers to, as a read-out
   const patches = evaluation?.mesh?.construction
   const eligible = pick?.eligible
+  // the On list's highlighted option (DF118 follow-up): its surface highlighted as on hover, a
+  // construction surface by its outline (added while it is not shown already)
+  const highlight = useUi((s) => s.surfaceHighlight)
   const construction = useMemo(() => {
     const size = part === undefined ? undefined : stockSizeOf(part)
     if (patches === undefined || size === undefined) return null
@@ -281,15 +284,14 @@ export function useDesignScene(): SceneProps {
         new Set(patches.map((c) => c.surface).filter((x) => eligible.has(x))),
         true,
       )
-    if (shown === null) return null
     const own = new Set(
       part?.dto.operations.filter((o) => o.id === shown || o.featureId === shown).map((o) => o.id),
     )
-    const refs = patches.filter((c) => c.referencedBy.some((r) => own.has(r.operationId)))
-    return refs.length === 0
-      ? null
-      : constructionOverlays(patches, size, new Set(refs.map((c) => c.surface)), false)
-  }, [patches, part, eligible, shown])
+    const refs = patches
+      .filter((c) => c.referencedBy.some((r) => own.has(r.operationId)) || c.surface === highlight)
+      .map((c) => c.surface)
+    return refs.length === 0 ? null : constructionOverlays(patches, size, new Set(refs), false)
+  }, [patches, part, eligible, shown, highlight])
   const constructionSummary =
     construction === null || eligible !== undefined || part === undefined
       ? undefined
@@ -329,6 +331,7 @@ export function useDesignScene(): SceneProps {
     split: splitScene.split,
     guide: overlays?.guide ?? clones.guide,
     construction,
+    highlight,
     clonePath: clones.clonePath,
     selectedAlso: clones.selectedAlso,
     outlineOnly,

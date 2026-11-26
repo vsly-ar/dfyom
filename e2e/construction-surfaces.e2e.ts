@@ -2,9 +2,11 @@
 // 3.2 mm cuts the "Pocket for M5" floor away; the recess sits in the middle of the stock here, so
 // it is under the viewport's centre from below). The slot's On field shows "Cut away by Chamfer 1"
 // and the viewport draws the floor as a dashed outline; in pick mode the outline takes a click,
-// which sets another operation's On to the cut-away floor. Windows stay hidden (fixture). With
-// DFYOM_RENDERS=1 it writes construction-{note,pick}-{light,dark}.png to DFYOM_RENDERS_DIR
-// (default design/features/renders).
+// which sets another operation's On to the cut-away floor. Follow-ups: Chamfer 1 (an edge chamfer,
+// no On field) shows the note at its Edge field, and highlighting the floor in Spot's On list
+// draws its outline. Windows stay hidden (fixture). With DFYOM_RENDERS=1 it writes
+// construction-{note,edge,hover,pick}-{light,dark}.png to DFYOM_RENDERS_DIR (default
+// design/features/renders).
 // Docs: docs/modes/construction-surfaces.md#ui, docs/conventions/ui.md#construction-surfaces-df118
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -15,7 +17,12 @@ const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir =
   process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
 
-async function render(page: Page, name: string, before: () => Promise<void>): Promise<void> {
+async function render(
+  page: Page,
+  name: string,
+  before: () => Promise<void>,
+  after?: () => Promise<void>,
+): Promise<void> {
   if (!RENDERS) return
   const settings = page.getByRole('dialog', { name: 'Settings' })
   for (const theme of ['light', 'dark'] as const) {
@@ -27,6 +34,7 @@ async function render(page: Page, name: string, before: () => Promise<void>): Pr
     await before()
     await page.waitForTimeout(400)
     await page.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+    await after?.()
   }
 }
 
@@ -144,8 +152,38 @@ test('construction surfaces: the cut-away floor is noted at On, outlined and pic
     await page.mouse.move(box.x + 20, box.y + box.height - 20)
   })
 
-  // pick mode offers the cut-away floor: a click on its outline sets Spot's On
+  // the edge chamfer has no On field: the note sits at its Edge field and names the face
+  await select('Chamfer 1')
+  await expect(
+    inspector.getByText(
+      'Pocket for M5 floor is cut away by M5 long hole · still measured from its level',
+    ),
+  ).toBeVisible()
+  await render(page, 'construction-edge', async () => {
+    await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
+    await page.mouse.move(box.x + 20, box.y + box.height - 20)
+  })
+
+  // highlighting the floor in Spot's On list draws its outline; closing the list drops it
   await select('Spot')
+  const outlined =
+    /Pocket for M5 floor, cut away by M5 long hole and Chamfer 1, shown as an outline\./
+  await expect(viewport).not.toHaveAccessibleDescription(outlined)
+  const hoverFloor = async () => {
+    await inspector.getByRole('combobox', { name: /^On/ }).click()
+    await page.getByRole('option', { name: 'Pocket for M5 floor (construction)' }).hover()
+  }
+  await hoverFloor()
+  await expect(viewport).toHaveAccessibleDescription(outlined)
+  const closeList = async () => {
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+  }
+  await closeList()
+  await expect(viewport).not.toHaveAccessibleDescription(outlined)
+  await render(page, 'construction-hover', hoverFloor, closeList)
+
+  // pick mode offers the cut-away floor: a click on its outline sets Spot's On
   const pickOn = inspector.getByRole('button', { name: 'Pick the surface in the viewport' })
   await pickOn.click()
   await expect(viewport.getByRole('status')).toHaveText('Pick a surface for On · Esc to cancel')

@@ -10,6 +10,7 @@
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #selection-and-picking,
 // #design-and-plan-controls-v02; docs/modes/design.md#operations-v01;
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
+import { useEffect } from 'react'
 import type { ConstructionEntry } from '../../../../core/design/evaluation'
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
@@ -953,6 +954,9 @@ export function ParamField({
 export function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
+  const highlight = useUi((s) => s.setSurfaceHighlight)
+  // the highlight lives while the list is open; a field that goes away takes it along
+  useEffect(() => () => highlight(null), [highlight])
   const { part, op } = ctx
   if (part.table === undefined) return null
   const choices = onChoices(part.dto, part.table, indexOf(ctx), op.kind)
@@ -992,6 +996,8 @@ export function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Ele
           value={onOf(op)}
           disabled={ctx.readOnly}
           onValueChange={(on) => commit(ctx, 'on', on)}
+          // DF118 follow-up: the highlighted option's surface is highlighted in the viewport
+          onHighlight={highlight}
         />
       </Field>
       {ctx.pickable && !ctx.readOnly ? (
