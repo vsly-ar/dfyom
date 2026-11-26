@@ -5,7 +5,10 @@
 // (one history); the window closes with its project. Windows stay
 // hidden (app.fixture.ts). A path's segment table opens a row's actions by right-click and
 // Shift+F10 (DF70), and so does a Shapes dialog row; with DFYOM_RENDERS=1 the light and dark
-// renders `df70-{segment,shape}-menu-*.png`.
+// renders `df70-{segment,shape}-menu-*.png`. "Offset…" on a shape row (U3) makes a new shape
+// whose offset item shows in the Shape Editor list and which a pocket then uses, scaled; with
+// DFYOM_RENDERS=1 the dark renders `u3-{offset-dialog,offset-item,pocket-scale}-dark.png` go to
+// DFYOM_RENDERS_DIR.
 // Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor,
 // docs/conventions/ui.md#shape-editor-window-df94
 import { resolve } from 'node:path'
@@ -13,7 +16,22 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, openPartSetup, shapeEditorWindow, shapeEditorWindows, test } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
-const rendersDir = resolve(__dirname, '../design/features/renders')
+const rendersDir =
+  process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
+
+/** With DFYOM_RENDERS=1: a dark render of the page as it is (U3). */
+async function renderDark(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as {
+        document: { documentElement: { setAttribute(n: string, v: string): void } }
+      }
+    ).document.documentElement.setAttribute('data-theme', 'dark'),
+  )
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: `${rendersDir}/u3-${name}-dark.png` })
+}
 
 /**
  * With DFYOM_RENDERS=1: light and dark renders without touching the page (an open menu stays
@@ -219,7 +237,7 @@ test('shapes dialog: a shape row opens its actions by right-click and Shift+F10 
   await row('Shape 1').click({ button: 'right' })
   const menu = page.getByRole('menu', { name: 'Actions for Shape 1' })
   await expect(menu).toBeVisible()
-  await expect(menu.getByRole('menuitem')).toHaveText([/^Remove/])
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Offset…/, /^Remove/])
   await renderOpen(page, 'shape-menu')
   await page.keyboard.press('Escape')
   await expect(menu).toBeHidden()
@@ -235,4 +253,65 @@ test('shapes dialog: a shape row opens its actions by right-click and Shift+F10 
   await expect(row('Shape 2')).toHaveCount(0)
   await expect(shapes).toBeVisible()
   await expect(row('Shape 1')).toBeVisible()
+})
+
+test('shapes dialog: "Offset…" on a row → the offset item in the Shape Editor → used by a pocket (U3)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  const { navigator, inspector } = await newPart(page)
+  let shapes = await openPartSetup(page, 'Shapes')
+  await shapes.getByRole('button', { name: 'Add shape' }).click()
+  await page.getByRole('menuitem', { name: 'Rectangle' }).click()
+  await expect(shapes).toBeHidden()
+
+  // the row menu's "Offset…": distance and direction, then a new shape
+  shapes = await openPartSetup(page, 'Shapes')
+  await shapes.getByRole('button', { name: /^Shape 1/ }).click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for Shape 1' })
+    .getByRole('menuitem', { name: /^Offset…/ })
+    .click()
+  const offset = page.getByRole('dialog', { name: 'Offset Shape 1' })
+  await expect(offset).toBeVisible()
+  // in a modal dialog a blur comes back to the field (focus trap): Tab leaves it instead
+  const distance = input(offset, 'Distance')
+  await distance.fill('3')
+  await distance.press('Enter')
+  await distance.press('Tab')
+  await offset.getByRole('radio', { name: 'Inward' }).click()
+  await renderDark(page, 'offset-dialog')
+  await offset.getByRole('button', { name: 'Create offset' }).click()
+  await expect(offset).toBeHidden()
+  await expect(shapes).toBeHidden()
+
+  // the Shape Editor window shows the new shape: its one item offsets Shape 1
+  const { page: win, inspector: shapeInspector, list } = await shapeEditorWindow(dfyom.app)
+  await expect(shapeInspector.getByRole('heading', { name: 'Shape 1 offset' })).toBeVisible()
+  await expect(list.getByRole('button', { name: /^Shape 1 offset/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  const items = shapeInspector.getByRole('list', { name: 'Items in order' })
+  await expect(items.getByText('Offset 3 inward · Shape 1')).toBeVisible()
+  await expect(input(shapeInspector, 'Source')).toHaveValue('Shape 1')
+  // 40 × 20 inset by 3: 34 × 14
+  await expect(shapeInspector.getByText('34.00 × 14.00 mm')).toBeVisible()
+  await renderDark(win, 'offset-item')
+
+  // a pocket uses it, scaled about its anchor
+  await navigator.getByRole('button', { name: 'Add pocket' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  await inspector.getByRole('combobox', { name: 'Shape' }).click()
+  await page
+    .getByRole('listbox')
+    .getByRole('option', { name: /^Shape 1 offset/ })
+    .click()
+  await expect(inspector.getByRole('combobox', { name: 'Shape' })).toContainText('Shape 1 offset')
+  await setField(inspector, 'Scale', '1.5')
+  await expect(input(inspector, 'Scale')).toHaveValue('1.5')
+  await renderDark(page, 'pocket-scale')
+  shapes = await openPartSetup(page, 'Shapes')
+  await expect(shapes.getByRole('button', { name: /^Shape 1 offset/ })).toContainText('Used by 1')
 })

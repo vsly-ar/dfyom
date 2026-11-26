@@ -34,6 +34,7 @@ import {
   useReorder,
   type FieldIconName,
   type FieldMessage,
+  type MenuEntry,
   type StepKind,
   InspectorGroup,
 } from '../../ui'
@@ -42,6 +43,7 @@ import { defaultUnit, quantityOf, type DesignPart } from './model'
 import { NameField } from './NameField'
 import { SegmentTable } from './SegmentTable'
 import { ImportReportDialog } from './ImportReportDialog'
+import { OffsetDialog } from './OffsetDialog'
 import { addShapeEntries, useSvgImport } from './ShapeList'
 import { shapeLoops } from './ShapePicker'
 import { ShapeKindIcon } from './ShapeKindIcon'
@@ -156,6 +158,19 @@ export function ShapeInspector({
   }
   const addItem = (kind: DrawnItemKind) =>
     void sendItems([...sources(), newItemArgs(kind, part.units)], shape.items.length)
+  // "Add item" → "Offset…" (U3): the dialog picks the source, distance and direction
+  const [offsetOpen, setOffsetOpen] = useState(false)
+  const addEntries: MenuEntry[] = [
+    ...addShapeEntries(addItem),
+    'separator',
+    {
+      label: shapeMessages.offset.addEntry,
+      icon: <ShapeKindIcon kind="offset" />,
+      description: shapeMessages.offset.addEntryDescription,
+      onSelect: () => setOffsetOpen(true),
+    },
+  ]
+  const nameOf = (id: string) => part.dto.shapes?.find((s) => s.id === id)?.name ?? id
 
   const ctx: ItemEditContext = {
     part,
@@ -198,7 +213,7 @@ export function ShapeInspector({
         <InspectorGroup
           title={t.items}
           actions={
-            <Menu label={t.addItem} items={addShapeEntries(addItem)}>
+            <Menu label={t.addItem} items={addEntries}>
               <IconButton label={t.addItem} icon={<Icon name="add" />} />
             </Menu>
           }
@@ -207,6 +222,7 @@ export function ShapeInspector({
             shape={shape}
             selected={index}
             units={part.units}
+            nameOf={nameOf}
             onSelect={(n) => selectItem(n)}
             onOp={(n, op) => void sendItem(n, { op })}
             onMove={move}
@@ -268,13 +284,34 @@ export function ShapeInspector({
         </InspectorGroup>
       </div>
       {svg.dialog}
+      <OffsetDialog
+        part={part}
+        open={offsetOpen}
+        onOpenChange={setOffsetOpen}
+        target={shape.id}
+        onSubmit={async (item) => {
+          const r = await call('design.shape.update', {
+            partId: part.dto.id,
+            shapeId: shape.id,
+            items: [...sources(), item],
+          })
+          if (!r.ok) return r.error
+          selectItem(shape.items.length)
+          return undefined
+        }}
+      />
     </div>
   )
 }
 
 // ── item list ───────────────────────────────────────────────────────────────────────────────
 
-export function itemSummaryText(dto: ShapeItemDTO, units: DesignPart['units']): string {
+/** A row's summary; an offset names its source by `nameOf` (the shape's name, U3), else its id. */
+export function itemSummaryText(
+  dto: ShapeItemDTO,
+  units: DesignPart['units'],
+  nameOf: (shapeId: string) => string = (id) => id,
+): string {
   const n = itemNumbers(dto)
   if (n === undefined) return shapeMessages.kinds[dto.kind]
   switch (n.kind) {
@@ -289,7 +326,12 @@ export function itemSummaryText(dto: ShapeItemDTO, units: DesignPart['units']): 
       return t.itemSummary({ kind: 'path', segments: n.segments.length, closed: n.closed }, units)
     case 'offset':
       return t.itemSummary(
-        { kind: 'offset', distance: n.distance, direction: n.direction, source: n.shapeId },
+        {
+          kind: 'offset',
+          distance: n.distance,
+          direction: n.direction,
+          source: nameOf(n.shapeId),
+        },
         units,
       )
   }
@@ -299,6 +341,7 @@ export function ShapeItemList({
   shape,
   selected,
   units,
+  nameOf,
   onSelect,
   onOp,
   onMove,
@@ -307,6 +350,8 @@ export function ShapeItemList({
   shape: ShapeDTO
   selected: number
   units: DesignPart['units']
+  /** An offset item's source name (U3); absent: its id. */
+  nameOf?: (shapeId: string) => string
   onSelect(n: number): void
   onOp(n: number, op: ShapeOp): void
   /** Item `n` to index `to`; resolves false when refused. */
@@ -361,7 +406,7 @@ export function ShapeItemList({
                 type="button"
                 className={styles['itemSelect']}
                 aria-pressed={n === selected}
-                aria-label={`${label}: ${itemSummaryText(item, units)}`}
+                aria-label={`${label}: ${itemSummaryText(item, units, nameOf)}`}
                 aria-keyshortcuts={
                   count > 1 ? 'Alt+ArrowUp Alt+ArrowDown Delete' : 'Alt+ArrowUp Alt+ArrowDown'
                 }
@@ -380,7 +425,7 @@ export function ShapeItemList({
                 }}
               >
                 <ShapeKindIcon kind={item.kind} />
-                <span className={styles['opName']}>{itemSummaryText(item, units)}</span>
+                <span className={styles['opName']}>{itemSummaryText(item, units, nameOf)}</span>
               </button>
               <SegmentedControl
                 label={`${t.op}: ${label}`}
@@ -638,7 +683,8 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
       )
     }
     case 'offset': {
-      // the source is changed by replacing the item (design.shape.update); "Offset…" is task U3
+      // the source is fixed once added (pick another by removing the item and "Add item" →
+      // "Offset…", U3); the core changes it by replacing the item list (design.shape.update)
       const source = ctx.part.dto.shapes?.find((s) => s.id === item.shapeId)
       return (
         <>
@@ -650,7 +696,7 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
             path={['distance']}
             stepKind="small"
             label={t.distance}
-            icon="length"
+            icon="offsetDistance"
           />
           <Field label={t.direction} kind="toggle">
             <SegmentedControl

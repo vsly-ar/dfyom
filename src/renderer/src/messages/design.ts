@@ -925,6 +925,7 @@ export const designMessages = {
       rotationNone: '0°',
       mirror: 'Mirror (flip x)',
       scale: 'Scale',
+      scaleTip: 'Grows or shrinks the shape about the anchor point; 1 is its drawn size.',
       roundCorners: (r: string) => `Round corners to ≥ ${r}`,
       roundCornersFit: (r: string) => `Round corners to ${r} (largest that fits)`,
       roundFitSmaller: (fit: string, tool: string) =>

@@ -83,6 +83,11 @@ export const shapeMessages = {
     openPath: 'Open path',
     failed: 'Does not resolve',
     removed: (name: string) => `Removed ${name}`,
+    /** U3: the row menu's entry that makes a new shape offsetting this one. */
+    offset: 'Offset…',
+    offsetDescription: 'A new shape that grows or shrinks this one and follows its edits.',
+    offsetOpen: 'An open path cannot be offset yet.',
+    offsetFailed: 'This shape does not resolve: fix it first.',
     referenced: (names: readonly string[]) =>
       `Used by ${names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}.`,
   },
@@ -244,6 +249,28 @@ export const shapeMessages = {
       ]
       return `${prefix} ${lengthText(mm, units)}`
     },
+  },
+  /** "Offset…" (U3, docs/modes/design-llm-first.md#offset-item): a shape row's or "Add item". */
+  offset: {
+    title: (source: string) => `Offset ${source}`,
+    titleItem: (shape: string) => `Add offset item to ${shape}`,
+    description: 'A new shape at this distance from the source; it follows the source’s edits.',
+    descriptionItem: 'The item offsets another shape and follows its edits.',
+    source: 'Source',
+    distance: 'Distance',
+    direction: 'Direction',
+    outward: 'Outward',
+    inward: 'Inward',
+    create: 'Create offset',
+    add: 'Add item',
+    cancel: 'Cancel',
+    refused: 'The offset was not made',
+    noSources: 'No other closed shape to offset.',
+    /** The new shape's name: "Outline offset". */
+    name: (source: string) => `${source} offset`,
+    /** "Add item"'s entry. */
+    addEntry: 'Offset…',
+    addEntryDescription: 'Offset another shape of the part; it follows that shape’s edits.',
   },
   importReport: {
     optionsTitle: 'Import SVG',

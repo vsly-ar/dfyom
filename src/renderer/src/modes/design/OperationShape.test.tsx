@@ -161,6 +161,18 @@ describe('operation inspector for shapes', () => {
       expect(part().operations[0]).toMatchObject({ shape: { kind: 'named', mirror: true } }),
     )
     expect(within(inspector()).getByRole('button', { name: 'Edit shape' })).toBeInTheDocument()
+    // Scale (D2, U3): its own illustration and (i) tip; 1 is not stored, another factor is
+    const scale = within(inspector()).getByLabelText('Scale', { selector: 'input' })
+    expect(scale).toHaveValue('1')
+    const label = within(inspector()).getByText('Scale', { selector: 'label' }).closest('label')!
+    expect(label.querySelector('svg[data-icon="scale"]')).not.toBeNull()
+    await user.clear(scale)
+    await user.type(scale, '1.02{Enter}', { skipClick: true })
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({ shape: { kind: 'named', scale: 1.02 } }),
+    )
+    act(() => scale.blur())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await expectNoAxeViolations(inspector())
 
     // the used shape in the Shapes dialog: its row menu's Remove says why it is refused (DF70),
