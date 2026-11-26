@@ -506,6 +506,24 @@ describe('design.tool.candidates', () => {
 })
 
 describe('auto choice (apply hook design.toolAutoChoice)', () => {
+  it('D4: corners in the waste of a through outline do not count; corners on the part do', async () => {
+    // the part: a through outside profile, 60 × 40 (u 20–80); a 10 mm wide groove with 1.5 mm
+    // corners at u 5 and 95 lies across it, its corners 15 mm into the frame: the 6 mm tool
+    const choose = async (length: string) => {
+      const s = await setup()
+      await s.addTool('flatEndMill', '6')
+      const small = await s.addTool('flatEndMill', '3')
+      await s.run('design.profile.add', { partId: s.partId, shape: rect('60', '40', '5') })
+      await s.pocket({ shape: rect(length, '10', '1.5') })
+      await s.apply()
+      const item = (snapshotOf(s, 'pocket1') as { libraryItemId: string }).libraryItemId
+      return item === small ? 3 : 6
+    }
+    expect(await choose('90')).toBe(6)
+    // a 50 mm groove has its corners on the part (u 25 and 75): they keep the 3 mm tool
+    expect(await choose('50')).toBe(3)
+  })
+
   it('prefers a fitting library tool (preset → largest → id); reports from: null, reason unset', async () => {
     const s = await setup()
     await s.addTool('flatEndMill', '6')

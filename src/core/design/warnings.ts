@@ -19,7 +19,7 @@ import type { Part } from './operation'
 import { shapeFacts } from './placement'
 import type { ShapeDTO } from './shape.dto'
 import { designToolLabel } from './tool'
-import { dfmTool, noFittingTool, operationTools } from './tool-choice'
+import { dfmTool, noFittingTool, operationTools, partWaste } from './tool-choice'
 import { checkOperations } from './validate'
 
 /** `DfmWarning` as a result schema (defined with the other boundary schemas). */
@@ -180,8 +180,10 @@ function noToolWarnings(
   const readOnly = new Set(
     features.filter((f) => f.spec.readOnly === true).map((f) => f.feature.id),
   )
+  const wasteOf = partWaste(input, region2d)
   return part.operations.flatMap((op, i): DfmWarning[] => {
     if (op.tool.isSome() || op.owner.mapOr(false, (o) => readOnly.has(o.featureId))) return []
+    const waste = wasteOf(input.operations[i]!)
     // F7: a drilling under a stepped chamfer is bored by the chamfer's end mill
     const also = input.operations.filter(
       (g) => g.kind === 'chamfer' && g.stepdown !== undefined && g.edgeOf === op.id,
@@ -197,6 +199,7 @@ function noToolWarnings(
         snapshots,
         ...(region2d !== undefined && { region2d }),
         ...(also.length > 0 && { also }),
+        ...(waste !== undefined && { waste }),
       },
       tools,
     )

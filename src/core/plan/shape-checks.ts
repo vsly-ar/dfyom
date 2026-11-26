@@ -4,12 +4,15 @@
  * empty – and the smallest inside corner is a warning (the corner keeps the tool radius). The
  * helix check uses the region's narrowest width. They need the 2D port, so they run where the plan
  * has one (`planFindings`, `planOperationInputs`, tool suggestion and resolution in commands).
- * Doc: docs/modes/plan-v0.3.md#plan-side, docs/architecture/shapes.md#implementation-k4
+ * Corners whose leftover lies wholly in the face's waste (offcut and frame of through profiles,
+ * D4) do not count, as for the design's DFM checks.
+ * Doc: docs/modes/plan-v0.3.md#plan-side, docs/architecture/shapes.md#implementation-k4,
+ * docs/modes/design-llm-first.md#rule-as-built-d4-slice-lf3
  */
 import { isGeneralShape, type Operation, type Part } from '../design/operation'
 import { placeShape } from '../design/placement'
 import type { Region2dPort } from '../geometry/2d/port'
-import { localStock } from '../geometry/face'
+import { localStock, type Direction } from '../geometry/face'
 import type { OperationGeometry, StockGeometry, Vec2 } from '../geometry/model'
 import {
   FIT_SLACK,
@@ -18,6 +21,7 @@ import {
   type ShapeMeasure,
 } from '../geometry/shape-measure'
 import type { Stock } from '../library/stock'
+import type { FaceWaste } from '../geometry/waste'
 import type { Tool } from '../library/tool'
 import { surfaceDirection } from './order'
 import type { PlanWarning } from './checks'
@@ -78,6 +82,8 @@ export interface ShapeCheckInput {
   readonly part: Part
   /** The plan's stock: corners whose leftover lies beyond it do not count (DF53). */
   readonly stock?: Stock
+  /** The waste of each face (D4): corners whose leftover lies wholly in it do not count. */
+  readonly waste?: (direction: Direction) => FaceWaste | undefined
   readonly tool: Tool
   readonly strategy: ResolvedStrategy
   /** The plan operation sets `helixDiameter` itself (the v0.1 helix check runs only then). */
@@ -95,10 +101,11 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
   const R = D / 2
   const byId = new Map(i.part.operations.map((o) => [o.id, o]))
   for (const op of i.ops) {
+    const direction = 'on' in op ? surfaceDirection(op.on, byId) : undefined
     const face =
-      i.stock === undefined || !('on' in op)
+      i.stock === undefined || direction === undefined
         ? undefined
-        : localStock(surfaceDirection(op.on, byId), {
+        : localStock(direction, {
             length: i.stock.length.canonical,
             width: i.stock.width.canonical,
             thickness: i.stock.thickness.canonical,
@@ -119,9 +126,12 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
       continue
     }
     // rotated rectangles keep the v0.1 corner rule (an error); named shapes warn; corners whose
-    // leftover lies beyond the stock do not count (DF53)
+    // leftover lies beyond the stock (DF53) or wholly in waste (D4) do not count
+    const waste = direction === undefined ? undefined : i.waste?.(direction)
     const corner =
-      face === undefined ? m.smallestCornerRadius : smallestWallCorner(m, placed.centre, face, R)
+      face === undefined
+        ? m.smallestCornerRadius
+        : smallestWallCorner(m, placed.centre, face, R, waste)
     if ('shape' in op && op.shape.kind === 'named' && corner < R - CORNER_TOLERANCE) {
       out.push({
         severity: 'warning',

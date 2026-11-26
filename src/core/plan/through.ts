@@ -4,19 +4,24 @@
  * an earlier setup of this plan (design reads the default setup order instead), and every facing,
  * pocket, profile and drilling the material earlier cuts left over its region (`materialBands`). The
  * toolpaths, the tool checks and `plan.operation.list`'s `throughDepth` take them from here.
+ * The waste of each face (D4, `faceWaste`) for the plan's corner check comes from here too.
  * Doc: docs/modes/plan-v0.2.md#material-removed-by-earlier-setups,
- * docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61
+ * docs/modes/plan-v0.2.md#material-left-for-later-cuts-df61,
+ * docs/modes/design-llm-first.md#rule-as-built-d4-slice-lf3
  */
 import { toGeometryInput } from '../design/geometry-input'
 import type { Operation } from '../design/operation'
 import { SurfaceTable } from '../design/surfaces'
 import type { Region2dPort } from '../geometry/2d/port'
+import type { Direction } from '../geometry/face'
+import { faceWaste, type FaceWaste } from '../geometry/waste'
 import { materialBands, throughDepths, type MaterialCover } from '../geometry/through-depth'
 import type { LoadedPlan } from './plan'
 
 interface Derived {
   readonly through: ReadonlyMap<string, number>
   readonly bands: ReadonlyMap<string, MaterialCover>
+  readonly waste: (direction: Direction) => FaceWaste | undefined
 }
 
 const memo = new WeakMap<LoadedPlan, Map<Region2dPort | undefined, Derived>>()
@@ -48,15 +53,40 @@ function derived(plan: LoadedPlan, port: Region2dPort | undefined): Derived {
         index++
       }
     })
-    const none: Derived = { through: new Map(), bands: new Map() }
-    out = toGeometryInput(plan.part, plan.stock, port).mapOr(none, (input): Derived => ({
-      through: throughDepths(input.operations, input.stock, port, earlier(setupOf)),
-      // openings count from the next setup on (the slug may still sit in its slot in its own)
-      bands: materialBands(input.operations, input.stock, port, earlier(indexOf), earlier(setupOf)),
-    }))
+    const none: Derived = { through: new Map(), bands: new Map(), waste: () => undefined }
+    out = toGeometryInput(plan.part, plan.stock, port).mapOr(none, (input): Derived => {
+      const wastes = new Map<Direction, FaceWaste | undefined>()
+      return {
+        through: throughDepths(input.operations, input.stock, port, earlier(setupOf)),
+        // openings count from the next setup on (the slug may still sit in its slot in its own)
+        bands: materialBands(
+          input.operations,
+          input.stock,
+          port,
+          earlier(indexOf),
+          earlier(setupOf),
+        ),
+        waste: (d) => {
+          if (!wastes.has(d)) wastes.set(d, faceWaste(input.operations, d, input.stock, port))
+          return wastes.get(d)
+        },
+      }
+    })
     byPort.set(port, out)
   }
   return out
+}
+
+/**
+ * The waste of the part's face of `direction` (D4, `faceWaste`): the offcut and frame of its
+ * through profiles; undefined when nothing is waste there.
+ */
+export function planFaceWaste(
+  plan: LoadedPlan,
+  direction: Direction,
+  port?: Region2dPort,
+): FaceWaste | undefined {
+  return derived(plan, port).waste(direction)
 }
 
 /**

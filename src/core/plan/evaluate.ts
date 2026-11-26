@@ -29,7 +29,7 @@ import {
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
 import { holdsOnSurface } from './workholding/items'
-import { planThroughDepths } from './through'
+import { planFaceWaste, planThroughDepths } from './through'
 import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from './z-headroom'
 import { checkPartFits } from './validity'
 import { shapeToolFindings } from './shape-checks'
@@ -247,6 +247,7 @@ export function evaluateOperation(
         ops,
         part: plan.part,
         stock: plan.stock,
+        waste: (d) => planFaceWaste(plan, d, port),
         tool: t,
         strategy,
         helixSet: op.strategy.helixDiameter !== undefined,
