@@ -27,8 +27,8 @@
     "fixtures:enclosure-sections": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/enclosure-sections.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js .",
+    "lint:fix": "node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js . --fix",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
     "notices": "node scripts/third-party-notices.mjs",
     "icon": "node scripts/app-icon.mjs"
