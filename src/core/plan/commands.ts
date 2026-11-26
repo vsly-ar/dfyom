@@ -29,6 +29,7 @@ import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
 import { ItemIdSchema, NAME_MAX, type LibraryItemKind } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { Tool } from '../library/tool'
+import { isBuiltinWorkholding, withBuiltinWorkholding } from '../library/workholding-builtins'
 import { deepEqual, refreshSnapshot, Snapshot, takeSnapshot } from '../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
@@ -90,6 +91,7 @@ import { shapeFindings } from './shape-findings'
 import { checkPart, sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
 import { workholdingSet } from './workholding/commands'
+import { reresolveCopy } from './workholding/devices'
 import { workholdingFindings } from './workholding/findings'
 import { setupWorkholding } from './workholding/setup'
 import { defaultClearance } from './build'
@@ -140,11 +142,14 @@ function libraryItem(
   id: string,
   path: string,
   where: string,
+  /** The project's: picks a built-in workholding device's value set (WL2). */
+  units: UnitSystem = 'mm',
 ): AppResult<LibraryItem> {
   const library = ctx.services.library
-  if (library === undefined)
+  const builtin = kind === 'workholding' && isBuiltinWorkholding(id)
+  if (library === undefined && !builtin)
     return fail('internal.unexpected', 'no library service configured', { where })
-  const found = library.lookup(kind, id)
+  const found = withBuiltinWorkholding(library?.lookup, units)(kind, id)
   if (found.state === 'found') return Ok(found.item)
   return fail('input.malformed', `${kind} ${id} is not in the library or does not load`, {
     issues: [
@@ -498,7 +503,8 @@ const planRebuild = defineCommand({
 const libraryItemUpdate = defineCommand({
   kind: 'document',
   name: 'plan.libraryItem.update',
-  summary: "Re-import one of the plan's library copies (stock, machine or tool) from the library.",
+  summary:
+    "Re-import one of the plan's library copies (stock, machine, tool or workholding) from the library.",
   title: () => 'Update plan copy from library',
   machine: false,
   args: z.object({
@@ -542,7 +548,7 @@ function refreshCopy(
       issues: [{ path: ['snapshotId'], rule: 'ownStock', message: 'not from the library' }],
       where,
     })
-  const item = libraryItem(ctx, dto.kind, dto.libraryItemId, 'snapshotId', where)
+  const item = libraryItem(ctx, dto.kind, dto.libraryItemId, 'snapshotId', where, units)
   if (item.isErr()) return item
   const refreshed = Snapshot.fromDTO(dto).andThen((s) =>
     refreshSnapshot(s, item.unwrap(), nowIso(ctx)),
@@ -557,6 +563,17 @@ function refreshCopy(
     const { part, stock } = loaded.unwrap()
     const ok = checkPart(part, stock, ctx.services.region2d)
     if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
+  }
+  if (dto.kind === 'workholding') {
+    // every item placed from the copy takes the new device values (WL2)
+    const loaded = loadPlanDTO(plan, units, where)
+    if (loaded.isErr()) return loaded
+    const issues = reresolveCopy(plan, snapshotId, loaded.unwrap().stock, units)
+    if (issues.length > 0)
+      return fail('model.invariant', `the new device does not fit: ${issueSummary(issues)}`, {
+        issues,
+        where,
+      })
   }
   return Ok(true)
 }

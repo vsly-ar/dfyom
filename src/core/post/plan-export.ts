@@ -27,7 +27,7 @@ import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport, type TravelFit } from './export'
 import { gcodeFileStem } from './file-name'
-import { commentLine } from './grbl/format'
+import { commentLine, MAX_LINE_BYTES, sanitizeComment } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
 import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
 import type { LinkSettings } from '../toolpath/links'
@@ -37,6 +37,7 @@ import {
   moveFindings,
   staticWorkholdingFindings,
 } from '../plan/workholding/findings'
+import { deviceLabel } from '../plan/workholding/devices'
 import { itemSummary } from '../plan/workholding/items'
 import { setupWorkholding } from '../plan/workholding/setup'
 
@@ -347,9 +348,21 @@ export async function exportPlan(
               : {
                   // in the WCS like every other coordinate of the program: what the DRO
                   // shows (DF81, docs/modes/alignment.md S12)
-                  items: holding.items.map(
-                    (i) => `${i.name}: ${itemSummary(i, programUnits, zero)}`,
-                  ),
+                  // a device from the user's library is named so the operator picks the right
+                  // clamp (workholding-library.md § Snapshots and persistence); a line too long
+                  // for GRBL names it on the next one instead of being cut
+                  items: holding.items.flatMap((i) => {
+                    const device = deviceLabel(
+                      plan.dto.snapshots,
+                      setup.workholding?.find((w) => w.id === i.id) ?? {},
+                    )
+                    const line = `${i.name}: ${itemSummary(i, programUnits, zero)}`
+                    if (device === undefined) return [line]
+                    const one = `${line} · ${device}`
+                    return sanitizeComment(`Workholding: ${one}`).length <= MAX_LINE_BYTES - 2
+                      ? [one]
+                      : [line, `${i.name} device: ${device}`]
+                  }),
                   margin: holding.margin,
                 },
           ),
