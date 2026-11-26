@@ -412,4 +412,29 @@ describe('hole inspector (U2)', () => {
       'true',
     )
   })
+
+  it('a Depth typed before the countersink Ø and angle holds (X2-8)', async () => {
+    // the exit test's foot hole, sizes in the order X2 typed them
+    const { user, hole1, field, setField, choose } = await renderHole()
+    await user.click(within(insp()).getByRole('radio', { name: 'Countersink' }))
+    await waitFor(() => expect(src(hole1()['csDiameter'])).toBe('12 mm'))
+    // the starting countersink (2 × the diameter) follows the diameter
+    await setField('Diameter', '2.447')
+    await waitFor(() => expect(src(hole1()['diameter'])).toBe('2.447'))
+    expect(src(hole1()['csDiameter'])).toBe('4.89 mm')
+    await choose('Bottom', 'Flat')
+    await waitFor(() => expect(hole1()['bottom']).toBe('flat'))
+    await setField('Depth', '3.944')
+    await waitFor(() => expect(src(hole1()['depth'])).toBe('3.944'))
+    await setField('Countersink Ø', '4.861')
+    await waitFor(() => expect(src(hole1()['csDiameter'])).toBe('4.861'))
+    await setField('Countersink angle', '82.8')
+    await waitFor(() => expect(src(hole1()['csAngle'])).toBe('82.8'))
+    expect(src(hole1()['depth'])).toBe('3.944')
+    expect(field('Depth')).toHaveValue('3.944')
+    // an entered countersink no longer follows: a depth too shallow for it is refused there
+    await setField('Depth', '1')
+    expect(await within(insp()).findByText(/countersink cone/i)).toBeInTheDocument()
+    expect(src(hole1()['depth'])).toBe('3.944')
+  })
 })

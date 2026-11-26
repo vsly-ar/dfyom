@@ -53,6 +53,7 @@ import {
   customSizeNote,
   enteredSizesReplaced,
   fastenerSources,
+  followingHead,
   holeRecord,
   sectionValues,
   sharedToolNote,
@@ -340,7 +341,19 @@ export function HoleInspector({
           kind={angle ? 'angle' : 'length'}
           defaultUnit={defaultUnit(angle ? 'angle' : 'length', units)}
           value={dto === undefined ? undefined : quantityOf(dto)}
-          onCommit={(q, gesture) => void update({ [field]: q.source }, field, gesture)}
+          onCommit={(q, gesture) =>
+            void update(
+              {
+                [field]: q.source,
+                // X2-8: a starting head follows the new diameter or depth
+                ...(field === 'diameter' || field === 'depth'
+                  ? followingHead(hole, { [field]: q.canonical }, units, stockBelow(part, hole.on))
+                  : {}),
+              },
+              field,
+              gesture,
+            )
+          }
           stepKind={FIELD_STEP[field]}
           stepKey={`hole.${field}`}
           onCancelGesture={cancelGesture}

@@ -320,8 +320,54 @@ export function headDefaults(
   units: UnitSystem,
   below?: number,
 ): Record<string, string> {
+  return startingHead(
+    mm(h.sizes.diameter) ?? 6,
+    h.bottom === 'through' ? below : mm(h.sizes.depth),
+    type,
+    units,
+  )
+}
+
+/**
+ * The starting head sizes that follow a Diameter or Depth edit (X2-8): while a hole without a
+ * fastener still has the head `headDefaults` gave it, the edit sends the head that fits the new
+ * values with it (one update), as the core's derived sizes follow a new head sink. Before, a
+ * countersink started at twice the 6 mm default (12 mm) kept that width when the diameter became
+ * 2.447 mm, so a Depth typed before the countersink Ø (3.944 mm) left no room for its cone: the
+ * core refused the depth (`countersinkTooDeep`, at Countersink Ø) and the field read the 7.22 mm
+ * Bottom → Flat had filled. Empty when the head was entered or comes from a fastener.
+ */
+export function followingHead(
+  h: HoleRecord,
+  edit: { readonly diameter?: number; readonly depth?: number },
+  units: UnitSystem,
+  below?: number,
+): Record<string, string> {
+  if (h.fastener !== undefined || h.type === 'simple') return {}
   const d = mm(h.sizes.diameter) ?? 6
-  const depth = h.bottom === 'through' ? below : mm(h.sizes.depth)
+  const depth = mm(h.sizes.depth)
+  const material = (x: number | undefined) => (h.bottom === 'through' ? below : x)
+  const now = startingHead(d, material(depth), h.type, units)
+  if (Object.entries(now).some(([k, v]) => h.sizes[k as HoleSizeField]?.source !== v)) return {}
+  const ok = (x: number | undefined) => x !== undefined && Number.isFinite(x) && x > 0
+  if (
+    (edit.diameter !== undefined && !ok(edit.diameter)) ||
+    (edit.depth !== undefined && !ok(edit.depth))
+  )
+    return {}
+  const next = startingHead(edit.diameter ?? d, material(edit.depth ?? depth), h.type, units)
+  return Object.fromEntries(
+    Object.entries(next).filter(([k, v]) => h.sizes[k as HoleSizeField]?.source !== v),
+  )
+}
+
+/** `headDefaults` from numbers: the diameter and the material its head must leave room in (mm). */
+function startingHead(
+  d: number,
+  depth: number | undefined,
+  type: Exclude<HoleType, 'simple'>,
+  units: UnitSystem,
+): Record<string, string> {
   const room = depth === undefined ? Infinity : depth * 0.5
   if (type === 'counterbore')
     return {

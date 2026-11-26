@@ -424,11 +424,12 @@ test('v0.4-llm-first exit criteria through the UI: the enclosure base from its S
   await setField(inspector, 'Diameter', String(hole.size.diameter))
   await choose(page, inspector, 'Bottom', 'Flat')
   await expect(inspector.getByRole('combobox', { name: 'Bottom' })).toHaveText('Flat')
-  await setField(inspector, 'Countersink Ø', X1_VALUES.csDiameter)
-  await setField(inspector, 'Countersink angle', X1_VALUES.csAngle)
-  // the depth from the mouth, which is the facing's floor
+  // the depth from the mouth, which is the facing's floor; typed before the countersink, it holds
+  // (X2-8: the starting countersink follows the diameter and leaves its cone room)
   const holeDepth = String(Math.round((hole.size.depth - hole.size.top) * 1000) / 1000)
   await setField(inspector, 'Depth', holeDepth)
+  await setField(inspector, 'Countersink Ø', X1_VALUES.csDiameter)
+  await setField(inspector, 'Countersink angle', X1_VALUES.csAngle)
   await expect(input(inspector, 'Depth')).toHaveValue(new RegExp(`^${holeDepth}`))
   await expect(input(inspector, 'Diameter')).toHaveValue(/^2\.447/)
 
