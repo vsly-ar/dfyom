@@ -45,6 +45,17 @@ A new item kind in the [shape definition](design-v0.3.md#shape-definition) (the 
 - `dfm.cornerSharp`, the tool-fit checks and `dfm.reach` are evaluated only on boundary pieces of the removal that lie on the part's final solid (the evaluated part minus [offcut](../glossary.md) and [loose pieces](../glossary.md)); a corner whose both edges lie in waste is skipped. The check classifies by the 2D removal region against the part's final outline on that face, so it stays within the resolve budget.
 - `dfm.shapeOutsideFace` becomes `info` when the overhang lies wholly in waste (an intended overrun).
 - Message fixes: every DFM and plan message names its operation by name and id; `dfm.retainedRemoved` reports what remains (e.g. "Pocket 3 lowers tabs 1–4 of Profile 1 from 8 mm to 2.8 mm") and says which one to change.
+
+### Rule as built (D4, slice LF3)
+
+Code: `src/core/geometry/waste.ts` (`faceWaste`), used by `dfm.ts`, `tool-fit.ts` (`toolFit`'s `waste`) and `shape-measure.ts` (`wallCorners`).
+
+- **[Waste](../glossary.md) of a face:** the through profiles (no `depth`; `inside` or `outside`, closed loop) of the operation's direction or the opposite one cut the whole extent along that axis, so their loops are the part's outline on that face (mapped into the operation's face frame). Waste is what lies outside every outside profile's loop (the frame; several outside profiles are several parts) or inside an inside profile's loop (the slug), except a part cut out inside that opening. No such profile: nothing is waste and every check runs as before. Blind profiles (steps, rabbets), `on` grooves, profiles of other axes and through pockets do not bound the part; loose pieces are not waste here (they need the evaluation, and `dfm.loosePiece` already reports them).
+- **Corners** (`dfm.cornerSharp`, `dfm.cornerTooSmall`, and `dfm.toolUnfit` rule `cornerRadius`): a corner does not count when the leftover a tool of radius r leaves there lies wholly in waste: its point lies off the part by at least r · spread (DF53's open-corner measure; r the smallest end mill for the library checks, the own tool for the fit rule; with no end mill, strictly off the outline). A corner on the outline or on the part warns as before. v0.1 rectangles test their four corner points the same way.
+- **Rest material:** `dfm.restMaterial` leaves out pieces whose marker lies at least the tool radius into waste.
+- **Wholly in waste:** a pocket or drilling whose removal region has no area on the part (2D port; without the port this is never assumed) gets none of `dfm.cornerSharp`, `dfm.cornerTooSmall`, `dfm.pocketNoToolFits`, `dfm.pocketDeepNarrow`, `dfm.restMaterial`, `dfm.reach`, nor `dfm.toolUnfit` for the rules `cornerRadius`, `width`, `reach` and `flutes` (a hold-down screw hole or a clamp pocket in the frame). Still reported: a wrong tool type, `floorRadius`, `dfm.holeNoTool`, `dfm.holeDeep`, `dfm.floorRadiusNoTool`, and everything of a cut that touches the part (reach is the whole operation's, so a pocket across the outline still gets it).
+- **Messages:** a design warning's `message` starts with its operation's name and id ("Pocket 1 (pocket1): a sharp inside corner …", `namedMessages` in `src/core/design/warnings.ts`, parameter and geometry warnings); the UI already names operations from `params` (DF43). Plan messages, `dfm.retainedRemoved`'s "what remains" text and `dfm.shapeOutsideFace` in waste are not built yet (D4 stays open for them).
+- **Not changed:** the plan's own corner check (`plan/shape-checks.ts`) and the design's tool choice (`tool-choice.ts`) still count corners in waste, so they may pick or ask for a smaller tool than needed there; harmless, revisit with the plan message fixes.
 - Acknowledging single warnings (`design.warning.ack`) is not in this milestone ([Q45](../plans/v0.4-llm-first.md#questions-for-the-user)): noise is fixed at the source first.
 
 ## Testing
@@ -52,7 +63,7 @@ A new item kind in the [shape definition](design-v0.3.md#shape-definition) (the 
 - Offset items: the offset oracle ("every output point lies exactly |d| from the input", the port's existing oracle) on the enclosure outline at 0.81, 4.80, 4.83, 4.85 and 5.00 mm inward and 3 mm outward; follow-edit (edit the source, the offset shape's region changes, operations go stale); cycle, open path and empty refusals; remove refused while referenced.
 - Scale: exact arcs after scale; anchor stays fixed; tab distances scale.
 - Partial-depth profiles: removal solid volume, floor surface, toolpath levels stop at depth (golden), `tabsOnBlind`.
-- DFM in waste: the black-box test's bottom pockets with keep-outs produce no `cornerSharp` in waste; corners on the part still warn.
+- DFM in waste: the black-box test's bottom pockets with keep-outs produce no `cornerSharp` in waste; corners on the part still warn. Unit tests per finding (in waste silent, on the part warns) in `src/core/geometry/dfm-waste.test.ts`; the enclosure flow itself follows with X1 (it needs D1's offset items).
 
 ## Not yet
 

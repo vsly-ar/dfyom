@@ -28,7 +28,7 @@ import type { ProjectDoc } from '../project/document'
 import { geometryEvaluate } from '../workers/tasks'
 import { loadEnabledPart, partGeometryInput, unknownPart } from './load'
 import { PartIdSchema } from './part.dto'
-import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
+import { DfmWarningSchema, libraryTools, namedMessages, partWarnings } from './warnings'
 
 export const EVALUATION_STATUSES = ['done', 'pending', 'failed'] as const
 export type EvaluationStatus = (typeof EVALUATION_STATUSES)[number]
@@ -627,8 +627,12 @@ export function warningsWithEvaluation(
   evaluation: EvaluationStatus
   error?: AppErrorData
 } {
-  const ids = (doc.parts[partId]?.operations ?? []).map((o) => o.id)
-  const geometry = state.status === 'done' ? (state.evaluation?.warnings ?? []) : []
+  const operations = doc.parts[partId]?.operations ?? []
+  const ids = operations.map((o) => o.id)
+  const geometry = namedMessages(
+    operations,
+    state.status === 'done' ? (state.evaluation?.warnings ?? []) : [],
+  )
   return {
     warnings: mergeWarnings(parameter, geometry, ids),
     evaluation: state.status,

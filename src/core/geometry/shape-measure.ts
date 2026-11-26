@@ -24,6 +24,7 @@ import { findRestMaterial, type RestPiece } from './2d/rest-material'
 import type { OperationGeometry, StockGeometry, Vec2 } from './model'
 import { ON_EDGE, openReach, openRegion, opensStock } from './open-sides'
 import { pocketRegion, profileChain, shapeOutline } from './outline'
+import type { FaceWaste } from './waste'
 
 /**
  * A vertex is a sharp corner when its elements turn by more than this (rad, 5°): a smaller kink
@@ -77,14 +78,22 @@ export function openCorner(
 
 const OPEN_EPSILON = 1e-6
 
-/** The corners of `m` that are walls for a tool of radius `r` (not `openCorner`). */
+/**
+ * The corners of `m` that are walls for a tool of radius `r`: not `openCorner`, and with `waste`
+ * (the face's offcut and frame, D4) not a corner whose leftover lies wholly in waste.
+ */
 export function wallCorners(
   m: ShapeMeasure,
   center: readonly [number, number],
   face: Pick<StockGeometry, 'length' | 'width'>,
   r: number,
+  waste?: FaceWaste,
 ): InsideCorner[] {
-  return m.corners.filter((c) => !openCorner(c, center, face, r))
+  return m.corners.filter(
+    (c) =>
+      !openCorner(c, center, face, r) &&
+      !(waste?.covers([c.at[0] + center[0], c.at[1] + center[1]], r * c.spread) ?? false),
+  )
 }
 
 /** The smallest radius of the wall corners for a tool of radius `r`; Infinity without any. */
@@ -93,9 +102,10 @@ export function smallestWallCorner(
   center: readonly [number, number],
   face: Pick<StockGeometry, 'length' | 'width'>,
   r: number,
+  waste?: FaceWaste,
 ): number {
   if (m.corners.length === 0) return Infinity
-  return wallCorners(m, center, face, r).reduce((s, c) => Math.min(s, c.radius), Infinity)
+  return wallCorners(m, center, face, r, waste).reduce((s, c) => Math.min(s, c.radius), Infinity)
 }
 
 /** Which side of the loops the tool works on. */

@@ -91,7 +91,7 @@ describe('design.warning.list', () => {
       code: 'dfm.noFittingTool',
       severity: 'warning',
       message:
-        'pocket1: no tool fits, not even the 1 mm flat end mill: cornerRadius 0 mm < tool radius 0.5 mm',
+        'Pocket 1 (pocket1): no tool fits, not even the 1 mm flat end mill: cornerRadius 0 mm < tool radius 0.5 mm',
       operation: 'pocket1',
       parameter: 'tool',
       params: {
@@ -105,7 +105,7 @@ describe('design.warning.list', () => {
     expect(warnings[1]).toEqual({
       code: 'dfm.cornerSharp',
       severity: 'warning',
-      message: 'pocket1: a sharp inside corner cannot be cut by a round tool',
+      message: 'Pocket 1 (pocket1): a sharp inside corner cannot be cut by a round tool',
       operation: 'pocket1',
       parameter: 'shape.cornerRadius',
       params: { cornerRadius: 0 },
