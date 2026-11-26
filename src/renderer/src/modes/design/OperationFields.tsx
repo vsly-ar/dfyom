@@ -12,7 +12,9 @@
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
+import { derivedLength } from '../../../../core/design/hole'
 import { STOCK_FACE } from '../../../../core/geometry/face'
+import { Rational } from '../../../../core/quantity/rational'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityKind } from '../../../../core/quantity/units'
@@ -20,6 +22,7 @@ import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
+import type { PickInsert } from '../../ui/QuantityInput/QuantityInput'
 import {
   Icon,
   AnchorPicker,
@@ -46,12 +49,14 @@ import styles from './Design.module.css'
 import {
   axisNames,
   defaultUnit,
+  depthPickTargets,
   isFormula,
   onChoices,
   quantityAt,
   quantityOf,
   referenceChoices,
   surfaceDirection,
+  surfaceLabel,
   shapeArgs,
   updateArgs,
   type DesignPart,
@@ -80,8 +85,15 @@ export interface OperationFieldsContext {
    * it they are chosen from the field's list only.
    */
   readonly pickable: boolean
-  /** One update command with these args; `path` is where its errors show, `gesture` a live step. */
-  send(args: Record<string, unknown>, path: string, gesture?: string): void
+  /**
+   * One update command with these args; `path` is where its errors show, `gesture` a live step,
+   * `draft` the field text it came from (kept as "not applied" if the command refuses it, DF117).
+   */
+  send(args: Record<string, unknown>, path: string, gesture?: string, draft?: string): void
+  /** DF117: refused field texts by path, kept by the owner (ui.md#quantity-and-expression-input). */
+  readonly drafts?: Readonly<Record<string, string>> | undefined
+  /** DF117: drop the refused text at `path` (Revert, Escape, typed back to the applied value). */
+  revertDraft?(path: string): void
   cancelGesture(gesture: string): Promise<boolean>
   /** The shape picker's design-only actions (task U2): New shape…, Edit shape, Convert, fixes. */
   readonly shapeActions?: ShapeActions | undefined
@@ -216,14 +228,17 @@ export function OperationFields({
             t.groups.depth,
             <>
               <OnField ctx={ctx} />
-              <ParamField
-                ctx={ctx}
-                path="depth"
-                stepKind="depth"
-                label={t.depth}
-                kind="length"
-                icon="depth"
-              />
+              <ThroughField ctx={ctx} />
+              {op.through === true ? null : (
+                <ParamField
+                  ctx={ctx}
+                  path="depth"
+                  stepKind="depth"
+                  label={t.depth}
+                  kind="length"
+                  icon="depth"
+                />
+              )}
             </>,
           )}
           {toolGroup}
@@ -359,6 +374,7 @@ export function OperationFields({
                   onValueChange={(side) => ctx.send({ side }, 'side')}
                 />
               </Field>
+              <ThroughField ctx={ctx} />
               <GrooveDepthField ctx={ctx} />
             </>,
           )}
@@ -655,7 +671,8 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
  */
 function GrooveDepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
-  if (op.kind !== 'profile') return null
+  // DF116: while through (no depth) the Through switch says so; the field shows when blind
+  if (op.kind !== 'profile' || op.depth === undefined) return null
   const messages: FieldMessage[] = ctx.errors
     .filter((e) => e.path === 'depth')
     .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text }))
@@ -675,6 +692,45 @@ function GrooveDepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.E
       onCommit={(q, gesture) => ctx.send({ depth: q?.source ?? null }, 'depth', gesture)}
       onCancelGesture={ctx.cancelGesture}
     />
+  )
+}
+
+/**
+ * DF116: the Through switch of a pocket's Depth group (`through`) and a profile's Cut group (an
+ * empty depth; off = a blind depth of a quarter of the material below `on`), design.md#pocket.
+ */
+function ThroughField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'pocket' && op.kind !== 'profile') return null
+  const through = op.kind === 'pocket' ? op.through === true : op.depth === undefined
+  const messages: FieldMessage[] = ctx.errors
+    .filter((e) => e.path === 'through')
+    .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text }))
+  const change = (on: boolean) => {
+    if (op.kind === 'pocket') return ctx.send({ through: on }, 'through')
+    if (on) return ctx.send({ depth: null }, 'through')
+    const table = ctx.part.table
+    if (table === undefined) return
+    const material = table.extent(surfaceDirection(table, onOf(op)))
+    const quarter = derivedLength(material.div(Rational.int(4n)).unwrapOr(material), ctx.units)
+    if (quarter.isOk()) ctx.send({ depth: quarter.unwrap().source }, 'through')
+  }
+  return (
+    <Field
+      label={t.through}
+      kind="toggle"
+      info={t.throughInfo}
+      messages={messages}
+      readOnly={ctx.readOnly}
+    >
+      <Switch
+        label={t.through}
+        hideLabel
+        checked={through}
+        disabled={ctx.readOnly}
+        onCheckedChange={change}
+      />
+    </Field>
   )
 }
 
@@ -752,6 +808,7 @@ export function ParamField({
 }): React.JSX.Element {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
+  const { ui } = useShell()
   const { part, op } = ctx
   const index = indexOf(ctx)
   const table = part.table
@@ -784,13 +841,42 @@ export function ParamField({
   ]
   const fieldId = `${op.id}:${path}`
   const recommended = ctx.recommended?.[path]
+  // DF115: a Depth pick takes the surface the cut goes down to (ui.md#depth-pick-df115)
+  const depthTargets =
+    path === 'depth' &&
+    table !== undefined &&
+    (op.kind === 'facing' || op.kind === 'pocket' || op.kind === 'drilling')
+      ? depthPickTargets(part.dto, table, index, onOf(op), op.kind)
+      : undefined
+  const pickDepth = (insert: PickInsert) =>
+    setPick({
+      owner: fieldId,
+      field: t.depthPickField(label),
+      eligible: new Set(depthTargets!.keys()),
+      onPick: (surface) => {
+        const target = depthTargets!.get(surface)
+        if (target === undefined) return
+        if (target.kind === 'level') return insert(target.source, 'replace')
+        // the far side of the part: through, one command (pocket Through, drilling Bottom)
+        if (op.kind === 'pocket') ctx.send({ through: true }, 'through')
+        else ctx.send({ bottom: 'through' }, 'bottom')
+        ui.getState().setRemovedToast(
+          t.depthPickedThrough(op.name, surfaceLabel(part.dto, surface)),
+        )
+      },
+    })
+  const draft = ctx.drafts?.[path]
   return (
     <QuantityInput
       label={label}
       kind={QUANTITY_KIND[kind]}
       defaultUnit={defaultUnit(kind, ctx.units)}
       value={quantityAt(op, path)}
-      onCommit={(q, gesture) => commit(ctx, path, q.source, gesture)}
+      onCommit={(q, gesture) =>
+        ctx.send(updateArgs(ctx.op, path, q.source), path, gesture, q.source)
+      }
+      {...(draft !== undefined ? { pending: draft } : {})}
+      {...(ctx.revertDraft !== undefined ? { onRevert: () => ctx.revertDraft?.(path) } : {})}
       stepKind={stepKind}
       stepKey={`${op.kind}.${path}`}
       {...(info !== undefined ? { info } : {})}
@@ -805,7 +891,8 @@ export function ParamField({
       {...(table ? { resolver: table.resolver(index) } : {})}
       {...(table && kind === 'length' && ctx.pickable && !ctx.readOnly
         ? {
-            onPick: (insert: (reference: string) => void) => {
+            onPick: (insert: PickInsert) => {
+              if (depthTargets !== undefined) return pickDepth(insert)
               setPick({
                 owner: fieldId,
                 field: label,

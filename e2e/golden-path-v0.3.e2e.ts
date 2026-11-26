@@ -593,6 +593,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await setField(inspector, 'Position v', PLACE.groove[1])
   await revealField(inspector, 'Slot width')
   await setField(inspector, 'Slot width', '6')
+  // a through cut shows the Through switch, not the depth (DF116): off gives the blind depth
+  await inspector.getByRole('switch', { name: 'Through' }).click()
   await setField(inspector, 'Depth', '1')
 
   await expect(designRows(page)).toHaveText([

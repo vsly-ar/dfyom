@@ -137,7 +137,7 @@ export const PocketDtoSchema = z.object({
   shape: OperationShapeDtoSchema,
   depth: length(),
   floorRadius: length(),
-  /** Patterns P4: a through pocket (set by a pattern's `through` only). */
+  /** Patterns P4: a through pocket (a pattern's `through`; since DF116 any pocket's). */
   through: z.literal(true).optional(),
   /** DF108: a pattern's roughing pocket (set by a pattern's `roughing` only). */
   roughing: z.literal(true).optional(),

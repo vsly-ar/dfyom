@@ -58,7 +58,7 @@ export interface FieldMessage {
    * check (it settles the value); `icon` replaces it for a fix that adds something (a plus for
    * "Add to library").
    */
-  fix?: { label: string; onApply: () => void; icon?: ReactNode }
+  fix?: { label: string; onApply: () => void; icon?: ReactNode; plain?: boolean }
   /**
    * A second, plain action after the fix (e.g. "Add to library" beside "Use wexme 1/4″ 1F"):
    * shown only with a `fix`, on a non-error message.
@@ -134,6 +134,11 @@ export interface FieldProps {
    * QuantityInput focuses without opening its adjust panel (DF111).
    */
   onLabelPress?: () => void
+  /**
+   * DF117: the shown value is not the applied one (a refused edit kept in the field): a dashed
+   * warning border on the control, this sentence as its tooltip (ui.md#quantity-and-expression-input).
+   */
+  pending?: string | undefined
   /** Layout only; appended to the wrapper's class. */
   className?: string | undefined
 }
@@ -151,6 +156,7 @@ export function Field({
   info,
   tag,
   onLabelPress,
+  pending,
   className,
 }: FieldProps): React.JSX.Element {
   const base = useId()
@@ -287,6 +293,7 @@ export function Field({
       data-kind={kind}
       data-readonly={readOnly || undefined}
       data-invalid={invalid || undefined}
+      data-pending={pending !== undefined || undefined}
       ref={fieldRef}
       className={[styles['field'], className].filter(Boolean).join(' ')}
       {...focusHandlers}
@@ -366,7 +373,9 @@ export function Field({
           </button>
         </Tooltip>
       ) : null}
-      <div className={styles['control']}>{control}</div>
+      <div className={styles['control']} {...(pending !== undefined ? { title: pending } : {})}>
+        {control}
+      </div>
       {hasSupport ? (
         <div ref={supportRef} className={styles['support']} data-tier={tier}>
           {shown !== undefined ? (
@@ -384,7 +393,7 @@ export function Field({
                 {primary.fix ? (
                   // a warning's fix is the suggested action (primary); an error's fix is a plain
                   // correction of the typed text, as on the design system page
-                  primary.severity === 'error' ? (
+                  primary.severity === 'error' || primary.fix.plain === true ? (
                     <Button size="sm" onClick={primary.fix.onApply}>
                       {primary.fix.label}
                     </Button>

@@ -238,6 +238,38 @@ describe('operations: add with defaults, update, undo/redo', () => {
     expect(later.issues[0]).toMatchObject({ path: ['on'], rule: 'onSurface' })
   })
 
+  it('pocket: through (DF116) is set and cleared by update, keeps the depth; a floor in use refuses it', async () => {
+    const s = await designSetup()
+    await s.run('design.pocket.add', { partId: s.partId, shape: rect('40', '25'), depth: '5' })
+    await expectUndoRedo(s, 'design.pocket.update', {
+      partId: s.partId,
+      operationId: 'pocket1',
+      through: true,
+    })
+    expect(s.op('pocket1')).toMatchObject({ through: true, depth: { source: '5' } })
+    // another edit keeps it
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
+    expect(s.op('pocket1')).toMatchObject({ through: true, depth: { source: '6' } })
+    await s.run('design.pocket.update', {
+      partId: s.partId,
+      operationId: 'pocket1',
+      through: false,
+    })
+    expect(s.op('pocket1')).not.toHaveProperty('through')
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      on: 'pocket1.floor',
+      shape: rect('10', '10'),
+      depth: '1',
+    })
+    const used = await s.fail(
+      'design.pocket.update',
+      { partId: s.partId, operationId: 'pocket1', through: true },
+      'model.invariant',
+    )
+    expect(used.issues[0]).toMatchObject({ rule: 'onSurface' })
+  })
+
   it('drilling: through by default; switching bottoms drops or defaults depth and pointAngle', async () => {
     const s = await designSetup()
     const r = await expectUndoRedo(s, 'design.drilling.add', {

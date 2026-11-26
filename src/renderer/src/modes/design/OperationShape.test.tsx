@@ -259,11 +259,19 @@ describe('operation inspector for shapes', () => {
       await screen.findByText('Side set to On line: an open path is cut on the line.'),
     ).toBeVisible()
     expect(within(inspector()).getByRole('radio', { name: 'On line' })).toBeChecked()
-    // On shows the groove's blind depth, empty = through
-    expect(within(inspector()).getByLabelText('Depth', { selector: 'input' })).toHaveAttribute(
-      'placeholder',
-      'Through',
+    // a through cut says so with the Cut group's Through switch (DF116); off = a blind depth
+    const through = within(inspector()).getByRole('switch', { name: 'Through' })
+    expect(through).toBeChecked()
+    expect(within(inspector()).queryByLabelText('Depth', { selector: 'input' })).toBeNull()
+    await user.click(through)
+    await waitFor(() =>
+      expect(
+        bridge.calls.filter((c) => c.name === 'design.profile.update').at(-1)!.args,
+      ).toMatchObject({
+        depth: expect.any(String),
+      }),
     )
+    expect(await within(inspector()).findByLabelText('Depth', { selector: 'input' })).toBeVisible()
   })
 
   it('turns count-spaced tabs into positions and back', async () => {

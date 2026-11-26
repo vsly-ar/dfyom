@@ -57,6 +57,7 @@ import {
   pendingApply,
   quantityOf,
   shapeArgs,
+  quantityAt,
   updateArgs,
   type DesignPart,
   dfmNames,
@@ -358,8 +359,32 @@ function OperationInspector({
   const cancelGesture = useCancelGesture()
   const { ui, bridge } = useShell()
   const openShapeIn = useOpenShape()
-  const [errors, setErrors] = useState<readonly FieldError[]>([])
+  // DF117: refused field texts survive selecting another operation (ui.md "Not applied")
+  const draftKey = `${part.dto.id}:${op.id}`
+  const saved = useUi((s) => s.fieldDrafts[draftKey])
+  const [errors, setErrors] = useState<readonly FieldError[]>(() => saved?.errors ?? [])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
+  /** Keeps (`text`) or drops (undefined) the refused text at `path`, with the errors now shown. */
+  const keepDraft = (
+    path: string | undefined,
+    text: string | undefined,
+    shown: readonly FieldError[],
+  ) => {
+    const now = ui.getState().fieldDrafts[draftKey]
+    const values = { ...now?.values }
+    if (path !== undefined && text === undefined) delete values[path]
+    else if (path !== undefined && text !== undefined) values[path] = text
+    ui.getState().setFieldDrafts(
+      draftKey,
+      Object.keys(values).length === 0 ? null : { values, errors: shown },
+    )
+  }
+  // a kept text the stored value has caught up with (undo, an agent edit) is no longer a draft
+  const drafts = Object.fromEntries(
+    Object.entries(saved?.values ?? {}).filter(
+      ([path, text]) => quantityAt(op, path)?.source !== text,
+    ),
+  )
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
   // a facing's depth down to the reference model (DF4), offered as the Depth field's recommended value
   const references = useDesignReferences(part)
@@ -372,6 +397,7 @@ function OperationInspector({
     args: Record<string, unknown>,
     path: string | undefined,
     gesture?: string,
+    draft?: string,
   ) => {
     const r = await call(
       `design.${op.kind}.update`,
@@ -381,6 +407,10 @@ function OperationInspector({
     const placed = r.ok ? undefined : placeErrors(r.error, path)
     setErrors(placed?.errors ?? [])
     setSummary(placed?.summary)
+    // DF117: a typed value the command refused stays as "not applied"; an accepted one ends it
+    if (path !== undefined && draft !== undefined && gesture === undefined)
+      keepDraft(path, r.ok ? undefined : draft, placed?.errors ?? [])
+    else if (saved !== undefined) keepDraft(undefined, undefined, placed?.errors ?? [])
   }
   // the Shape Editor window on the shape (DF94)
   const openShape = (shapeId: string) => openShapeIn(part.dto.id, shapeId)
@@ -509,7 +539,13 @@ function OperationInspector({
     errors,
     readOnly: false,
     pickable: true,
-    send: (args, path, gesture) => void send(args, path, gesture),
+    send: (args, path, gesture, draft) => void send(args, path, gesture, draft),
+    drafts,
+    revertDraft: (path) => {
+      keepDraft(path, undefined, [])
+      setErrors([])
+      setSummary(undefined)
+    },
     cancelGesture,
     shapeActions,
     ...(facingDepth !== undefined

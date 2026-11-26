@@ -904,6 +904,13 @@ export const designMessages = {
     useSideOn: 'Use side On',
     grooveDepth: 'Depth',
     grooveThrough: 'Through',
+    /** DF116: the Depth / Cut group's Through switch (design.md#pocket). */
+    through: 'Through',
+    throughInfo:
+      'Cut through to the opposite face (or what an earlier setup left there), with the breakthrough. Off: the depth below On.',
+    /** DF115: a Depth pick takes the surface the cut goes down to (ui.md#depth-pick-df115). */
+    depthPickField: (label: string) => `${label} (cut down to it)`,
+    depthPickedThrough: (op: string, surface: string) => `${op}: cut through to ${surface}.`,
     tabs: {
       entered: 'Positions entered by you.',
       spaceEvenly: 'Space evenly',

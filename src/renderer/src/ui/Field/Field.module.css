@@ -209,6 +209,16 @@
   border-color: var(--danger);
 }
 
+/* DF117: the shown value is not applied (a refused edit kept in the field) */
+.field[data-pending]:not([data-invalid]) .box {
+  border-style: dashed;
+  border-color: var(--warning);
+}
+
+.field[data-pending]:not([data-invalid]) .box:focus-within {
+  border-color: var(--focus);
+}
+
 .box[data-readonly] {
   border-style: dashed;
   background: transparent;
