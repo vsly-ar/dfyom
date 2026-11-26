@@ -234,7 +234,10 @@ describe('shape editor', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((i) => i.textContent),
-    ).toEqual(['RemoveDelete'])
+    ).toEqual([
+      'Offset…A new shape that grows or shrinks this one and follows its edits.',
+      'RemoveDelete',
+    ])
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     expect(document.activeElement).toBe(first)
@@ -501,5 +504,93 @@ describe('shape editor', () => {
     unmount()
     await waitFor(() => expect(editor().querySelector('[data-handle]')).not.toBeNull())
     await expectNoAxeViolations(container)
+  })
+
+  it('"Offset…" on a shape row makes a new shape offsetting it, opened in the editor (U3)', async () => {
+    const { user, project, part, shape, addShape } = await renderShapes()
+    await addShape('Rectangle')
+    await addShape('Path')
+    await waitFor(() => expect(part().shapes).toHaveLength(2))
+    const dialog = await shapesGroup()
+    // a closed shape offers it; an open path says why not (its Closed switch is off below)
+    fireEvent.contextMenu(within(dialog).getByRole('button', { name: /^Shape 1/ }))
+    let menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: /^Offset…/ }))
+    const offset = await screen.findByRole('dialog', { name: 'Offset Shape 1' })
+    expect(within(offset).queryByRole('combobox', { name: 'Source' })).toBeNull()
+    expect(within(offset).getByLabelText('Distance', { selector: 'input' })).toHaveValue('2')
+    await retype(user, within(offset).getByLabelText('Distance', { selector: 'input' }), '3{Enter}')
+    await user.click(within(offset).getByRole('radio', { name: 'Inward' }))
+    await user.click(within(offset).getByRole('button', { name: 'Create offset' }))
+    await waitFor(() => expect(part().shapes).toHaveLength(3))
+    const made = shape(2)
+    expect(made.name).toBe('Shape 1 offset')
+    expect(made.items).toEqual([
+      expect.objectContaining({
+        kind: 'offset',
+        op: 'add',
+        shapeId: shape(0).id,
+        direction: 'inward',
+        distance: expect.objectContaining({ source: '3' }),
+      }),
+    ])
+    expect(project.calls.filter((c) => c.name === 'design.shape.add')).toHaveLength(3)
+    // the dialogs close and the editor window shows the new shape: its item names the source
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const items = await within(inspector()).findByRole('list', { name: 'Items in order' })
+    expect(within(items).getByText('Offset 3 inward · Shape 1')).toBeInTheDocument()
+    expect(field('Distance')).toHaveValue('3')
+    // an open path: the entry is there but says why it cannot be chosen
+    await user.click(within(shapesList()).getByRole('button', { name: /^Shape 2/ }))
+    await within(inspector()).findByRole('region', { name: 'Items' })
+    await user.click(within(inspector()).getByRole('switch', { name: 'Closed' }))
+    await waitFor(() => expect(shape(1).items[0]).toMatchObject({ closed: false }))
+    fireEvent.contextMenu(within(shapesList()).getByRole('button', { name: /^Shape 2/ }))
+    menu = await screen.findByRole('menu', { name: 'Actions for Shape 2' })
+    const entry = within(menu).getByRole('menuitem', { name: /^Offset…/ })
+    expect(entry).toHaveAttribute('aria-disabled', 'true')
+    expect(within(menu).getByText('An open path cannot be offset yet.')).toBeInTheDocument()
+  })
+
+  it('"Add item" → "Offset…" adds an offset of another shape; a refusal stays in the dialog (U3)', async () => {
+    const { user, part, shape, addShape } = await renderShapes()
+    await addShape('Circle')
+    await addShape('Rectangle')
+    await waitFor(() => expect(part().shapes).toHaveLength(2))
+    await user.click(within(inspector()).getByRole('button', { name: 'Add item' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Offset…' }))
+    const offset = await screen.findByRole('dialog', { name: 'Add offset item to Shape 2' })
+    // the source: closed shapes other than this one (Shape 1, preselected)
+    expect(within(offset).getByRole('combobox', { name: 'Source' })).toHaveTextContent('Shape 1')
+    // an inward offset of Ø 20 by 15 leaves nothing: refused, shown here, the dialog stays
+    await retype(
+      user,
+      within(offset).getByLabelText('Distance', { selector: 'input' }),
+      '15{Enter}',
+    )
+    await user.click(within(offset).getByRole('radio', { name: 'Inward' }))
+    await user.click(within(offset).getByRole('button', { name: 'Add item' }))
+    expect(await within(offset).findByText('The offset was not made')).toBeInTheDocument()
+    expect(shape(1).items).toHaveLength(1)
+    // outward works: the item is added and selected
+    await user.click(within(offset).getByRole('radio', { name: 'Outward' }))
+    await user.click(within(offset).getByRole('button', { name: 'Add item' }))
+    await waitFor(() => expect(shape(1).items.map((i) => i.kind)).toEqual(['rectangle', 'offset']))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(within(inspector()).getByLabelText('Source', { selector: 'input' })).toHaveValue(
+      'Shape 1',
+    )
+  })
+
+  it('has no axe violations in the "Offset…" dialog (U3)', async () => {
+    const { user, addShape, unmount } = await renderShapes()
+    await addShape('Rectangle')
+    unmount()
+    await user.click(within(inspector()).getByRole('button', { name: 'Add item' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Offset…' }))
+    const offset = await screen.findByRole('dialog', { name: 'Add offset item to Shape 1' })
+    expect(within(offset).getByText('No other closed shape to offset.')).toBeInTheDocument()
+    expect(within(offset).getByRole('button', { name: 'Add item' })).toBeDisabled()
+    await expectNoAxeViolations(offset)
   })
 })

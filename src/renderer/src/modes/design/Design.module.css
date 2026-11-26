@@ -90,6 +90,12 @@
   gap: var(--space-2);
 }
 
+/* the "Offset…" dialog's fields (U3): the inspector's field rhythm */
+.offsetForm {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .setupEmpty {
   margin: 0;
   font-size: var(--text-sm);

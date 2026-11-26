@@ -85,6 +85,7 @@ Unit = the display unit in a mm project. "Range" is the typical range in practic
 | Pocket                    | Length, Width, Diameter                           | mm                |     | 2–stock        | `xy`                                 | –                         |
 | Pocket                    | Rotation                                          | °                 |     | 0–360          | `rotation`                           | –                         |
 | Pocket                    | Depth                                             | mm                |     | 0.5–thickness  | `depth`                              | –                         |
+| Pocket, Profile           | Scale (named shape, U3)                           | –                 |     | 0.1–10         | `scale`                              | –                         |
 | Pocket                    | Corner radius, Floor fillet radius                | mm                |     | 0–10           | `small`                              | –                         |
 | Profile                   | Position, Length, Width, Diameter                 | mm                |     | 0–stock        | `xy`                                 | D (DFM)                   |
 | Profile                   | Rotation                                          | °                 |     | 0–360          | `rotation`                           | –                         |
@@ -117,6 +118,7 @@ Unit = the display unit in a mm project. "Range" is the typical range in practic
 | Pattern                   | Chamfer width / angle                             | mm / °            |     | 0.2–2 / 90     | `small` / `angle`                    | S                         |
 | Shape Editor              | Centre, Start X/Y, Length, Width, Diameter        | mm                |     | ±200           | `xy`                                 | –                         |
 | Shape Editor              | Corner radius, Fillet, segment radius             | mm                |     | 0–20           | `small`                              | –                         |
+| Shape Editor, "Offset…"   | Offset Distance (U3)                              | mm                |     | 0–20           | `small`                              | –                         |
 | Shape Editor              | Rotation                                          | °                 |     | 0–360          | `rotation`                           | –                         |
 | Shape Editor              | Sides                                             | –                 | yes | 3–12           | `count`                              | –                         |
 | Split section             | Line at X/Y, Level at Z                           | mm                |     | 0–stock        | `xy`, `depth`                        | –                         |

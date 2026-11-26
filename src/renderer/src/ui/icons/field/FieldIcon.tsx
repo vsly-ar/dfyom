@@ -126,6 +126,24 @@ const ICONS = {
       <path data-accent="" d="M10 16A7 7 0 0 0 7.95 11.05" />
     </>
   ),
+  // U3: a named placement's scale: the shape (solid) and its scaled copy (dashed) from the same
+  // corner; the amber line is the growth along the diagonal
+  scale: (
+    <>
+      <rect x="3" y="9" width="8" height="8" rx="1" />
+      <path d="M3 3H16A1 1 0 0 1 17 4V17" strokeDasharray="1.5 1" />
+      <path data-accent="" d="M11 9L17 3" />
+    </>
+  ),
+  // U3: an offset item's distance: the source outline and the offset one around it; the amber
+  // line is the gap between them
+  offsetDistance: (
+    <>
+      <rect x="6" y="6" width="8" height="8" rx="1" />
+      <rect x="2" y="2" width="16" height="16" rx="5" strokeDasharray="1.5 1" />
+      <path data-accent="" d="M14 10H18" />
+    </>
+  ),
   floorRadius: (
     <>
       <path d="M2 4H6V10M12 16H18" />

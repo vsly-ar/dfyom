@@ -24,6 +24,8 @@ describe('field illustrations', () => {
       'positionX',
       'positionY',
       'rotation',
+      'scale',
+      'offsetDistance',
       'floorRadius',
       'slotWidth',
       'tabWidth',

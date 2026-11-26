@@ -698,8 +698,8 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
 
 /**
  * A named placement's uniform Scale about the anchor point (D2,
- * docs/modes/design-llm-first.md#placement-scale); empty or 1 = unscaled. The full placement UI
- * is U3.
+ * docs/modes/design-llm-first.md#placement-scale); empty or 1 = unscaled. U3 gave it its own
+ * illustration and an (i) tip (docs/modes/design-llm-first.md#implementation-u3).
  */
 function ScaleField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
@@ -721,7 +721,8 @@ function ScaleField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
       value={value.isOk() ? value.unwrap() : undefined}
       stepKind="scale"
       stepKey="shape.scale"
-      illustration={<FieldIcon name="length" />}
+      illustration={<FieldIcon name="scale" />}
+      info={t.picker.scaleTip}
       messages={messages}
       readOnly={ctx.readOnly}
       onCommit={(q, gesture) => {

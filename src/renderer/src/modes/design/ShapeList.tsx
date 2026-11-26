@@ -9,7 +9,9 @@
 // Shape Editor (DF49). Adding or choosing a shape opens it in the Shape Editor window (DF94,
 // `useOpenShape`) and closes the dialog (`onChosen`); the window lists the same rows. Row actions are a context menu (DF70, ui.md decision 27): right-click,
 // Shift+F10 / the Menu key on a row open "Actions for Shape 1" (Remove; the row has no action
-// button). `Delete` (or `Backspace`) on a row removes an unused shape, and focus goes to the next
+// button) and, above it, "Offset…" (U3: a dialog for distance and direction, then a new shape with one
+// offset item of the row's shape, opened in the Shape Editor; disabled with the reason for an open
+// path or a shape that does not resolve). `Delete` (or `Backspace`) on a row removes an unused shape, and focus goes to the next
 // row (else the previous one, else "Add shape"). Doc: docs/conventions/ui.md#navigator-and-add,
 // docs/conventions/ui.md#import-svg-where-it-is-looked-for-df49,
 // docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, docs/modes/design-v0.3.md#what-a-shape-is
@@ -34,6 +36,7 @@ import {
 } from '../../ui'
 import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
+import { OffsetDialog } from './OffsetDialog'
 import { itemName, type DesignPart } from './model'
 import { shapeLoops } from './ShapePicker'
 import { newItemArgs, type DrawnItemKind } from './shape-model'
@@ -181,6 +184,8 @@ export function ShapeList({
   const rowButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
   const hintId = useId()
+  // the row whose "Offset…" dialog is open
+  const [offsetOf, setOffsetOf] = useState<string | null>(null)
 
   const add = async (kind: DrawnItemKind) => {
     const r = await call('design.shape.add', {
@@ -252,6 +257,18 @@ export function ShapeList({
             const reason = used ? m.referenced(row.usedBy.map(opName)) : undefined
             const reasonId = `${row.id}-reason`
             const menu: MenuEntry[] = [
+              {
+                label: m.offset,
+                icon: <Icon name="kind-offset" />,
+                description: m.offsetDescription,
+                disabledReason: failed
+                  ? m.offsetFailed
+                  : row.kind === 'path'
+                    ? m.offsetOpen
+                    : undefined,
+                onSelect: () => setOffsetOf(row.id),
+              },
+              'separator',
               {
                 label: nav.removeItem,
                 icon: <Icon name="delete" />,
@@ -346,6 +363,30 @@ export function ShapeList({
         </p>
       )}
       {svg.dialog}
+      <OffsetDialog
+        part={part}
+        open={offsetOf !== null}
+        onOpenChange={(o) => {
+          if (o) return
+          const from = offsetOf
+          setOffsetOf(null)
+          // back to the row the menu came from (a created shape has opened in its editor)
+          if (from !== null) rowButtons.current.get(from)?.focus()
+        }}
+        {...(offsetOf === null ? {} : { source: offsetOf })}
+        onSubmit={async (item) => {
+          const source = part.dto.shapes?.find((s) => s.id === item.shapeId)
+          const r = await call('design.shape.add', {
+            partId: part.dto.id,
+            name: shapeMessages.offset.name(source?.name ?? item.shapeId),
+            items: [item],
+          })
+          if (!r.ok) return r.error
+          openShape(part.dto.id, (r.value as { shapeId: string }).shapeId)
+          onChosen()
+          return undefined
+        }}
+      />
     </div>
   )
 }
