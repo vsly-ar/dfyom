@@ -725,8 +725,14 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(preflight.getByText('Bottom (1 of 2)')).toBeVisible()
   await expect(preflight.getByText('Router')).toBeVisible()
   await preflight.getByRole('button', { name: 'Start run' }).click()
-  // M7: the inspector names the running plan and setup
-  await expect(inspector.getByText(/ · setup 1 of 2: Bottom$/)).toBeVisible()
+  // M7: the inspector names the running plan and setup; on screen even when the run's first
+  // wait (at Max, often before this check) already hides the inspector from the a11y tree
+  // behind its modal (P9)
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Inspector', includeHidden: true })
+      .getByText(/ · setup 1 of 2: Bottom$/),
+  ).toBeVisible()
   // M5: stopped at its first wait, the run resumes at that operation's start ("Resume from…")
   const firstWait = page.getByRole('dialog', { name: /^(Tool change|Program pause) \d+$/ })
   await expect(firstWait).toBeVisible({ timeout: 90_000 })
