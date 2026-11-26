@@ -515,6 +515,14 @@ User TG #369: picking the top faced surface for a bottom-side pocket's Depth gav
 - **The far side of the part** – the opposite stock face, or the floor of a facing from the opposite direction (it spans the whole face) – means **through**: a pocket turns its [Through](../modes/design.md#pocket) switch on and a drilling's Bottom becomes Through, as one command (one undo step), with the toast "M5 long hole: cut through to Facing top floor.". A facing has no through, so they are not eligible for its depth.
 - Pure helper: `depthPickTargets` in `modes/design/model.ts` (eligible surfaces and what each gives).
 
+#### Construction surfaces (DF118)
+
+[construction-surfaces.md § UI](../modes/construction-surfaces.md#ui): a referenced surface later cuts removed (a recess floor a countersink eats) still resolves at its level.
+
+- **Field note:** the `On` field (and a formula field referring to one) shows a quiet `note` in its support area, "Cut away by Chamfer 1 · still measured from its level" (the operation itself is not named), with an (i) tip: "A construction surface: later cuts remove it from the finished part, but its level still holds, so this operation is still measured from it." A `dfm.surfaceCutAway` warning on the field replaces the note. The `On` list reads "Pocket for M5 floor (construction)".
+- **3D view:** the surface is drawn from the evaluation's patch as a dashed `--vp-selected` outline (on top) with a 12 % fill and no depth write – the datum-plane look – while the selected operation refers to it, and in pick mode while it is eligible. In pick mode it behaves like an eligible face: a normal glyph at its centroid, hover raises the fill to the pick-hover mix and thickens the outline, a click picks it; a dimmed surface in front of it lets the pointer through. Fades in over `DEVIATION_FADE_MS`, at once under reduced motion. The viewport summary names it ("…, cut away by …, shown as an outline.").
+- Code: `modes/design/construction-view.ts`, `viewport/ConstructionLayer.tsx`, `constructionAt` in `modes/design/model.ts`.
+
 ### Design mode (task 3.6)
 
 `src/renderer/src/modes/design/` ([design.md](../modes/design.md#design-ui-task-36)):

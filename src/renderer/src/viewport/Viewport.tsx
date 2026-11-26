@@ -89,6 +89,7 @@ import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds, placeBox } from './toolpath-lines'
 import { classifyWheel, type WheelHistory } from './wheel'
 import { useTokens } from './useTokens'
+import type { ConstructionOverlay } from './ConstructionLayer'
 import styles from './Viewport.module.css'
 
 /** `--delay-indicator` (tokens.css): the outdated tint of a pending evaluation waits this long. */
@@ -125,6 +126,11 @@ export interface ViewportProps {
   tabs?: TabOverlay | null
   /** The exploded split preview with draggable lines and levels (split parts 4a polish). */
   split?: SplitOverlay | null
+  /**
+   * Construction surfaces (DF118 V3, construction-surfaces.md#ui): dashed outlines at their level;
+   * the `pickable` ones take hover and clicks in pick mode, with a normal glyph at their centroid.
+   */
+  construction?: readonly ConstructionOverlay[] | null
   /** Thin dashed guide loops (part frame): the rotated bounding box while rotation has focus (U2). */
   guide?: readonly OutlineLoop[] | null
   /**
@@ -269,6 +275,7 @@ export function Viewport({
   tabs = null,
   split = null,
   guide = null,
+  construction = null,
   ghosts = null,
   referenceOverlay = null,
   deviation = null,
@@ -374,8 +381,17 @@ export function Viewport({
   // pick mode: a normal glyph on every eligible face (ui.md#design-and-plan-controls-v02)
   const pickEligible = pick?.eligible
   const glyphs = useMemo(
-    () => (mesh && pickEligible ? surfaceGlyphs(mesh, pickEligible) : null),
-    [mesh, pickEligible],
+    () =>
+      mesh && pickEligible
+        ? [
+            ...surfaceGlyphs(mesh, pickEligible),
+            // construction surfaces have no triangles: their glyph stands at the patch centroid
+            ...(construction ?? [])
+              .filter((c) => c.pickable && pickEligible.has(c.surface))
+              .map((c) => ({ surface: c.surface, at: c.at, normal: c.normal })),
+          ]
+        : null,
+    [mesh, pickEligible, construction],
   )
 
   const hoveredRef = useRef<SurfaceTarget | undefined>(undefined)
@@ -752,6 +768,7 @@ export function Viewport({
           outline={status === 'pending' ? outline : null}
           marker={status === 'failed' ? marker : null}
           glyphs={glyphs}
+          construction={construction}
           hovered={pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : null}
           frame={frame}
           anchor={anchor}

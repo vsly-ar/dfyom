@@ -34,6 +34,7 @@ function viewOf(
             indices: e.indices,
             triangleSurface: e.triangleSurface,
             surfaces: e.surfaces,
+            ...(e.construction.length === 0 ? {} : { construction: e.construction }),
           },
         }
       : {}),

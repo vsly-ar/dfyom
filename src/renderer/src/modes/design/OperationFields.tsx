@@ -10,6 +10,7 @@
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #selection-and-picking,
 // #design-and-plan-controls-v02; docs/modes/design.md#operations-v01;
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
+import type { ConstructionEntry } from '../../../../core/design/evaluation'
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { derivedLength } from '../../../../core/design/hole'
@@ -49,6 +50,7 @@ import styles from './Design.module.css'
 import {
   axisNames,
   defaultUnit,
+  constructionAt,
   depthPickTargets,
   isFormula,
   onChoices,
@@ -64,6 +66,7 @@ import {
 } from './model'
 
 const t = designMessages.inspector
+const dc = designMessages.construction
 
 const sentence = (s: string) => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1))
 
@@ -102,6 +105,11 @@ export interface OperationFieldsContext {
    * fix instead of "Use …" ("Fix in Hole 1": select the feature, focus the mapped field).
    */
   readonly fixElsewhere?: ((w: DfmWarning) => { label: string; onApply: () => void }) | undefined
+  /**
+   * The part's construction surfaces (`design.warning.list`, DF118 V3): a reference to one shows
+   * a note "Cut away by …" at its field (construction-surfaces.md#ui).
+   */
+  readonly construction?: readonly ConstructionEntry[] | undefined
   /**
    * Recommended values by parameter path (the facing's depth down to the reference, DF4): the
    * field's adjust panel offers "Use …" (QuantityInput `recommended`); never on read-only fields.
@@ -839,6 +847,10 @@ export function ParamField({
         }
       }),
   ]
+  // DF118 V3: a formula referring to a construction surface shows a quiet note
+  const cut = constructionAt(part.dto, ctx.construction, op.id, path)
+  if (cut !== undefined && !messages.some((x) => x.id.startsWith('dfm.surfaceCutAway')))
+    messages.push({ id: 'construction', severity: 'note', text: dc.noteOf(cut.label, cut.by) })
   const fieldId = `${op.id}:${path}`
   const recommended = ctx.recommended?.[path]
   // DF115: a Depth pick takes the surface the cut goes down to (ui.md#depth-pick-df115)
@@ -922,25 +934,35 @@ export function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Ele
   const choices = onChoices(part.dto, part.table, indexOf(ctx), op.kind)
   const owner = `${op.id}:on`
   const picking = pick?.owner === owner
+  const onWarnings = ctx.warnings.filter((w) => w.parameter === 'on')
+  // DF118 V3: a construction surface shows a quiet note, unless a cut-away warning replaces it
+  const cut = constructionAt(part.dto, ctx.construction, op.id, 'on')
+  const consumed = new Set(ctx.construction?.map((c) => c.surface))
   const messages: FieldMessage[] = [
     ...ctx.errors
       .filter((e) => e.path === 'on')
       .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    ...ctx.warnings
-      .filter((w) => w.parameter === 'on')
-      .map((w): FieldMessage => ({
-        id: w.code,
-        severity: dfmMessages.tier(w),
-        text: dfmMessages.text(w, part.units, dfmNames(part.dto)),
-      })),
+    ...onWarnings.map((w): FieldMessage => ({
+      id: w.code,
+      severity: dfmMessages.tier(w),
+      text: dfmMessages.text(w, part.units, dfmNames(part.dto)),
+    })),
+    ...(cut !== undefined && !onWarnings.some((w) => w.code === 'dfm.surfaceCutAway')
+      ? [{ id: 'construction', severity: 'note' as const, text: dc.note(cut.by) }]
+      : []),
   ]
   return (
     <div className={styles['onRow']}>
-      <Field label={t.on} messages={messages} readOnly={ctx.readOnly}>
+      <Field
+        label={t.on}
+        messages={messages}
+        readOnly={ctx.readOnly}
+        {...(cut !== undefined ? { info: dc.info } : {})}
+      >
         <Select
           options={choices.map((c) => ({
             value: c.id,
-            label: c.label,
+            label: consumed.has(c.id) ? `${c.label} ${dc.suffix}` : c.label,
             group: c.group,
           }))}
           value={onOf(op)}

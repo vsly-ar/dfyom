@@ -536,6 +536,7 @@ function OperationInspector({
     op,
     units: part.units,
     warnings: opWarnings,
+    construction: warnings.construction,
     errors,
     readOnly: false,
     pickable: true,

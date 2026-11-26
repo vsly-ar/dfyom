@@ -28,6 +28,7 @@ import {
   STOCK_FACE,
   type Direction,
 } from '../../../../core/geometry/face'
+import type { ConstructionEntry } from '../../../../core/design/evaluation'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
@@ -414,6 +415,37 @@ function disambiguate<T extends { readonly label: string }>(
     const index = part.operations.findIndex((o) => o.id === ownerOfSurface(surface(c)))
     return index < 0 ? c : { ...c, label: m.surfaceAt(c.label, index + 1) }
   })
+}
+
+/** A construction surface a parameter refers to (DF118 V3, construction-surfaces.md#ui). */
+export interface ConstructionAt {
+  readonly surface: string
+  /** "Pocket for M5 floor". */
+  readonly label: string
+  /** The names of the operations that cut it away, the asking operation left out. */
+  readonly by: readonly string[]
+}
+
+/**
+ * The construction surface `operationId`'s parameter `param` (`on`, or a formula's path such as
+ * `depth`) refers to, if any: a referenced surface later cuts removed, still resolving at its
+ * level. The other consumers are named; the operation itself is left out (its own cut is expected).
+ */
+export function constructionAt(
+  part: PartDTO,
+  construction: readonly ConstructionEntry[] | undefined,
+  operationId: string,
+  param: string,
+): ConstructionAt | undefined {
+  const c = construction?.find((x) =>
+    x.referencedBy.some((r) => r.operationId === operationId && r.param === param),
+  )
+  if (c === undefined) return undefined
+  return {
+    surface: c.surface,
+    label: surfaceLabel(part, c.surface),
+    by: c.consumedBy.filter((id) => id !== operationId).map((id) => itemName(part, id)),
+  }
 }
 
 const byDirection = (a: SurfaceChoice, b: SurfaceChoice) =>

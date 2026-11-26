@@ -106,6 +106,7 @@ export function OwnedOperationInspector({
     op,
     units: part.units,
     warnings: opWarnings,
+    construction: warnings.construction,
     errors: [],
     readOnly: true,
     pickable: false,

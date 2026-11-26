@@ -20,7 +20,7 @@ import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import { referenceMessages } from '../../messages/reference'
 import type { OutlineLoop, ViewportProps } from '../../viewport'
-import { disabledOf, failingOperation, surfaceLabel } from './model'
+import { disabledOf, failingOperation, itemName, surfaceLabel } from './model'
 import {
   anchorPoint,
   frameAxes,
@@ -40,6 +40,7 @@ import { lengthSource } from './reference-view'
 import { countsAsWarning } from './feature-view'
 import { useClonesScene } from './useClonesScene'
 import { useSplitScene } from './useSplitScene'
+import { constructionOverlays } from './construction-view'
 import { instanceId, instanceOfOperation } from './clones-view'
 import {
   useDesignEvaluation,
@@ -266,6 +267,43 @@ export function useDesignScene(): SceneProps {
   )
   const announcement = useUi((s) => s.announcement)
 
+  // DF118 V3: construction surfaces (construction-surfaces.md#ui) – in pick mode the eligible ones,
+  // pickable; else those the selected operation refers to, as a read-out
+  const patches = evaluation?.mesh?.construction
+  const eligible = pick?.eligible
+  const construction = useMemo(() => {
+    const size = part === undefined ? undefined : stockSizeOf(part)
+    if (patches === undefined || size === undefined) return null
+    if (eligible !== undefined)
+      return constructionOverlays(
+        patches,
+        size,
+        new Set(patches.map((c) => c.surface).filter((x) => eligible.has(x))),
+        true,
+      )
+    if (shown === null) return null
+    const own = new Set(
+      part?.dto.operations.filter((o) => o.id === shown || o.featureId === shown).map((o) => o.id),
+    )
+    const refs = patches.filter((c) => c.referencedBy.some((r) => own.has(r.operationId)))
+    return refs.length === 0
+      ? null
+      : constructionOverlays(patches, size, new Set(refs.map((c) => c.surface)), false)
+  }, [patches, part, eligible, shown])
+  const constructionSummary =
+    construction === null || eligible !== undefined || part === undefined
+      ? undefined
+      : construction
+          .map((o) =>
+            designMessages.construction.summary(
+              surfaceLabel(part.dto, o.surface),
+              (patches?.find((c) => c.surface === o.surface)?.consumedBy ?? []).map((id) =>
+                itemName(part.dto, id),
+              ),
+            ),
+          )
+          .join(' ')
+
   const marker = useMemo(() => {
     if (status !== 'failed' || ops === undefined || part?.loaded === undefined || !part.table)
       return null
@@ -290,6 +328,7 @@ export function useDesignScene(): SceneProps {
     tabs,
     split: splitScene.split,
     guide: overlays?.guide ?? clones.guide,
+    construction,
     clonePath: clones.clonePath,
     selectedAlso: clones.selectedAlso,
     outlineOnly,
@@ -311,6 +350,7 @@ export function useDesignScene(): SceneProps {
               status,
             }),
             overlays?.describe,
+            constructionSummary,
             face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,
             splitScene.summary,

@@ -77,7 +77,7 @@ describe('libraryTools: library items → DfmTool (mm)', () => {
 describe('design.warning.list', () => {
   it('returns the parameter warnings of the document; with an empty library only geometric ones', async () => {
     const s = await designSetup()
-    expect(warningList(s)).toEqual({ warnings: [], evaluation: 'pending' })
+    expect(warningList(s)).toEqual({ warnings: [], construction: [], evaluation: 'pending' })
     await s.run('design.facing.add', { partId: s.partId, depth: '4' })
     await s.run('design.pocket.add', { partId: s.partId, ...sharpPocket })
     const { warnings } = warningList(s)
