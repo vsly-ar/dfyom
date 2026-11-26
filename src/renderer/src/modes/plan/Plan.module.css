@@ -887,3 +887,8 @@
 .opOff[data-where='design'] {
   border-style: dashed;
 }
+
+/* S5: a finding target field (PlanInspector Slot) adds no box to the field rhythm */
+.slot {
+  display: contents;
+}

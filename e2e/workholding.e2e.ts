@@ -150,7 +150,7 @@ test('setup inspector: toe clamps added and edited, the facing clears around the
       { kind: 'toeClamp', edge: 'uMax', width: '28', grip: '10', reach: '18', top: '12' },
     ],
   })
-  await expect(section.getByRole('heading', { name: /Workholding/ })).toContainText('2 items')
+  await expect(section).toContainText('2 items')
 
   const clearance = inspector.getByLabel('Clearance height', { exact: true })
   await expect(clearance).toHaveValue('14 mm')

@@ -163,6 +163,19 @@ export const planMessages = {
         .join(' · '),
     /** DF45: a field label, not only the group's name (the control had no visible label). */
     rotation: 'Rotation on the table',
+    /** S5: the setup inspector's groups (inspector-layout.md § Per-inspector target layout). */
+    setupGroup: 'Overview',
+    linksGroup: 'Links and heights',
+    linksSummary: (retract: string | undefined, full: boolean, rotation: number) =>
+      [
+        retract === undefined ? undefined : `Retract ${retract}`,
+        full ? 'Full' : 'Minimum',
+        `${rotation}°`,
+      ]
+        .filter((x) => x !== undefined)
+        .join(' · '),
+    pointsSummary: (n: number) => (n === 0 ? 'None' : plural(n, 'point', 'points')),
+    aidsSummary: 'Marks and holes for the next setup',
     rotationHint:
       'About the spindle axis; the work zero keeps its offset from the new front-left corner.',
     // DF78: docs/modes/alignment.md#plan-ui
@@ -519,7 +532,25 @@ export const planMessages = {
         ? `${plural(n, 'plan operation', 'plan operations')}, one per design operation.`
         : `${plural(n, 'plan operation', 'plan operations')} from the design's ${plural(design, 'operation', 'operations')}: equal holes and chamfers (clones too) are machined together as one.`,
     commandFailed: 'The change was not applied.',
-    groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
+    groups: {
+      tool: 'Tool',
+      strategy: 'Strategy',
+      feeds: 'Feeds and speeds',
+      /** S5: the rarely changed tool fields (inspector-layout.md § Per-inspector target layout). */
+      toolSetup: 'Tool setup',
+    },
+    /** S5: the plan operation's tabs (inspector-layout.md § Tabs). */
+    tabs: {
+      label: 'Operation sections',
+      cut: 'Cut',
+      feeds: 'Feeds',
+      design: 'Design',
+    },
+    /** The closed Tool setup accordion's summary. */
+    toolSetupSummary: (stickout: string | undefined) =>
+      stickout === undefined ? 'Stickout, touch-off' : `Stickout ${stickout}`,
+    /** The Feeds tab before a tool is chosen. */
+    feedsNoTool: 'Choose a tool on the Cut tab first: feeds and speeds come from its presets.',
     // plan-only edits (task E3b): docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
     planCopy: {
       title: 'Part (plan copy)',

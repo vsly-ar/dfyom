@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test, zeroXyz } from './app.fixture'
+import { expect, openInspectorGroup, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -188,7 +188,7 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
   await top.click({ position: { x: 24, y: 12 } })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
-  const aids = inspector.getByRole('region', { name: 'Alignment aids' })
+  const aids = await openInspectorGroup(inspector, 'Alignment aids')
   await expect(aids.getByText(/so Bottom can line up on them/)).toBeVisible()
   await expect(aids.getByText(/go on the flip axis to Bottom/)).toBeVisible()
   await aids.getByRole('button', { name: 'Add registration holes' }).click()

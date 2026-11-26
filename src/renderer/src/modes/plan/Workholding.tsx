@@ -29,6 +29,7 @@ import {
   Switch,
   type FieldMessage,
   type MenuEntry,
+  InspectorGroup,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { allows, planPart } from './model'
@@ -157,11 +158,7 @@ export function Workholding({
   }))
 
   return (
-    <section aria-labelledby={`workholding-${setup.id}`} className={styles['section']}>
-      <h3 id={`workholding-${setup.id}`} className={styles['title']}>
-        <span>{m.title}</span>
-        <span className={styles['count']}>{m.count(items.length)}</span>
-      </h3>
+    <InspectorGroup title={m.title} meta={m.count(items.length)} className={styles['section']}>
       {failed ? (
         <ErrorMessage error={failed} message={planMessages.inspector.commandFailed} />
       ) : null}
@@ -270,7 +267,7 @@ export function Workholding({
           onCancelGesture={cancelGesture}
         />
       ) : null}
-    </section>
+    </InspectorGroup>
   )
 }
 

@@ -27,7 +27,15 @@ import type { PlanWarning } from '../../../../core/plan/checks'
 import { lengthSource } from '../../messages/dfm'
 import { libraryMessages } from '../../messages/library'
 import { areaText, planMessages, sentence } from '../../messages/plan'
-import { DragGrip, Icon, Menu, ReorderStatus, useReorder, type MenuEntry } from '../../ui'
+import {
+  DragGrip,
+  Icon,
+  Menu,
+  ReorderStatus,
+  useReorder,
+  type MenuEntry,
+  InspectorGroup,
+} from '../../ui'
 import { quantityOf } from '../design/model'
 import { allows, planOperationName, toolpathState, type ToolpathEntry } from './model'
 import {
@@ -300,11 +308,7 @@ export function ToolChanges({
   if (runs.length === 0) return null
   const count = setupToolChanges(plan.setups, index)
   return (
-    <section aria-labelledby={`tool-changes-${setup.id}`} className={styles['section']}>
-      <h3 id={`tool-changes-${setup.id}`} className={styles['title']}>
-        <span>{m.title}</span>
-        <span className={styles['count']}>{m.count(count)}</span>
-      </h3>
+    <InspectorGroup title={m.title} meta={m.count(count)} className={styles['section']}>
       <ol
         ref={attachList}
         className={`${styles['runs']} ${canMove ? styles['gripped'] : ''} ${reorder.listClass}`}
@@ -388,6 +392,6 @@ export function ToolChanges({
         })}
       </ol>
       <ReorderStatus refusal={refusal} announcement={announcement} />
-    </section>
+    </InspectorGroup>
   )
 }

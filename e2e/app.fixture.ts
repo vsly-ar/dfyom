@@ -342,4 +342,29 @@ export async function zeroXyz(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Selects inspector tab `name` ("Feeds") in `scope` unless it is selected (DF110 S5: hidden tab
+ * panels stay mounted, but role queries skip them). Doc: docs/conventions/inspector-layout.md
+ */
+export async function openInspectorTab(scope: Locator, name: string): Promise<void> {
+  const tab = scope.getByRole('tab', { name: new RegExp(`^${name}\\b`) })
+  if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click()
+  await expect(tab).toHaveAttribute('aria-selected', 'true')
+}
+
+/** Opens the closed inspector accordion `title` ("Tool setup") in `scope`; returns its region. */
+export async function openInspectorGroup(scope: Locator, title: string): Promise<Locator> {
+  const region = scope.getByRole('region', { name: title, exact: true })
+  const toggle = region.locator(':scope > div > :is(h3, h4) > button[aria-expanded]')
+  if ((await toggle.count()) > 0 && (await toggle.getAttribute('aria-expanded')) === 'false')
+    await toggle.click()
+  return region
+}
+
+/** Opens the inspector More row in `scope` whose button names `field` ("Overshoot"). */
+export async function openInspectorMore(scope: Locator, field: string): Promise<void> {
+  const button = scope.getByRole('button', { name: new RegExp(`^More \\(.*${field}`) })
+  if ((await button.getAttribute('aria-expanded')) === 'false') await button.click()
+}
+
 export { expect } from '@playwright/test'

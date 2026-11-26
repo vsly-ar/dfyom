@@ -13,6 +13,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { openInspectorTab } from '../../test/inspector'
 import { useModeScene } from '../ModePanels'
 
 vi.mock('@react-three/fiber', () => ({
@@ -53,6 +54,8 @@ async function renderPlan(setup?: (s: PlanSetup, planId: string) => Promise<void
     await waitFor(() => expect(rows().length).toBeGreaterThan(0))
     await r.user.click(rows()[0]!)
     await within(inspector()).findByRole('heading', { name: 'Facing 1' })
+    // S5: the plan copy is the operation's Design tab
+    await openInspectorTab(r.user, inspector(), 'Design')
     return within(inspector()).getByRole('region', { name: 'Part (plan copy)' })
   }
   return { ...r, s, planId, bridge, nav, inspector, callsOf, facingCopy }

@@ -16,7 +16,7 @@
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test, zeroXyz } from './app.fixture'
+import { expect, openInspectorGroup, test, zeroXyz } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -151,7 +151,8 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
 
   const list = inspector.getByRole('list', { name: 'Tool runs of Top in machining order' })
   const runs = list.locator(':scope > li')
-  const title = inspector.getByRole('heading', { name: /^Tool changes/ })
+  // the count is the group header's meta (S5), beside the heading
+  const title = inspector.getByRole('region', { name: 'Tool changes' })
   // DF65: Flat 6 stays in the spindle from Bottom, so the top starts with it
   await expect(runs).toHaveCount(2)
   await expect(runs.nth(0)).toContainText('Flat 6')
@@ -241,6 +242,8 @@ test('plan viewport: the run touches off on the faced floor; its spot drags, the
     .click()
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  // S5: Z from and the touch-off spot are in the operation's closed "Tool setup" accordion
+  await openInspectorGroup(inspector, 'Tool setup')
   await expect(
     inspector.getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor .*\(default\)/ }),
   ).toBeVisible()

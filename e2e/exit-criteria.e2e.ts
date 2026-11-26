@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, launchApp, test, zeroXyz } from './app.fixture'
+import { expect, launchApp, openInspectorTab, test, zeroXyz } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 
@@ -235,6 +235,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
     ],
   })
   await expect(planRows(page).nth(1)).toHaveText(/^Drilling 1Drill 6/)
+  await openInspectorTab(inspector, 'Feeds')
   await setField(inspector, 'Spindle speed', '3000')
   await setField(inspector, 'Feed rate', '150')
   await setField(inspector, 'Plunge rate', '150')
@@ -361,6 +362,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
       /^Profile 1Flat 6/,
     ])
     await planRows(page2).nth(1).click()
+    await openInspectorTab(inspector2, 'Feeds')
     await expect(inspector2.getByLabel('Feed rate', { exact: true })).toHaveValue('150')
     expect(second.rendererErrors).toEqual([])
   } finally {

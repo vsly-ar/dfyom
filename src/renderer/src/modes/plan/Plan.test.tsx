@@ -12,6 +12,7 @@ import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, type FakeBridge } from '../../test/bridge'
+import { openInspectorTab } from '../../test/inspector'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 
 vi.mock('@react-three/fiber', () => ({
@@ -179,6 +180,8 @@ describe('Plan mode', () => {
     // a preset means fixed values: no locks (stickout has none either)
     expect(within(insp).queryByRole('button', { name: /^Lock / })).toBeNull()
 
+    // S5: feeds and speeds are on the operation's Feeds tab
+    await openInspectorTab(t.user, insp, 'Feeds')
     await t.user.clear(feed)
     await t.user.type(feed, '600{Enter}')
     await waitFor(() =>
@@ -209,6 +212,7 @@ describe('Plan mode', () => {
         expect.objectContaining({ auto: true }),
       ),
     )
+    await openInspectorTab(t.user, insp, 'Feeds')
     const spindleLock = await within(insp).findByRole('button', { name: 'Lock Spindle speed' })
     expect(spindleLock).toHaveAttribute('aria-pressed', 'false')
     // facing: speed, feed, stepdown and stepover can be locked; plunge rate can't
@@ -282,6 +286,7 @@ describe('Plan mode', () => {
     await within(insp).findByText(/^Auto \(calculator\) is unavailable\. No feeds-and-speeds data/)
     expect(within(insp).queryByRole('button', { name: /^Lock / })).toBeNull()
     expect(within(t.nav()).getByRole('button', { name: 'Generate toolpaths' })).toBeDisabled()
+    await openInspectorTab(t.user, insp, 'Feeds')
     for (const [label, value] of [
       ['Spindle speed', '3000'],
       ['Feed rate', '150'],
@@ -303,6 +308,51 @@ describe('Plan mode', () => {
         ),
       )
     }
+  })
+
+  it('S5: a finding about a field reveals it – the Feeds tab from Checks and from the plan list', async () => {
+    const t = await renderPlan({
+      setup: async (s) => {
+        const planId = Object.keys(s.d.doc.plans)[0]!
+        const drill = s.d.doc.plans[planId]!.setups[0]!.operations.find((o) =>
+          o.designOperationIds.includes('drill1'),
+        )!
+        await s.run('plan.tool.assign', {
+          planId,
+          planOperationId: drill.id,
+          toolLibraryItemId: s.tools.drill6,
+        })
+      },
+    })
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    const insp = t.inspector()
+    const tab = (name: string) => within(insp).getByRole('tab', { name: new RegExp(`^${name}`) })
+
+    // no selection: the plan's checks; the drill's missing spindle speed names its operation
+    const subject = await within(insp).findAllByRole('button', { name: /^Drilling 1/ })
+    await t.user.click(subject[0]!)
+    await within(insp).findByRole('heading', { name: /^Drilling 1/ })
+    // the field it is about is shown: its tab selected, the field focused
+    await waitFor(() => expect(tab('Feeds')).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAccessibleName(
+        /^(Spindle speed|Feed rate|Plunge rate)$/,
+      ),
+    )
+    // the Feeds tab says it has errors
+    expect(tab('Feeds')).toHaveAccessibleName(/has errors/)
+
+    // from the operation's own Checks: back on Cut, the finding's field name reveals it again
+    await t.user.click(tab('Cut'))
+    expect(within(insp).getByLabelText('Spindle speed', { selector: 'input' })).not.toBeVisible()
+    const checks = within(insp).getByRole('region', { name: 'Checks' })
+    await t.user.click(within(checks).getAllByRole('button', { name: 'Spindle speed' })[0]!)
+    expect(tab('Feeds')).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(insp).getByLabelText('Spindle speed', { selector: 'input' }),
+      ),
+    )
   })
 
   it('generates toolpaths as a job and exports gCode through the save dialog, with the warnings', async () => {

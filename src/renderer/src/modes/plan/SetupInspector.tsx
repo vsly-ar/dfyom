@@ -186,138 +186,71 @@ export function SetupInspector({
     <div className={styles['inspector']}>
       <PanelHeader title={m.inspector} meta={m.position(index + 1, plan.setups.length)} />
       <div className={styles['fields']}>
-        <NameField
-          label={m.name}
-          name={setup.name}
-          readOnly={readOnly}
-          onCommit={(name) => void update({ name })}
-        />
-        {failed ? (
-          <ErrorMessage error={failed} message={planMessages.inspector.commandFailed} />
-        ) : null}
-        <div className={styles['setupFacts']}>
-          <DirectionIcon direction={direction} className={styles['dirIconLg']} />
-          <dl className={styles['facts']}>
-            <dt>{m.direction}</dt>
-            <dd>{m.directionValue(face)}</dd>
-            {stock !== undefined ? (
-              <>
-                <dt>{m.workOffset}</dt>
-                <dd>
-                  {m.workOffsetValue(
-                    setupZeroWords(setup, stock, info, (mm) => formatHeight(mm, units)),
-                    face,
-                  )}
-                </dd>
-              </>
-            ) : null}
-            <dt>{m.reach}</dt>
-            <dd>{reach}</dd>
-            <dt>{m.links}</dt>
-            <dd>{linksText}</dd>
-            {headroom !== undefined ? (
-              <>
-                <dt>{m.zHeadroom}</dt>
-                <dd>{headroom}</dd>
-              </>
-            ) : null}
-          </dl>
-        </div>
-        <Field
-          label={m.rotation}
-          kind="toggle"
-          illustration={<FieldIcon name="rotation" />}
-          readOnly={readOnly}
-          info={m.rotationHint}
-        >
-          <SegmentedControl<string>
-            label={m.rotation}
-            options={SETUP_ROTATIONS.map((r) => ({ value: String(r), label: `${r}°` }))}
-            value={String(setup.rotation ?? 0)}
-            disabled={readOnly}
-            onValueChange={(v) => {
-              const rotation = Number(v) as SetupRotation
-              if (rotation !== (setup.rotation ?? 0)) void update({ rotation })
-            }}
+        {/* S5 (inspector-layout.md § Per-inspector target layout): Setup, Work zero, Links and
+            heights (closed), Alignment points, Alignment aids (closed), Tool changes */}
+        <InspectorGroup title={m.setupGroup}>
+          <NameField
+            label={m.name}
+            name={setup.name}
+            readOnly={readOnly}
+            onCommit={(name) => void update({ name })}
           />
-        </Field>
-        <QuantityInput
-          label={m.clearanceHeight}
-          stepKind="depth"
-          stepUncapped
-          kind="length"
-          defaultUnit={defaultUnit('length', units)}
-          value={clearance}
-          illustration={<FieldIcon name="clearance" />}
-          readOnly={readOnly}
-          messages={[...messages('clearanceHeight'), ...clampNote]}
-          onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
-          onCancelGesture={cancelGesture}
-        />
-        {canFollow ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className={styles['followButton']}
-            title={wm.clearanceAutoHint}
-            onClick={() => void update({ clearanceHeight: 'auto' })}
-          >
-            {wm.clearanceAuto}
-          </Button>
-        ) : null}
-        <QuantityInput
-          label={m.retractHeight}
-          stepKind="depth"
-          stepUncapped
-          kind="length"
-          defaultUnit={defaultUnit('length', units)}
-          value={quantityOf(setup.retractHeight)}
-          illustration={<FieldIcon name="retract" />}
-          readOnly={readOnly}
-          messages={messages('retractHeight')}
-          onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
-          onCancelGesture={cancelGesture}
-        />
-        <Field
-          label={m.retraction}
-          kind="toggle"
-          illustration={<FieldIcon name="retract" />}
-          readOnly={readOnly}
-          messages={[
-            { id: 'retractionHint', severity: 'note', text: m.retractionHint[retraction] },
-          ]}
-        >
-          <SegmentedControl<Retraction>
-            label={m.retraction}
-            options={RETRACTIONS.map((r) => ({
-              value: r,
-              label: r === 'minimum' ? m.retractionMinimum : m.retractionFull,
-            }))}
-            value={retraction}
-            disabled={readOnly}
-            onValueChange={(v) => {
-              if (v !== retraction) void update({ retraction: v })
-            }}
-          />
-        </Field>
-        {/* workholding.md#links-and-safe-heights: items supersede the clamp height */}
-        {(holding?.items.length ?? 0) > 0 ? null : (
+          {failed ? (
+            <ErrorMessage error={failed} message={planMessages.inspector.commandFailed} />
+          ) : null}
+          <div className={styles['setupFacts']}>
+            <DirectionIcon direction={direction} className={styles['dirIconLg']} />
+            <dl className={styles['facts']}>
+              <dt>{m.direction}</dt>
+              <dd>{m.directionValue(face)}</dd>
+              {stock !== undefined ? (
+                <>
+                  <dt>{m.workOffset}</dt>
+                  <dd>
+                    {m.workOffsetValue(
+                      setupZeroWords(setup, stock, info, (mm) => formatHeight(mm, units)),
+                      face,
+                    )}
+                  </dd>
+                </>
+              ) : null}
+              <dt>{m.reach}</dt>
+              <dd>{reach}</dd>
+              <dt>{m.links}</dt>
+              <dd>{linksText}</dd>
+              {headroom !== undefined ? (
+                <>
+                  <dt>{m.zHeadroom}</dt>
+                  <dd>{headroom}</dd>
+                </>
+              ) : null}
+            </dl>
+          </div>
           <QuantityInput
-            label={m.clampHeight}
+            label={m.clearanceHeight}
             stepKind="depth"
             stepUncapped
             kind="length"
-            optional
-            placeholder={m.clampHeightPlaceholder}
             defaultUnit={defaultUnit('length', units)}
-            value={clampHeight}
+            value={clearance}
             illustration={<FieldIcon name="clearance" />}
             readOnly={readOnly}
-            messages={[...messages('clampHeight'), ...clampHeightNote]}
-            onCommit={(q, gesture) => void update({ clampHeight: q?.source ?? null }, gesture)}
+            messages={[...messages('clearanceHeight'), ...clampNote]}
+            onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
             onCancelGesture={cancelGesture}
           />
-        )}
+          {canFollow ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className={styles['followButton']}
+              title={wm.clearanceAutoHint}
+              onClick={() => void update({ clearanceHeight: 'auto' })}
+            >
+              {wm.clearanceAuto}
+            </Button>
+          ) : null}
+        </InspectorGroup>
         <AlignmentFields
           plan={plan}
           setup={setup}
@@ -326,6 +259,97 @@ export function SetupInspector({
           info={info}
           sources={sources ?? NO_SOURCES}
           warnings={mine}
+          afterZero={
+            <InspectorGroup
+              title={m.linksGroup}
+              collapsible
+              rememberKey="setup.links"
+              summary={m.linksSummary(
+                quantityOf(setup.retractHeight)?.source,
+                retraction === 'full',
+                setup.rotation ?? 0,
+              )}
+              severity={
+                errors.some((i) => i.path[0] === 'retractHeight' || i.path[0] === 'clampHeight')
+                  ? 'error'
+                  : undefined
+              }
+            >
+              <QuantityInput
+                label={m.retractHeight}
+                stepKind="depth"
+                stepUncapped
+                kind="length"
+                defaultUnit={defaultUnit('length', units)}
+                value={quantityOf(setup.retractHeight)}
+                illustration={<FieldIcon name="retract" />}
+                readOnly={readOnly}
+                messages={messages('retractHeight')}
+                onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
+                onCancelGesture={cancelGesture}
+              />
+              <Field
+                label={m.retraction}
+                kind="toggle"
+                illustration={<FieldIcon name="retract" />}
+                readOnly={readOnly}
+                messages={[
+                  { id: 'retractionHint', severity: 'note', text: m.retractionHint[retraction] },
+                ]}
+              >
+                <SegmentedControl<Retraction>
+                  label={m.retraction}
+                  options={RETRACTIONS.map((r) => ({
+                    value: r,
+                    label: r === 'minimum' ? m.retractionMinimum : m.retractionFull,
+                  }))}
+                  value={retraction}
+                  disabled={readOnly}
+                  onValueChange={(v) => {
+                    if (v !== retraction) void update({ retraction: v })
+                  }}
+                />
+              </Field>
+              {/* workholding.md#links-and-safe-heights: items supersede the clamp height */}
+              {(holding?.items.length ?? 0) > 0 ? null : (
+                <QuantityInput
+                  label={m.clampHeight}
+                  stepKind="depth"
+                  stepUncapped
+                  kind="length"
+                  optional
+                  placeholder={m.clampHeightPlaceholder}
+                  defaultUnit={defaultUnit('length', units)}
+                  value={clampHeight}
+                  illustration={<FieldIcon name="clearance" />}
+                  readOnly={readOnly}
+                  messages={[...messages('clampHeight'), ...clampHeightNote]}
+                  onCommit={(q, gesture) =>
+                    void update({ clampHeight: q?.source ?? null }, gesture)
+                  }
+                  onCancelGesture={cancelGesture}
+                />
+              )}
+              <Field
+                label={m.rotation}
+                kind="toggle"
+                illustration={<FieldIcon name="rotation" />}
+                readOnly={readOnly}
+                info={m.rotationHint}
+              >
+                <SegmentedControl<string>
+                  label={m.rotation}
+                  options={SETUP_ROTATIONS.map((r) => ({ value: String(r), label: `${r}°` }))}
+                  value={String(setup.rotation ?? 0)}
+                  disabled={readOnly}
+                  onValueChange={(v) => {
+                    const rotation = Number(v) as SetupRotation
+                    if (rotation !== (setup.rotation ?? 0)) void update({ rotation })
+                  }}
+                />
+              </Field>
+            </InspectorGroup>
+          }
         />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         <Workholding doc={doc} plan={plan} setup={setup} />

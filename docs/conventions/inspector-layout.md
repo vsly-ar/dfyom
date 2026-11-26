@@ -288,6 +288,16 @@ Built 2026-11-25 (provisional, awaits the user's review of the captures). Chrome
 - **Not changed:** the Run inspector (a parallel Run-mode fix; it takes the header style with S5), the per-operation `h4` in the Part (plan copy) group, the Reference panel's fit mode heading (a mode panel, not a group), the library tool Details' open state (the Library window's own, as before), the joint settings' "open when the joint was just chosen" (controlled, not remembered).
 - **Captures** (hidden, throwaway): Profile, Bolt hole, Part with a dowel split, Plan operation, light and dark, before and after.
 
+## S5 implementation notes
+
+Built 2026-11-25 (provisional, awaits the user's review of the captures). The Plan inspectors take their [target layout](#per-inspector-target-layout):
+
+- **Plan operation:** Header, Checks and the aid fields stay above `ui/Tabs` (label "Operation sections", sticky, remembered as `plan.op`): **Cut** (Group Tool: Tool, Cutting preset, why this tool · Group Strategy with a More row for helix diameter, ramp angle, finishing allowance, finish stepdown and overshoot, `plan.strategyMore`, open while a problem is in it · Accordion **Tool setup**, closed, `plan.toolSetup`: Stickout, Z from and the touch-off spot, summary the stickout), **Feeds** (feeds and speeds with locks, chip load, the calculation; without a tool a one-line note), **Design** (the plan copy; not for alignment aids). Tab dots: the Feeds tab carries the feeds findings, Cut every other field's; Tool setup shows the stickout and Z-from findings when closed.
+- **Reveal:** every finding field is wrapped in a `Slot` (`modes/plan/field-slot.tsx`, `display: contents`, `data-plan-field`). A Checks item with a field is named by the field ("Spindle speed") and reveals it; a plan-list finding selects the operation and asks the store (`revealField`) to reveal the field once the inspector is there. `revealPlanField` calls `revealInInspector` (tab, accordion, More row) and focuses the control, a frame later when the panel opens on React's next commit.
+- **Setup:** Group **Overview** (Name, facts with the work zero summary, Clearance height and its follow button; not "Setup", the panel title, so the heading stays unique) · Work zero · Accordion **Links and heights**, closed, `setup.links` (Retract height, Links, Clamp height, Rotation on the table; summary retract, links, rotation) · Accordion Alignment points, open, `setup.alignmentPoints` · Accordion Alignment aids, closed, `setup.alignmentAids` · Workholding and Tool changes as groups with the count as header `meta`.
+- **Tests:** component helpers `test/inspector.ts` (`openInspectorTab`, `openInspectorGroup`, `openInspectorMore`) and the same three in `e2e/app.fixture.ts`; specs select the tab or open the accordion before a hidden field (role queries skip hidden panels). The reveal test: `Plan.test.tsx` "S5: a finding about a field reveals it".
+- **Not changed:** the Run inspector's header style (Run mode, not this lane), the aid fields' place above the tabs, provenance tags (DF105, already per field).
+
 ## Open questions
 
 None blocking (D70: recommended options taken). Revisit after S3 dogfood: the `depth` default `.1` for deep pockets; whether the (i) tip on keyboard focus is wanted or noisy; whether the Plan operation's Design tab should be a closed accordion instead.
