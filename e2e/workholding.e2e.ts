@@ -210,11 +210,13 @@ test('held pieces (W5): an outline without tabs comes loose under clamps, tape h
   const checks = inspector.getByRole('region', { name: 'Setup checks' })
   await expect(checks).toContainText('cuts the part free in Top without tabs')
 
-  // tape from the Add menu: the part stays held, the open item says so
+  // tape from the Add menu: the part stays held, the open item's Type says so in its (i) (R11)
   await section.getByRole('button', { name: 'Add' }).click()
   await page.getByRole('menuitem', { name: /^Tape/ }).click()
   const tape = section.getByRole('group', { name: 'Item Tape' })
-  await expect(tape).toContainText('pieces cut free stay held')
+  await expect(tape.getByRole('combobox', { name: 'Type' })).toHaveAccessibleDescription(
+    /pieces cut free stay held/,
+  )
   await expect(inspector.getByText('cuts the part free in Top without tabs')).toHaveCount(0)
   await render(page, 'w5-surface-hold')
 

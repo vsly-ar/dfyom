@@ -501,11 +501,8 @@ function ItemFields({
       )
     case 'surface':
       return (
-        <Field
-          label={m.type}
-          readOnly={readOnly}
-          messages={[{ id: 'surfaceNote', severity: 'note', text: m.surfaceNote }]}
-        >
+        // design review R11: the static note is the Type's (i), boxes are for findings
+        <Field label={m.type} readOnly={readOnly} info={m.surfaceNote}>
           <Select
             options={[
               { value: 'tape', label: m.kinds.tape },

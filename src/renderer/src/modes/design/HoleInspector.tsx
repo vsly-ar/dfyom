@@ -473,12 +473,7 @@ export function HoleInspector({
       void update({ type, ...headDefaults(hole, type, units, stockBelow(part, hole.on)) }, 'type')
     else void update({ type }, 'type')
   }
-  const purposeMessages: FieldMessage[] = [
-    ...messagesAt('purpose'),
-    ...(headed
-      ? [{ id: 'tapDrillSimple', severity: 'note' as const, text: h.tapDrillSimple }]
-      : []),
-  ]
+  const purposeMessages: FieldMessage[] = messagesAt('purpose')
   const sources = fastenerSources(hole, rows)
   const refOf = (key: string) => fasteners?.sources.find((s) => s.key === key)?.ref ?? key
 
@@ -567,7 +562,13 @@ export function HoleInspector({
             </Field>
           </div>
           <div {...track('purpose')}>
-            <Field label={h.purpose} kind="toggle" messages={purposeMessages}>
+            {/* design review R11: why Tap drill is disabled is the field's (i), not a box */}
+            <Field
+              label={h.purpose}
+              kind="toggle"
+              messages={purposeMessages}
+              info={headed ? h.tapDrillSimple : undefined}
+            >
               <SegmentedControl<HolePurpose>
                 label={h.purpose}
                 options={(['clearance', 'tapDrill'] as const).map((p) => ({
