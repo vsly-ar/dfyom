@@ -9,7 +9,7 @@
  * (references, recalculation of dependants, every operation's constraints). Undo replays the
  * patches, never the expansion.
  */
-import type { Draft } from 'immer'
+import { produce, type Draft } from 'immer'
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
@@ -57,6 +57,7 @@ import { checkOperations } from './validate'
 import { AdjustedSchema, type Adjusted } from './round'
 import { knownIssues, withoutKnown } from './known-issues'
 import { snapshotTool } from './tool-choice'
+import { baseOf } from './frozen-memo'
 
 const FeatureArg = { partId: PartIdSchema, featureId: FeatureIdSchema }
 
@@ -70,6 +71,7 @@ const FeatureResult = z.object({
   lines: z.number().int().optional().describe('engraving: lines placed'),
   length: z.number().optional().describe('engraving: total line length (mm)'),
   size: z.number().optional().describe("engraving: the motif's width as placed (mm)"),
+  maxWidth: z.number().optional().describe('engraving: widest groove (mm)'),
   adjusted: AdjustedSchema.optional(),
   warnings: Warnings,
 })
@@ -354,6 +356,12 @@ export interface FeatureCommandSpec<
    * design.pattern.add boundary", engraved-patterns.md E3); the add validates the full ones.
    */
   readonly addParams?: { readonly [K in keyof P]?: z.ZodType }
+  /**
+   * true: add and update take `dryRun` (engraved-patterns.md § Agent API): the same checks and
+   * result, nothing written (no patches, so no commit, undo entry or revision). Opt-in per kind
+   * (one arg per tool in tools/list).
+   */
+  readonly dryRun?: true
   /** The feature from args as entered (parsed through `c.f`) and its previous version. */
   build(args: Partial<z.output<z.ZodObject<P>>>, prev: F | undefined, c: FeatureBuildContext): F
 }
@@ -375,7 +383,13 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
         required && spec.required.includes(k) ? s : (s as z.ZodType).optional(),
       ]),
     ) as P
-  type Args = { partId: string; name?: string; on?: string } & Partial<z.output<z.ZodObject<P>>>
+  type Args = { partId: string; name?: string; on?: string; dryRun?: boolean } & Partial<
+    z.output<z.ZodObject<P>>
+  >
+  const dryRunArg =
+    spec.dryRun === true
+      ? { dryRun: z.boolean().optional().describe('true: result only, part unchanged') }
+      : {}
 
   const add = defineCommand({
     kind: 'document',
@@ -390,6 +404,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       name: NameArg.optional(),
       ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(true),
+      ...dryRunArg,
     }),
     ...(spec.addParams === undefined
       ? {}
@@ -417,7 +432,9 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      return finish(draft, args.partId, l, spec, feature, undefined, where, ctx, f.adjusted)
+      return finish(draft, args.partId, l, spec, feature, undefined, where, ctx, f.adjusted, {
+        dryRun: args.dryRun === true,
+      })
     },
   })
 
@@ -432,6 +449,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       name: NameArg.optional(),
       ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(false),
+      ...dryRunArg,
     }),
     // the long params are sketched in tools/list only; the args above validate them in full
     ...(spec.updateParams === undefined
@@ -475,7 +493,9 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       })
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      return finish(draft, args.partId, l, spec, feature, prev, where, ctx, f.adjusted)
+      return finish(draft, args.partId, l, spec, feature, prev, where, ctx, f.adjusted, {
+        dryRun: args.dryRun === true,
+      })
     },
   })
   return Ok([add, update])
@@ -492,6 +512,7 @@ function finish<F extends FeatureBase>(
   ctx: CommandContext,
   /** What the DF120 apply rule changed while building the feature (pattern cells). */
   adjusted: readonly Adjusted[] = [],
+  { dryRun = false }: { readonly dryRun?: boolean } = {},
 ) {
   const placed = placeFeature(
     loaded,
@@ -502,15 +523,26 @@ function finish<F extends FeatureBase>(
     shapeEnv(loaded, ctx.services.region2d),
   )
   if (placed.isErr()) return placed
-  writePlaced(draft, partId, placed.unwrap(), spec.toDTO(feature))
-  const shapes = draft.parts[partId]?.shapes ?? []
+  const dto = spec.toDTO(feature)
+  // dryRun: the same write on a copy of the part (no patches on the draft), read as after it
+  let view = loaded
+  if (dryRun) {
+    const base = { parts: { [partId]: baseOf(draft.parts[partId]!) } } as unknown as ProjectDoc
+    const after = produce(base, (d) => writePlaced(d, partId, placed.unwrap(), dto))
+    view = { ...loaded, dto: after.parts[partId]! }
+  } else writePlaced(draft, partId, placed.unwrap(), dto)
+  const shapes = view.dto.shapes ?? []
+  const owned = placed.unwrap().owned
   const result = {
     featureId: feature.id,
-    operationIds: placed.unwrap().owned.map((o) => o.id),
-    ...(spec.resultOf?.(feature, shapes as readonly ShapeDTO[], ctx.services.region2d) ?? {}),
+    operationIds: owned.map((o) => o.id),
+    ...(spec.resultOf?.(feature, shapes as readonly ShapeDTO[], ctx.services.region2d, {
+      operations: owned,
+      ...(loaded.snapshots === undefined ? {} : { snapshots: loaded.snapshots }),
+    }) ?? {}),
     ...(adjusted.length > 0 ? { adjusted: [...adjusted] } : {}),
   }
-  return withWarnings(result, loaded, placed.unwrap().ops, ctx, where, placed.unwrap().features)
+  return withWarnings(result, view, placed.unwrap().ops, ctx, where, placed.unwrap().features)
 }
 
 /**

@@ -15,7 +15,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { DfmWarning, OperationGeometry } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
-import type { UnitSystem } from '../project/document'
+import type { ProjectDoc, UnitSystem } from '../project/document'
 import type { FeatureDTO } from './feature.dto'
 import { FEATURE_ROLE_PATTERN } from './feature.dto'
 import { ID_PREFIX, type FeatureOwner, type GeneralTolerance, type Operation } from './operation'
@@ -120,12 +120,17 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
   /**
    * Extra result fields of `design.<kind>.add` / `.update` (patterns P1: `cells`), from the
    * feature's owned shapes and the part's shapes after the edit; the port is absent headless
-   * without one.
+   * without one. `owned` (engraved patterns: `maxWidth` from the Line's tool) are the feature's
+   * owned operations after the edit, `snapshots` the document's (specific tools resolve there).
    */
   resultOf?(
     feature: F,
     shapes: readonly ShapeDTO[],
     port: Region2dPort | undefined,
+    owned: {
+      readonly operations: readonly Operation[]
+      readonly snapshots?: ProjectDoc['snapshots']
+    },
   ): Record<string, number>
   /** Notes about the feature itself (`dfm.holeCustomSize`), on its owned operations' ids. */
   warnings?(feature: F, ownedId: (role: string) => string): DfmWarning[]

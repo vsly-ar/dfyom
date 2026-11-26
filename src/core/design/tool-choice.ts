@@ -13,9 +13,11 @@ import { None, Some, type Option } from '../../shared/result'
 import { TOOL_MATCH_TOLERANCE, type DfmTool, type OperationTool } from '../geometry/dfm'
 import { localStock, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
+import { DEFAULT_LINE_CUTTER } from '../geometry/line'
 import {
   CHAMFER_ANGLE_TOLERANCE,
   isAnalyticOperation,
+  type LineCutter,
   type OperationGeometry,
   type PartGeometryInput,
   type StockGeometry,
@@ -554,4 +556,26 @@ export function chooseTool(input: ChoiceInput): ToolChoice {
   if (fits) return { kind: 'keep' }
   const g = generalizedChoice(input)
   return g.isSome() ? { kind: 'generalized', tool: g.unwrap() } : { kind: 'none' }
+}
+
+/**
+ * The tool a Line's groove takes (engraved-patterns.md § Line operation): its tool field's chamfer
+ * mill (V-bit), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
+ * that does not resolve) the default 60° V-bit.
+ */
+export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
+  if (op.tool.isNone()) return DEFAULT_LINE_CUTTER
+  const t = resolveDesignTool(op.tool.unwrap(), snapshots ?? {})
+  if (t.isNone()) return DEFAULT_LINE_CUTTER
+  const tool = t.unwrap()
+  if (tool.type === 'chamferMill' && tool.angle !== undefined)
+    return {
+      kind: 'vBit',
+      diameter: tool.diameter,
+      angle: tool.angle,
+      tipDiameter: tool.tipDiameter ?? 0,
+    }
+  if (tool.type === 'ballEndMill') return { kind: 'ball', diameter: tool.diameter }
+  if (tool.type === 'flatEndMill') return { kind: 'flat', diameter: tool.diameter }
+  return DEFAULT_LINE_CUTTER
 }

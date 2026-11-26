@@ -7,8 +7,7 @@
  */
 import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
-import { DEFAULT_LINE_CUTTER } from '../geometry/line'
-import { resolveDesignTool } from './tool-choice'
+import { lineCutter } from './tool-choice'
 import type { Quantity } from '../quantity/quantity'
 import { definitionOf, requirePort } from './shape'
 import { pathLevelProfile } from './shape-items'
@@ -16,7 +15,6 @@ import type { EngravingRecord, ShapeItem } from './shape.dto'
 import { resolveEngraving } from './engraving/resolve'
 import type {
   Contour,
-  LineCutter,
   LinePathLevels,
   Vec2,
   OperationGeometry,
@@ -416,28 +414,6 @@ function linePathLevels(
     return typeof lv === 'number' ? [lv] : lv
   })
   return { kind: 'loops', level: Math.max(...all) }
-}
-
-/**
- * The tool a Line's groove takes (engraved-patterns.md § Line operation): its tool field's chamfer
- * mill (V-bit), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
- * that does not resolve) the default 60° V-bit.
- */
-export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
-  if (op.tool.isNone()) return DEFAULT_LINE_CUTTER
-  const t = resolveDesignTool(op.tool.unwrap(), snapshots ?? {})
-  if (t.isNone()) return DEFAULT_LINE_CUTTER
-  const tool = t.unwrap()
-  if (tool.type === 'chamferMill' && tool.angle !== undefined)
-    return {
-      kind: 'vBit',
-      diameter: tool.diameter,
-      angle: tool.angle,
-      tipDiameter: tool.tipDiameter ?? 0,
-    }
-  if (tool.type === 'ballEndMill') return { kind: 'ball', diameter: tool.diameter }
-  if (tool.type === 'flatEndMill') return { kind: 'flat', diameter: tool.diameter }
-  return DEFAULT_LINE_CUTTER
 }
 
 /** A pattern's own chamfers: its top edges (P3) and its through cells' bottom edges (P5). */
