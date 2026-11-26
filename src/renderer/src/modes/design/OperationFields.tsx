@@ -932,6 +932,8 @@ export function ParamField({
       owner: fieldId,
       field: t.depthPickField(label),
       eligible: new Set(depthTargets!.keys()),
+      // R18: a pocket or a drilling can go through instead (facing cannot)
+      ...(op.kind === 'facing' ? {} : { noneFacing: t.depthPickNoneFacing }),
       onPick: (surface) => {
         const target = depthTargets!.get(surface)
         if (target === undefined) return
