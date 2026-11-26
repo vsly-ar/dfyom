@@ -32,12 +32,14 @@ import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import {
   referenceCompare,
+  referenceHeightmapTask,
   referenceHoles,
   referenceLevels,
   referenceSection,
   type CompareInput,
+  type ReferenceHeightmapInput,
 } from '../workers/tasks'
-import type { CompareRaw } from './reference-compare'
+import type { CompareRaw, ReferenceMap } from './reference-compare'
 import type { LoadedPart } from './load'
 import type { HoleOptions, MeshHoles } from './mesh-holes'
 import type { LevelOptions, MeshLevels } from './mesh-levels'
@@ -294,6 +296,24 @@ export async function referenceCompareOf(
   if (path.isErr()) return path
   const r = await ctx.services.workers.run(
     referenceCompare,
+    { path: path.unwrap(), triangles: ref.asset.triangles, ...input },
+    control,
+  )
+  return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId: ref.id })) : r
+}
+
+/** The reference maps for the simulated-cut compare (V3) on the geometry lane. */
+export async function referenceHeightmapsOf(
+  ctx: Pick<QueryContext, 'services'>,
+  ref: ReferenceDTO,
+  input: Omit<ReferenceHeightmapInput, 'path' | 'triangles'>,
+  control: WorkerControl,
+  where: string,
+): AsyncAppResult<ReferenceMap[]> {
+  const path = assetPath(ctx, ref, where)
+  if (path.isErr()) return path
+  const r = await ctx.services.workers.run(
+    referenceHeightmapTask,
     { path: path.unwrap(), triangles: ref.asset.triangles, ...input },
     control,
   )

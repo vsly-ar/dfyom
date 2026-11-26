@@ -153,7 +153,7 @@ In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8),
 
 ## 3. Compare
 
-`design.reference.compare { partId, referenceId?, source: { kind: 'part' }, threshold?: 0.1 mm, limit?: 10 }` – the command of [deviation.md](deviation.md#the-command) (a job; `job.wait` returns the result), restricted here to the **design** source; `source: plan` (simulated cut) stays in deviation.md and the v0.4 follow-up.
+`design.reference.compare { partId, referenceId?, source: { kind: 'part' }, threshold?: 0.1 mm, limit?: 10 }` – the command of [deviation.md](deviation.md#the-command) (a job; `job.wait` returns the result), restricted here to the **design** source; `source: { kind: 'plan', planId }` (simulated cut) is deviation.md's ([Implementation (V3)](deviation.md#implementation-v3)).
 
 ### Method (RT-F)
 
@@ -214,14 +214,14 @@ All analysis is headless core (`src/core`, no Electron, DOM or Node-only imports
 
 ## Agent API and budget
 
-| Tool                                  | Kind                                   | `tools/list` cost                          |
-| ------------------------------------- | -------------------------------------- | ------------------------------------------ |
-| `design.reference.find`               | async query (P1)                       | ≈ 1.3 K measured (levels and section args) |
-| `face: { setupId }`, `frame: 'setup'` | existing args extended (P2)            | + 0.37 K measured                          |
-| `design.shape.import`                 | existing command, gains `from` (P1)    | + 0.7 K measured (659 → ≈ 1.36 K)          |
-| `kind: 'holes'`, `maxDiameter`        | existing args extended (P3)            | + 0.25 K measured                          |
-| `design.reference.update`             | existing; result fields only (P1)      | in the output schema                       |
-| `design.reference.compare`            | job (P4; `source: part` only at first) | 0.88 K (measured, P4)                      |
+| Tool                                  | Kind                                | `tools/list` cost                          |
+| ------------------------------------- | ----------------------------------- | ------------------------------------------ |
+| `design.reference.find`               | async query (P1)                    | ≈ 1.3 K measured (levels and section args) |
+| `face: { setupId }`, `frame: 'setup'` | existing args extended (P2)         | + 0.37 K measured                          |
+| `design.shape.import`                 | existing command, gains `from` (P1) | + 0.7 K measured (659 → ≈ 1.36 K)          |
+| `kind: 'holes'`, `maxDiameter`        | existing args extended (P3)         | + 0.25 K measured                          |
+| `design.reference.update`             | existing; result fields only (P1)   | in the output schema                       |
+| `design.reference.compare`            | job (P4; `source: plan` since V3)   | 0.88 K (measured, P4); +0.16 K (V3)        |
 
 P1 measured: 107 245 → 109 183 characters (124 → 125 tools, + 1.94 K, under the 120 K budget; logged in [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)). Results stay ≤ 5 KB by default (levels ≈ 2.5 KB, section summary ≈ 1–3 KB, holes ≈ 4 KB, compare ≈ 2 KB). The primer's bullet grows with the phases; P1: "Reference: `design_reference_find` (levels, section) → `design_shape_import { from }`"; P3 adds "holes → the suggested `design_hole_add`/`design_drilling_add` (+ `design_clones_add`)".
 
