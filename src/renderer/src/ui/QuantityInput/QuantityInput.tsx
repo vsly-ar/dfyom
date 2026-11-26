@@ -103,6 +103,11 @@ export interface QuantityInputBaseProps {
   kind: QuantityKind
   /** Unit a bare number means (the project unit for the kind); also the display unit. */
   defaultUnit: UnitId
+  /**
+   * The unit slot's label for a dimensionless field ("×" for a scale factor, design review R17),
+   * shown where a length shows "mm"; a unit with its own label keeps it.
+   */
+  unitLabel?: string
   /** The stored value; undefined = empty. */
   value: Quantity | undefined
   /** Resolves references in formulas; none by default. */
@@ -239,6 +244,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     label,
     kind,
     defaultUnit,
+    unitLabel,
     value,
     resolver = NO_REFERENCES,
     references = [],
@@ -783,7 +789,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
         .nominal.map((n) => n.unit.isSome())
         .unwrapOr(false)
     : false
-  const suffix = showComputed || writtenUnit ? undefined : UNIT_LABEL[defaultUnit] || undefined
+  const suffix =
+    showComputed || writtenUnit ? undefined : UNIT_LABEL[defaultUnit] || unitLabel || undefined
 
   const mark = explained?.mark
   const overlay = mark ? (

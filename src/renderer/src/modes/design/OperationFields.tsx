@@ -718,6 +718,7 @@ function ScaleField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
       label={t.picker.scale}
       kind="scalar"
       defaultUnit={defaultUnit('scalar', ctx.units)}
+      unitLabel="×"
       value={value.isOk() ? value.unwrap() : undefined}
       stepKind="scale"
       stepKey="shape.scale"
