@@ -30,7 +30,7 @@ The archive holds no undo history and no action log in v0.1.
 | Lock           | `<project folder>/lock.json`                         | Instance id, PID, host, `startedAt`, `heartbeatAt`.                                                            |
 | Save history   | `<project folder>/saves/<savedAt>-r<revision>.dfyom` | Verified archives, identical to what was written to the project file.                                          |
 | App settings   | `<appData>/settings.json`                            | GUI preferences ([ui.md](../conventions/ui.md#settings)).                                                      |
-| App state      | `<appData>/app-state.json`                           | Last window bounds, dialog folders ([ui.md](../conventions/ui.md#remembered-window-state-and-dialog-folders)). |
+| App state      | `<appData>/app-state.json`                           | Window, dialog folders and recents ([ui.md](../conventions/ui.md#remembered-window-state-and-dialog-folders)). |
 
 - Documents are **JSON**, pretty-printed with stable key order, so they diff cleanly. They are the `ProjectDoc` DTOs ([commands.md](commands.md#project-state)).
 - The stock/tool/machine **library is global app data**, not part of a project: sketched as `<appData>/library/`; format and location are defined in task 1.7 (library models doc, [plan](../plans/v0.1.md)).

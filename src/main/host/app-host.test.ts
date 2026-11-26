@@ -1,5 +1,6 @@
 // The app host: project lifecycle commands, unsaved changes, recovery, sessions, library follow on Apply.
 // Spec: docs/architecture/llm-api.md#app-scope-and-project-scope, #sessions-and-sources
+import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -236,6 +237,23 @@ describe('app host', () => {
     }
     await call('project.close', { key })
     expect(changes).toBe(2)
+  })
+
+  it('reports the project file on save and open, not for an untitled project (DF114)', async () => {
+    const { host, call, dir } = await setup()
+    const files: string[] = []
+    host.onProjectFile((f) => files.push(f))
+    const { key } = (await call('project.create', { name: 'R', unitSystem: 'mm' })) as {
+      key: string
+    }
+    expect(files).toEqual([])
+    const file = join(dir, 'r.dfyom')
+    await call('project.save', { target: file })
+    await call('project.save', {})
+    await call('project.close', { key })
+    await call('project.open', { file })
+    const real = await realpath(file) // the stored file path is resolved (/private/var on macOS)
+    expect(files).toEqual([real, real, real])
   })
 
   it('openKey finds a file open in this instance; reopening it reports no second opener', async () => {

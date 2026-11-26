@@ -13,6 +13,7 @@ import {
   type PartEvaluationView,
   type PreloadApi,
   type ProjectSnapshot,
+  type RecentProjectView,
   type ReferenceMeshReply,
   type ReferenceCompareViewReply,
   type ReferenceSectionReply,
@@ -132,6 +133,8 @@ const api: PreloadApi = {
     chooseReference: () => ipcRenderer.invoke(IPC.fileChooseReference) as Promise<string | null>,
     chooseSvg: () => ipcRenderer.invoke(IPC.fileChooseSvg) as Promise<string | null>,
     showInFolder: (path) => ipcRenderer.invoke(IPC.fileShowInFolder, path) as Promise<boolean>,
+    recent: () => ipcRenderer.invoke(IPC.fileRecent) as Promise<readonly RecentProjectView[]>,
+    forgetRecent: (path) => ipcRenderer.invoke(IPC.fileForgetRecent, path) as Promise<void>,
   },
   reference: {
     mesh: (referenceId) =>

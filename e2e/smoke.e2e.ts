@@ -6,7 +6,7 @@
 // UI selectors are roles and accessible names (docs/conventions/ui.md#testing).
 // Doc: docs/conventions/testing.md#end-to-end
 import { execFile } from 'node:child_process'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { answerMessageBoxes, askedMessageBoxes, expect, launchApp, test } from './app.fixture'
@@ -322,6 +322,10 @@ test('the native title has the version; window bounds and the project folder sur
       window: { bounds, maximized: false, fullScreen: false },
       dialogFolders: { project: folder },
       recentRunFiles: [],
+      // DF114: the saved project (its path resolved: /private/var on macOS)
+      recentProjects: [
+        { path: await realpath(join(folder, 'Lid.dfyom')), openedAt: expect.any(Number) },
+      ],
     })
   await app.close()
 

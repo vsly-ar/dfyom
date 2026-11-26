@@ -1,6 +1,7 @@
 // The native application menu (ui.md decision 12): the macOS app menu (with Settings… Cmd+,), File
 // (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library and Shape Editor), Help (with
-// Connect an agent…, Open-source licences) with accelerators. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
+// Connect an agent…, Open-source licences) with accelerators. File → Open Recent lists the recent
+// projects (DF114) and opens one like a file from Finder. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
 // Without any window (macOS), New / Open open an empty window; other items do nothing.
@@ -21,6 +22,15 @@ export interface MenuHooks {
   readonly openLibrary: () => void
   /** Help → Open-source licences: the notices window (src/main/licences-window.ts, PK1). */
   readonly openLicences?: () => void
+  /**
+   * File → Open Recent (DF114): the recent projects, newest first; `open` routes a file like one
+   * from Finder, `clear` empties the list.
+   */
+  readonly recent?: {
+    readonly items: readonly { readonly label: string; readonly path: string }[]
+    open(path: string): void
+    clear(): void
+  }
   /** File → Run gCode file… (DF93): main asks for the file and picks the window. */
   readonly openRunFile?: () => void
   /**
@@ -45,6 +55,24 @@ export function sendMenuAction(
     if (TO_FRONT.includes(action) && win.isVisible() && !win.isFocused()) win.focus()
     win.webContents.send(IPC.menuAction, action)
   } else if (WITHOUT_WINDOW.includes(action)) noWindow()
+}
+
+/** File → Open Recent (DF114): disabled while the list is empty. */
+function openRecent(recent: MenuHooks['recent']): MenuItemConstructorOptions {
+  const items = recent?.items ?? []
+  if (recent === undefined || items.length === 0)
+    return { label: 'Open Recent', enabled: false, submenu: [] }
+  return {
+    label: 'Open Recent',
+    submenu: [
+      ...items.map((i): MenuItemConstructorOptions => ({
+        label: i.label,
+        click: () => recent.open(i.path),
+      })),
+      { type: 'separator' },
+      { label: 'Clear Menu', click: () => recent.clear() },
+    ],
+  }
 }
 
 const NO_HOOKS: MenuHooks = { noWindow: () => {}, openLibrary: () => {} }
@@ -92,6 +120,7 @@ export function menuTemplate(
       submenu: [
         item('New project…', 'project.new', 'CmdOrCtrl+N'),
         item('Open project…', 'project.open', 'CmdOrCtrl+O'),
+        openRecent(hooks.recent),
         { type: 'separator' },
         item('Save', 'project.save', 'CmdOrCtrl+S'),
         item('Save as…', 'project.saveAs', 'CmdOrCtrl+Shift+S'),

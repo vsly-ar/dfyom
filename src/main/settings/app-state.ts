@@ -1,5 +1,6 @@
 // App state the main process remembers between runs but never shows as a setting: the last
-// window's bounds and the last folder of each kind of file dialog. Written to
+// window's bounds, the last folder of each kind of file dialog and the recent files (gCode runs,
+// projects). Written to
 // `<appData>/app-state.json` (atomic, serialized, debounced); main-only, never pushed to windows
 // and not reachable by agents. Doc: docs/conventions/ui.md#remembered-window-state-and-dialog-folders
 import { join } from 'node:path'
@@ -28,6 +29,16 @@ export type DialogKind = (typeof DIALOG_KINDS)[number]
 /** How many recently run gCode files are remembered (DF93). */
 export const RECENT_RUN_FILES = 8
 
+/** How many recently opened or saved projects are remembered (DF114). */
+export const RECENT_PROJECTS = 8
+
+/** A recently opened or saved project file and when (epoch ms; DF114). */
+export const RecentProjectSchema = z.object({
+  path: z.string().min(1),
+  openedAt: z.number().int().nonnegative(),
+})
+export type RecentProject = Readonly<z.output<typeof RecentProjectSchema>>
+
 const RectSchema = z.object({
   x: z.number().int(),
   y: z.number().int(),
@@ -53,6 +64,11 @@ export const AppStateSchema = z.object({
   dialogFolders: z.record(z.string(), z.string().min(1)).default({}).catch({}),
   /** External gCode files run lately, newest first (DF93, docs/modes/run.md#run-an-external-g-code-file-df93). */
   recentRunFiles: z.array(z.string().min(1)).max(RECENT_RUN_FILES).default([]).catch([]),
+  /**
+   * Project files opened or saved lately, newest first (DF114, the start panel's "Recent projects"
+   * and File → Open Recent: docs/conventions/ui.md#project-files).
+   */
+  recentProjects: z.array(RecentProjectSchema).max(RECENT_PROJECTS).default([]).catch([]),
 })
 export type AppState = Readonly<z.output<typeof AppStateSchema>>
 
@@ -72,6 +88,12 @@ export interface AppStateStore {
   rememberRunFile(path: string): void
   /** DF93: drops `path` from the recent gCode files (it is gone). */
   forgetRunFile(path: string): void
+  /** DF114: puts `path` first in the recent projects, opened at `at` (at most `RECENT_PROJECTS`). */
+  rememberProject(path: string, at: number): void
+  /** DF114: drops `path` from the recent projects (gone, or removed by the user). */
+  forgetProject(path: string): void
+  /** DF114: File → Open Recent → Clear Menu. */
+  clearProjects(): void
   /** Writes a pending change now and resolves when every write has finished (tests, quit). */
   flush(): Promise<void>
 }
@@ -156,6 +178,21 @@ export function createAppStateStore(o: {
     forgetRunFile(path) {
       if (!current.recentRunFiles.includes(path)) return
       change({ ...current, recentRunFiles: current.recentRunFiles.filter((p) => p !== path) })
+    },
+    rememberProject(path, at) {
+      const next = [
+        { path, openedAt: at },
+        ...current.recentProjects.filter((p) => p.path !== path),
+      ]
+      change({ ...current, recentProjects: next.slice(0, RECENT_PROJECTS) })
+    },
+    forgetProject(path) {
+      if (!current.recentProjects.some((p) => p.path === path)) return
+      change({ ...current, recentProjects: current.recentProjects.filter((p) => p.path !== path) })
+    },
+    clearProjects() {
+      if (current.recentProjects.length === 0) return
+      change({ ...current, recentProjects: [] })
     },
     flush() {
       if (timer !== undefined) {
