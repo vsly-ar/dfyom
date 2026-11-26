@@ -30,12 +30,15 @@ import { OperationIdSchema, PartIdSchema } from './part.dto'
 import {
   definitionOf,
   itemToDTO,
+  lookupInDtos,
   mapItem,
   requirePort,
   resolveShape,
   shapeFromDTO,
   shapeName,
   shapeSummary,
+  withOffsetSources,
+  type ShapeLookup,
 } from './shape'
 import {
   ShapeDtoSchema,
@@ -48,7 +51,7 @@ import {
   type ShapeOp,
   type ShapeItemDTO,
 } from './shape.dto'
-import { featuresUsingShape, operationsUsingShape } from './shape-users'
+import { featuresUsingShape, operationsUsingShape, shapesOffsetting } from './shape-users'
 import { SurfaceTable } from './surfaces'
 import { ABSOLUTE_PATH } from './reference-commands'
 import { sectionShapeItems, svgShapeItems } from './shape-import'
@@ -210,14 +213,36 @@ function nextShapeNumber(shapes: readonly ShapeDTO[]): number {
   return max + 1
 }
 
-/** Resolves the items (the shape's invariants) and returns their DTOs. */
+/**
+ * Resolves the items of shape `self` (the shape's invariants, offset sources from the part's
+ * `shapes`) and returns their DTOs. The shapes offsetting `self` through any chain are resolved
+ * again with the new items: one that would no longer resolve refuses the edit, its issues at
+ * `shapes.<id>.items.<n>.<param>` (docs/modes/design-llm-first.md#offset-item).
+ */
 function settleItems(
   port: Region2dPort,
   items: readonly ShapeItem<Quantity>[],
   where: string,
+  shapes: readonly ShapeDTO[],
+  self: string,
 ): AppResult<ShapeItemDTO[]> {
-  const r = resolveShape(port, definitionOf(items))
+  const stored = lookupInDtos(shapes)
+  const mine = definitionOf(items)
+  const lookup: ShapeLookup = (id) => (id === self ? mine : stored(id))
+  const r = resolveShape(port, withOffsetSources(mine, lookup, new Set([self])))
   if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+  for (const id of shapesOffsetting({ shapes }, self)) {
+    const def = lookup(id)
+    if (def === undefined) continue
+    const d = resolveShape(port, withOffsetSources(def, lookup, new Set([id])))
+    if (d.isErr())
+      return Err(
+        d
+          .unwrapErr()
+          .prefixIssues('shapes', id)
+          .withContext(where, { dependant: id, offsets: self }),
+      )
+  }
   return Ok(items.map(itemToDTO))
 }
 
@@ -251,10 +276,10 @@ const shapeAdd = defineCommand({
       shapeResolver(loaded),
     )
     if (items.isErr()) return Err(items.unwrapErr().withContext(where))
-    const dtos = settleItems(port, items.unwrap(), where)
-    if (dtos.isErr()) return dtos
     const n = nextShapeNumber(shapes)
     const shapeId = `shape${n}`
+    const dtos = settleItems(port, items.unwrap(), where, shapes, shapeId)
+    if (dtos.isErr()) return dtos
     draftShapes(draft, args.partId).push({
       id: shapeId,
       name: args.name ?? shapeName(n),
@@ -291,7 +316,7 @@ const shapeUpdate = defineCommand({
         shapeResolver(loaded),
       )
       if (items.isErr()) return Err(items.unwrapErr().withContext(where))
-      const dtos = settleItems(port, items.unwrap(), where)
+      const dtos = settleItems(port, items.unwrap(), where, shapes, args.shapeId)
       if (dtos.isErr()) return dtos
       target.items = dtos.unwrap()
     }
@@ -307,6 +332,8 @@ const ITEM_FIELDS: Record<ShapeItem<unknown>['kind'], readonly string[]> = {
   obround: ['center', 'length', 'width', 'rotation'],
   polygon: ['center', 'sides', 'diameter', 'across', 'cornerRadius', 'rotation'],
   path: ['start', 'segments', 'closed', 'fillets'],
+  // the source shape is changed by design.shape.update (`shapeId` names the edited shape here)
+  offset: ['distance', 'direction'],
 }
 
 /** Every item field, optional (equal names share one schema); `kind` is not changeable. */
@@ -314,7 +341,9 @@ const ITEM_UPDATE_ARGS = (() => {
   const out: Record<string, z.ZodType> = {}
   for (const option of (ShapeItemArgSchema as unknown as { options: z.ZodObject[] }).options)
     for (const [k, s] of Object.entries(option.shape))
-      if (k !== 'kind' && out[k] === undefined) out[k] = (s as z.ZodType).optional()
+      // an offset's `shapeId` (its source) would shadow the edited shape's id
+      if (k !== 'kind' && k !== 'shapeId' && out[k] === undefined)
+        out[k] = (s as z.ZodType).optional()
   return out
 })()
 
@@ -406,7 +435,7 @@ const itemUpdate = defineCommand({
       if (l.isErr()) return Err(l.unwrapErr().withContext(where))
       all.push(l.unwrap())
     }
-    const dtos = settleItems(port, all, where)
+    const dtos = settleItems(port, all, where, shapes, args.shapeId)
     if (dtos.isErr()) return dtos
     draftShapes(draft, args.partId)[index.unwrap()]!.items[n] = dtos.unwrap()[n]!
     return withWarnings({}, loaded, loaded.part.operations, ctx, where)
@@ -429,17 +458,19 @@ const shapeRemove = defineCommand({
     const shapes = l.dto.shapes ?? []
     const index = findShape(shapes, args.shapeId, where)
     if (index.isErr()) return index
-    const users = operationsUsingShape(l.dto, args.shapeId)
+    const users = operationsUsingShape(l.dto, args.shapeId, false)
+    // shapes with an offset item on it (design-llm-first.md § Offset item)
+    const offsets = shapesOffsetting(l.dto, args.shapeId, false)
     // Clones whose `along` row follows the shape (F6)
     const features = featuresUsingShape(l.dto, args.shapeId)
     // split lines along the shape (split parts 4e)
     const lines = (l.dto.split?.lines ?? []).flatMap((x, i) =>
       'shape' in x && x.shape === args.shapeId ? [i] : [],
     )
-    if (users.length + features.length + lines.length > 0)
+    if (users.length + features.length + lines.length + offsets.length > 0)
       return fail(
         'design.referenced',
-        `${args.shapeId} is used by ${[...users, ...features, ...lines.map((i) => `split line ${i + 1}`)].join(', ')}`,
+        `${args.shapeId} is used by ${[...users, ...features, ...offsets, ...lines.map((i) => `split line ${i + 1}`)].join(', ')}`,
         {
           issues: [
             ...users.map((id) => ({
@@ -454,6 +485,12 @@ const shapeRemove = defineCommand({
               message: `follows ${args.shapeId} (Clones along, pattern cell)`,
               params: { featureId: id, shapeId: args.shapeId },
             })),
+            ...offsets.map((id) => ({
+              path: ['shapes', id, 'items'],
+              rule: 'referenced',
+              message: `offsets ${args.shapeId}`,
+              params: { shapeId: id, source: args.shapeId },
+            })),
             ...lines.map((i) => ({
               path: ['split', 'lines', i],
               rule: 'referenced',
@@ -462,7 +499,7 @@ const shapeRemove = defineCommand({
             })),
           ],
           where,
-          data: { dependants: [...users, ...features] },
+          data: { dependants: [...users, ...features, ...offsets] },
         },
       )
     const list = draftShapes(draft, args.partId)
@@ -551,10 +588,10 @@ const shapeConvert = defineCommand({
     })
     const bad = errors.find((r) => r.isErr())
     if (bad !== undefined) return Err(bad.unwrapErr().withContext(where))
-    const dtos = settleItems(port, [item], where)
-    if (dtos.isErr()) return dtos
     const n = nextShapeNumber(shapes)
     const shapeId = `shape${n}`
+    const dtos = settleItems(port, [item], where, shapes, shapeId)
+    if (dtos.isErr()) return dtos
     draftShapes(draft, args.partId).push({ id: shapeId, name: shapeName(n), items: dtos.unwrap() })
     // the operation now places the shape: same anchor point, anchor and rotation, so the placed
     // box (and the feature) stays where it was (shapes.md#implementation-k3)
@@ -762,9 +799,9 @@ const shapeImport = defineCommand({
       for (const [k, s] of m.shapes.entries()) {
         const items = sectionShapeItems(s.items, loaded.units)
         if (items.isErr()) return Err(items.unwrapErr().withContext(where))
-        const dtos = settleItems(port, items.unwrap(), where)
-        if (dtos.isErr()) return dtos
         const id = `shape${n++}`
+        const dtos = settleItems(port, items.unwrap(), where, shapes, id)
+        if (dtos.isErr()) return dtos
         const name = (k === 0 ? base : `${base} ${k + 1}`).slice(0, NAME_MAX)
         added.push({ id, name, items: dtos.unwrap() })
         rows.push({
@@ -807,7 +844,7 @@ const shapeImport = defineCommand({
     for (const s of prepared.svg.shapes) {
       const items = svgShapeItems(s, loaded.units)
       if (items.isErr()) return Err(items.unwrapErr().withContext(where))
-      const dtos = settleItems(port, items.unwrap(), where)
+      const dtos = settleItems(port, items.unwrap(), where, shapes, `shape${n}`)
       if (dtos.isErr()) return Err(dtos.unwrapErr().withContext(where, { shape: s.name }))
       const name = s.name.trim().slice(0, NAME_MAX)
       added.push({
@@ -858,8 +895,13 @@ const IssueSchema = z.object({
 })
 
 /** The resolved summary, or the issues of a stored shape that no longer resolves. */
-function resolved(port: Region2dPort, s: ShapeDTO) {
-  const r = shapeFromDTO(s).andThen((m) => resolveShape(port, definitionOf(m.items)))
+function resolved(port: Region2dPort, s: ShapeDTO, shapes: readonly ShapeDTO[]) {
+  const r = shapeFromDTO(s).andThen((m) =>
+    resolveShape(
+      port,
+      withOffsetSources(definitionOf(m.items), lookupInDtos(shapes), new Set([s.id])),
+    ),
+  )
   if (r.isOk()) return { resolved: shapeSummary(r.unwrap()) }
   const e = r.unwrapErr()
   return {
@@ -900,7 +942,7 @@ const shapeList = defineQuery({
       shapes: shapes
         .filter((s) => s.owner === undefined)
         .map((s) => {
-          const r = resolved(port, s).resolved
+          const r = resolved(port, s, shapes).resolved
           return {
             id: s.id,
             name: s.name,
@@ -932,7 +974,11 @@ const shapeGet = defineQuery({
     const index = findShape(shapes, args.shapeId, where)
     if (index.isErr()) return index
     const s = shapes[index.unwrap()]!
-    return Ok({ shape: s, usedBy: operationsUsingShape(loaded.dto, s.id), ...resolved(port, s) })
+    return Ok({
+      shape: s,
+      usedBy: operationsUsingShape(loaded.dto, s.id),
+      ...resolved(port, s, shapes),
+    })
   },
 })
 

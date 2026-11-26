@@ -43,6 +43,8 @@ export function useShapeDrag(
   partId: string,
   shape: ShapeDTO | undefined,
   port: Region2dPort | undefined,
+  /** The part's shapes: the sources of offset items. */
+  shapes?: readonly ShapeDTO[],
 ): (e: ShapeDragEvent) => void {
   const call = useCommand()
   const cancelGesture = useCancelGesture()
@@ -114,7 +116,7 @@ export function useShapeDrag(
         g.stepMm = e.stepMm
         s.setShapePreview({ shapeId: g.dto.id, index: g.index, item: e.item })
         if (port !== undefined) {
-          const def = definitionNumbers(g.dto.items)
+          const def = definitionNumbers(g.dto.items, shapes ?? [], g.dto.id)
           if (def !== undefined) {
             def[g.index] = e.item
             const r = resolveShape(port, def)
@@ -152,6 +154,6 @@ export function useShapeDrag(
       s.setShapeIssues(null)
       void g.chain.then(() => (g.sent ? cancelGesture(g.id) : undefined))
     },
-    [port, flush, cancelGesture, ui],
+    [port, shapes, flush, cancelGesture, ui],
   )
 }

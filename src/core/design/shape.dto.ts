@@ -33,6 +33,9 @@ export type ShapeOp = (typeof SHAPE_OPS)[number]
 /** A polygon's `diameter` is measured across its corners (default) or across its flats. */
 export const POLYGON_ACROSS = ['corners', 'flats'] as const
 export type PolygonAcross = (typeof POLYGON_ACROSS)[number]
+/** An offset item grows (`outward`) or shrinks (`inward`) its source (design-llm-first.md DL-A). */
+export const OFFSET_DIRECTIONS = ['outward', 'inward'] as const
+export type OffsetDirection = (typeof OFFSET_DIRECTIONS)[number]
 
 /** Limits that keep a record and a command bounded (the SVG import limit is 20 000 elements). */
 export const SHAPE_ITEMS_MAX = 1000
@@ -99,6 +102,26 @@ export type ShapeItem<Q> =
        */
       levels?: number | number[] | undefined
     }
+  | {
+      /**
+       * Another named shape of the part offset by `distance` (docs/modes/design-llm-first.md#offset-item):
+       * stores the reference, so the item follows edits of the source.
+       */
+      kind: 'offset'
+      op: ShapeOp
+      shapeId: string
+      distance: Q
+      direction: OffsetDirection
+      /**
+       * Resolver stage only (never stored): the source's definition inlined by
+       * `withOffsetSources` (shape.ts), or why it could not be (no such shape, a cycle). It is
+       * part of the definition, so caches and staleness key on the source too.
+       */
+      source?: OffsetSource | undefined
+    }
+
+/** An offset item's inlined source: its definition (numbers), or the refusal rule. */
+export type OffsetSource = ShapeItem<number>[] | 'unknownShape' | 'shapeCycle'
 
 export type ShapeItemKind = ShapeItem<unknown>['kind']
 
@@ -195,6 +218,13 @@ function itemSchema(q: (kind: QuantityField) => z.ZodType, mode: 'dto' | 'args')
               .optional(),
           }
         : {}),
+    }),
+    z.object({
+      kind: z.literal('offset'),
+      op,
+      shapeId: ShapeIdSchema.describe('Source shape; follows its edits'),
+      distance: len(),
+      direction: z.enum(OFFSET_DIRECTIONS),
     }),
   ])
 }

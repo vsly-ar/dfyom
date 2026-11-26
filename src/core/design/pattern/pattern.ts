@@ -848,7 +848,10 @@ export function patternFacts(
   const add = (sid: string) => {
     if (refs.has(sid)) return
     refs.add(sid)
-    const rec = shapes.find((s) => s.id === sid)?.pattern
+    const shape = shapes.find((s) => s.id === sid)
+    // a named shape's offset sources (design-llm-first.md § Offset item)
+    for (const item of shape?.items ?? []) if (item.kind === 'offset') add(item.shapeId)
+    const rec = shape?.pattern
     if (rec === undefined) return
     if ('shapeId' in rec.cell) add(rec.cell.shapeId)
     if (rec.area !== undefined) add(rec.area.shapeId)

@@ -570,6 +570,10 @@ export function itemChain(
       elements = pathChain(item, base, issues)
       break
     }
+    case 'offset':
+      // a region of its source, resolved by shape.ts (design-llm-first.md § Offset item)
+      issue(issues, base, 'offsetNoChain', 'an offset item is not one loop of its own')
+      return undefined
   }
   if (elements === undefined || issues.length > before) return undefined
   if (!closed) return { loop: { elements }, closed }

@@ -7,12 +7,7 @@
 // Doc: docs/conventions/ui.md#shape-editor, #reordering-lists-d45, #import-svg-where-it-is-looked-for-df49,
 // docs/modes/design-v0.3.md#shape-definition
 import { useRef, useState } from 'react'
-import type {
-  ShapeDTO,
-  ShapeItemDTO,
-  ShapeItemKind,
-  ShapeOp,
-} from '../../../../core/design/shape.dto'
+import type { ShapeDTO, ShapeItemDTO, ShapeOp } from '../../../../core/design/shape.dto'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -27,6 +22,7 @@ import {
   ErrorMessage,
   Field,
   FieldIcon,
+  FieldInput,
   IconButton,
   Menu,
   moveItem,
@@ -56,6 +52,7 @@ import {
   itemNumbers,
   itemSources,
   newItemArgs,
+  type DrawnItemKind,
 } from './shape-model'
 import { useCommand } from './useDesign'
 import { useShapeInfo } from './useShapes'
@@ -153,7 +150,7 @@ export function ShapeInspector({
     ;(list[0] as { op: ShapeOp }).op = 'add'
     return sendItems(list, Math.max(0, Math.min(index, list.length - 1)))
   }
-  const addItem = (kind: ShapeItemKind) =>
+  const addItem = (kind: DrawnItemKind) =>
     void sendItems([...sources(), newItemArgs(kind, part.units)], shape.items.length)
 
   const ctx: ItemEditContext = {
@@ -286,6 +283,11 @@ export function itemSummaryText(dto: ShapeItemDTO, units: DesignPart['units']): 
       return t.itemSummary({ kind: 'polygon', sides: n.sides, diameter: n.diameter }, units)
     case 'path':
       return t.itemSummary({ kind: 'path', segments: n.segments.length, closed: n.closed }, units)
+    case 'offset':
+      return t.itemSummary(
+        { kind: 'offset', distance: n.distance, direction: n.direction, source: n.shapeId },
+        units,
+      )
   }
 }
 
@@ -622,6 +624,36 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
             />
           </Field>
           {closingLine ? <StartFillet ctx={ctx} /> : null}
+        </>
+      )
+    }
+    case 'offset': {
+      // the source is changed by replacing the item (design.shape.update); "Offset…" is task U3
+      const source = ctx.part.dto.shapes?.find((s) => s.id === item.shapeId)
+      return (
+        <>
+          <Field label={t.offsetSource} readOnly info={t.offsetSourceTip}>
+            <FieldInput readOnly value={source?.name ?? item.shapeId} />
+          </Field>
+          <ItemQuantity
+            ctx={ctx}
+            path={['distance']}
+            stepKind="small"
+            label={t.distance}
+            icon="length"
+          />
+          <Field label={t.direction} kind="toggle">
+            <SegmentedControl
+              label={t.direction}
+              size="sm"
+              options={[
+                { value: 'outward', label: t.outward },
+                { value: 'inward', label: t.inward },
+              ]}
+              value={item.direction}
+              onValueChange={(direction) => ctx.send({ direction })}
+            />
+          </Field>
         </>
       )
     }

@@ -1027,6 +1027,10 @@ function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>
     // the cell, (patterns P2) the boundary shape and (P4) the pattern below; an engraving's
     // motif shapes and boundary (engraved-patterns.md E3)
     const refs: [string, string][] = []
+    // a named shape's offset sources (design-llm-first.md § Offset item), at items.<n>.shapeId
+    s.items.forEach((item, n) => {
+      if (item.kind === 'offset') refs.push([`items.${n}`, item.shapeId])
+    })
     if (p !== undefined) {
       if ('shapeId' in p.cell) refs.push(['cell', p.cell.shapeId])
       if (p.area !== undefined) refs.push(['area', p.area.shapeId])
@@ -1042,11 +1046,13 @@ function patternCells(out: Map<string, NamedShape>, dto: Pick<PartDTO, 'shapes'>
       if (k < 0)
         return fail(
           'input.malformed',
-          `${s.id} takes shape ${id} as its ${field === 'area' ? 'boundary' : field}, which the part does not have`,
+          `${s.id} takes shape ${id} as its ${field === 'area' ? 'boundary' : field.startsWith('items.') ? 'offset source' : field}, which the part does not have`,
           {
             issues: [
               {
-                path: ['shapes', s.id, p !== undefined ? 'pattern' : 'engraving', field, 'shapeId'],
+                path: field.startsWith('items.')
+                  ? ['shapes', s.id, 'items', Number(field.slice('items.'.length)), 'shapeId']
+                  : ['shapes', s.id, p !== undefined ? 'pattern' : 'engraving', field, 'shapeId'],
                 rule: 'unknownShape',
                 message: 'no such shape in the part',
               },

@@ -1,7 +1,7 @@
 // User-facing strings of the Shape UI (task U1): the navigator's Shapes group, the Shape Editor
 // (item list, fields, segment table, flat view, handles) and the SVG import report. Terms from
 // docs/glossary.md. Doc: docs/conventions/ui.md#shapes-v03, #internationalization
-import type { ShapeItemKind, ShapeOp } from '../../../core/design/shape.dto'
+import type { OffsetDirection, ShapeItemKind, ShapeOp } from '../../../core/design/shape.dto'
 import type { UnitSystem } from '../../../core/project/document'
 
 const fmt = (n: number, digits: number): string => n.toFixed(digits)
@@ -25,6 +25,7 @@ const KIND: Record<ShapeItemKind, string> = {
   obround: 'Obround',
   polygon: 'Polygon',
   path: 'Path',
+  offset: 'Offset',
 }
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
@@ -106,7 +107,8 @@ export const shapeMessages = {
         | { kind: 'rectangle' | 'obround'; length: number; width: number }
         | { kind: 'circle'; diameter: number }
         | { kind: 'polygon'; sides: number; diameter: number }
-        | { kind: 'path'; segments: number; closed: boolean },
+        | { kind: 'path'; segments: number; closed: boolean }
+        | { kind: 'offset'; distance: number; direction: OffsetDirection; source: string },
       units: UnitSystem,
     ): string => {
       switch (item.kind) {
@@ -119,6 +121,8 @@ export const shapeMessages = {
           return `Polygon ${item.sides} sides Ø ${short(item.diameter, units)}`
         case 'path':
           return `${item.closed ? 'Path' : 'Open path'} · ${plural(item.segments, 'segment')}`
+        case 'offset':
+          return `Offset ${short(item.distance, units)} ${item.direction} · ${item.source}`
       }
     },
     fields: 'Item',
@@ -136,6 +140,12 @@ export const shapeMessages = {
     startX: 'Start X',
     startY: 'Start Y',
     closed: 'Closed',
+    offsetSource: 'Source',
+    offsetSourceTip: 'The shape this item offsets; it follows edits of that shape.',
+    distance: 'Distance',
+    direction: 'Direction',
+    outward: 'Outward',
+    inward: 'Inward',
     startFillet: 'Fillet at start',
     noneZero: '0',
     summary: 'Shape',
