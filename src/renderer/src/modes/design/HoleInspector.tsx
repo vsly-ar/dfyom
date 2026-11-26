@@ -68,7 +68,7 @@ import {
   type HoleType,
 } from './hole-view'
 import { NameField } from './NameField'
-import { placeErrors, type FieldError } from './OperationFields'
+import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { sameTool, ToolField } from './ToolField'
 import {
   axisNames,
@@ -515,7 +515,7 @@ export function HoleInspector({
     <div ref={rootRef} className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField
           label={t.name}
           name={feature.name}

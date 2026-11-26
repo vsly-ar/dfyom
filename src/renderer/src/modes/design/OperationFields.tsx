@@ -13,7 +13,8 @@
 import { useEffect } from 'react'
 import type { ConstructionEntry } from '../../../../core/design/evaluation'
 import type { FieldKind } from '../../../../core/design/operation'
-import type { OperationDTO } from '../../../../core/design/part.dto'
+import { partIssueText } from '../../../../core/design/issue-text'
+import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import { derivedLength } from '../../../../core/design/hole'
 import { STOCK_FACE } from '../../../../core/geometry/face'
 import { Rational } from '../../../../core/quantity/rational'
@@ -120,9 +121,15 @@ export interface OperationFieldsContext {
   readonly recommended?: Readonly<Record<string, { source: string; text: string }>> | undefined
 }
 
+/** Issue paths that start here name another item of the part, not a field of the edited one. */
+const ITEM_PATHS: ReadonlySet<unknown> = new Set(['operations', 'features', 'shapes'])
+
 /**
  * A failed update's issues: those at a field of the operation show there, the rest at the top
- * (ui.md#errors); `summary` is set when something is left for the top.
+ * (ui.md#errors); `summary` is set when something is left for the top. An issue at another item
+ * of the part (`shapes.<id>.items.0.shapeId`: an offset's source the re-anchoring could not load,
+ * X2-7) is left for the top, which says it in words (`refusalText`), never dropped at a path no
+ * field shows.
  */
 export function placeErrors(
   error: AppErrorData,
@@ -131,13 +138,24 @@ export function placeErrors(
   const mine: FieldError[] = []
   const rest: Issue[] = []
   for (const issue of error.issues) {
+    const other = ITEM_PATHS.has(issue.path[0])
     const p = issue.path.join('.')
-    const at = p.length > 0 && !p.startsWith('operations.') ? p : path
-    if (at !== undefined && issue.path[0] !== 'operations')
-      mine.push({ path: at, text: sentence(issue.message) })
+    const at = p.length > 0 ? p : path
+    if (at !== undefined && !other) mine.push({ path: at, text: sentence(issue.message) })
     else rest.push(issue)
   }
   return { errors: mine, summary: mine.length === 0 || rest.length > 0 ? error : undefined }
+}
+
+/**
+ * The top message of a refused change: "The change was not applied." and each issue no field
+ * shows, its item by name ("Section 20 mm item 1 shape id: no such shape in the part", X2-7).
+ */
+export function refusalText(summary: AppErrorData, part: PartDTO): string {
+  const why = summary.issues
+    .filter((i) => ITEM_PATHS.has(i.path[0]))
+    .map((i) => sentence(partIssueText(part, i)).replace(/([^.])$/, '$1.'))
+  return [designMessages.inspector.commandFailed, ...why].join(' ')
 }
 
 /**

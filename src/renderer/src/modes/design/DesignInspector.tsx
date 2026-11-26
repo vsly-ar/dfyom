@@ -71,6 +71,7 @@ import type { ShapeDTO } from '../../../../core/design/shape.dto'
 import {
   OperationFields,
   placeErrors,
+  refusalText,
   warningPath,
   type FieldError,
   type OperationFieldsContext,
@@ -570,7 +571,7 @@ function OperationInspector({
     <div className={styles['inspector']}>
       <PanelHeader title={op.name} itemId={op.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />
         <OperationFields ctx={ctx} tool={<ToolField part={part} op={op} warnings={opWarnings} />} />
         {unplaced.length > 0 ? (

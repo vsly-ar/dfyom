@@ -42,7 +42,7 @@ import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
-import { placeErrors, type FieldError } from './OperationFields'
+import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
 import { PatternPresetsDialog } from './PatternPresetsDialog'
 import { adjustedNote, RoundField } from './RoundField'
@@ -322,7 +322,7 @@ export function PatternInspector({
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
-        {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
+        {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField
           label={t.name}
           name={feature.name}

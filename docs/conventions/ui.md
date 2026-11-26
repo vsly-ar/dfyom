@@ -487,6 +487,7 @@ How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error
 
 - Message text: the catalogue in `messages/` maps `code` (and issue `rule`) to a friendly sentence with `params` formatted in the project unit system; fallback is the registry's `userMessage` ([codes.ts](../../src/shared/errors/codes.ts)). The developer-facing `message` and the frames are only in an "Details" expander with a "Copy details" button (for bug reports).
 - Every message says what happened, why if known, and what to do next.
+- **An issue at another item** (its path starts at `operations`, `features` or `shapes` of the part: a re-anchoring that cannot load the shape an offset references) is never matched to the edited field, which could not show it: it goes to the summary at the top of the inspector, which says it in words after "The change was not applied.", the item by its name (`partIssueText`; `placeErrors` / `refusalText` in `OperationFields.tsx`, X2-7). Before, such a refusal was dropped.
 
 ### Selection and picking
 

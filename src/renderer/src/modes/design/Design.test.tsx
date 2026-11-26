@@ -11,7 +11,7 @@ import type { PartDTO } from '../../../../core/design/part.dto'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { expectOk } from '../../../../shared/testing/result'
-import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
+import { createFakeBridge, designDispatcher, errorReply, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
 import { revealInInspector } from '../../ui'
 import { dragTo, gripOf, layOutRows } from '../../test/reorder'
@@ -760,6 +760,35 @@ describe('design mode', () => {
       expect(part().operations[0]).toMatchObject({ shape: { anchor: { u: 'centre', v: 'min' } } }),
     )
     await expectNoAxeViolations()
+  })
+
+  it('shows a refusal whose issue is at another item, not at the edited field (X2-7)', async () => {
+    const { user, part, bridge } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    await user.click(within(inspector()).getByRole('button', { name: 'More (Anchor, Rotation)' }))
+    const anchor = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
+    // the re-anchoring that could not load an offset's source shape (X2, fixed in core since)
+    bridge.handle('design.pocket.update', () =>
+      errorReply({
+        code: 'input.malformed',
+        message: 'shapes.shape7.items.0.shapeId: no such shape in the part',
+        issues: [
+          {
+            path: ['shapes', 'shape7', 'items', 0, 'shapeId'],
+            rule: 'unknownShape',
+            message: 'no such shape in the part',
+          },
+        ],
+        frames: [],
+      }),
+    )
+    await user.click(within(anchor).getByRole('radio', { name: 'Front left' }))
+    const alert = await within(inspector()).findByRole('alert')
+    expect(alert).toHaveTextContent(
+      'The change was not applied. A shape items 1 shape id: no such shape in the part.',
+    )
+    expect(part().operations[0]).not.toMatchObject({ shape: { anchor: { u: 'min', v: 'min' } } })
   })
 
   it('disables the anchor picker while the position is a formula, with the reason', async () => {
