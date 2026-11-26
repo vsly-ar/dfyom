@@ -177,6 +177,10 @@ export function updateArgs(
       const depth = { start: src(op.depth.start), end: src(op.depth.end) }
       return { depth: { ...depth, [rest[0]!]: source } }
     }
+    if (head === 'depth' && rest.length > 0 && 'min' in op.depth) {
+      const depth = { min: src(op.depth.min), max: src(op.depth.max) }
+      return { depth: { ...depth, [rest[0]!]: source } }
+    }
   }
   return { [head]: source }
 }
@@ -190,6 +194,7 @@ export function linePathArgs(
     center: [src(p.center[0]), src(p.center[1])],
     ...(p.rotation !== undefined ? { rotation: src(p.rotation) } : {}),
     ...(p.mirror === true ? { mirror: true } : {}),
+    ...(p.scale !== undefined ? { scale: p.scale } : {}),
   }))
 }
 

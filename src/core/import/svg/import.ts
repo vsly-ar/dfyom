@@ -11,19 +11,23 @@
 import { Ok, type AppResult } from '../../../shared/result'
 import type { Vec2 } from '../../geometry/model'
 import {
+  arc,
   chainBounds,
   elementLength,
+  line,
   type Bounds2,
+  type Element,
   type Loop,
   type Path,
 } from '../../geometry/2d/model'
 import { buildChain, emptyStats, type Chain, type ChainStats } from './chain'
 import { fillLoops, type FillRule, type FillSource } from './fill'
-import { elementPointAt, windingNumber } from '../../geometry/2d/measure'
+import { elementPointAt, onLoop, windingNumber } from '../../geometry/2d/measure'
 import { parsePathData, transformSeg, type Seg, type Subpath } from './path-data'
 import { compose, parseTransform, type Affine, type Pt } from './transform'
 import { rootViewport, userLength, type SvgUnit } from './units'
 import { parseXml, svgError, type XmlElement } from './xml'
+import { levelOfRgb, parseColour, parseDataLevel, stopsAt } from './paint'
 
 /** Import limits (docs/architecture/shapes.md#svg-import); beyond them `input.malformed`, rule `svgLimit`. */
 export const SVG_LIMITS = {
@@ -57,10 +61,21 @@ export interface SvgImportOptions {
   readonly limits?: Partial<SvgLimits>
 }
 
-/** A closed loop (`add` counter-clockwise, `subtract` clockwise) or an open path. */
+/**
+ * A closed loop (`add` counter-clockwise, `subtract` clockwise) or an open path. E2
+ * (engraved-patterns.md § SVG encoding): a loop's `level` from its stroke (else its fill) or
+ * `data-level`; an open path's `levels`, one for the path (its stroke) or one per vertex
+ * (`elements.length + 1`, from `data-level` stops, the elements split at the stops). Absent:
+ * no paint read (level 1).
+ */
 export type SvgShapeItem =
-  | { readonly kind: 'loop'; readonly op: 'add' | 'subtract'; readonly loop: Loop }
-  | { readonly kind: 'path'; readonly path: Path }
+  | {
+      readonly kind: 'loop'
+      readonly op: 'add' | 'subtract'
+      readonly loop: Loop
+      readonly level?: number
+    }
+  | { readonly kind: 'path'; readonly path: Path; readonly levels?: number | readonly number[] }
 
 export interface SvgShape {
   /** The element's label (`inkscape:label`) or id, else "Path 2", "Group 3", … */
@@ -151,11 +166,22 @@ const SILENT_TAGS = new Set([
 ])
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
+/**
+ * An element's engraving level (E2): `stops` from `data-level` (one value or stops start → end),
+ * else `open` (its stroke's level) and `closed` (its stroke's, else its fill's). Undefined: none.
+ */
+interface DrawnLevel {
+  readonly stops?: readonly number[]
+  readonly open?: number
+  readonly closed?: number
+}
+
 /** One geometry element after transforms: its subpaths in mm. */
 interface Drawn {
   readonly rule: FillRule
   readonly subpaths: readonly Subpath[]
   readonly ref: string
+  readonly level: DrawnLevel
 }
 
 interface Group {
@@ -177,7 +203,97 @@ interface Inherited {
   readonly ctm: Affine
   readonly rule: FillRule
   readonly hidden: boolean
+  /** Paint properties inherited from groups (E2): `stroke`, `fill`, `data-level`. */
+  readonly paint: Paint
 }
+
+interface Paint {
+  readonly stroke?: string
+  readonly fill?: string
+  readonly dataLevel?: string
+}
+
+/** The paint an element sets over the inherited one (`style` wins over attributes). */
+function paintOf(el: XmlElement, style: Map<string, string>, inh: Paint): Paint {
+  const stroke = prop(el, style, 'stroke') ?? inh.stroke
+  const fill = prop(el, style, 'fill') ?? inh.fill
+  const dataLevel = el.attrs.get('data-level') ?? inh.dataLevel
+  return {
+    ...(stroke === undefined ? {} : { stroke }),
+    ...(fill === undefined ? {} : { fill }),
+    ...(dataLevel === undefined ? {} : { dataLevel }),
+  }
+}
+
+/**
+ * An element's engraving level from its paint (engraved-patterns.md § SVG encoding): `data-level`
+ * wins; else the stroke's colour, and for closed subpaths the fill's when there is no stroke
+ * (an absent fill is black, as SVG paints it). Warnings: `levelInvalid`, `levelWhite`,
+ * `strokeGradientIgnored`, `opacityIgnored`.
+ */
+function levelOf(
+  el: XmlElement,
+  style: Map<string, string>,
+  paint: Paint,
+  w: Walk,
+  ref: string,
+): DrawnLevel {
+  if (paint.dataLevel !== undefined) {
+    const stops = parseDataLevel(paint.dataLevel)
+    if (stops !== undefined) return { stops }
+    w.warnings.push({
+      rule: 'levelInvalid',
+      message: `data-level "${paint.dataLevel}" is not levels 0..1; the colour is used`,
+      element: ref,
+    })
+  }
+  for (const a of ['opacity', 'stroke-opacity', 'fill-opacity'] as const) {
+    const v = prop(el, style, a)
+    if (v !== undefined && Number(v) < 1) {
+      w.warnings.push({
+        rule: 'opacityIgnored',
+        message: `${a} is ignored; the level is read from the opaque colour`,
+        element: ref,
+      })
+      break
+    }
+  }
+  const read = (c: string | undefined): number | undefined => {
+    if (c === undefined || c === 'none') return undefined
+    if (c.startsWith('url(')) {
+      w.warnings.push({
+        rule: 'strokeGradientIgnored',
+        message: 'a gradient paint is ignored for levels',
+        element: ref,
+      })
+      return undefined
+    }
+    const rgb = parseColour(c)
+    if (rgb === undefined) return undefined
+    if (rgb.alpha)
+      w.warnings.push({
+        rule: 'opacityIgnored',
+        message: "a colour's alpha is ignored; the level is read from the opaque colour",
+        element: ref,
+      })
+    return levelOfRgb(rgb)
+  }
+  const stroke = read(paint.stroke)
+  if (stroke !== undefined && stroke < WHITE_LEVEL)
+    w.warnings.push({
+      rule: 'levelWhite',
+      message: 'a white stroke is level 0 (the shallowest)',
+      element: ref,
+    })
+  const fill = stroke === undefined ? read(paint.fill ?? 'black') : undefined
+  return {
+    ...(stroke === undefined ? {} : { open: stroke, closed: stroke }),
+    ...(fill === undefined ? {} : { closed: fill }),
+  }
+}
+
+/** Below this level a stroke is white (invisible on paper): warned (E2 `levelWhite`). */
+const WHITE_LEVEL = 0.005
 
 const bump = (m: Record<string, number>, k: string): void => {
   m[k] = (m[k] ?? 0) + 1
@@ -439,9 +555,10 @@ function walk(el: XmlElement, inh: Inherited, w: Walk, out: Drawn[]): void {
         element: ref,
       })
   }
+  const paint = paintOf(el, style, inh.paint)
   if (GROUP_TAGS.has(tag)) {
     const kids = tag === 'switch' ? el.children.slice(0, 1) : el.children
-    for (const c of kids) walk(c, { ctm, rule, hidden }, w, out)
+    for (const c of kids) walk(c, { ctm, rule, hidden, paint }, w, out)
     return
   }
   if (hidden) {
@@ -459,7 +576,90 @@ function walk(el: XmlElement, inh: Inherited, w: Walk, out: Drawn[]): void {
     segs: s.segs.map((g) => transformSeg(ctm, g)),
   }))
   for (const s of subpaths) w.segments += s.segs.length
-  out.push({ rule, subpaths, ref })
+  out.push({ rule, subpaths, ref, level: levelOf(el, style, paint, w, ref) })
+}
+
+// ── engraving levels (E2) ───────────────────────────────────────────────────────────────────
+
+/** A closed subpath's level: `data-level`'s deepest stop, else its stroke's or fill's level. */
+const closedLevel = (l: DrawnLevel): number | undefined =>
+  l.stops !== undefined ? Math.max(...l.stops) : l.closed
+
+/**
+ * The level of a filled loop: that of the source loop it lies on (a repaired loop: the first
+ * source loop its first element's middle touches), else the deepest of the shape's levels.
+ */
+function loopLevel(
+  loop: Loop,
+  levelled: readonly { loop: Loop; level: number }[],
+): number | undefined {
+  if (levelled.length === 0) return undefined
+  const first = levelled[0]!.level
+  if (levelled.every((l) => l.level === first)) return first
+  const probe = elementPointAt(loop.elements[0]!, 0.5).point
+  const hit = levelled.find((l) => onLoop(l.loop, probe, 1e-6))
+  return hit?.level ?? Math.max(...levelled.map((l) => l.level))
+}
+
+/** Stops closer than this to an element end snap to it instead of splitting (mm). */
+const STOP_SNAP = 1e-3
+
+/** An element split at fraction `u` (0 < u < 1) of its length. */
+function splitElement(e: Element, u: number): [Element, Element] {
+  if (e.kind === 'line') {
+    const p: Vec2 = [e.a[0] + (e.b[0] - e.a[0]) * u, e.a[1] + (e.b[1] - e.a[1]) * u]
+    return [line(e.a, p), line(p, e.b)]
+  }
+  const p = elementPointAt(e, u).point
+  return [arc(e.a, p, e.centre, e.ccw), arc(p, e.b, e.centre, e.ccw)]
+}
+
+/**
+ * An open path item with its levels (engraved-patterns.md § SVG encoding 1–2): `data-level` stops
+ * at even fractions of the path's length (elements split there, so the vertex levels are exact),
+ * one per vertex; else one level for the path, its stroke's. Level 1 everywhere (black, or no
+ * stroke) is left out: it is the default.
+ */
+function openItem(elements: readonly Element[], level: DrawnLevel): SvgShapeItem {
+  const plain: SvgShapeItem = { kind: 'path', path: { elements } }
+  const stops = level.stops
+  if (stops === undefined || stops.length === 1) {
+    const one = stops?.[0] ?? level.open
+    return one === undefined || one === 1 ? plain : { ...plain, levels: one }
+  }
+  if (stops.every((x) => x === 1)) return plain
+  const total = elements.reduce((n, e) => n + elementLength(e), 0)
+  const at = stops.slice(1, -1).map((_, k) => ((k + 1) * total) / (stops.length - 1))
+  const out: Element[] = []
+  let acc = 0
+  let next = 0
+  for (const e of elements) {
+    let rest = e
+    let start = acc
+    const len = elementLength(e)
+    while (next < at.length && at[next]! < acc + len - STOP_SNAP) {
+      const s = at[next]!
+      if (s > start + STOP_SNAP) {
+        const restLen = elementLength(rest)
+        const [a, b] = splitElement(rest, (s - start) / restLen)
+        out.push(a)
+        rest = b
+        start = s
+      }
+      next++
+    }
+    out.push(rest)
+    acc += len
+    // a stop within the snap distance of this element's end is at the vertex
+    while (next < at.length && at[next]! <= acc + STOP_SNAP) next++
+  }
+  const levels: number[] = [stopsAt(stops, 0)]
+  let s = 0
+  for (const e of out) {
+    s += elementLength(e)
+    levels.push(stopsAt(stops, s / total))
+  }
+  return { kind: 'path', path: { elements: out }, levels }
 }
 
 /** UTF-8 byte length (exact only when it might exceed `limit`). */
@@ -535,7 +735,12 @@ export function importSvg(text: string, options: SvgImportOptions = {}): AppResu
   const rootStyle = styleOf(root)
   const rootRule: FillRule =
     prop(root, rootStyle, 'fill-rule') === 'evenodd' ? 'evenodd' : 'nonzero'
-  const base: Inherited = { ctm: view.matrix, rule: rootRule, hidden: false }
+  const base: Inherited = {
+    ctm: view.matrix,
+    rule: rootRule,
+    hidden: false,
+    paint: paintOf(root, rootStyle, {}),
+  }
   const groups: Group[] = []
   const rootName = root.attrs.get('inkscape:label') ?? root.attrs.get('id') ?? 'Drawing'
   if (split === 'file') {
@@ -570,7 +775,8 @@ export function importSvg(text: string, options: SvgImportOptions = {}): AppResu
   let unclosed = 0
   for (const g of groups) {
     const sources: FillSource[] = []
-    const opens: Chain[] = []
+    const opens: { chain: Chain; level: DrawnLevel }[] = []
+    const levelled: { loop: Loop; level: number }[] = []
     for (const d of g.drawn) {
       const loops: Loop[] = []
       for (const s of d.subpaths) {
@@ -583,8 +789,11 @@ export function importSvg(text: string, options: SvgImportOptions = {}): AppResu
             message: 'a subpath without length or area is dropped',
             element: d.ref,
           })
-        } else if (chain.closed) loops.push({ elements: chain.elements })
-        else opens.push(chain)
+        } else if (chain.closed) {
+          loops.push({ elements: chain.elements })
+          const lv = closedLevel(d.level)
+          if (lv !== undefined) levelled.push({ loop: { elements: chain.elements }, level: lv })
+        } else opens.push({ chain, level: d.level })
       }
       if (loops.length > 0) sources.push({ rule: d.rule, loops })
     }
@@ -592,7 +801,10 @@ export function importSvg(text: string, options: SvgImportOptions = {}): AppResu
     repaired += fill.repaired
     dropped += fill.dropped
     unclosed += fill.unclosed
-    const items: SvgShapeItem[] = fill.loops.map((l) => ({ kind: 'loop', op: l.op, loop: l.loop }))
+    const items: SvgShapeItem[] = fill.loops.map((l) => {
+      const level = loopLevel(l.loop, levelled)
+      return { kind: 'loop', op: l.op, loop: l.loop, ...(level === undefined ? {} : { level }) }
+    })
     if (split === 'loop') {
       // each outer loop with the holes directly inside it (the smallest containing outer loop)
       const outers = items.filter((i) => i.kind === 'loop' && i.op === 'add')
@@ -622,7 +834,7 @@ export function importSvg(text: string, options: SvgImportOptions = {}): AppResu
       shapes.push({
         name: items.length > 0 || opens.length > 1 ? `${g.name} path ${k + 1}` : g.name,
         source: { element: g.element },
-        items: [{ kind: 'path', path: { elements: o.elements } }],
+        items: [openItem(o.chain.elements, o.level)],
       }),
     )
   }

@@ -49,8 +49,18 @@ const SvgImportSchema = z.object({
       source: z.object({ element: z.string() }),
       items: z.array(
         z.discriminatedUnion('kind', [
-          z.object({ kind: z.literal('loop'), op: z.enum(['add', 'subtract']), loop: ChainSchema }),
-          z.object({ kind: z.literal('path'), path: ChainSchema }),
+          // E2: levels (engraved-patterns.md § SVG encoding) cross the worker boundary too
+          z.object({
+            kind: z.literal('loop'),
+            op: z.enum(['add', 'subtract']),
+            loop: ChainSchema,
+            level: z.number().optional(),
+          }),
+          z.object({
+            kind: z.literal('path'),
+            path: ChainSchema,
+            levels: z.union([z.number(), z.array(z.number())]).optional(),
+          }),
         ]),
       ),
     }),

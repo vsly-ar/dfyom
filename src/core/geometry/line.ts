@@ -128,34 +128,176 @@ export interface LineChains {
 
 const chainsMemo = new WeakMap<object, LineChains>()
 
+/** What `lineChains` reads of a Line's geometry. */
+export type LineChainsInput = Pick<LineGeometry, 'paths' | 'depth' | 'levels' | 'blend'>
+
+/** The default blend of a level step (mm, engraved-patterns.md § Line operation). */
+export const DEFAULT_LINE_BLEND = 1
+
+/** Whether a Line's depth comes from levels (`{ min, max }`, E2). */
+export const isLevelDepth = (
+  d: LineGeometry['depth'],
+): d is { readonly min: number; readonly max: number } => 'min' in d
+
+const reverseElement = (e: Element): Element =>
+  e.kind === 'line' ? line(e.b, e.a) : arc(e.b, e.a, e.centre, !e.ccw)
+
+/** A profile run backwards (s from the other end). */
+const reverseProfile = (p: LineProfile, L: number): LineProfile => ({
+  s: [...p.s].reverse().map((x) => L - x),
+  d: [...p.d].reverse(),
+})
+
 /**
- * The lines of a Line in its face frame: every loop of a placed region and every open path, each
- * with the depth profile `start` → `end` by arc length; coincident elements removed (the deeper
- * kept; equal: the later dropped), which splits a line into open runs. Cached per operation
- * geometry object.
+ * Every step of a profile (two equal `s` with different depths) turned into a slope over
+ * ±`blend`, clamped to half the pieces on either side (to the next step or the line's end),
+ * engraved-patterns.md § Toolpath. `blend` 0 keeps the steps.
  */
-export function lineChains(op: Pick<LineGeometry, 'paths' | 'depth'>): LineChains {
-  const hit = chainsMemo.get(op)
-  if (hit !== undefined) return hit
-  const raw: { elements: Element[]; closed: boolean }[] = []
-  for (const shape of op.paths) {
+export function blendSteps(p: LineProfile, L: number, blend: number): LineProfile {
+  if (!(blend > EPSILON)) return p
+  const steps: number[] = []
+  for (let k = 1; k < p.s.length; k++)
+    if (Math.abs(p.s[k]! - p.s[k - 1]!) <= EPSILON && Math.abs(p.d[k]! - p.d[k - 1]!) > EPSILON)
+      steps.push(p.s[k]!)
+  if (steps.length === 0) return p
+  const windows = steps.map((sj, i) => {
+    const left = sj - (i === 0 ? 0 : steps[i - 1]!)
+    const right = (i === steps.length - 1 ? L : steps[i + 1]!) - sj
+    const b = Math.min(blend, left / 2, right / 2)
+    return { a: sj - b, b: sj + b, da: depthBefore(p, sj - b), db: profileAt(p, sj + b) }
+  })
+  const s: number[] = []
+  const d: number[] = []
+  let w = 0
+  let used = -1
+  const push = (x: number, y: number) => {
+    if (s.length > 0 && Math.abs(s.at(-1)! - x) <= EPSILON && Math.abs(d.at(-1)! - y) <= EPSILON)
+      return
+    s.push(x)
+    d.push(y)
+  }
+  for (let k = 0; k < p.s.length; k++) {
+    const x = p.s[k]!
+    while (w < windows.length && x > windows[w]!.b + EPSILON) w++
+    const win = windows[w]
+    if (win !== undefined && win.b - win.a > EPSILON && x >= win.a - EPSILON) {
+      // inside the window: its two ends replace every point there
+      if (used !== w) {
+        push(win.a, win.da)
+        push(win.b, win.db)
+        used = w
+      }
+      continue
+    }
+    push(x, p.d[k]!)
+  }
+  return { s, d }
+}
+
+/** The raw lines of a Line with their profiles (before coincident removal and chaining). */
+function rawLines(op: LineChainsInput) {
+  const levelled = isLevelDepth(op.depth) ? op.depth : undefined
+  const depthOf = (level: number): number =>
+    levelled === undefined ? 0 : levelled.min + (levelled.max - levelled.min) * level
+  const out: {
+    elements: Element[]
+    closed: boolean
+    starts: number[]
+    length: number
+    profile: LineProfile
+  }[] = []
+  op.paths.forEach((shape, pi) => {
+    const lv = op.levels?.[pi] ?? null
     const c = shape.contour
+    const raw: { elements: Element[]; closed: boolean }[] = []
     if (c.kind === 'region')
       for (const loop of regionLoops(c.region))
         raw.push({ elements: loop.elements.map((e) => translate(e, shape.center)), closed: true })
     else if (c.kind === 'path')
       raw.push({ elements: c.path.elements.map((e) => translate(e, shape.center)), closed: false })
-  }
-  const lines = raw.map((r) => {
-    const starts: number[] = []
-    let L = 0
-    for (const e of r.elements) {
-      starts.push(L)
-      L += elementLength(e)
+    for (const r of raw) {
+      const starts: number[] = []
+      let L = 0
+      for (const e of r.elements) {
+        starts.push(L)
+        L += elementLength(e)
+      }
+      let profile: LineProfile
+      if (levelled === undefined) {
+        const d = op.depth as { readonly start: number; readonly end: number }
+        profile = { s: [0, L], d: [d.start, d.end] }
+      } else if (lv?.kind === 'path' && !r.closed)
+        profile = { s: lv.u.map((u) => u * L), d: lv.level.map(depthOf) }
+      else {
+        // a loop takes one level (a path's levels on a loop: the deepest)
+        const level = lv === null ? 1 : lv.kind === 'loops' ? lv.level : Math.max(...lv.level)
+        profile = { s: [0, L], d: [depthOf(level), depthOf(level)] }
+      }
+      out.push({ ...r, starts, length: L, profile })
     }
-    const profile: LineProfile = { s: [0, L], d: [op.depth.start, op.depth.end] }
-    return { ...r, starts, length: L, profile }
   })
+  return out
+}
+
+/**
+ * Open lines whose ends meet (within `COINCIDENT_TOLERANCE`, either orientation) chained into
+ * one, greedily in order (engraved-patterns.md § SVG encoding 5): their profiles joined, a level
+ * change at a junction a step (blended afterwards). Loops are kept as they are.
+ */
+function chainOpen(lines: readonly ResolvedLine[]): ResolvedLine[] {
+  const left = lines.filter((l) => !l.closed)
+  const out: ResolvedLine[] = []
+  const rev = (l: ResolvedLine): ResolvedLine => ({
+    elements: [...l.elements].reverse().map(reverseElement),
+    closed: false,
+    length: l.length,
+    profile: reverseProfile(l.profile, l.length),
+  })
+  const join = (a: ResolvedLine, b: ResolvedLine): ResolvedLine => ({
+    elements: [...a.elements, ...b.elements],
+    closed: false,
+    length: a.length + b.length,
+    profile: {
+      s: [...a.profile.s, ...b.profile.s.map((x) => x + a.length)],
+      d: [...a.profile.d, ...b.profile.d],
+    },
+  })
+  while (left.length > 0) {
+    let chain = left.shift()!
+    for (let grew = true; grew;) {
+      grew = false
+      for (let k = 0; k < left.length; k++) {
+        const c = left[k]!
+        const end = chain.elements.at(-1)!.b
+        const start = chain.elements[0]!.a
+        const cs = c.elements[0]!.a
+        const ce = c.elements.at(-1)!.b
+        if (near(end, cs)) chain = join(chain, c)
+        else if (near(end, ce)) chain = join(chain, rev(c))
+        else if (near(start, ce)) chain = join(c, chain)
+        else if (near(start, cs)) chain = join(rev(c), chain)
+        else continue
+        left.splice(k, 1)
+        grew = true
+        break
+      }
+    }
+    out.push(chain)
+  }
+  return [...out, ...lines.filter((l) => l.closed)]
+}
+
+/**
+ * The lines of a Line in its face frame: every loop of a placed region and every open path, each
+ * with its depth profile by arc length (`start` → `end`; or, E2, its levels mapped by
+ * `{ min, max }`); coincident elements removed (the deeper kept; equal: the later dropped), which
+ * splits a line into open runs. With levels (E2) open lines whose ends meet are then chained and
+ * level steps blended over ±`blend`. Cached per operation geometry object.
+ */
+export function lineChains(op: LineChainsInput): LineChains {
+  const hit = chainsMemo.get(op)
+  if (hit !== undefined) return hit
+  const lines = rawLines(op)
   // coincident elements: a grid of their middles, then ends and middle compared
   const GRID = 0.05
   const cells = new Map<string, { li: number; ei: number }[]>()
@@ -235,14 +377,50 @@ export function lineChains(op: Pick<LineGeometry, 'paths' | 'depth'>): LineChain
     }
     flush()
   })
-  const result = { lines: out, coincident }
+  const blend = op.blend ?? DEFAULT_LINE_BLEND
+  const lines2 = isLevelDepth(op.depth)
+    ? chainOpen(out).map((l) => ({ ...l, profile: blendSteps(l.profile, l.length, blend) }))
+    : out
+  const result = { lines: lines2, coincident }
   chainsMemo.set(op, result)
   return result
 }
 
-/** The deepest depth of a Line below its face (mm). */
-export const lineMaxDepth = (op: Pick<LineGeometry, 'depth'>): number =>
-  Math.max(op.depth.start, op.depth.end)
+/** The deepest depth of a Line below its face (mm); with levels (E2), of its resolved lines. */
+export function lineMaxDepth(op: LineChainsInput): number {
+  if (!isLevelDepth(op.depth)) return Math.max(op.depth.start, op.depth.end)
+  const ls = lineChains(op).lines
+  return ls.length === 0 ? op.depth.max : Math.max(...ls.map((l) => profileMax(l.profile)))
+}
+
+/** The shallowest depth of a Line below its face (mm); with levels (E2), of its resolved lines. */
+export function lineMinDepth(op: LineChainsInput): number {
+  if (!isLevelDepth(op.depth)) return Math.min(op.depth.start, op.depth.end)
+  const ls = lineChains(op).lines
+  return ls.length === 0 ? op.depth.min : Math.min(...ls.map((l) => Math.min(...l.profile.d)))
+}
+
+/** `[u, v]` of the deepest place of a Line's resolved lines (the first such profile point). */
+export function lineDeepestPoint(op: LineChainsInput): number[] | undefined {
+  let best: { l: ResolvedLine; s: number; d: number } | undefined
+  for (const l of lineChains(op).lines)
+    l.profile.d.forEach((d, k) => {
+      if (best === undefined || d > best.d + EPSILON) best = { l, s: l.profile.s[k]!, d }
+    })
+  if (best === undefined) return undefined
+  const { l, s } = best as { l: ResolvedLine; s: number }
+  let acc = 0
+  for (const e of l.elements) {
+    const len = elementLength(e)
+    if (s <= acc + len + EPSILON) {
+      const p = elementPoint(e, len > 0 ? Math.min(1, Math.max(0, (s - acc) / len)) : 0)
+      return [p[0], p[1]]
+    }
+    acc += len
+  }
+  const p = elementPoint(l.elements.at(-1)!, 1)
+  return [p[0], p[1]]
+}
 
 /**
  * The groove's width at the face for a depth (research § Tools): V-bit dt + 2 d tan(α/2) up to its

@@ -20,6 +20,7 @@ import {
   type StockGeometry,
 } from './model'
 import { inradius } from './operations'
+import { lineMaxDepth } from './line'
 import { rectangleWallCorner } from './open-sides'
 import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
 
@@ -127,7 +128,7 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
       ? [loopChamferDepth(op) - op.onZ, 'width']
       : [chamferDepth(op) - op.onZ, 'diameter']
   // a Line (engraved-patterns.md E1): its deepest point below the stock face
-  if (op.kind === 'line') return [Math.max(op.depth.start, op.depth.end) - op.onZ, 'depth']
+  if (op.kind === 'line') return [lineMaxDepth(op) - op.onZ, 'depth']
   return op.bottom.kind === 'through'
     ? [op.throughDepth ?? stock.thickness, 'on']
     : [op.bottom.depth - op.onZ, 'depth']

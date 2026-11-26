@@ -566,6 +566,7 @@ export function itemChain(
     }
     case 'path': {
       closed = item.closed
+      levelIssues(item, base, issues)
       elements = pathChain(item, base, issues)
       break
     }
@@ -642,4 +643,74 @@ export function maxCornerRadius(item: ShapeItem<number>, vertex?: number): numbe
     else hi = mid
   }
   return lo
+}
+
+// ── engraving levels (engraved-patterns.md E2) ──────────────────────────────────────────────
+
+/**
+ * Rules of a path's `levels` (engraved-patterns.md § Levels on shapes): each 0..1 (`levelRange`),
+ * one value or one per vertex: `segments.length + 1`, a closed path with a closing line one more
+ * (`levelCount`).
+ */
+function levelIssues(
+  item: Extract<ShapeItem<number>, { kind: 'path' }>,
+  base: Path,
+  issues: Issues,
+) {
+  const lv = item.levels
+  if (lv === undefined) return
+  const values = typeof lv === 'number' ? [lv] : lv
+  values.forEach((v, k) => {
+    if (!(v >= 0 && v <= 1))
+      issue(
+        issues,
+        typeof lv === 'number' ? [...base, 'levels'] : [...base, 'levels', k],
+        'levelRange',
+        'a level is between 0 and 1',
+        { min: 0, max: 1, actual: v },
+      )
+  })
+  if (typeof lv === 'number') return
+  const n = item.segments.length + 1
+  if (lv.length !== n && !(item.closed && lv.length === n + 1))
+    issue(issues, [...base, 'levels'], 'levelCount', 'one level, or one per vertex', {
+      expected: n,
+      actual: lv.length,
+    })
+}
+
+/**
+ * An open path's level profile by arc-length fraction (0 = start, 1 = end): its vertices' levels
+ * at their positions along the path resolved without fillets (fillets barely move the fractions).
+ * Undefined without levels or when the path does not resolve.
+ */
+export function pathLevelProfile(
+  item: Extract<ShapeItem<number>, { kind: 'path' }>,
+): { u: number[]; level: number[] } | undefined {
+  const lv = item.levels
+  if (lv === undefined) return undefined
+  if (typeof lv === 'number') return { u: [0, 1], level: [lv, lv] }
+  const { fillets: _, ...sharp } = item
+  const chain = itemChain(sharp, 0, [])
+  if (chain === undefined) return undefined
+  const vertices: Vec2[] = [item.start, ...item.segments.map((s) => s.to)].map((p): Vec2 => [
+    p[0],
+    p[1],
+  ])
+  const s: number[] = [0]
+  let acc = 0
+  let next = 1
+  for (const e of chain.loop.elements) {
+    acc += elementLength(e)
+    if (next < vertices.length && dist(e.b, vertices[next]!) <= POSITION_EPSILON * 10) {
+      s.push(acc)
+      next++
+    }
+  }
+  const total = acc
+  if (!(total > 0)) return undefined
+  // a closing line's end is vertex 0 again
+  while (s.length < lv.length) s.push(total)
+  const u = s.slice(0, lv.length).map((x) => x / total)
+  return { u, level: [...lv] }
 }

@@ -101,10 +101,18 @@ export function svgShapeItems(s: SvgShape, units: UnitSystem): AppResult<ShapeIt
       ],
     })
   const q = quantities(units)
+  // E2: the importer's levels are kept on the items (level 1, the default, is left out)
+  const withLevels = (
+    item: ShapeItem<number>,
+    levels: number | readonly number[] | undefined,
+  ): ShapeItem<number> =>
+    item.kind !== 'path' || levels === undefined || levels === 1
+      ? item
+      : { ...item, levels: typeof levels === 'number' ? levels : [...levels] }
   const items = s.items.map((it) =>
     it.kind === 'loop'
-      ? toQuantities(pathItem(it.loop.elements, it.op, true), q)
-      : toQuantities(pathItem(it.path.elements, 'add', false), q),
+      ? toQuantities(withLevels(pathItem(it.loop.elements, it.op, true), it.level), q)
+      : toQuantities(withLevels(pathItem(it.path.elements, 'add', false), it.levels), q),
   )
   const all = collect(items)
   return all.isErr() ? Err(all.unwrapErr().withContext('svgShapeItems', { shape: s.name })) : all

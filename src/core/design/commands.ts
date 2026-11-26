@@ -64,7 +64,7 @@ import {
   type GeneralTolerance,
   type Line,
   type LineDepth,
-  type NamedPlacement,
+  type LinePath,
   type Operation,
   type Part,
   type Shape,
@@ -215,6 +215,7 @@ const LinePathArg = z.object({
   center: PointArg,
   rotation: RotationArg,
   mirror: z.literal(true).optional(),
+  scale: z.number().positive().optional(),
 })
 const lineParams = {
   on: SurfaceIdSchema.describe('Default as a pocket'),
@@ -224,8 +225,9 @@ const lineParams = {
     .max(LINE_PATHS_MAX)
     .describe('Placed as a named shape; each loop or open path is a line'),
   depth: z
-    .union([Src, z.object({ start: Src, end: Src })])
-    .describe('Default 0.5 mm; {start, end}: linear along each line'),
+    .union([Src, z.object({ start: Src, end: Src }), z.object({ min: Src, max: Src })])
+    .describe('Default 0.5 mm; {start, end}: linear along each line; {min, max}: by shape levels'),
+  blend: Src.describe('±, at level steps; default 1 mm'),
 }
 
 const chamferParams = {
@@ -368,9 +370,10 @@ export class Fields {
       center: readonly [string, string]
       rotation?: string | undefined
       mirror?: true | undefined
+      scale?: number | undefined
     },
     i: number,
-  ): NamedPlacement {
+  ): LinePath {
     if (!(this.env.dto.shapes ?? []).some((s) => s.id === a.shapeId))
       this.results.push(
         fail('input.malformed', `shape ${a.shapeId} does not exist in the part`, {
@@ -394,6 +397,7 @@ export class Fields {
       rotation:
         a.rotation === undefined ? None : Some(this.q(`paths.${i}.rotation`, 'angle', a.rotation)),
       mirror: a.mirror === true,
+      ...(a.scale === undefined ? {} : { scale: a.scale }),
     }
   }
 
@@ -1816,6 +1820,12 @@ const lineSpec: KindSpec<typeof lineParams, Line> = {
     on: a.on ?? prev?.on ?? defaultOn(ops),
     paths: a.paths === undefined ? prev!.paths : a.paths.map((p, i) => f.linePath(p, i)),
     depth: lineDepthOf(f, a.depth, prev?.depth),
+    blend:
+      a.blend === undefined
+        ? (prev?.blend ?? None)
+        : a.blend === null
+          ? None
+          : Some(f.q('blend', 'length', a.blend)),
   }),
 }
 
@@ -1832,6 +1842,12 @@ function lineDepthOf(
       }
     )
   if (typeof a === 'string') return { kind: 'constant', depth: f.q('depth', 'length', a) }
+  if ('min' in a)
+    return {
+      kind: 'levels',
+      min: f.q('depth.min', 'length', a.min),
+      max: f.q('depth.max', 'length', a.max),
+    }
   return {
     kind: 'ramp',
     start: f.q('depth.start', 'length', a.start),

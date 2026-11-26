@@ -172,7 +172,26 @@ export const LineGeometrySchema = z.object({
   direction,
   onZ: z.number(),
   paths: z.array(ShapeSchema).readonly(),
-  depth: z.object({ start: z.number(), end: z.number() }),
+  depth: z.union([
+    z.object({ start: z.number(), end: z.number() }),
+    z.object({ min: z.number(), max: z.number() }),
+  ]),
+  levels: z
+    .array(
+      z
+        .discriminatedUnion('kind', [
+          z.object({
+            kind: z.literal('path'),
+            u: z.array(z.number()).readonly(),
+            level: z.array(z.number()).readonly(),
+          }),
+          z.object({ kind: z.literal('loops'), level: z.number() }),
+        ])
+        .nullable(),
+    )
+    .readonly()
+    .exactOptional(),
+  blend: z.number().exactOptional(),
   cutter: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('vBit'),

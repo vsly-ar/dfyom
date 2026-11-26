@@ -207,31 +207,50 @@ export interface ChamferSourceEdge {
 /** A named shape placed on a face, as a Line's path (the `named` kind of `Shape`). */
 export type NamedPlacement = Extract<Shape, { kind: 'named' }>
 
+/** A Line's path: a named placement, E2 `scale`d about its anchor point (absent = 1). */
+export type LinePath = NamedPlacement & { readonly scale?: number }
+
 /**
- * A Line's depth below `on` (engraved-patterns.md E1): constant, or linear from `start` to `end`
- * along each line by arc length. Levels (`{ min, max }`) come with E2.
+ * A Line's depth below `on` (engraved-patterns.md E1, E2): constant, linear from `start` to `end`
+ * along each line by arc length, or from the paths' levels (E2: level 0 → `min`, 1 → `max`).
  */
 export type LineDepth =
   | { readonly kind: 'constant'; readonly depth: Quantity }
   | { readonly kind: 'ramp'; readonly start: Quantity; readonly end: Quantity }
+  | { readonly kind: 'levels'; readonly min: Quantity; readonly max: Quantity }
 
 /**
- * A Line (engraved-patterns.md EP-A, E1): a groove cut on the centreline of every loop and open
- * path of its placed named shapes, at a depth that may change along the line. No slot width, tabs
- * or cut side; the tool (V-bit by default, ball or flat end mill) gives the groove's width.
+ * A Line (engraved-patterns.md EP-A, E1, E2): a groove cut on the centreline of every loop and
+ * open path of its placed named shapes, at a depth that may change along the line. No slot width,
+ * tabs or cut side; the tool (V-bit by default, ball or flat end mill) gives the groove's width.
+ * `blend` (E2, None = 1 mm): a level step is blended over ±`blend` along the line.
  * Doc: docs/modes/engraved-patterns.md#line-operation
  */
 export interface Line extends Common {
   readonly kind: 'line'
-  readonly paths: readonly NamedPlacement[]
+  readonly paths: readonly LinePath[]
   readonly depth: LineDepth
+  readonly blend: Option<Quantity>
 }
 
-/** A Line's depths at the start and end of each line (equal for a constant depth), canonical mm. */
-export const lineDepths = (d: LineDepth): { start: number; end: number } =>
+/**
+ * A Line's depths for its geometry, canonical mm: at the start and end of each line (equal for a
+ * constant depth), or the levels' `{ min, max }` (E2).
+ */
+export const lineDepths = (
+  d: LineDepth,
+): { start: number; end: number } | { min: number; max: number } =>
   d.kind === 'constant'
     ? { start: d.depth.canonical, end: d.depth.canonical }
-    : { start: d.start.canonical, end: d.end.canonical }
+    : d.kind === 'ramp'
+      ? { start: d.start.canonical, end: d.end.canonical }
+      : { min: d.min.canonical, max: d.max.canonical }
+
+/** A Line's deepest depth as entered (mm): with levels, `max` (levels never pass it). */
+export const lineDeepest = (d: LineDepth): number => {
+  const v = lineDepths(d)
+  return 'min' in v ? v.max : Math.max(v.start, v.end)
+}
 
 export type Operation = Facing | Pocket | Drilling | Profile | Chamfer | Line
 
@@ -366,6 +385,10 @@ export const DEFAULTS = {
   patternDepth: { mm: '1 mm', inch: '1/32"' },
   // Line (docs/modes/engraved-patterns.md#line-operation)
   lineDepth: { mm: '0.5 mm', inch: '0.02"' },
+  // levels (E2): `{ min, max }` and the blend of a level step
+  lineLevelMin: { mm: '0.2 mm', inch: '0.008"' },
+  lineLevelMax: { mm: '1 mm', inch: '0.04"' },
+  lineBlend: { mm: '1 mm', inch: '0.04"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -426,10 +449,14 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
         addOpt(`paths.${i}.rotation`, p.rotation)
       })
       if (op.depth.kind === 'constant') add('depth', op.depth.depth)
-      else {
+      else if (op.depth.kind === 'ramp') {
         add('depth.start', op.depth.start)
         add('depth.end', op.depth.end)
+      } else {
+        add('depth.min', op.depth.min)
+        add('depth.max', op.depth.max)
       }
+      addOpt('blend', op.blend)
       break
   }
   return out
@@ -470,9 +497,27 @@ export function withParam(op: Operation, path: string, value: Quantity): Operati
 /** A Line with the quantity at `path` replaced (`depth`, `depth.start`, `paths.<i>.center.0`, …). */
 function lineWithParam(op: Line, path: string, value: Quantity): Line {
   const parts = path.split('.')
+  if (parts[0] === 'blend') return { ...op, blend: Some(value) }
   if (parts[0] === 'depth') {
     if (parts[1] === undefined) return { ...op, depth: { kind: 'constant', depth: value } }
-    const d = op.depth.kind === 'ramp' ? op.depth : { start: op.depth.depth, end: op.depth.depth }
+    if (parts[1] === 'min' || parts[1] === 'max') {
+      const d =
+        op.depth.kind === 'levels'
+          ? op.depth
+          : op.depth.kind === 'ramp'
+            ? { min: op.depth.start, max: op.depth.end }
+            : { min: op.depth.depth, max: op.depth.depth }
+      return {
+        ...op,
+        depth: { kind: 'levels', min: d.min, max: d.max, [parts[1]]: value } as LineDepth,
+      }
+    }
+    const d =
+      op.depth.kind === 'ramp'
+        ? op.depth
+        : op.depth.kind === 'levels'
+          ? { start: op.depth.min, end: op.depth.max }
+          : { start: op.depth.depth, end: op.depth.depth }
     return {
       ...op,
       depth: { kind: 'ramp', start: d.start, end: d.end, [parts[1]]: value } as LineDepth,
@@ -480,7 +525,7 @@ function lineWithParam(op: Line, path: string, value: Quantity): Line {
   }
   if (parts[0] !== 'paths') return op
   const i = Number(parts[1])
-  const paths = op.paths.map((p, k): NamedPlacement => {
+  const paths = op.paths.map((p, k): LinePath => {
     if (k !== i) return p
     if (parts[2] === 'rotation') return { ...p, rotation: Some(value) }
     return { ...p, center: parts[3] === '0' ? [value, p.center[1]] : [p.center[0], value] }
@@ -737,7 +782,14 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
     }
     case 'line': {
       const paths = collect(
-        dto.paths.map((p, i) => shapeFromDTO(p).mapErr((e) => e.prefixIssues('paths', i))),
+        dto.paths.map((p, i) =>
+          shapeFromDTO(p)
+            .map((s): LinePath => ({
+              ...(s as NamedPlacement),
+              ...(p.scale === undefined ? {} : { scale: p.scale }),
+            }))
+            .mapErr((e) => e.prefixIssues('paths', i)),
+        ),
       )
       const d = dto.depth
       const depth: AppResult<LineDepth> =
@@ -745,13 +797,19 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
           ? collect([q(d.start, 'depth', 'start'), q(d.end, 'depth', 'end')]).map(
               ([start, end]): LineDepth => ({ kind: 'ramp', start: start!, end: end! }),
             )
-          : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
-      return collect<unknown>([paths, depth]).map(() => ({
+          : 'min' in d
+            ? collect([q(d.min, 'depth', 'min'), q(d.max, 'depth', 'max')]).map(
+                ([min, max]): LineDepth => ({ kind: 'levels', min: min!, max: max! }),
+              )
+            : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
+      const blend = optQ(dto.blend, 'blend')
+      return collect<unknown>([paths, depth, blend]).map(() => ({
         ...base,
         kind: 'line',
         on: dto.on,
-        paths: paths.unwrap() as NamedPlacement[],
+        paths: paths.unwrap(),
         depth: depth.unwrap(),
+        blend: blend.unwrap(),
       }))
     }
   }
@@ -885,11 +943,17 @@ export function operationToDTO(op: Operation): OperationDTO {
         kind: 'line',
         ...base,
         on: op.on,
-        paths: op.paths.map(shapeToDTO),
+        paths: op.paths.map((p) => ({
+          ...shapeToDTO(p),
+          ...(p.scale === undefined ? {} : { scale: p.scale }),
+        })),
         depth:
           op.depth.kind === 'constant'
             ? op.depth.depth.toDTO()
-            : { start: op.depth.start.toDTO(), end: op.depth.end.toDTO() },
+            : op.depth.kind === 'ramp'
+              ? { start: op.depth.start.toDTO(), end: op.depth.end.toDTO() }
+              : { min: op.depth.min.toDTO(), max: op.depth.max.toDTO() },
+        ...(op.blend.isSome() ? { blend: op.blend.unwrap().toDTO() } : {}),
       } as OperationDTO
   }
 }

@@ -1,12 +1,15 @@
-// The Line inspector (engraved-patterns.md E1, minimal): the `line` kind's groups inside
+// The Line inspector (engraved-patterns.md E1, E2): the `line` kind's groups inside
 // OperationFields, so the Design inspector and the plan copy share it. Paths (`on`, then per path
 // its shape, a Select of the part's shapes, and its centre on the face), Depth (a segmented choice
-// Constant / Start → end, then the fields; to Constant keeps the deeper end), then the tool group.
-// Each commit is one `design.line.update` (one undo step). "From levels" and blend come with E2.
+// Constant / Start → end / From SVG levels, then the fields; to Constant keeps the deeper end;
+// levels: Min and Max, Blend behind More), then the tool group. Each commit is one
+// `design.line.update` (one undo step).
 // Doc: docs/modes/engraved-patterns.md#ui, docs/conventions/inspector-layout.md
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
 import { lineMessages } from '../../messages/line'
+import { DEFAULTS } from '../../../../core/design/operation'
+import type { UnitSystem } from '../../../../core/project/document'
 import { Field, InspectorGroup, SegmentedControl, Select } from '../../ui'
 import { linePathArgs, quantityAt } from './model'
 import { OnField, ParamField, type OperationFieldsContext } from './OperationFields'
@@ -14,7 +17,10 @@ import { OnField, ParamField, type OperationFieldsContext } from './OperationFie
 const t = lineMessages
 
 type LineDTO = Extract<OperationDTO, { kind: 'line' }>
-type Mode = 'constant' | 'ramp'
+type Mode = 'constant' | 'ramp' | 'levels'
+
+const modeOf = (op: LineDTO): Mode =>
+  'start' in op.depth ? 'ramp' : 'min' in op.depth ? 'levels' : 'constant'
 
 export function LineInspector({
   ctx,
@@ -27,7 +33,7 @@ export function LineInspector({
 }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'line') return null
-  const ramp = 'start' in op.depth
+  const mode = modeOf(op)
   return (
     <>
       <InspectorGroup title={t.groups.paths} level={level}>
@@ -40,13 +46,48 @@ export function LineInspector({
         <Field label={t.depthMode} kind="toggle" readOnly={ctx.readOnly}>
           <SegmentedControl<Mode>
             label={t.depthMode}
-            options={(['constant', 'ramp'] as const).map((m) => ({ value: m, label: t.modes[m] }))}
-            value={ramp ? 'ramp' : 'constant'}
+            options={(['constant', 'ramp', 'levels'] as const).map((m) => ({
+              value: m,
+              label: t.modes[m],
+            }))}
+            value={mode}
             disabled={ctx.readOnly}
-            onValueChange={(m) => ctx.send({ depth: depthFor(op, m) }, 'depth')}
+            onValueChange={(m) => ctx.send({ depth: depthFor(op, m, ctx.units) }, 'depth')}
           />
         </Field>
-        {ramp ? (
+        {mode === 'levels' ? (
+          <>
+            <ParamField
+              ctx={ctx}
+              path="depth.max"
+              stepKind="depth"
+              label={t.max}
+              kind="length"
+              icon="depth"
+              info={t.levelsNote}
+            />
+            <ParamField
+              ctx={ctx}
+              path="depth.min"
+              stepKind="depth"
+              label={t.min}
+              kind="length"
+              icon="depth"
+            />
+            <InspectorGroup.More fields={[t.blend]} rememberKey="line.depth.more">
+              <ParamField
+                ctx={ctx}
+                path="blend"
+                stepKind="small"
+                label={t.blend}
+                kind="length"
+                icon="length"
+                placeholder={DEFAULTS.lineBlend[ctx.units]}
+                info={t.blendNote}
+              />
+            </InspectorGroup.More>
+          </>
+        ) : mode === 'ramp' ? (
           <>
             <ParamField
               ctx={ctx}
@@ -82,17 +123,33 @@ export function LineInspector({
   )
 }
 
-/** The depth arg when the mode changes: a ramp starts flat, a constant keeps the deeper end. */
-export function depthFor(op: LineDTO, mode: Mode): unknown {
+/**
+ * The depth arg when the mode changes: a ramp starts flat; a constant keeps the deeper end; levels
+ * keep the deepest as `max` and take the shallower ramp end, else the default, as `min`.
+ */
+export function depthFor(op: LineDTO, mode: Mode, units: UnitSystem): unknown {
   const d = op.depth
-  if (mode === 'ramp')
-    return 'start' in d
-      ? { start: d.start.source, end: d.end.source }
-      : { start: d.source, end: d.source }
+  const deeper = (a: string, b: string, sa: string, sb: string): [string, string] => {
+    const x = quantityAt(op, a)?.canonical ?? 0
+    const y = quantityAt(op, b)?.canonical ?? 0
+    return y >= x ? [sb, sa] : [sa, sb]
+  }
+  if (mode === 'levels') {
+    if ('min' in d) return { min: d.min.source, max: d.max.source }
+    if ('start' in d) {
+      const [max, min] = deeper('depth.start', 'depth.end', d.start.source, d.end.source)
+      return { min, max }
+    }
+    return { min: DEFAULTS.lineLevelMin[units], max: d.source }
+  }
+  if (mode === 'ramp') {
+    if ('start' in d) return { start: d.start.source, end: d.end.source }
+    if ('min' in d) return { start: d.max.source, end: d.min.source }
+    return { start: d.source, end: d.source }
+  }
+  if ('min' in d) return d.max.source
   if (!('start' in d)) return d.source
-  const s = quantityAt(op, 'depth.start')?.canonical ?? 0
-  const e = quantityAt(op, 'depth.end')?.canonical ?? 0
-  return e >= s ? d.end.source : d.start.source
+  return deeper('depth.start', 'depth.end', d.start.source, d.end.source)[0]
 }
 
 function PathFields({

@@ -55,7 +55,15 @@ import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
 import { chamferIncomplete, chamferMeets } from './chamfer-findings'
-import { elementPoint, lineChains, lineMaxDepth, vBitEdgeHeight } from './line'
+import {
+  elementPoint,
+  isLevelDepth,
+  lineChains,
+  lineDeepestPoint,
+  lineMaxDepth,
+  lineMinDepth,
+  vBitEdgeHeight,
+} from './line'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -255,7 +263,7 @@ function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[
       ),
     )
   }
-  const shallowest = Math.min(op.depth.start, op.depth.end)
+  const shallowest = lineMinDepth(op)
   if (shallowest < LINE_SHALLOW - EPSILON)
     out.push(
       warning(
@@ -272,6 +280,7 @@ function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[
 
 /** `[u, v]` of a Line's deepest place (its first line's end at the deeper depth). */
 function deepestPoint(op: Op<'line'>): number[] | undefined {
+  if (isLevelDepth(op.depth)) return lineDeepestPoint(op)
   const l = lineChains(op).lines[0]
   if (l === undefined) return undefined
   const atEnd = op.depth.end > op.depth.start

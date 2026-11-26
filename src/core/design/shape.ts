@@ -131,6 +131,9 @@ export function mapItem<A, B>(item: ShapeItem<A>, f: (a: A, path: ParamPath) => 
                 radius: f(x.radius, ['fillets', i, 'radius']),
               })),
             }),
+        ...(item.levels === undefined
+          ? {}
+          : { levels: typeof item.levels === 'number' ? item.levels : [...item.levels] }),
       }
   }
 }

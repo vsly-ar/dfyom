@@ -8,9 +8,16 @@ import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import { DEFAULT_LINE_CUTTER } from '../geometry/line'
 import { resolveDesignTool } from './tool-choice'
+import type { Quantity } from '../quantity/quantity'
+import { arc, line, type Element, type Loop } from '../geometry/2d/model'
+import { definitionOf, requirePort } from './shape'
+import { pathLevelProfile } from './shape-items'
+import type { ShapeItem } from './shape.dto'
 import type {
   Contour,
   LineCutter,
+  LinePathLevels,
+  Vec2,
   OperationGeometry,
   LoopChamferTab,
   PartGeometryInput,
@@ -31,6 +38,7 @@ import {
   isBottomChamfer,
   isGeneralShape,
   lineDepths,
+  type LinePath,
   type Operation,
   type Part,
   type Point,
@@ -38,7 +46,6 @@ import {
 } from './operation'
 import { throughDepths, withThroughDepths } from '../geometry/through-depth'
 import { placeShape } from './placement'
-import { requirePort } from './shape'
 import { operationReferences, SurfaceTable } from './surfaces'
 import { shapeCentre } from './anchor'
 import { instanceOf, stepOf } from './feature'
@@ -303,8 +310,19 @@ function operationGeometry(
       })
     }
     case 'line': {
-      const paths = collect(op.paths.map((p) => shapeGeometry(p, shapes, port)))
+      const paths = collect(
+        op.paths.map((p) =>
+          shapeGeometry(p, shapes, port).map((g) =>
+            p.scale === undefined || p.scale === 1 ? g : scaledShape(g, p),
+          ),
+        ),
+      )
       if (paths.isErr()) return Err(paths.unwrapErr())
+      // E2: levels only with `{ min, max }`, so constant and start → end inputs stay as they were
+      const levels =
+        op.depth.kind === 'levels'
+          ? op.paths.map((p, i) => linePathLevels(p, paths.unwrap()[i]!, shapes))
+          : []
       return Ok({
         kind: 'line',
         id: op.id,
@@ -312,10 +330,69 @@ function operationGeometry(
         onZ: on.faceZ.toNumber(),
         paths: paths.unwrap(),
         depth: lineDepths(op.depth),
+        ...(levels.some((l) => l !== null) ? { levels } : {}),
+        ...(op.depth.kind === 'levels' && op.blend.isSome()
+          ? { blend: op.blend.unwrap().canonical }
+          : {}),
         cutter: lineCutter(op, ctx.snapshots),
       })
     }
   }
+}
+
+/**
+ * A Line path's placed geometry scaled by its `scale` (E2) about its anchor point (`center`):
+ * the contour about its own centre, the centre away from the anchor point.
+ */
+function scaledShape(g: ShapeGeometry, p: LinePath): ShapeGeometry {
+  const k = p.scale!
+  const at: Vec2 = [p.center[0].canonical, p.center[1].canonical]
+  const sp = (q: Vec2): Vec2 => [q[0] * k, q[1] * k]
+  const el = (e: Element): Element =>
+    e.kind === 'line' ? line(sp(e.a), sp(e.b)) : arc(sp(e.a), sp(e.b), sp(e.centre), e.ccw)
+  const loop = (l: Loop): Loop => ({ elements: l.elements.map(el) })
+  const center: Vec2 = [at[0] + (g.center[0] - at[0]) * k, at[1] + (g.center[1] - at[1]) * k]
+  const c = g.contour
+  if (c.kind === 'path') return { center, contour: { kind: 'path', path: loop(c.path) } }
+  if (c.kind === 'region')
+    return {
+      center,
+      contour: {
+        kind: 'region',
+        region: {
+          pieces: c.region.pieces.map((pc) => ({
+            outer: loop(pc.outer),
+            holes: pc.holes.map(loop),
+          })),
+        },
+      },
+    }
+  return { center, contour: c }
+}
+
+/**
+ * A Line path's levels (E2, engraved-patterns.md § Levels on shapes): an open path's per-vertex
+ * profile by arc-length fraction, or one level for a closed shape (its items' deepest); null when
+ * the shape has no levels (level 1).
+ */
+function linePathLevels(
+  p: LinePath,
+  g: ShapeGeometry,
+  shapes: Part['shapes'],
+): LinePathLevels | null {
+  const items = shapes?.get(p.shapeId)?.items ?? []
+  const paths = items.filter((i) => i.kind === 'path' && i.levels !== undefined)
+  if (paths.length === 0) return null
+  if (g.contour.kind === 'path') {
+    const item = definitionOf([paths[0]!])[0] as Extract<ShapeItem<number>, { kind: 'path' }>
+    const prof = pathLevelProfile(item)
+    return prof === undefined ? null : { kind: 'path', u: prof.u, level: prof.level }
+  }
+  const all = paths.flatMap((i) => {
+    const lv = (i as Extract<ShapeItem<Quantity>, { kind: 'path' }>).levels!
+    return typeof lv === 'number' ? [lv] : lv
+  })
+  return { kind: 'loops', level: Math.max(...all) }
 }
 
 /**

@@ -384,10 +384,15 @@ const itemUpdate = defineCommand({
       )
     const model = loadItem(stored, n)
     if (model.isErr()) return Err(model.unwrapErr().withContext(where))
-    const merged = withDefaults(
-      { ...model.unwrap(), ...given } as ShapeItem<Quantity | string>,
-      loaded.units,
+    const joined = { ...model.unwrap(), ...given } as ShapeItem<Quantity | string>
+    // E2: per-vertex levels go with the vertices; a path edited to another vertex count drops them
+    if (
+      joined.kind === 'path' &&
+      Array.isArray(joined.levels) &&
+      joined.levels.length !== joined.segments.length + 1
     )
+      delete joined.levels
+    const merged = withDefaults(joined, loaded.units)
     const parsed = parseItems([merged], n, loaded.units, shapeResolver(loaded))
     if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
     // the other items as stored (loaded once per edit; the resolve is cached by value)

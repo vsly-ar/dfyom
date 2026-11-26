@@ -170,21 +170,21 @@ export class LinePath {
     return segSlice(seg, u0, u1)
   }
 
-  /** The breaks between `lo` and `hi` (unwrapped), the closed line's repeated per lap. */
+  /** The breaks between `lo` and `hi` (unwrapped, ascending), the closed line's repeated per lap. */
   breaksIn(lo: number, hi: number, extra: readonly number[]): number[] {
     const L = this.length
     const base = [...this.breaks, ...extra]
     const out: number[] = []
     if (!this.closed) {
       for (const b of base) if (b > lo && b < hi) out.push(b)
-      return out
+      return out.sort((a, b) => a - b)
     }
     for (let lap = Math.floor(lo / L) - 1; lap * L <= hi; lap++)
       for (const b of base) {
         const x = lap * L + b
         if (x > lo && x < hi) out.push(x)
       }
-    return out
+    return out.sort((a, b) => a - b)
   }
 }
 
@@ -387,8 +387,13 @@ export function generateLine(input: LineInput, steps: Steps = noSteps): AppResul
     issues.rule('invariant', 'strategy.rampAngle', 'range', 'rampAngle must be in (0°, 90°)', {
       rampAngle: st.rampAngle,
     })
-  issues.positive('operation.depth.start', op.depth.start)
-  issues.positive('operation.depth.end', op.depth.end)
+  if ('min' in op.depth) {
+    issues.positive('operation.depth.min', op.depth.min)
+    issues.positive('operation.depth.max', op.depth.max)
+  } else {
+    issues.positive('operation.depth.start', op.depth.start)
+    issues.positive('operation.depth.end', op.depth.end)
+  }
   const ok = issues.result('generateLine', input.planOperationId)
   if (ok.isErr()) return Err(ok.unwrapErr())
   const left = lineChains(op).lines.filter((l) => l.length > 1e-6)

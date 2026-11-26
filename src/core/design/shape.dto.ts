@@ -90,6 +90,12 @@ export type ShapeItem<Q> =
       segments: ShapeSegment<Q>[]
       closed: boolean
       fillets?: ShapeFillet<Q>[] | undefined
+      /**
+       * Engraving levels 0..1 (engraved-patterns.md E2, § Levels on shapes): one for the path, or
+       * one per vertex (`segments.length + 1`), linear by arc length between vertices. Read by a
+       * Line with `{ min, max }` depth; booleans ignore them.
+       */
+      levels?: number | number[] | undefined
     }
 
 export type ShapeItemKind = ShapeItem<unknown>['kind']
@@ -178,6 +184,15 @@ function itemSchema(q: (kind: QuantityField) => z.ZodType, mode: 'dto' | 'args')
         )
         .optional()
         .describe('Tangent arcs rounding vertices'),
+      // E2: stored only (set by the SVG import, kept by item edits); not a command arg, so
+      // design.shape.add/item.update stay as listed (tools/list budget, engraved-patterns.md)
+      ...(mode === 'dto'
+        ? {
+            levels: z
+              .union([z.number(), z.array(z.number()).max(PATH_SEGMENTS_MAX + 1)])
+              .optional(),
+          }
+        : {}),
     }),
   ])
 }

@@ -20,6 +20,11 @@ import { generateDrilling } from '../../toolpath/drilling'
 import { generateFacing } from '../../toolpath/facing'
 import { generateLine } from '../../toolpath/line'
 import { arc, line } from '../../geometry/2d/model'
+import type { LinePathLevels } from '../../geometry/model'
+import { importSvg } from '../../import/svg'
+import { definitionOf } from '../../design/shape'
+import { svgShapeItems } from '../../design/shape-import'
+import { pathLevelProfile } from '../../design/shape-items'
 import type { Move, Toolpath, Vec3 } from '../../toolpath/model'
 import { generatePocket } from '../../toolpath/pocket'
 import { generateProfile } from '../../toolpath/profile'
@@ -128,6 +133,63 @@ const profileOp = () => {
  * Chamfers (v0.4 T1) on two holes of Ø `d` at the face: one contoured with a mill of DC = d, one
  * plunged with a mill twice as wide; in mm or inch sizes (1 mm or 1/32" wider than the hole).
  */
+/**
+ * A variable-depth Line from an SVG with levels (engraved-patterns.md E2): the E0 sample (stroke
+ * colours, a data-level ramp, a coloured circle) imported, its levels taken as the shapes store
+ * them (`svgShapeItems`, `pathLevelProfile`), cut 0.2–1.5 mm with a 60° V-bit; the three coloured
+ * pieces chained into one line with blended steps.
+ */
+const lineLevelsOps = (): ExportOperation[] => {
+  const nodeFs = (
+    globalThis as unknown as {
+      process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, e: 'utf8'): string } }
+    }
+  ).process.getBuiltinModule('node:fs')
+  const text = nodeFs.readFileSync(
+    new URL('../../design/__fixtures__/levels-sample.svg', import.meta.url),
+    'utf8',
+  )
+  const shapes = expectOk(importSvg(text)).shapes
+  const paths = shapes.map((s) => {
+    const it = s.items[0]!
+    return {
+      center: [0, 0] as [number, number],
+      contour:
+        it.kind === 'path'
+          ? { kind: 'path' as const, path: it.path }
+          : {
+              kind: 'region' as const,
+              region: { pieces: [{ outer: it.loop, holes: [] }] },
+            },
+    }
+  })
+  const levels = shapes.map((s): LinePathLevels | null => {
+    const item = definitionOf(expectOk(svgShapeItems(s, 'mm')))[0]!
+    if (item.kind !== 'path' || item.levels === undefined) return null
+    if (item.closed)
+      return { kind: 'loops', level: typeof item.levels === 'number' ? item.levels : 1 }
+    const p = pathLevelProfile(item)!
+    return { kind: 'path', u: p.u, level: p.level }
+  })
+  const tool = chamferMill(6, 60)
+  const op = {
+    kind: 'line',
+    id: 'line1',
+    onZ: 0,
+    paths,
+    depth: { min: 0.2, max: 1.5 },
+    levels,
+    cutter: { kind: 'vBit', diameter: 6, angle: 60, tipDiameter: 0 },
+  } as const
+  const stock = { length: 100, width: 60, thickness: 10 }
+  return [
+    operation(
+      generateLine(lineInput(stock, op, tool, {}, { stepdown: 0.8, feedRate: 1200 })).unwrap(),
+      tool,
+    ),
+  ]
+}
+
 /** Lines (engraved-patterns.md E1): a 60° V-bit fluting an open curve 0.2 → 1.5 mm. */
 const lineRampOps = (): ExportOperation[] => {
   const tool = chamferMill(6, 60)
@@ -525,6 +587,7 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['countersink-stepped', steppedCountersinkOps],
     ['line-ramp', lineRampOps],
     ['line-vgroove-closed', lineClosedOps],
+    ['line-levels', lineLevelsOps],
     [
       'multi-tool-inch-manual-spindle',
       facedMultiToolOps,
