@@ -24,6 +24,7 @@ import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
 import type { PlanWarning } from '../../../../core/plan/checks'
+import { withoutOperationName } from '../../../../core/plan/labels'
 import { lengthSource } from '../../messages/dfm'
 import { libraryMessages } from '../../messages/library'
 import { areaText, planMessages, sentence } from '../../messages/plan'
@@ -203,13 +204,13 @@ function ZFrom({
       <span
         className={styles['zFinding']}
         data-severity={worst.severity}
-        title={sentence(worst.message)}
+        title={sentence(withoutOperationName(worst.message, worst.planOperationId))}
       >
         <Icon
           name={
             worst.severity === 'error' ? 'error' : worst.severity === 'warning' ? 'warning' : 'info'
           }
-          label={sentence(worst.message)}
+          label={sentence(withoutOperationName(worst.message, worst.planOperationId))}
         />
       </span>
     )

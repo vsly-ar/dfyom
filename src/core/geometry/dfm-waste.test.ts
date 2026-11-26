@@ -279,3 +279,22 @@ describe('reach in waste', () => {
     expect(codesOf(ws)).toEqual(['dfm.reach'])
   })
 })
+
+describe('shapeOutsideFace in waste', () => {
+  // the overhang beyond the stock is never on the part: an intended overrun is info (DF53), only
+  // a shape wholly off the face (it cuts nothing) warns
+  it('an overrun from the frame over the stock edge is info and has no corner findings', () => {
+    const ws = run([outline(), pocket([2, 30])])
+    const out = ws.filter((w) => w.code === 'dfm.shapeOutsideFace')
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ severity: 'info', params: { sides: ['stock.side[3]'], by: 3 } })
+    expect(codesOf(ws)).toEqual(['dfm.shapeOutsideFace'])
+  })
+
+  it('a shape wholly off the face still warns', () => {
+    const ws = run([outline(), pocket([-10, 30])])
+    const out = ws.filter((w) => w.code === 'dfm.shapeOutsideFace')
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ severity: 'warning', params: { wholly: true } })
+  })
+})

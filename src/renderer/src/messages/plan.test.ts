@@ -17,6 +17,15 @@ const finding = (over: Partial<PlanWarning>): PlanWarning =>
   }) as PlanWarning
 
 describe('plan finding texts', () => {
+  it('drops the operation name the core puts in front for agents (D4): the finding sits at it', () => {
+    expect(findingText(finding({ message: 'Pocket 1 (op-1): no tool assigned' }))).toBe(
+      'No tool assigned.',
+    )
+    expect(
+      findingText(finding({ code: 'plan.aid', message: 'Witness mark 1 (op-1) cuts the part' })),
+    ).toBe('Witness mark 1 cuts the part.')
+  })
+
   it('names operations and setups by name in order, loose-piece, cut-out, corner and rest findings, never by id (DF43)', () => {
     const NAMES: Record<string, string> = {
       pocket1: 'Pocket 1',

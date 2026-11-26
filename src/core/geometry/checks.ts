@@ -16,7 +16,7 @@ import {
   unapplyPlacement,
   type Placement,
 } from './model'
-import type { NominalRegion, OperationSolids, PlacedMesh } from './operations'
+import type { NominalRegion, OperationSolids } from './operations'
 import type { Solid, SolidPort } from './solid-port'
 import { noSteps, type Steps } from '../workers/steps'
 
@@ -70,7 +70,9 @@ export function geometryChecks(
 }
 
 /** Bounds of meshes placed in the part frame. */
-export function boxOf(meshes: readonly PlacedMesh[]): Box {
+export function boxOf(
+  meshes: readonly { readonly mesh: { readonly positions: ArrayLike<number> } }[],
+): Box {
   const min = [Infinity, Infinity, Infinity]
   const max = [-Infinity, -Infinity, -Infinity]
   for (const { mesh } of meshes) {
@@ -184,14 +186,27 @@ function loosePieces(
 
 /**
  * Nominal retained region ∩ another operation's net solid > ε_V; one warning per
- * (retaining operation, removing operation). Boxes skip pairs that cannot meet.
+ * (retaining operation, removing operation). Boxes skip pairs that cannot meet. For tabs the
+ * warning says what remains (D4, docs/modes/design-llm-first.md#dfm-in-waste): the tab height a
+ * cut reaching in from the tab's top or bottom leaves ("lowers tabs 1–4 from 3 mm to 0.5 mm"),
+ * and every message names the operation to change (the remover).
  */
 function retainedRemoved(
   input: CheckInput,
   solids: SolidPort,
   steps: Steps,
 ): AppResult<DfmWarning[]> {
-  type Hit = { regions: string[]; parameter: string; volume: number }
+  type Hit = {
+    regions: string[]
+    parameter: string
+    volume: number
+    /** Nominal height of the regions along the face normal (tabs). */
+    height?: number
+    /** Least height left of a lowered region (tabs; 0 where cut through). */
+    remains?: number
+    /** Some region is cut into from neither its top nor its bottom. */
+    into?: boolean
+  }
   const all = new Map<ComposedOperation, Map<ComposedOperation, Hit>>()
   for (const a of input.operations) {
     const hits = new Map<ComposedOperation, Hit>()
@@ -205,19 +220,28 @@ function retainedRemoved(
       const solid = placed(region, a.originalId, solids)
       if (solid.isErr()) return Err(solid.unwrapErr())
       for (const b of others) {
-        const v = removedVolume(
+        const r = removed(
           solid.unwrap(),
           b.solid,
           region.minusRemoval ? a.solid : undefined,
           solids,
         )
-        if (v.isErr()) return Err(v.unwrapErr())
+        if (r.isErr()) return Err(r.unwrapErr())
         const step = steps.step()
         if (step.isErr()) return Err(step.unwrapErr())
-        if (v.unwrap() <= EPSILON_VOLUME) continue
+        const { volume, cut } = r.unwrap()
+        if (volume <= EPSILON_VOLUME) continue
         const hit = hits.get(b) ?? { regions: [], parameter: region.parameter, volume: 0 }
         hit.regions.push(region.region)
-        hit.volume += v.unwrap()
+        hit.volume += volume
+        if (region.parameter === 'tabs') {
+          const left = heightLeft(a.op.frame, box, cut, solids)
+          if (left.isErr()) return Err(left.unwrapErr())
+          const { height, remains } = left.unwrap()
+          hit.height = Math.max(hit.height ?? 0, height)
+          if (remains === undefined) hit.into = true
+          else hit.remains = Math.min(hit.remains ?? Infinity, remains)
+        }
         hits.set(b, hit)
       }
     }
@@ -232,15 +256,114 @@ function retainedRemoved(
       warnings.push({
         code: 'dfm.retainedRemoved',
         severity: 'warning',
-        message:
-          `${b.op.id} cuts away ${hit.regions.join(', ')} of ${a.op.id} (${mm3(hit.volume)}); ` +
-          `move one of them`,
+        ...retainedText(a.op.id, b.op.id, hit),
         operation: a.op.id,
         parameter: hit.parameter,
-        params: { by: b.op.id, regions: hit.regions, volume: hit.volume },
       })
     }
   return Ok(warnings)
+}
+
+/** A tab height left below this (mm) is none: the cut goes through. */
+const REMAINS_NONE = 1e-3
+/** Float32 mesh slack (mm) when comparing a cut's extent with the region's. */
+const MESH_SLACK = 1e-3
+
+const mmText = (v: number): string => `${Math.round(v * 100) / 100} mm`
+
+/**
+ * The message and params of one `dfm.retainedRemoved` (owner `a`, remover `by`): starts with the
+ * owner's id (named by `namedMessages`), says what remains and to change the remover.
+ */
+function retainedText(
+  a: string,
+  by: string,
+  hit: {
+    readonly regions: readonly string[]
+    readonly parameter: string
+    readonly volume: number
+    readonly height?: number
+    readonly remains?: number
+    readonly into?: boolean
+  },
+): Pick<DfmWarning, 'message' | 'params'> {
+  const params = { by, regions: [...hit.regions], volume: hit.volume }
+  const volume = mm3(hit.volume)
+  if (hit.into === true || hit.remains === undefined || hit.height === undefined)
+    return {
+      message:
+        `${a}: ${by} cuts into ${regionWords(hit.regions)} (${volume}); change ${by}: move it ` +
+        `off ${hit.parameter === 'tabs' ? 'the tabs' : 'the fillet'}`,
+      params,
+    }
+  const tabs = tabList(hit.regions)
+  const remains = Math.max(0, hit.remains)
+  const lowered = { ...params, height: hit.height, remains }
+  if (remains <= REMAINS_NONE)
+    return {
+      message: `${a}: ${by} cuts through ${tabs} (${volume}); change ${by}: move it off the tabs`,
+      params: lowered,
+    }
+  return {
+    message:
+      `${a}: ${by} lowers ${tabs} from ${mmText(hit.height)} to ${mmText(remains)} ` +
+      `(${volume}); change ${by}: make it shallower or move it off the tabs`,
+    params: lowered,
+  }
+}
+
+/** Region keys as words: "the floor fillet", tabs as `tabList`, others verbatim. */
+function regionWords(regions: readonly string[]): string {
+  const tabs = regions.filter((r) => /^tab\[\d+\]$/.test(r))
+  const words = [
+    ...regions
+      .filter((r) => !tabs.includes(r))
+      .map((r) => (r === 'floorFillet' ? 'the floor fillet' : r)),
+    ...(tabs.length > 0 ? [tabList(tabs)] : []),
+  ]
+  return words.join(' and ')
+}
+
+/** "tab 2", "tabs 1–4", "tabs 1, 3 and 5" from region keys `tab[i]` (others verbatim). */
+export function tabList(regions: readonly string[]): string {
+  const n = regions.map((r) => /^tab\[(\d+)\]$/.exec(r)).map((m) => (m ? Number(m[1]) + 1 : NaN))
+  if (n.some((x) => Number.isNaN(x))) return regions.join(', ')
+  const sorted = [...new Set(n)].sort((x, y) => x - y)
+  if (sorted.length === 1) return `tab ${sorted[0]}`
+  const runs: string[] = []
+  for (let i = 0; i < sorted.length;) {
+    let j = i
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++
+    if (j - i >= 2) runs.push(`${sorted[i]}–${sorted[j]}`)
+    else runs.push(...sorted.slice(i, j + 1).map(String))
+    i = j + 1
+  }
+  const last = runs.pop()!
+  return `tabs ${runs.length === 0 ? last : `${runs.join(', ')} and ${last}`}`
+}
+
+/**
+ * The region's height along its face normal and what the cut `cut` (region ∩ remover) leaves of
+ * it: reaching in from the top, the height below the cut; from the bottom, the height above it;
+ * across the whole height 0; touching neither end, `remains` undefined.
+ */
+function heightLeft(
+  frame: Placement,
+  region: Box,
+  cut: Solid,
+  solids: SolidPort,
+): AppResult<{ height: number; remains?: number }> {
+  return solids.toMesh(cut).map((mesh) => {
+    const r = boxIn(frame, region)
+    const c = boxIn(frame, boxOf([{ mesh }]))
+    const height = r.max[2] - r.min[2]
+    const top = c.max[2] >= r.max[2] - MESH_SLACK
+    const bottom = c.min[2] <= r.min[2] + MESH_SLACK
+    if (top && bottom) return { height, remains: 0 }
+    if (top) return { height, remains: c.min[2] - r.min[2] }
+    if (bottom) return { height, remains: r.max[2] - c.max[2] }
+    return { height }
+  })
 }
 
 /**
@@ -272,17 +395,23 @@ function placed(region: NominalRegion, originalId: number, solids: SolidPort): A
   return solids.fromMesh(region.mesh.mesh, originalId)
 }
 
-/** vol(region ∩ other), minus the retaining operation's own removal when given. */
-function removedVolume(
+/**
+ * vol(region ∩ other), minus the retaining operation's own removal when given, with the
+ * intersection itself (before that subtraction).
+ */
+function removed(
   region: Solid,
   other: Solid,
   own: Solid | undefined,
   solids: SolidPort,
-): AppResult<number> {
+): AppResult<{ volume: number; cut: Solid }> {
   return solids.intersect(region, other).andThen((cut) =>
     solids.volume(cut).andThen((v) => {
-      if (own === undefined || v <= EPSILON_VOLUME) return Ok(v)
-      return solids.subtract(cut, own).andThen((rest) => solids.volume(rest))
+      if (own === undefined || v <= EPSILON_VOLUME) return Ok({ volume: v, cut })
+      return solids
+        .subtract(cut, own)
+        .andThen((rest) => solids.volume(rest))
+        .map((volume) => ({ volume, cut }))
     }),
   )
 }

@@ -74,7 +74,9 @@ export function partWarnings(
 /**
  * Messages name their operation by name and id (D4, docs/modes/design-llm-first.md#dfm-in-waste):
  * a message that starts with its operation's id ("pocket1: …", "pocket1.depth: …") starts with
- * "Pocket 1 (pocket1)" instead. Others are left as they are; applying it twice changes nothing.
+ * "Pocket 1 (pocket1)" instead, and the other operation a finding names in `params.by`
+ * (`dfm.retainedRemoved`'s remover) reads "Pocket 2 (pocket2)" wherever its bare id stands.
+ * Others are left as they are; applying it twice changes nothing.
  */
 export function namedMessages(
   operations: readonly { readonly id: string; readonly name: string }[],
@@ -82,17 +84,43 @@ export function namedMessages(
 ): DfmWarning[] {
   const names = new Map(operations.map((o) => [o.id, o.name]))
   return warnings.map((w) => {
-    const name = names.get(w.operation)
-    const next = w.message.charAt(w.operation.length)
-    if (
-      name === undefined ||
-      name === w.operation ||
-      !w.message.startsWith(w.operation) ||
-      (next !== ':' && next !== '.')
-    )
-      return w
-    return { ...w, message: `${name} (${w.operation})${w.message.slice(w.operation.length)}` }
+    const message = namedOther(names, w, namedHead(names, w))
+    return message === w.message ? w : { ...w, message }
   })
+}
+
+function namedHead(names: ReadonlyMap<string, string>, w: DfmWarning): string {
+  const name = names.get(w.operation)
+  const next = w.message.charAt(w.operation.length)
+  if (
+    name === undefined ||
+    name === w.operation ||
+    !w.message.startsWith(w.operation) ||
+    (next !== ':' && next !== '.')
+  )
+    return w.message
+  return `${name} (${w.operation})${w.message.slice(w.operation.length)}`
+}
+
+/** Characters of an operation id: a bare id is neither led nor followed by one. */
+const ID_CHAR = /[\w-]/
+
+/** `params.by`'s bare id (not inside "(id)") as "Name (id)". */
+function namedOther(names: ReadonlyMap<string, string>, w: DfmWarning, message: string): string {
+  const by = w.params['by']
+  if (typeof by !== 'string' || by === '') return message
+  const name = names.get(by)
+  if (name === undefined || name === by) return message
+  let out = ''
+  let from = 0
+  for (let i = message.indexOf(by); i >= 0; i = message.indexOf(by, i + by.length)) {
+    const before = message.charAt(i - 1)
+    const after = message.charAt(i + by.length)
+    if (before === '(' || ID_CHAR.test(before) || ID_CHAR.test(after)) continue
+    out += `${message.slice(from, i)}${name} (${by})`
+    from = i + by.length
+  }
+  return out + message.slice(from)
 }
 
 /**

@@ -131,3 +131,50 @@ export function aidName(
   }
   return {}
 }
+
+/**
+ * Plan messages name their plan operation by label and id (D4, docs/modes/design-llm-first.md#dfm-in-waste):
+ * a finding with a `planOperationId` of the plan reads "Pocket 1 (op3): no tool assigned"; one
+ * that already starts with the label ("Witness mark 1 cuts the part") gets the id after it.
+ * Others are left as they are; applying it twice changes nothing. The app shows the text without
+ * the prefix (`withoutOperationName`), in the inspector of that operation.
+ */
+export function namedPlanMessages<
+  W extends { readonly message: string; readonly planOperationId?: string },
+>(
+  plan: {
+    readonly design: { readonly part: PartDTO }
+    readonly setups: readonly { readonly operations: readonly PlanOperationDTO[] }[]
+  },
+  findings: readonly W[],
+): W[] {
+  const ops = new Map(plan.setups.flatMap((s) => s.operations.map((o) => [o.id, o] as const)))
+  const labels = new Map<string, string>()
+  return findings.map((f) => {
+    const id = f.planOperationId
+    const op = id === undefined ? undefined : ops.get(id)
+    if (id === undefined || op === undefined) return f
+    let label = labels.get(id)
+    if (label === undefined) labels.set(id, (label = planOpLabel(plan.design.part, op)))
+    const head = `${label} (${id})`
+    if (f.message.startsWith(head)) return f
+    const message = f.message.startsWith(`${label} `)
+      ? `${head}${f.message.slice(label.length)}`
+      : `${head}: ${f.message}`
+    return { ...f, message }
+  })
+}
+
+/**
+ * A plan message without the "Label (id): " or "Label (id)" head `namedPlanMessages` gave it
+ * (the app shows findings at their operation, which names it already).
+ */
+export function withoutOperationName(message: string, planOperationId?: string): string {
+  if (planOperationId === undefined) return message
+  const at = message.indexOf(` (${planOperationId})`)
+  if (at <= 0) return message
+  const end = at + planOperationId.length + 3
+  if (message.startsWith(': ', end)) return message.slice(end + 2)
+  // "Witness mark 1 (op7) cuts the part": the label is the sentence's subject, keep it
+  return message.slice(0, at) + message.slice(end)
+}
