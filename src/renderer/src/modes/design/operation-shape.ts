@@ -119,6 +119,50 @@ export function shapePlacement(
   }
 }
 
+// ── "Place as drawn" (X2-2) ───────────────────────────────────────────────────────────────
+
+/** Where "Place as drawn" puts a named shape, or why it cannot. */
+export type DrawnPlacement =
+  | {
+      readonly kind: 'place'
+      /** The min corner of the shape's own bounds (mm, 0.001): the position at anchor min/min. */
+      readonly center: readonly [number, number]
+      /** The operation already sits there (anchor min/min at that corner). */
+      readonly already: boolean
+    }
+  | { readonly kind: 'oriented' }
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000
+
+/**
+ * "Place as drawn" (v0.4-llm-first X2-2): a named shape at its own coordinates on the face, anchor
+ * min/min at the min corner of its own bounds, which is a section's `placeAt` (its shapes are made
+ * in the face frame). Only unrotated, unmirrored shapes at scale 1 have such a position
+ * (`oriented`); undefined for an inline shape or one that does not resolve.
+ * Doc: docs/modes/reference-tools.md#ui-reach-of-the-agents-values-x2
+ */
+export function drawnPlacement(
+  port: Region2dPort,
+  shape: Extract<Operation, { kind: 'pocket' | 'profile' }>['shape'],
+  shapes: Part['shapes'],
+): DrawnPlacement | undefined {
+  if (shape.kind !== 'named') return undefined
+  const o = shapeOrientation(shape)
+  if (o.rotation !== 0 || o.mirror || o.scale !== undefined) return { kind: 'oriented' }
+  const def = shapeDefinition(shape, shapes)
+  if (def.isErr()) return undefined
+  const oriented = orientedShape(port, def.unwrap(), o)
+  if (oriented.isErr()) return undefined
+  const { min } = oriented.unwrap().bounds
+  const center = [r3(min[0]), r3(min[1])] as const
+  const already =
+    shape.anchor.u === 'min' &&
+    shape.anchor.v === 'min' &&
+    Math.abs(shape.center[0].canonical - center[0]) < 1e-6 &&
+    Math.abs(shape.center[1].canonical - center[1]) < 1e-6
+  return { kind: 'place', center, already }
+}
+
 // ── "Round corners" ─────────────────────────────────────────────────────────────────────
 
 /** A corner closer than this to an item's vertex or edge belongs to that item (mm). */

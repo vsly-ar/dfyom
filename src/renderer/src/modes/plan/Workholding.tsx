@@ -1,7 +1,8 @@
 // "Workholding" in the setup inspector (docs/modes/workholding.md#ui-summary): the setup's items
 // (icon, name, one-line summary), an Add menu, the margin, and the open item's fields. Every
-// change is one `plan.workholding.set` with the whole list; items keep their ids, so the open
-// item survives the edit. Opening an item shows its keep-out zone in the viewport (plan store).
+// change is one `plan.workholding.set` with the whole list ("Copy from…" sends its `copyFrom`,
+// X2-5); items keep their ids, so the open item survives the edit. Opening an item shows its
+// keep-out zone in the viewport (plan store).
 // Doc: docs/conventions/ui.md#workholding
 import { useState } from 'react'
 import {
@@ -189,6 +190,27 @@ export function Workholding({
           : r.error.message,
     )
   }
+  /** X2-5: another setup's items, same edges and positions (the agent's `copyFrom`). */
+  const copyFrom = async (from: SetupDTO) => {
+    const r = await call('plan.workholding.set', {
+      planId: plan.id,
+      setupId: setup.id,
+      copyFrom: from.id,
+    })
+    setErrors([])
+    setFailed(undefined)
+    setArrangeError(r.ok ? undefined : r.error.message)
+  }
+  const others = plan.setups.filter((s) => s.id !== setup.id)
+  const copyItems: MenuEntry[] = others.map((s) => {
+    const n = s.workholding?.length ?? 0
+    return {
+      label: s.name,
+      description: m.count(n),
+      onSelect: () => void copyFrom(s),
+      ...(n === 0 ? { disabled: true, disabledReason: m.copyNothing } : {}),
+    }
+  })
   const issueAt = (n: number, param: string): FieldMessage[] =>
     errors
       .filter((i) => i.path[0] === 'items' && i.path[1] === n && i.path[2] === param)
@@ -311,6 +333,14 @@ export function Workholding({
             <Icon name="toe-clamp" />
             {m.arrange}
           </Button>
+        )}
+        {readOnly || others.length === 0 ? null : (
+          <Menu label={m.copyFromMenu} items={copyItems} align="start">
+            <Button size="sm" variant="ghost" title={m.copyFromHint}>
+              <Icon name="copy" />
+              {m.copyFrom}
+            </Button>
+          </Menu>
         )}
       </div>
       {arrangeError === undefined ? null : (

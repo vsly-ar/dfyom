@@ -818,6 +818,29 @@
   gap: var(--space-1);
 }
 
+/* X2-1: where a group's holes are, a quiet second line */
+.holeWhere {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+/* X2-3: the inset readout with Create offset at its end */
+.insetRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.insetValue {
+  min-width: 0;
+}
+
 .warnings {
   display: grid;
   gap: var(--space-2);

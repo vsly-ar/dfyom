@@ -918,6 +918,12 @@ export const designMessages = {
         `${op} could not use ${shape}; the reason shows at its Shape field.`,
       usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
       editShape: 'Edit shape',
+      /** v0.4-llm-first X2-2 (reference-tools.md#ui-reach-of-the-agents-values-x2). */
+      placeAsDrawn: 'Place as drawn',
+      placeAsDrawnTip:
+        'Puts the shape at its own coordinates on this face: a section’s shape lands where the section lies.',
+      placeAsDrawnOriented: 'Only an unrotated, unmirrored shape at scale 1 has its own position.',
+      placeAsDrawnAlready: 'Already where it was drawn.',
       convert: 'Convert to shape',
       converted: (name: string) => `Converted to ${name}`,
       convertedUnnamed: 'Converted to a shape',

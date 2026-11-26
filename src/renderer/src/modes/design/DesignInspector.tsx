@@ -520,6 +520,30 @@ function OperationInspector({
               setErrors([])
               setSummary(undefined)
             })(),
+          // X2-2: re-anchor to min/min (no move), then the position; one gesture, one undo step
+          placeAsDrawn: (center) =>
+            void (async () => {
+              const gesture = { gesture: newGestureId() }
+              const args = { partId: part.dto.id, operationId: op.id }
+              const a = op.shape.anchor
+              if (a?.u !== 'min' || a.v !== 'min') {
+                const r = await call(
+                  `design.${op.kind}.update`,
+                  { ...args, anchor: { u: 'min', v: 'min' } },
+                  gesture,
+                )
+                if (failed(r)) return
+              }
+              const at = center.map((c) => `${c} mm`)
+              const r = await call(
+                `design.${op.kind}.update`,
+                { ...args, shape: { ...shapeArgs(op.shape), center: at } },
+                gesture,
+              )
+              if (failed(r)) return
+              setErrors([])
+              setSummary(undefined)
+            })(),
           pickOnLine: (shape) =>
             void (async () => {
               const r = await call(`design.${op.kind}.update`, {

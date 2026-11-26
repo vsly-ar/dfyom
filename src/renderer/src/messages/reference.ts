@@ -112,6 +112,8 @@ export const referenceMessages = {
     level: (depth: string, area: string, visible: string) =>
       `Depth ${depth}, area ${area}, visible ${visible}`,
     undercut: 'Undercut: not reachable from this side',
+    /** X2-1: a level's depth at full precision (the row's tooltip). */
+    exactDepth: (depth: string) => `Depth ${depth}`,
     area: (mm2: number) => `${count(Math.round(mm2))} mm²`,
     section: 'Section',
     depth: 'Section depth',
@@ -157,6 +159,25 @@ export const referenceMessages = {
     boltCircle: (n: number, d: string) => `${n} on a circle Ø ${d}`,
     noToolChip: (d: string) => `No tool under Ø ${d}`,
     addBoltHole: 'Add as Bolt hole',
+    /** X2-1: a mouth below the face, on the floor at its depth. */
+    addBoltHoleOn: (floor: string) => `Add as Bolt hole on ${floor}`,
+    /** X2-1: where a group's holes are, face frame, full precision. */
+    gridAt: (first: string, pitch: string) => `First at ${first} · pitch ${pitch}`,
+    circleAt: (centre: string, pitch: string) => `Centre ${centre} · pitch Ø ${pitch}`,
+    holesAt: (shown: readonly string[], more: number) =>
+      `At ${shown.join('; ')}${more > 0 ? ` and ${more} more` : ''}`,
+    /** X2-3: "Inset from" in the Section group (reference-tools.md § UI reach). */
+    insetFrom: 'Inset from',
+    insetChoose: 'Choose a shape',
+    insetHint:
+      'For a shape made from a section of this face: its coordinates are read on this face.',
+    /** "4.821 mm inside Section 22.5 mm (sides 4.81–4.83 mm)"; `lo` without its unit. */
+    inset: (d: string, inside: boolean, shape: string, lo: string, hi: string) =>
+      `${d} ${inside ? 'inside' : 'outside'} ${shape} (sides ${lo}–${hi})`,
+    noOutline: 'The section has no outline.',
+    createOffset: 'Create offset',
+    offsetMade: (name: string) => `${name} created.`,
+    offsetFailed: 'The offset was not made.',
     addDrilling: 'Add as Drilling',
     belowFace: (depth: string, face: string) =>
       `The mouth is ${depth} below ${face.toLowerCase()}: add the facing or pocket that makes that floor, then a Bolt hole on it.`,

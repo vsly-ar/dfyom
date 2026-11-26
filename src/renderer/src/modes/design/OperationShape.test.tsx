@@ -232,6 +232,52 @@ describe('operation inspector for shapes', () => {
     expect(part().operations[0]).toMatchObject({ shape: { kind: 'rectangle' } })
   })
 
+  it('"Place as drawn" puts a named shape at its own coordinates, one undo step (X2-2)', async () => {
+    const { user, d, part, partId } = await renderOps()
+    // a 30 × 20 rectangle whose own min corner is (12.3456, 7.5): where it was drawn
+    await d.dispatch(
+      'design.shape.add',
+      {
+        partId,
+        items: [{ kind: 'rectangle', center: ['27.3456', '17.5'], length: '30', width: '20' }],
+      },
+      src,
+    )
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    await choose(user, 'Shape', /Shape 1/)
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({ shape: { kind: 'named', shapeId: 'shape1' } }),
+    )
+    const place = within(inspector()).getByRole('button', { name: 'Place as drawn' })
+    expect(place).toBeEnabled()
+    const before = d.history.undoable.length
+    await user.click(place)
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({
+        shape: {
+          anchor: { u: 'min', v: 'min' },
+          center: [{ source: '12.346 mm' }, { source: '7.5 mm' }],
+        },
+      }),
+    )
+    expect(d.history.undoable).toHaveLength(before + 1)
+    await waitFor(() => expect(place).toBeDisabled())
+    expect(place).toHaveAttribute('title', 'Already where it was drawn.')
+    // a mirrored shape has no own position
+    await user.click(within(inspector()).getByRole('switch', { name: 'Mirror (flip x)' }))
+    await waitFor(() =>
+      expect(place).toHaveAttribute(
+        'title',
+        'Only an unrotated, unmirrored shape at scale 1 has its own position.',
+      ),
+    )
+    expect(place).toBeDisabled()
+    await d.dispatch('history.undo', {}, src)
+    await d.dispatch('history.undo', {}, src)
+    expect(part().operations[0]).not.toHaveProperty('shape.anchor.u', 'min')
+  })
+
   it('cuts an open named path on the line only', async () => {
     const { user, d, part, partId, bridge } = await renderOps()
     await d.dispatch(

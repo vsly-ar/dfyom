@@ -5,8 +5,12 @@
 // the compute worker; the rows show the last answer while a new one is read. The face and the
 // depth are per-window view state (the depth is the Shape Editor's section depth too). The Holes
 // list (P3, `kind: 'holes'`) groups the round holes by size with their pattern and adds a group as
-// a Bolt hole or Drillings with Clones in one undo step (one gesture id for its commands).
-// Doc: docs/conventions/ui.md#reference-tools-df60, docs/modes/reference-tools.md#ui
+// a Bolt hole or Drillings with Clones in one undo step (one gesture id for its commands). X2: the
+// rounded figures carry their 0.001 mm values as tooltips, a hole row says where the holes are, a
+// Bolt hole whose mouth is below the face goes on the floor at the mouth, and "Inset from" reads
+// how far the section's outline lies inside a shape, with "Create offset" of that shape.
+// Doc: docs/conventions/ui.md#reference-tools-df60, docs/modes/reference-tools.md#ui,
+// docs/modes/reference-tools.md#ui-reach-of-the-agents-values-x2
 import { useEffect, useMemo, useState } from 'react'
 import { STOCK_FACE, faceFrame, type Direction } from '../../../../core/geometry/face'
 import { setupDirection } from '../../../../core/plan/setups'
@@ -17,6 +21,7 @@ import type { FittedLoop } from '../../../../core/design/reference-section'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { lengthSource as displayLength } from '../../messages/dfm'
 import { referenceMessages } from '../../messages/reference'
+import { shapeMessages } from '../../messages/shape'
 import { useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
@@ -30,7 +35,7 @@ import {
   InspectorGroup,
 } from '../../ui'
 import styles from './Design.module.css'
-import { defaultUnit, type DesignPart } from './model'
+import { defaultUnit, surfaceLabel, type DesignPart } from './model'
 import { keepLoop, type ReferenceOverlayState } from './reference-overlay'
 import {
   ghostMatrix,
@@ -44,6 +49,7 @@ import {
 } from './reference-view'
 import { useCommand } from './useDesign'
 import { ReferenceCompare } from './ReferenceCompare'
+import { useShapeList, type ShapeRow } from './useShapes'
 
 const t = referenceMessages.tools
 
@@ -116,8 +122,17 @@ export interface FoundHoleGroup {
     readonly steps?: readonly { readonly diameter: number; readonly depth: number }[]
   }
   readonly pattern?:
-    | { readonly kind: 'grid'; readonly count: readonly [number, number] }
-    | { readonly kind: 'circle'; readonly count: number; readonly pitchDiameter: number }
+    | {
+        readonly kind: 'grid'
+        readonly count: readonly [number, number]
+        readonly pitch: readonly [number, number]
+      }
+    | {
+        readonly kind: 'circle'
+        readonly count: number
+        readonly pitchDiameter: number
+        readonly center: readonly [number, number]
+      }
   readonly suggest: {
     readonly command: string
     readonly args: Record<string, unknown>
@@ -139,7 +154,32 @@ const newGestureId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `holes-gesture-${++gestureCounter}`
-const mm = (v: number) => `${Math.round(v * 1000) / 1000} mm`
+const r3 = (v: number) => Math.round(v * 1000) / 1000
+const mm = (v: number) => `${r3(v)} mm`
+/** A length at full precision (X2-1): 0.001 mm, 0.0001″ (the results' own rounding). */
+export const exactLength = (v: number, units: DesignPart['units']): string =>
+  units === 'mm' ? `${r3(v)} mm` : `${Math.round((v / 25.4) * 10_000) / 10_000}"`
+
+/**
+ * X2-3: how far the section's outline lies inside a shape: the mean gap of the four sides of their
+ * bounds (each rounded to 0.001 mm first, as the results give them), positive inside, and the
+ * smallest and largest side. X1's arithmetic (exit-criteria.llm-first.fixture.ts).
+ */
+export function insetOf(
+  loop: FoundLoop['bounds'],
+  shape: NonNullable<ShapeRow['bounds']>,
+): { inset: number; sides: readonly [number, number] } {
+  const gaps = [
+    loop[0][0] - r3(shape.min[0]),
+    loop[0][1] - r3(shape.min[1]),
+    r3(shape.max[0]) - loop[1][0],
+    r3(shape.max[1]) - loop[1][1],
+  ]
+  return {
+    inset: Math.round((gaps.reduce((a, b) => a + b, 0) / 4) * 1000) / 1000,
+    sides: [r3(Math.min(...gaps)), r3(Math.max(...gaps))],
+  }
+}
 
 type Answer<T> =
   | { readonly key: string; readonly ok: true; readonly value: T }
@@ -238,6 +278,11 @@ export function ReferenceTools({
   const endMill = useSmallestEndMillRadius()
   const [roundRadius, setRoundRadius] = useState<Quantity | undefined>(undefined)
   const [created, setCreated] = useState<{ n: number } | { error: AppErrorData } | null>(null)
+  const [insetShape, setInsetShape] = useState<string | undefined>(undefined)
+  const [offsetMade, setOffsetMade] = useState<{ name: string } | { error: AppErrorData } | null>(
+    null,
+  )
+  const shapeRows = useShapeList(part)
   const [holesAdded, setHolesAdded] = useState<
     { n: number; bolt: boolean } | { error: AppErrorData } | null
   >(null)
@@ -334,7 +379,7 @@ export function ReferenceTools({
    * Adds a hole group as suggested: one command per hole of a list, or the first hole and a Clones
    * of it for a pattern; all with one gesture id, so the click is one undo step.
    */
-  const addHoles = async (g: FoundHoleGroup) => {
+  const addHoles = async (g: FoundHoleGroup, on?: string) => {
     const gesture = newGestureId()
     const s = g.suggest
     const centres = g.pattern === undefined ? g.holes : g.holes.slice(0, 1)
@@ -345,7 +390,7 @@ export function ReferenceTools({
       for (const a of [s.args, ...(s.also ?? [])]) {
         const r = await call(
           s.command,
-          { partId: part.dto.id, ...a, center: [mm(c[0]), mm(c[1])] },
+          { partId: part.dto.id, ...a, center: [mm(c[0]), mm(c[1])], ...(on ? { on } : {}) },
           { gesture },
         )
         if (!r.ok) return setHolesAdded({ error: r.error })
@@ -368,6 +413,44 @@ export function ReferenceTools({
       n = g.count
     }
     setHolesAdded({ n, bolt: s.command === 'design.hole.add' })
+  }
+
+  /**
+   * X2-1/X2-9: the floor a Bolt hole whose mouth lies `top` below the face goes on: the first
+   * operation floor on this face (facing, pocket or blind profile) at that depth within 0.01 mm.
+   */
+  const floorAt = (top: number): { id: string; name: string } | undefined => {
+    const table = part.table
+    if (table === undefined) return undefined
+    const e = table
+      .before(part.dto.operations.length)
+      .find(
+        (x) =>
+          x.owner >= 0 &&
+          x.onTarget &&
+          x.direction === direction &&
+          x.id.endsWith('.floor') &&
+          Math.abs(-x.faceZ.toNumber() - top) <= 0.01,
+      )
+    return e === undefined ? undefined : { id: e.id, name: surfaceLabel(part.dto, e.id) }
+  }
+
+  /** X2-3: "Create offset" of the chosen shape by the inset, a new shape (the Offset dialog's). */
+  const makeOffset = async (shape: ShapeRow, inset: number) => {
+    const name = shapeMessages.offset.name(shape.name)
+    const r = await call('design.shape.add', {
+      partId: part.dto.id,
+      name,
+      items: [
+        {
+          kind: 'offset',
+          shapeId: shape.id,
+          distance: exactLength(Math.abs(inset), units),
+          direction: inset >= 0 ? 'inward' : 'outward',
+        },
+      ],
+    })
+    setOffsetMade(r.ok ? { name } : { error: r.error })
   }
 
   const faceName = setup?.name ?? t.faces[face] ?? face
@@ -400,7 +483,11 @@ export function ReferenceTools({
                     className={styles['levelRow']}
                     data-undercut={undercut ? '' : undefined}
                     aria-label={undercut ? `${text}. ${t.undercut}` : text}
-                    title={undercut ? t.undercut : undefined}
+                    title={
+                      undercut
+                        ? `${t.exactDepth(exactLength(shown, units))}. ${t.undercut}`
+                        : t.exactDepth(exactLength(shown, units))
+                    }
                     onPointerEnter={() => setHover({ depth: l.depth, facing: l.facing })}
                     onPointerLeave={() => setHover(null)}
                     onFocus={() => setHover({ depth: l.depth, facing: l.facing })}
@@ -513,6 +600,24 @@ export function ReferenceTools({
             </p>
           </>
         )}
+        <InsetFrom
+          shapes={shapeRows}
+          value={insetShape}
+          onValueChange={(id) => {
+            setInsetShape(id)
+            setOffsetMade(null)
+          }}
+          loops={sectionValue?.loops}
+          units={units}
+          onOffset={(shape, inset) => void makeOffset(shape, inset)}
+        />
+        {offsetMade === null ? null : 'name' in offsetMade ? (
+          <p className={styles['muted']} role="status">
+            {t.offsetMade(offsetMade.name)}
+          </p>
+        ) : (
+          <ErrorMessage error={offsetMade.error} message={t.offsetFailed} />
+        )}
         <Checkbox
           label={t.roundInside}
           checked={round}
@@ -573,7 +678,9 @@ export function ReferenceTools({
                   group={g}
                   units={units}
                   faceName={faceName}
-                  onAdd={() => void addHoles(g)}
+                  direction={direction}
+                  floor={g.suggest.note === 'belowFace' ? floorAt(g.size.top) : undefined}
+                  onAdd={(on) => void addHoles(g, on)}
                 />
               ))}
             </ul>
@@ -603,9 +710,16 @@ function LoopRow({ loop: l, units }: { loop: FoundLoop; units: DesignPart['units
     : `${displayLength(l.bounds[1][0] - l.bounds[0][0], units)} × ${displayLength(l.bounds[1][1] - l.bounds[0][1], units)}`
   const r = l.corners.minInsideRadius
   const name = l.circle ? size : t.loop(l.role, size)
+  const E = (v: number) => exactLength(v, units)
+  const exact = l.circle
+    ? t.circle(E(l.circle.diameter))
+    : t.loop(
+        l.role,
+        `${E(l.bounds[1][0] - l.bounds[0][0])} × ${E(l.bounds[1][1] - l.bounds[0][1])}`,
+      )
   return (
     <li className={styles['loopRow']}>
-      <span className={styles['loopName']} title={name}>
+      <span className={styles['loopName']} title={exact}>
         {name}
       </span>
       <span className={styles['loopCorners']} role="group" aria-label={t.corners}>
@@ -626,8 +740,13 @@ function LoopRow({ loop: l, units }: { loop: FoundLoop; units: DesignPart['units
 }
 
 /** The text of a hole group: count, diameter, mouth, bottom and pattern. */
-export function holeGroupText(g: FoundHoleGroup, units: DesignPart['units']): string {
-  const L = (v: number) => displayLength(v, units)
+export function holeGroupText(
+  g: FoundHoleGroup,
+  units: DesignPart['units'],
+  exact = false,
+): string {
+  const L = (v: number) => (exact ? exactLength(v, units) : displayLength(v, units))
+  const deg = (a: number) => `${exact ? Math.round(a * 10) / 10 : Math.round(a)}°`
   const m = g.size.mouth
   const s = g.size
   return t.holeGroup({
@@ -637,7 +756,7 @@ export function holeGroupText(g: FoundHoleGroup, units: DesignPart['units']): st
       ? {
           mouth:
             m.type === 'countersink'
-              ? t.countersunk(L(m.diameter), `${Math.round(m.angle)}°`)
+              ? t.countersunk(L(m.diameter), deg(m.angle))
               : t.counterbored(L(m.diameter), L(m.depth - s.top)),
         }
       : s.steps !== undefined
@@ -647,7 +766,7 @@ export function holeGroupText(g: FoundHoleGroup, units: DesignPart['units']): st
       s.bottom === 'through'
         ? t.through
         : s.bottom === 'cone'
-          ? t.pointed(L(s.depth - s.top), `${Math.round(s.coneAngle ?? 118)}°`)
+          ? t.pointed(L(s.depth - s.top), deg(s.coneAngle ?? 118))
           : t.deep(L(s.depth - s.top)),
     ...(g.pattern === undefined
       ? {}
@@ -660,24 +779,54 @@ export function holeGroupText(g: FoundHoleGroup, units: DesignPart['units']): st
   })
 }
 
+/** X2-1: where a group's holes are, in the face frame at 0.001 mm (X/Y on the top). */
+export function holePositionsText(
+  g: FoundHoleGroup,
+  units: DesignPart['units'],
+  direction: Direction,
+): string {
+  const E = (v: number) => exactLength(v, units)
+  const [u, v] = direction === '+z' ? ['X', 'Y'] : ['u', 'v']
+  const at = (c: readonly [number, number]) => `${u} ${E(c[0])} ${v} ${E(c[1])}`
+  const first = g.holes[0]
+  const p = g.pattern
+  if (p?.kind === 'grid' && first !== undefined)
+    return t.gridAt(at(first), `${E(p.pitch[0])} × ${E(p.pitch[1])}`)
+  if (p?.kind === 'circle') return t.circleAt(at(p.center), E(p.pitchDiameter))
+  const shown = g.holes.slice(0, 4).map(at)
+  return t.holesAt(shown, g.holes.length - shown.length)
+}
+
 function HoleRow({
   group: g,
   units,
   faceName,
+  direction,
+  floor,
   onAdd,
 }: {
   group: FoundHoleGroup
   units: DesignPart['units']
   faceName: string
-  onAdd: () => void
+  direction: Direction
+  /** The floor a `belowFace` Bolt hole goes on (X2-1), if the part has it. */
+  floor: { id: string; name: string } | undefined
+  onAdd: (on?: string) => void
 }) {
   const text = holeGroupText(g, units)
   const bolt = g.suggest.command === 'design.hole.add'
   const below = g.suggest.note === 'belowFace'
-  const reason = below ? t.belowFace(displayLength(g.size.top, units), faceName) : undefined
+  const blocked = below && floor === undefined
+  const reason = blocked ? t.belowFace(displayLength(g.size.top, units), faceName) : undefined
+  const label =
+    below && floor !== undefined
+      ? t.addBoltHoleOn(floor.name)
+      : bolt
+        ? t.addBoltHole
+        : t.addDrilling
   return (
     <li className={styles['holeRow']}>
-      <span>{text}</span>
+      <span title={holeGroupText(g, units, true)}>{text}</span>
       <span className={styles['holeActions']}>
         {g.note === 'noTool' && g.smallestTool !== undefined ? (
           <span className={styles['cornerChip']} data-sharp="">
@@ -699,15 +848,85 @@ function HoleRow({
               }
             />
           }
-          disabled={below}
+          disabled={blocked}
           title={reason}
-          aria-label={`${bolt ? t.addBoltHole : t.addDrilling}: ${text}`}
-          onClick={onAdd}
+          aria-label={`${label}: ${text}`}
+          onClick={() => onAdd(below ? floor?.id : undefined)}
         >
-          {bolt ? t.addBoltHole : t.addDrilling}
+          {label}
         </Button>
       </span>
+      <span className={styles['holeWhere']}>{holePositionsText(g, units, direction)}</span>
       {reason !== undefined ? <span className={styles['muted']}>{reason}</span> : null}
     </li>
+  )
+}
+
+/**
+ * X2-3 "Inset from": a shape chosen here, the section's largest outline read against its bounds
+ * (both in the face frame), and "Create offset" of the shape by that inset.
+ */
+function InsetFrom({
+  shapes,
+  value,
+  onValueChange,
+  loops,
+  units,
+  onOffset,
+}: {
+  shapes: readonly ShapeRow[]
+  value: string | undefined
+  onValueChange: (id: string) => void
+  loops: readonly FoundLoop[] | undefined
+  units: DesignPart['units']
+  onOffset: (shape: ShapeRow, inset: number) => void
+}): React.JSX.Element | null {
+  const closed = shapes.filter((r) => r.kind === 'region' && r.bounds !== undefined)
+  if (closed.length === 0) return null
+  const shape = closed.find((r) => r.id === value)
+  const outline = (loops ?? [])
+    .filter((l) => l.role === 'outer' && l.open !== true)
+    .reduce<FoundLoop | undefined>(
+      (a, l) => (a === undefined || l.area > a.area ? l : a),
+      undefined,
+    )
+  const measured = shape && outline ? insetOf(outline.bounds, shape.bounds!) : undefined
+  const num = (v: number) => displayLength(v, units).replace(/ mm$|"$/, '')
+  return (
+    <>
+      <Field label={t.insetFrom} kind="toggle" info={t.insetHint}>
+        <Select
+          aria-label={t.insetFrom}
+          placeholder={t.insetChoose}
+          options={closed.map((r) => ({ value: r.id, label: r.name }))}
+          {...(shape === undefined ? {} : { value: shape.id })}
+          onValueChange={onValueChange}
+        />
+      </Field>
+      {shape === undefined ? null : measured === undefined ? (
+        <p className={styles['muted']}>{t.noOutline}</p>
+      ) : (
+        <div className={styles['insetRow']}>
+          <span role="status" className={styles['insetValue']}>
+            {t.inset(
+              exactLength(Math.abs(measured.inset), units),
+              measured.inset >= 0,
+              shape.name,
+              num(measured.sides[0]),
+              displayLength(measured.sides[1], units),
+            )}
+          </span>
+          {measured.inset === 0 ? null : (
+            <Button
+              size="sm"
+              icon={<Icon name="kind-offset" />}
+              onClick={() => onOffset(shape, measured.inset)}
+            >
+              {t.createOffset}
+            </Button>
+          )}
+        </div>
+      )}
+    </>
   )
 }
