@@ -1,21 +1,36 @@
 // The plan scene's workholding overlay (workholding.md#ui-summary): the setup's prisms as solids
 // (an open-ended prism stands on the table: −T), the open item's keep-out halo (footprints grown
 // by the margin at its top + margin) and the first hit of each collision finding (WCS); the
-// solids of an item a collision names are marked (drawn in --danger). X2-6: a toe clamp's drag
-// along its edge (`snapClampAt`, `moveClamp`; workholding.md#toe-clamp-drag-x2-6). Pure.
+// solids of an item a collision names are marked (drawn in --danger). Design review R8 (D75):
+// with `focus` (something other than the setup is selected) every item but the open one is a
+// ghost: drawn transparent and not pickable. R9: a surface hold (tape, vacuum, glue) as a thin
+// layer under the stock (`SURFACE_LAYER`). X2-6: a toe clamp's drag along its edge (`snapClampAt`,
+// `moveClamp`; workholding.md#toe-clamp-drag-x2-6). Pure.
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { Edge } from '../../../../core/plan/workholding/items'
 import { footprintOutline } from '../../../../core/plan/workholding/obstacles'
 import type { SetupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { WorkholdingOverlay } from '../../viewport'
 
+/** A surface hold's layer under the stock (mm): its thickness and how far it shows past the stock. */
+export const SURFACE_LAYER = { thickness: 1, rim: 2 } as const
+
+/**
+ * The overlay of a setup's workholding. `selected`: the open item (drawn a step stronger, with its
+ * halo); `focus`: something other than the setup itself is selected in the plan (an operation, an
+ * item), so every item but the open one is a ghost (design review R8).
+ */
 export function workholdingOverlay(
   holding: SetupWorkholding,
   setupId: string,
   selected: string | undefined,
   warnings: readonly PlanWarning[],
+  focus = false,
 ): WorkholdingOverlay | undefined {
   const floor = -holding.stock.thickness
+  const held = holding.items.some((i) => i.kind === 'surface')
+  const { length: l, width: w } = holding.stock
+  const r = SURFACE_LAYER.rim
   const hits = warnings
     .filter((w) => w.code === 'plan.workholding.collision' && w.params['setupId'] === setupId)
     .flatMap((w): (readonly [number, number, number])[] => {
@@ -24,7 +39,7 @@ export function workholdingOverlay(
         ? [[x, y, lowestZ]]
         : []
     })
-  if (holding.prisms.length === 0 && hits.length === 0) return undefined
+  if (holding.prisms.length === 0 && hits.length === 0 && !held) return undefined
   const colliding = new Set(
     warnings
       .filter((w) => w.code === 'plan.workholding.collision' && w.params['setupId'] === setupId)
@@ -49,6 +64,21 @@ export function workholdingOverlay(
           },
         }),
     ...(selected === undefined ? {} : { selected }),
+    ...(focus ? { ghost: true } : {}),
+    ...(held
+      ? {
+          surface: {
+            outline: [
+              [-r, -r],
+              [l + r, -r],
+              [l + r, w + r],
+              [-r, w + r],
+            ],
+            zMin: floor - SURFACE_LAYER.thickness,
+            zMax: floor,
+          },
+        }
+      : {}),
     hits,
   }
 }
@@ -71,6 +101,9 @@ export function shiftOverlay(
     ...(o.halo === undefined
       ? {}
       : { halo: { ...o.halo, outlines: o.halo.outlines.map((l) => l.map(at)) } }),
+    ...(o.surface === undefined
+      ? {}
+      : { surface: { ...o.surface, outline: o.surface.outline.map(at) } }),
   }
 }
 

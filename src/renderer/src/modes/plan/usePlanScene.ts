@@ -423,6 +423,9 @@ export function usePlanScene(mode: AppMode): RunScene | null {
             setup.id,
             openItem?.setupId === setup.id ? openItem.itemId : undefined,
             data.warnings,
+            // design review R8 (D75): an operation or an open item is selected; the setup itself
+            // selected (its Workholding group in view) keeps every clamp drawn and draggable
+            (selected !== null && selected !== setup.id) || openItem?.setupId === setup.id,
           )
     const heldItem = holding?.items.find((i) => i.id === heldClamp?.itemId)
     const moved =
@@ -459,6 +462,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     flipAxes,
     aids,
     openItem,
+    selected,
     holding,
     heldClamp,
     clamps,

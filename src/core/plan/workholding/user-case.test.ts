@@ -140,10 +140,8 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     expect(r.items[0]!.top).toBe(12)
     expect(r.clearanceHeight).toBe('14 mm')
     // what plan.warning.list says of the setup: the facing's uncut material under the clamps
-    expect(r.findings.map((f) => f.code)).toEqual([
-      'plan.workholding.unmachined',
-      'plan.workholding.unmachined',
-    ])
+    // (design review R13: one finding per operation, naming both clamps)
+    expect(r.findings.map((f) => f.code)).toEqual(['plan.workholding.unmachined'])
     const sv = services()
     const e = expectOk(await exportPlan(s.d.doc, planId, sv))
     const text = withoutAppVersion(e.text)
@@ -158,11 +156,29 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     // the facing leaves the material under the clamps uncut and says so
     const after = findings(s, planId)
     const uncut = after.filter((f) => f.code === 'plan.workholding.unmachined')
-    expect(uncut.map((f) => f.params['itemId'])).toEqual(['wh1', 'wh2'])
+    expect(uncut.map((f) => f.params['itemIds'])).toEqual(['wh1,wh2'])
+    expect(uncut[0]!.params['itemId']).toBeUndefined()
+    expect(uncut[0]!.message).toMatch(
+      /^Facing 1 \(planOp-\d+\) leaves [\d.]+ mm² uncut under Toe clamp 1 \([\d.]+ mm², X-?[\d.]+–[\d.]+ Y[\d.]+–[\d.]+\) and Toe clamp 2 \(/,
+    )
+    const [a, b] = [uncut[0]!.params['area'], uncut[0]!.params['xMin']]
+    expect(typeof a === 'number' && a > 0).toBe(true)
+    expect(b).toBeCloseTo(-1, 3)
     expect(after.filter((f) => f.severity === 'error')).toEqual([])
   })
 
   // DF81 (docs/modes/alignment.md S12): the header's item positions are in the WCS, as on the DRO
+  it('one clamp: the uncut finding names it with its bounds and keeps itemId (R13)', async () => {
+    const { s, planId, setupId } = await userCase()
+    await s.run('plan.workholding.set', { planId, setupId, items: [USER_CLAMPS[0]] })
+    const uncut = findings(s, planId).filter((f) => f.code === 'plan.workholding.unmachined')
+    expect(uncut).toHaveLength(1)
+    expect(uncut[0]!.params).toMatchObject({ itemId: 'wh1', itemIds: 'wh1' })
+    expect(uncut[0]!.message).toMatch(
+      /^Facing 1 \(planOp-\d+\) leaves [\d.]+ mm² uncut under Toe clamp 1 \(X-?[\d.]+–[\d.]+ Y[\d.]+–[\d.]+\)$/,
+    )
+  })
+
   it('with a moved work zero the header names the items in the WCS, the set result in the setup frame', async () => {
     const { s, planId, setupId } = await userCase()
     const items = [
@@ -344,6 +360,12 @@ describe("auto: 'toeClamps' on the user's case", () => {
     expect(r.findings.filter((f) => f.severity === 'error')).toEqual([])
     await generate(s, planId)
     expect(findings(s, planId).filter((f) => f.severity === 'error')).toEqual([])
+    // design review R13: the facing's material under the four clamps is one grouped finding
+    const uncut = findings(s, planId).filter((f) => f.code === 'plan.workholding.unmachined')
+    expect(uncut.map((f) => f.params['itemIds'])).toEqual(['wh1,wh2,wh3,wh4'])
+    expect(uncut[0]!.message).toMatch(
+      /uncut under Toe clamp 1 \(.*\), Toe clamp 2 \(.*\), Toe clamp 3 \(.*\) and Toe clamp 4 \(/,
+    )
     const text = withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
     const boxes = r.items.map((i) => ({
       x: [i.bounds[0]![0]!, i.bounds[1]![0]!] as const,
