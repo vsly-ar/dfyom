@@ -20,6 +20,7 @@ import {
 } from '../../../core/library/library-item'
 import type { MachineValuesDTO } from '../../../core/library/machine.dto'
 import type { StockValuesDTO } from '../../../core/library/stock.dto'
+import type { WorkholdingType, WorkholdingValuesDTO } from '../../../core/library/workholding.dto'
 import { Tool } from '../../../core/library/tool'
 import type { CuttingPresetDTO, ToolType, ToolValuesDTO } from '../../../core/library/tool.dto'
 import {
@@ -74,12 +75,23 @@ export type MachineDraft = Omit<MachineValuesDTO, 'acceleration' | 'stepsPerMm'>
   readonly stepsPerMm?: Partial<Record<Axis, QuantityDTO>> | undefined
 }
 export type StockDraft = StockValuesDTO
-export type DraftValues = ToolDraft | MachineDraft | StockDraft
+/** A workholding device's values (workholding-library.md § Item model): its type is fixed. */
+export type WorkholdingDraft = WorkholdingValuesDTO
+export type DraftValues = ToolDraft | MachineDraft | StockDraft | WorkholdingDraft
 
 /** The values of a stored item (its meta dropped). */
 export function itemValues(item: LibraryItemDTO): ItemValuesDTO {
-  // a stock variant's parentId is library bookkeeping, not a value (DF13)
-  const { id: _id, revision: _revision, updatedAt: _updatedAt, parentId: _parent, ...values } = item
+  // a stock variant's parentId is library bookkeeping, not a value (DF13); a workholding
+  // listing's `builtIn` and `isDefault` flags are output only (WL1)
+  const {
+    id: _id,
+    revision: _revision,
+    updatedAt: _updatedAt,
+    parentId: _parent,
+    builtIn: _builtIn,
+    isDefault: _isDefault,
+    ...values
+  } = item as LibraryItemDTO & { builtIn?: true; isDefault?: true }
   return values as ItemValuesDTO
 }
 
@@ -206,12 +218,56 @@ export function defaultStockValues(units: UnitSystem): StockDraft {
   }
 }
 
-export function defaultValues(kind: LibraryTabKind, units: UnitSystem): DraftValues {
+/**
+ * A new workholding device of `type` with the built-in item's sizes (workholding-library.md §
+ * Built-in items; a block 50 × 20 × 20 mm, 2 × 3/4 × 3/4″, which has no built-in).
+ */
+export function defaultWorkholdingValues(
+  type: WorkholdingType,
+  units: UnitSystem,
+): WorkholdingDraft {
+  const mm = units === 'mm'
+  const len = (metric: string, inch: string) => qdto('length', mm ? metric : inch, units)
+  const base = {
+    kind: 'workholding' as const,
+    name: libraryMessages.workholding.defaultNames[type],
+    type,
+  }
+  switch (type) {
+    case 'toeClamp':
+      return {
+        ...base,
+        width: len('30', '1 1/4'),
+        length: len('60', '2 1/2'),
+        top: len('25', '1'),
+        gripMin: len('5', '3/16'),
+        gripMax: len('15', '5/8'),
+      }
+    case 'vise':
+      return { ...base, jawWidth: len('150', '6'), jawThickness: len('20', '3/4'), soft: false }
+    case 'screw':
+      return { ...base, headDiameter: len('8', '5/16'), headHeight: len('0', '0') }
+    case 'block':
+      return { ...base, length: len('50', '2'), width: len('20', '3/4'), height: len('20', '3/4') }
+    case 'base':
+      return { ...base, baseType: 'spoilboard', sacrificial: true }
+    case 'surface':
+      return { ...base, surfaceType: 'tape' }
+  }
+}
+
+export function defaultValues(
+  kind: LibraryTabKind,
+  units: UnitSystem,
+  type: WorkholdingType = 'toeClamp',
+): DraftValues {
   return kind === 'tool'
     ? defaultToolValues(units)
     : kind === 'machine'
       ? defaultMachineValues(units)
-      : defaultStockValues(units)
+      : kind === 'stock'
+        ? defaultStockValues(units)
+        : defaultWorkholdingValues(type, units)
 }
 
 /** Names compare trimmed and case-insensitively (ui-library-window.md § Names, DF47). */
@@ -325,6 +381,21 @@ export function cleanValues(
         ...allOrNone('acceleration', acceleration, libraryMessages.machine.accelerationAll),
         ...allOrNone('stepsPerMm', stepsPerMm, libraryMessages.machine.stepsPerMmAll),
       } as MachineValuesDTO,
+      issues,
+    }
+  }
+  if (values.kind === 'workholding') {
+    // empty texts are no value; `default` is stored only when true (WL1)
+    const { stud, thread, default: isDefault, ...rest } = values
+    return {
+      values: {
+        ...rest,
+        name: values.name.trim(),
+        notes,
+        ...(stud?.trim() ? { stud: stud.trim() } : {}),
+        ...(thread?.trim() ? { thread: thread.trim() } : {}),
+        ...(isDefault === true ? { default: true } : {}),
+      },
       issues,
     }
   }

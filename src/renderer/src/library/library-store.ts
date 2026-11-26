@@ -7,6 +7,8 @@
 // Doc: docs/conventions/ui-library-window.md#decisions-assumed, #behaviour-with-projects
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { LibraryTabKind } from '../../../core/library/item'
+import { isBuiltinWorkholding } from '../../../core/library/workholding-builtins'
+import { WORKHOLDING_TYPES, type WorkholdingType } from '../../../core/library/workholding.dto'
 import type { LibraryChange } from '../../../core/library/library'
 import type { LibraryItemDTO } from '../../../core/library/library-item'
 import type { UnitSystem } from '../../../core/project/document'
@@ -28,9 +30,11 @@ import {
   toolName,
   uniqueName,
   type DraftValues,
+  type WorkholdingDraft,
 } from './form'
+import { asWorkholding, isBuiltIn } from './workholding-view'
 
-export const KINDS: readonly LibraryTabKind[] = ['machine', 'tool', 'stock']
+export const KINDS: readonly LibraryTabKind[] = ['machine', 'tool', 'stock', 'workholding']
 
 export interface Listing {
   readonly items: readonly LibraryItemDTO[]
@@ -88,7 +92,8 @@ export interface LibraryActions {
   setSearch(search: string): void
   setTab(tab: LibraryTabKind): void
   select(kind: LibraryTabKind, id: string): void
-  newItem(kind?: LibraryTabKind): void
+  /** A new item of the kind (the tab's); a workholding device of `type` (default toe clamp). */
+  newItem(kind?: LibraryTabKind, type?: WorkholdingType): void
   duplicate(): void
   /** A new stock variant of the selected stock (or a sibling of the selected variant), DF13. */
   newVariant(): void
@@ -99,6 +104,11 @@ export interface LibraryActions {
   overwrite(): Promise<boolean>
   setRemoving(open: boolean): void
   setToolDetailsOpen(open: boolean): void
+  /**
+   * The selected built-in workholding device becomes its type's default: the user items of the
+   * type drop their `default` flag (the built-in itself is never written, WL3).
+   */
+  makeBuiltinDefault(): Promise<void>
   remove(): Promise<void>
   promptSave(): Promise<void>
   promptDiscard(): void
@@ -117,6 +127,25 @@ export interface LibraryActions {
 export type LibraryStore = StoreApi<LibraryState & LibraryActions>
 
 const EMPTY: Listing = { items: [], errors: [], loaded: false }
+
+/**
+ * The list order: by name; workholding grouped by device type (WORKHOLDING_TYPES order), the
+ * built-ins after the user's items of their type (in their list order, WL3).
+ */
+function listOrder(items: readonly LibraryItemDTO[]): LibraryItemDTO[] {
+  const typeAt = (i: LibraryItemDTO) => {
+    const w = asWorkholding(i)
+    return w === undefined ? 0 : WORKHOLDING_TYPES.indexOf((w as WorkholdingDraft).type)
+  }
+  const byName = [...items].sort((a, b) => a.name.localeCompare(b.name))
+  const builtins = items.filter(isBuiltIn)
+  return byName.sort(
+    (a, b) =>
+      typeAt(a) - typeAt(b) ||
+      Number(isBuiltIn(a)) - Number(isBuiltIn(b)) ||
+      (isBuiltIn(a) ? builtins.indexOf(a) - builtins.indexOf(b) : 0),
+  )
+}
 
 /** Order-independent equality of plain values (undefined fields count as absent). */
 export function sameValues(a: unknown, b: unknown): boolean {
@@ -200,8 +229,42 @@ export function createLibraryStore(deps: {
       })
     }
 
+    /** `get` / `list` args: workholding built-ins come in the window's unit system (WL1). */
+    const unitsArg = (kind: LibraryTabKind) =>
+      kind === 'workholding' ? { units: get().units() } : {}
+
+    /** The window's unit system changed: built-ins are listed (and a clean one shown) in it. */
+    const unitsChanged = async () => {
+      await get().load('workholding')
+      const d = get().draft
+      if (
+        d?.kind === 'workholding' &&
+        d.id !== null &&
+        isBuiltinWorkholding(d.id) &&
+        !get().isDirty()
+      )
+        showItem('workholding', d.id)
+    }
+
+    /**
+     * One default per type (Q135): after a user item was marked default, the other user items of
+     * its type drop the flag, so the switch shows what Add and Arrange use (WL3). `keep` stays.
+     */
+    const clearDefaults = async (type: WorkholdingType, keep: string | null) => {
+      const others = get().lists.workholding.items.filter((i) => {
+        const w = asWorkholding(i) as (WorkholdingDraft & { id: string }) | undefined
+        return w !== undefined && !isBuiltIn(i) && i.id !== keep && w.type === type && w.default
+      })
+      for (const o of others) {
+        const base = itemValues(o) as WorkholdingDraft
+        const { default: _default, ...values } = base
+        const input = commandInput(values, { units: get().units(), base })
+        await call('library.workholding.update', { ...input, id: o.id, revision: o.revision })
+      }
+      if (others.length > 0) await get().load('workholding')
+    }
+
     const onChange = (change: LibraryChange) => {
-      if (change.kind === 'workholding') return // its tab comes with WL3 (workholding-library.md)
       void get().load(change.kind)
       const s = get()
       if (s.saving || s.draft === null || s.draft.id !== change.id) return
@@ -215,7 +278,9 @@ export function createLibraryStore(deps: {
     }
 
     const refreshDraft = async (kind: LibraryTabKind, id: string) => {
-      const item = reply<LibraryItemDTO>(await call(`library.${kind}.get`, { id }))
+      const item = reply<LibraryItemDTO>(
+        await call(`library.${kind}.get`, { id, ...unitsArg(kind) }),
+      )
       if (item !== undefined && get().draft?.id === id && !get().isDirty())
         set({ draft: draftOf(item) })
     }
@@ -259,6 +324,8 @@ export function createLibraryStore(deps: {
       }
       const item = r.value as LibraryItemDTO
       await get().load(d.kind)
+      const saved = asWorkholding(item) as WorkholdingDraft | undefined
+      if (saved?.default === true) await clearDefaults(saved.type, item.id)
       patch({
         draft: draftOf(item),
         selected: { ...get().selected, [d.kind]: item.id },
@@ -270,8 +337,8 @@ export function createLibraryStore(deps: {
 
     return {
       tab: 'tool',
-      lists: { machine: EMPTY, tool: EMPTY, stock: EMPTY },
-      selected: { machine: null, tool: null, stock: null },
+      lists: { machine: EMPTY, tool: EMPTY, stock: EMPTY, workholding: EMPTY },
+      selected: { machine: null, tool: null, stock: null, workholding: null },
       draft: null,
       saving: false,
       error: undefined,
@@ -286,13 +353,22 @@ export function createLibraryStore(deps: {
       toolDetailsOpen: false,
       setToolDetailsOpen: (toolDetailsOpen) => set({ toolDetailsOpen }),
 
+      async makeBuiltinDefault() {
+        const d = get().draft
+        if (d === null || d.values.kind !== 'workholding' || d.id === null) return
+        if (!isBuiltinWorkholding(d.id)) return
+        await clearDefaults(d.values.type, null)
+      },
+
       start() {
         let live = true
         const stops = [
           bridge.library.onChanged(onChange),
           bridge.library.onContext((context) => {
             const previous = get().context
+            const units = get().units()
             set({ context })
+            if (get().units() !== units) void unitsChanged()
             follow(context, previous)
           }),
           bridge.library.onCloseRequest((closeRequest) => set({ closeRequest })),
@@ -300,7 +376,10 @@ export function createLibraryStore(deps: {
         void Promise.all(KINDS.map((k) => get().load(k))).then(async () => {
           const context = await bridge.library.context()
           if (!live) return
+          const units = get().units()
           set({ context, tab: context.target?.kind ?? context.tab })
+          // the built-ins' value set follows the project's unit system (WL1)
+          if (get().units() !== units) await get().load('workholding')
           follow(context, null)
           const tab = get().tab
           if (get().selected[tab] === null) {
@@ -317,11 +396,11 @@ export function createLibraryStore(deps: {
 
       async load(kind) {
         const r = reply<{ items: LibraryItemDTO[]; errors: Listing['errors'] }>(
-          await call(`library.${kind}.list`, {}),
+          await call(`library.${kind}.list`, unitsArg(kind)),
         )
         if (r === undefined) return
         // by name, as the list sorts by default: the first item is the first row
-        const items = [...r.items].sort((a, b) => a.name.localeCompare(b.name))
+        const items = listOrder(r.items)
         set({ lists: { ...get().lists, [kind]: { items, errors: r.errors, loaded: true } } })
       },
 
@@ -334,8 +413,10 @@ export function createLibraryStore(deps: {
         )
       },
       setUnits(units) {
+        const before = get().units()
         set({ unitsOverride: units })
         settings.getState().update({ libraryUnits: units })
+        if (units !== before) void unitsChanged()
       },
       setSearch: (search) => set({ search }),
 
@@ -354,10 +435,10 @@ export function createLibraryStore(deps: {
         guard(() => showItem(kind, id))
       },
 
-      newItem(kind) {
+      newItem(kind, type) {
         const k = kind ?? get().tab
         guard(() => {
-          const values = defaultValues(k, get().units())
+          const values = defaultValues(k, get().units(), type)
           // a default name never repeats another item's (a tool's follows type and size; DF47)
           const taken = get().lists[k].items.map((i) => i.name)
           patch({
@@ -383,6 +464,8 @@ export function createLibraryStore(deps: {
         guard(() => {
           const taken = get().lists[d.kind].items.map((i) => i.name)
           const values = { ...d.values, name: copyName(get().draftName(), taken) } as DraftValues
+          // a copy is never the default: the original keeps it (WL3)
+          if (values.kind === 'workholding') delete (values as { default?: boolean }).default
           patch({
             selected: { ...get().selected, [d.kind]: NEW },
             // a duplicated variant stays under the same parent

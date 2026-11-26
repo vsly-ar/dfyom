@@ -221,6 +221,32 @@
     );
 }
 
+.headRow[data-kind='workholding'],
+.row[data-kind='workholding'] {
+  /* name with its chips, main size, details (WL3) */
+  grid-template-columns: minmax(240px, 2.4fr) minmax(110px, 1.2fr) minmax(80px, 0.9fr);
+}
+
+/* a device type's heading row in the workholding list (WL3): muted, a hairline above */
+.groupRow {
+  display: grid;
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.groupRow:first-child {
+  padding-top: var(--space-1);
+}
+
+.groupCell {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .headRow {
   position: sticky;
   top: calc(var(--space-2) * -1);
@@ -447,6 +473,15 @@
   line-height: var(--lh-sm);
 }
 
+/* a built-in workholding device (WL3): read-only, duplicate to change */
+.builtInNote {
+  margin: calc(var(--space-2) * -1) 0 0;
+  padding: 0 var(--space-4) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
 .variantLink {
   padding: 0;
   border: 0;
@@ -614,6 +649,61 @@
 .dim[data-active] .dimText {
   fill: var(--text-accent);
   font-weight: var(--weight-bold);
+}
+
+/* ── workholding device drawing (WL3): plan above side, neutral, the stock dashed ─────── */
+.deviceBody {
+  stroke: var(--text-muted);
+  stroke-width: 1.2px;
+  fill: color-mix(in oklab, var(--text-muted) 8%, transparent);
+}
+
+.deviceDetail {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+  fill: none;
+}
+
+.stockShape {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  fill: none;
+}
+
+.table {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+}
+
+.viewLabel {
+  fill: var(--text-faint);
+  stroke: none;
+  font: var(--weight-medium) 10px var(--font-ui);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.viewDivider {
+  stroke: var(--border);
+  stroke-width: 1px;
+}
+
+.deviceLegend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.deviceLegend > [data-active] {
+  color: var(--text);
 }
 
 /* ── presets ─────────────────────────────────────────────────────────────────────────── */

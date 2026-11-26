@@ -2,7 +2,9 @@
 // "Library" opens one window (again: the same one), a new tool is drafted ("Unsaved") and saved,
 // then edited and saved again, and the design tool field lists it. The context link "Edit in
 // library" is not used here (plan mode); the leave prompt and conflicts are covered by component
-// tests. Docs: docs/conventions/ui-library-window.md, docs/conventions/testing.md#end-to-end
+// tests. The Workholding tab (WL3): duplicate the built-in toe clamp, change a size, make it the
+// default. Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
+// docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import {
@@ -200,6 +202,49 @@ test('library window: a new machine in the tabs Machine / Motion / Spindle (DF11
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(row).toContainText('750')
   await expect(row).toContainText('24000')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('library window: duplicate the built-in toe clamp, change a size, make it the default (WL3)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const opened = dfyom.app.waitForEvent('window')
+  await page.getByRole('button', { name: 'Library', exact: true }).click()
+  const lib = await opened
+  await lib.waitForLoadState('domcontentloaded')
+  if (RENDERS) await lib.setViewportSize({ width: 1100, height: 760 })
+  await lib.getByRole('tab', { name: 'Workholding' }).click()
+  const grid = lib.getByRole('grid', { name: 'Workholding' })
+  const editor = lib.getByRole('region', { name: 'Item editor' })
+  // an empty library lists the built-ins, grouped by device type; the toe clamp is the default
+  const builtin = grid.getByRole('row', { name: /^Toe clamp(?!s| copy)/ })
+  await expect(builtin).toContainText('Built-in')
+  await expect(builtin).toContainText('Default')
+  await builtin.click()
+  await expect(editor.getByText('Built-in: duplicate it to change the sizes.')).toBeVisible()
+  await expect(input(editor, 'Strap length')).toHaveAttribute('readonly', '')
+
+  await editor.getByRole('button', { name: 'Duplicate' }).click()
+  await expect(editor.getByRole('heading', { name: 'Toe clamp copy' })).toBeVisible()
+  await editor.getByRole('textbox', { name: 'Name' }).fill('Strap clamp M8')
+  await setField(editor, 'Strap length', '80')
+  await input(editor, 'Top above the stock').focus()
+  await expect(
+    editor.getByRole('img', { name: 'Device drawing: Top above the stock highlighted' }),
+  ).toBeVisible()
+  await setField(editor, 'Top above the stock', '30')
+  await editor.getByRole('switch', { name: 'Default for toe clamps' }).click()
+  await editor.getByRole('button', { name: 'Save' }).click()
+  const row = grid.getByRole('row', { name: /Strap clamp M8/ })
+  await expect(row).toHaveAttribute('aria-selected', 'true')
+  await expect(row).not.toContainText('Unsaved')
+  await expect(row).toContainText('30 × 80, top 30 mm')
+  await expect(row).toContainText('Default')
+  await expect(builtin).not.toContainText('Default')
+  await render(page, lib, 'wl-library')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

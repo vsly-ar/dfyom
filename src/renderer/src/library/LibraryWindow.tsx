@@ -1,12 +1,14 @@
 // The Library window (one per app instance, L1): banner toolbar (search, mm / in, "New <kind>",
-// the machine group with Stop while a connection is open), navigation tabs Machines | Tools |
-// Stock, and the main region with the item list and the item editor. Keys: Ctrl/Cmd+S and
+// the machine group with Stop while a connection is open; on the Workholding tab "New workholding"
+// is a menu of the six device types, WL3), navigation tabs Machines | Tools | Stock | Workholding,
+// and the main region with the item list and the item editor. Keys: Ctrl/Cmd+S and
 // Ctrl/Cmd+Enter save the draft, F6 cycles toolbar, tabs, list and editor. Leaving a draft asks
 // "Save changes to …?"; closing the window with one asks the same (main's close request).
 // Doc: docs/conventions/ui-library-window.md
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useStore } from 'zustand'
 import type { LibraryTabKind } from '../../../core/library/item'
+import { WORKHOLDING_TYPES } from '../../../core/library/workholding.dto'
 import type { UnitSystem } from '../../../core/project/document'
 import type { MenuAction } from '../../../shared/preload-api'
 import { libraryMessages } from '../messages/library'
@@ -20,10 +22,12 @@ import {
   Button,
   Dialog,
   DialogClose,
+  Menu,
   SegmentedControl,
   modalDialogOpen,
 } from '../ui'
-import type { ToolDraft } from './form'
+import type { ToolDraft, WorkholdingDraft } from './form'
+import { WORKHOLDING_TYPE_ICON } from './workholding-view'
 import { ItemEditor } from './ItemEditor'
 import { ItemTable } from './ItemTable'
 import { createLibraryStore, KINDS, NEW, type LibraryStore } from './library-store'
@@ -197,9 +201,29 @@ export function LibraryWindow(): React.JSX.Element {
           value={units}
           onValueChange={(u) => s.setUnits(u)}
         />
-        <Button variant="primary" size="sm" icon={<Icon name="add" />} onClick={() => s.newItem()}>
-          {w.newItem[s.tab]}
-        </Button>
+        {s.tab === 'workholding' ? (
+          <Menu
+            label={libraryMessages.workholding.newMenu}
+            items={WORKHOLDING_TYPES.map((t) => ({
+              label: libraryMessages.workholding.types[t],
+              icon: <Icon name={WORKHOLDING_TYPE_ICON[t]} />,
+              onSelect: () => s.newItem('workholding', t),
+            }))}
+          >
+            <Button variant="primary" size="sm" icon={<Icon name="add" />}>
+              {w.newItem.workholding}
+            </Button>
+          </Menu>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Icon name="add" />}
+            onClick={() => s.newItem()}
+          >
+            {w.newItem[s.tab]}
+          </Button>
+        )}
         <span className={styles['spacer']} />
         <div className={styles['machine']}>
           <MachineToolbar />
@@ -228,6 +252,12 @@ export function LibraryWindow(): React.JSX.Element {
                   ? (s.draft.values as ToolDraft).type
                   : undefined
               }
+              newDevice={
+                s.draft?.kind === 'workholding' && s.draft.id === null
+                  ? (s.draft.values as WorkholdingDraft).type
+                  : undefined
+              }
+              units={units}
               onSelect={(id) => (id === NEW ? undefined : s.select(s.tab, id))}
               onEnter={() =>
                 editorRef.current

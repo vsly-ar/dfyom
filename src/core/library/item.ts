@@ -15,10 +15,10 @@ export type LibraryItemKind = (typeof LIBRARY_ITEM_KINDS)[number]
 export const LibraryItemKindSchema = z.enum(LIBRARY_ITEM_KINDS)
 
 /**
- * The kinds the Library window has a tab for. Workholding gets its tab in slice WL3
- * (docs/modes/workholding-library.md#slices); until then it is an agent-only kind.
+ * The kinds the Library window has a tab for: every kind since workholding got its tab in slice
+ * WL3 (docs/modes/workholding-library.md#library-window-tab).
  */
-export const LIBRARY_TAB_KINDS = ['stock', 'tool', 'machine'] as const
+export const LIBRARY_TAB_KINDS = ['stock', 'tool', 'machine', 'workholding'] as const
 export type LibraryTabKind = (typeof LIBRARY_TAB_KINDS)[number]
 
 /** Fixed enum; users cannot add classes (docs/architecture/library.md#stock). */
