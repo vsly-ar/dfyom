@@ -18,6 +18,7 @@ import { fakeClock, fakeIds, uiSource } from '../commands/testing'
 import type { PartEvaluation } from '../geometry/evaluate'
 import { loadManifold } from '../geometry/manifold'
 import type { DfmWarning, PartGeometryInput } from '../geometry/model'
+import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import { Library } from '../library/library'
 import { createMemoryLibraryStorage } from '../library/memory-storage'
@@ -478,6 +479,7 @@ describe('design.warning.list and design.part.evaluate', () => {
   const warningList = (s: Setup) =>
     expectOk(s.d.query('design.warning.list', { partId: s.partId }, ui)).value as {
       warnings: DfmWarning[]
+      construction: unknown[]
       evaluation: string
       error?: { code: string }
     }
@@ -531,6 +533,65 @@ describe('design.warning.list and design.part.evaluate', () => {
     )
   })
 
+  // DF118 V2: the user's clamps_40 (TG #369), the chamfer wide enough to cut the recess floor away
+  const clamps: object[] = [
+    ['design.facing.add', { depth: '0.3' }],
+    ['design.facing.add', { on: 'stock.bottom', depth: '0.3' }],
+    [
+      'design.pocket.add',
+      {
+        on: 'facing2.floor',
+        depth: '2',
+        shape: {
+          kind: 'rectangle',
+          center: ['30', '22'],
+          length: '11.3',
+          width: '31',
+          cornerRadius: '5.6',
+        },
+      },
+    ],
+    [
+      'design.pocket.add',
+      {
+        on: 'pocket1.floor',
+        depth: '7.8',
+        shape: {
+          kind: 'rectangle',
+          center: ['30', '22'],
+          length: '5.5',
+          width: '25',
+          cornerRadius: '2.5',
+        },
+      },
+    ],
+    ['design.chamfer.add', { edgeOf: 'pocket2', on: 'pocket1.floor', width: '3.2', angle: '90' }],
+  ]
+
+  it('lists the construction surfaces of a done evaluation, without their patches (DF118 V2)', async () => {
+    const workers = createInProcessWorkers({
+      solids: () => loadManifold(nodeManifoldSource()),
+      region2d: () => Ok(nodeRegion2d()),
+    })
+    const s = await setup({ workers, part: clamps })
+    expect(warningList(s)).toMatchObject({ evaluation: 'pending', construction: [] })
+    const job = await startJob(s)
+    const r = expectOk(await job.result) as { construction: unknown[]; warnings: DfmWarning[] }
+    const expected = [
+      {
+        surface: 'pocket1.floor',
+        consumedBy: ['pocket2', 'chamfer1'],
+        referencedBy: [
+          { operationId: 'pocket2', param: 'on' },
+          { operationId: 'chamfer1', param: 'on' },
+        ],
+      },
+    ]
+    expect(r.construction).toEqual(expected)
+    expect(r.warnings.map((w) => w.code)).not.toContain('dfm.surfaceCutAway')
+    expect(warningList(s).construction).toEqual(expected)
+  })
+
   it('a failed evaluation returns the parameter warnings and the error', async () => {
     const s = await setup({ part: noTabs })
     const params = warningList(s).warnings
@@ -546,7 +607,11 @@ describe('design.warning.list and design.part.evaluate', () => {
     await settle()
     expect(s.runs).toHaveLength(1)
     await finish(s.runs[0]!, Ok(evaluation()))
-    expect(expectOk(await job.result)).toEqual({ evaluation: 'done', warnings: [] })
+    expect(expectOk(await job.result)).toEqual({
+      evaluation: 'done',
+      warnings: [],
+      construction: [],
+    })
   })
 
   it('the job skips the debounce', async () => {
