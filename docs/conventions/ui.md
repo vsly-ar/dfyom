@@ -402,6 +402,7 @@ App settings (`src/shared/settings.ts`): GUI preferences of the app instance, ow
 | Last machine (DF45)               | a machine library id, or none (default)       | `lastMachine`: preselects the machine of the [Plan start](#plan-start-df29) card; written when a plan is created there and when a plan's machine is chosen. Not in the dialog.                               |
 
 - The settings dialog (toolbar "Settings", or "Agent settings" in the agent indicator) applies changes at once and optimistically; main validates the patch (unknown fields and wrong values are refused, the window then returns to main's settings), writes the file atomically and pushes the new settings to every window.
+- The dialog groups its rows with the inspectors' group header style ([inspector-layout.md § Group header style](inspector-layout.md#group-header-style), DF110 S6): **Appearance** (Theme, Reduce motion) · **Editing** (Auto-apply after, Default anchor, Snap grid) · **Run** (Jog keys, Homing confirmation) · **Agents** (Allow local agents to connect).
 - A window gets the settings at creation as a window argument (`--dfyom-settings`), so theme and motion are applied before the first render (no flash).
 - A missing field takes its default; an unreadable or invalid file gives the defaults with a warning in the log and is replaced on the next change. Settings are preferences, not user data, so this needs no confirmation and no migration.
 

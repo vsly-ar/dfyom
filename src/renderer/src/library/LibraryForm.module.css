@@ -112,3 +112,11 @@
   line-height: var(--lh-sm);
   color: var(--text-muted);
 }
+
+/* a tab panel of the full machine form (DF110): its groups stack as in the form body */
+.tabBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+}

@@ -1,11 +1,12 @@
 // The stock form of the Library window's editor (library.md#stock): name, the block's length,
-// width and thickness, the material name and class, notes. The stock setup in design mode keeps
-// its own short form. Doc: docs/conventions/ui-library-window.md#layout
+// width and thickness, the material name and class, notes (a closed accordion, DF110). The stock
+// setup in design mode keeps its own short form.
+// Docs: docs/conventions/ui-library-window.md#layout, docs/conventions/inspector-layout.md
 import { MATERIAL_CLASSES } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { Field, FieldInput, InspectorGroup, Select } from '../ui'
 import type { StockDraft } from './form'
-import { FixedField, NameField, NotesField, QuantityField, type FormProps } from './fields'
+import { FixedField, NameField, NotesGroup, QuantityField, type FormProps } from './fields'
 
 const m = libraryMessages.stock
 const g = libraryMessages.window.groups
@@ -78,13 +79,12 @@ export function StockFields({
           />
         </Field>
       </InspectorGroup>
-      <InspectorGroup title={g.notes}>
-        <NotesField
-          value={values.notes}
-          messages={messages('notes')}
-          onChange={(notes) => set({ notes })}
-        />
-      </InspectorGroup>
+      <NotesGroup
+        kind="stock"
+        value={values.notes}
+        messages={messages('notes')}
+        onChange={(notes) => set({ notes })}
+      />
     </>
   )
 }

@@ -16,7 +16,7 @@ import {
 } from '../../../../core/run/override'
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
-import { Button, SegmentedControl, Slider } from '../../ui'
+import { Button, InspectorGroup, SegmentedControl, Slider } from '../../ui'
 import { useLibraryItems } from '../plan/usePlan'
 import { formatFeed } from './machine-state'
 import { machineOverrideLimits, type MachineOverrideLimits } from './plan-info'
@@ -67,8 +67,7 @@ export function OverridesSection({
         : undefined
   const rapid = String(ov?.rapid ?? 100) as Rapid
   return (
-    <section className={styles['section']} aria-label={m.title}>
-      <h3 className={styles['sectionTitle']}>{m.title}</h3>
+    <InspectorGroup title={m.title}>
       <OverrideRow
         which="feed"
         label={m.feed}
@@ -108,7 +107,7 @@ export function OverridesSection({
         />
       </div>
       {changed ? <p className={styles['overrideHint']}>{m.hint}</p> : null}
-    </section>
+    </InspectorGroup>
   )
 }
 

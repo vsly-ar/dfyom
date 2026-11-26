@@ -5,7 +5,15 @@
 // tests. Docs: docs/conventions/ui-library-window.md, docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { closeApp, closeDialog, expect, test } from './app.fixture'
+import {
+  closeApp,
+  closeDialog,
+  expect,
+  openInspectorGroup,
+  openInspectorTab,
+  revealField,
+  test,
+} from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
@@ -149,6 +157,49 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(row).toContainText('90°')
   await expect(row).not.toContainText('Unsaved')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('library window: a new machine in the tabs Machine / Motion / Spindle (DF110 S6)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const opened = dfyom.app.waitForEvent('window')
+  await page.getByRole('button', { name: 'Library', exact: true }).click()
+  const lib = await opened
+  await lib.waitForLoadState('domcontentloaded')
+  await lib.getByRole('tab', { name: 'Machines' }).click()
+  await lib.getByRole('button', { name: 'New machine' }).click()
+  const editor = lib.getByRole('region', { name: 'Item editor' })
+  const grid = lib.getByRole('grid', { name: 'Machines' })
+  await editor.getByRole('textbox', { name: 'Name' }).fill('Shop router')
+  // Machine (first): travel; the feeds are on Motion, the spindle on Spindle
+  await expect(editor.getByRole('tab', { name: 'Machine', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await setField(editor, 'Travel X', '750')
+  await expect(input(editor, 'Max feed rate X')).toBeHidden()
+  await openInspectorTab(editor, 'Motion')
+  await setField(editor, 'Max feed rate X', '6000')
+  await openInspectorTab(editor, 'Spindle')
+  await setField(editor, 'Max spindle speed', '24000')
+  // a field on another tab is revealed like a message's target (its tab selected)
+  await revealField(editor, 'Junction deviation')
+  await expect(editor.getByRole('tab', { name: 'Motion' })).toHaveAttribute('aria-selected', 'true')
+  await setField(editor, 'Junction deviation', '0.01')
+  // notes wait in the closed Notes accordion of the Machine tab
+  await openInspectorTab(editor, 'Machine')
+  const notes = await openInspectorGroup(editor, 'Notes')
+  await notes.getByRole('textbox', { name: 'Notes' }).fill('By the window')
+  await editor.getByRole('button', { name: 'Save' }).click()
+  await expect(grid.getByRole('row', { name: /Unsaved/ })).toHaveCount(0)
+  const row = grid.getByRole('row', { name: /Shop router/ })
+  await expect(row).toHaveAttribute('aria-selected', 'true')
+  await expect(row).toContainText('750')
+  await expect(row).toContainText('24000')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

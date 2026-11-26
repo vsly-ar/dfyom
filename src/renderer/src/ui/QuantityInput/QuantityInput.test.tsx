@@ -46,6 +46,7 @@ function Harness({ initial, optional, onCommit, ...props }: HarnessProps): React
   }
   return (
     <QuantityInput
+      stepKind="xy"
       label="Width"
       kind="length"
       defaultUnit="mm"
@@ -270,6 +271,7 @@ describe('QuantityInput: commit and revert', () => {
             Agent edit
           </button>
           <QuantityInput
+            stepKind="xy"
             label="Width"
             kind="length"
             defaultUnit="mm"
@@ -288,6 +290,7 @@ describe('QuantityInput: commit and revert', () => {
   it('marks a stored formula whose reference is gone', () => {
     renderUi(
       <QuantityInput
+        stepKind="xy"
         label="Width"
         kind="length"
         defaultUnit="mm"
@@ -500,6 +503,7 @@ function GestureHarness({
     late ? void Promise.resolve().then(() => setValue(v)) : setValue(v)
   return (
     <QuantityInput
+      stepKind="xy"
       label="Width"
       kind="length"
       defaultUnit="mm"
@@ -804,6 +808,7 @@ describe('QuantityInput: adjust panel on focus (DF9)', () => {
       <>
         <Harness initial="3.00" onPick={() => {}} />
         <QuantityInput
+          stepKind="xy"
           label="Depth"
           kind="length"
           defaultUnit="mm"
@@ -892,6 +897,7 @@ describe('QuantityInput: adjust panel on focus (DF9)', () => {
   it('opens nothing for a dense cell', async () => {
     const { user } = renderUi(
       <QuantityInput
+        stepKind="xy"
         label="Length"
         kind="length"
         defaultUnit="mm"
@@ -912,6 +918,7 @@ describe('QuantityInput: read-only', () => {
     const onCommit = vi.fn()
     const { user } = renderUi(
       <QuantityInput
+        stepKind="feed"
         label="Feed"
         kind="feedRate"
         defaultUnit="mm/min"
