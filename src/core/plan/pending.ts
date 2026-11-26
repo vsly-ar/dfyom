@@ -7,6 +7,7 @@
 import { changedFields, movedIds, type PendingChange } from '../commands/apply'
 import type { Services } from '../commands/context'
 import type { PendingSource } from '../commands/define'
+import { withBuiltinWorkholding } from '../library/workholding-builtins'
 import type { ProjectDoc } from '../project/document'
 import { planOperationInputs } from './inputs'
 import { UNKNOWN_OPERATION } from './labels'
@@ -254,8 +255,10 @@ export const draftPlanPending: PendingSource = {
 export const libraryPending: PendingSource = {
   name: 'plan.libraryFollow',
   changes(doc, _baseline, _design, ctx) {
-    const lookup = ctx.services.library?.lookup
-    if (lookup === undefined) return []
+    const library = ctx.services.library?.lookup
+    if (library === undefined) return []
+    // built-in workholding devices too (WL2)
+    const lookup = withBuiltinWorkholding(library, doc.unitSystem)
     const out = new Map<string, PendingChange>()
     for (const plan of Object.values(doc.plans)) {
       if (plan.status !== 'draft') continue

@@ -5,10 +5,10 @@
  */
 import { z } from 'zod'
 import { issueSummary, type Issue } from '../../../shared/errors/app-error'
-import { fail, Ok, type AppResult } from '../../../shared/result'
+import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import { defineCommand } from '../../commands/define'
 import { fieldContext } from '../../design/operation'
-import { NAME_MAX } from '../../library/item'
+import { ItemIdSchema, NAME_MAX } from '../../library/item'
 import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Quantity } from '../../quantity/quantity'
 import { PlanWarningSchema, type PlanWarning } from '../checks'
@@ -51,6 +51,25 @@ import { setupStock, setupWorkholding } from './setup'
 import { arrangeToeClamps, type EdgeRoom } from './arrange'
 import { wasteTest } from './held'
 import { setupZero } from '../alignment'
+import { nextSnapshotId } from '../build'
+import type { LibraryItem } from '../../library/library-item'
+import { deepEqual, type ItemLookup } from '../../library/snapshot'
+import type { Workholding } from '../../library/workholding'
+import {
+  defaultWorkholding,
+  isBuiltinWorkholding,
+  withBuiltinWorkholding,
+} from '../../library/workholding-builtins'
+import {
+  detaches,
+  deviceCopy,
+  deviceFallbacks,
+  deviceGrip,
+  deviceLabel,
+  itemDevice,
+  placeDevice,
+  pruneWorkholdingCopies,
+} from './devices'
 
 const Src = z.string().min(1).max(256)
 
@@ -77,6 +96,7 @@ export const WorkholdingItemArgSchema = z.object({
   bottom: Src.optional(),
   type: z.enum([...BASE_TYPES, ...SURFACE_TYPES]).optional(),
   sacrificial: z.boolean().optional(),
+  libraryItemId: ItemIdSchema.optional(),
 })
 export type WorkholdingItemArg = z.output<typeof WorkholdingItemArgSchema>
 
@@ -92,7 +112,7 @@ const PARAMS: Readonly<Record<WorkholdingKind, readonly string[]>> = {
 const ALL_PARAMS = [...new Set(Object.values(PARAMS).flat())]
 
 const ITEMS_HELP =
-  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue, holds pieces cut free. An item with id keeps it (omitted parameters stay).'
+  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue, holds pieces cut free. An item with id keeps it (omitted parameters stay). libraryItemId: place that library device (its sizes; a differing size detaches).'
 
 /** The parsed item, or issues at `items.<n>.<param>`. */
 function parseItem(
@@ -103,6 +123,8 @@ function parseItem(
   taken: string[],
   units: UnitSystem,
   stock: { length: number; width: number },
+  /** Values of the device the item is placed from (`deviceFallbacks`), before the defaults. */
+  device: Readonly<Record<string, ReturnType<typeof lengthDTO>>> = {},
 ): { item?: WorkholdingItemDTO; issues: Issue[] } {
   const issues: Issue[] = []
   const at = (param: string) => ['items', n, param]
@@ -121,6 +143,7 @@ function parseItem(
     const src = (arg as Record<string, unknown>)[param] as string | undefined
     if (src === undefined) {
       if (prev?.[param] !== undefined) return prev[param] as L
+      if (device[param] !== undefined) return device[param]
       if (fallback === undefined) {
         issues.push({ path: at(param), rule: 'required', message: `a ${arg.kind} needs ${param}` })
         return undefined
@@ -283,6 +306,79 @@ function all<T extends Record<string, unknown>>(
     : undefined
 }
 
+/** The device an item is placed from: a new library one, or the copy it already follows. */
+type ItemSource =
+  | { readonly device: Workholding; readonly item: LibraryItem; readonly copyId?: undefined }
+  | { readonly device: Workholding; readonly copyId: string }
+
+/**
+ * Where item `n`'s device values come from: `libraryItemId` (a library device or a built-in, of
+ * the item's kind), else the copy the item already follows (same kind); undefined for an own
+ * item, null after an issue.
+ */
+function itemSource(
+  arg: WorkholdingItemArg,
+  n: number,
+  prev: WorkholdingItemDTO | undefined,
+  snapshots: PlanDTO['snapshots'],
+  lookup: ItemLookup,
+  issues: Issue[],
+): ItemSource | undefined | null {
+  if (arg.libraryItemId === undefined) {
+    const d = prev?.kind === arg.kind ? itemDevice(snapshots, prev) : undefined
+    return d === undefined ? undefined : { device: d.device, copyId: d.copy.id }
+  }
+  const found = lookup('workholding', arg.libraryItemId)
+  const path = ['items', n, 'libraryItemId']
+  if (found.state !== 'found' || found.item.values.kind !== 'workholding') {
+    issues.push({
+      path,
+      rule: found.state === 'unreadable' ? 'unreadableItem' : 'unknownItem',
+      message: 'no such library workholding device (library_workholding_list)',
+    })
+    return null
+  }
+  const device = found.item.values
+  if (device.type !== arg.kind) {
+    issues.push({ path, rule: 'kindMismatch', message: `${device.name} is a ${device.type}` })
+    return null
+  }
+  return { device, item: found.item }
+}
+
+/**
+ * The toe clamp `auto` places (Q135): `autoItemId`, else the default toe clamp (a user item
+ * marked default, else the built-in).
+ */
+function autoDevice(
+  id: string | undefined,
+  lookup: ItemLookup,
+  services: Services,
+  units: UnitSystem,
+  where: string,
+): AppResult<LibraryItem> {
+  if (id === undefined) {
+    const user = services.library?.list('workholding').items ?? []
+    const def = defaultWorkholding(user, 'toeClamp', units)
+    if (def.isSome()) return Ok(def.unwrap())
+    return fail('internal.unexpected', 'no default toe clamp', { where })
+  }
+  const found = lookup('workholding', id)
+  const values = found.state === 'found' ? found.item.values : undefined
+  if (found.state !== 'found' || values?.kind !== 'workholding' || values.type !== 'toeClamp')
+    return fail('input.malformed', `${id} is not a library toe clamp`, {
+      issues: [
+        {
+          path: ['autoItemId'],
+          rule: found.state === 'found' ? 'kindMismatch' : 'unknownItem',
+          message: 'a toe clamp of the library (library_workholding_list type toeClamp)',
+        },
+      ],
+      where,
+    })
+  return Ok(found.item)
+}
+
 /** Every item id of the plan (ids are unique per plan). */
 const planItemIds = (plan: PlanDTO) =>
   plan.setups.flatMap((s) => (s.workholding ?? []).map((i) => i.id))
@@ -315,6 +411,7 @@ export const workholdingSet = defineCommand({
       .describe(
         'Instead of items: 4 toe clamps in the waste clear of the generated toolpaths (other items stay)',
       ),
+    autoItemId: ItemIdSchema.optional().describe('The toe clamp auto places; default: the default'),
     margin: Src.optional().describe('Kept around every item; default 2 mm'),
   }),
   result: z.object({
@@ -323,6 +420,10 @@ export const workholdingSet = defineCommand({
         id: z.string(),
         name: z.string(),
         kind: z.enum(WORKHOLDING_KINDS),
+        libraryItemId: z
+          .string()
+          .optional()
+          .describe('The library device it was placed from (its copy is copyId in plan_get)'),
         summary: z.string(),
         bounds: z.tuple([Vec2, Vec2]).nullable().describe('Of its prisms, mm, setup frame'),
         top: z.number().nullable().describe('Highest point above Z0, mm'),
@@ -365,6 +466,13 @@ export const workholdingSet = defineCommand({
     const size = setupStock(loaded.unwrap().stock, setup)
     const issues: Issue[] = []
     let items: WorkholdingItemDTO[] | undefined
+    // the plan's library copies; a placement from the library may add one (pruned below)
+    const snapshots = plainCopy(planDto.snapshots)
+    const lookup = withBuiltinWorkholding(ctx.services.library?.lookup, units)
+    const now = new Date(ctx.clock.now()).toISOString()
+    const newCopyId = () => nextSnapshotId({ ...planDto, snapshots }, ctx.ids)
+    if (args.autoItemId !== undefined && args.auto === undefined)
+      issues.push({ path: ['autoItemId'], rule: 'needsAuto', message: 'only with auto' })
     const used = planItemIds(planDto)
     const fresh = () => {
       const id = nextItemId(used)
@@ -393,20 +501,37 @@ export const workholdingSet = defineCommand({
           continue
         }
         const id = arg.id ?? fresh()
+        const prev = arg.id === undefined ? undefined : mine.get(arg.id)
+        const from = itemSource(arg, n, prev, planDto.snapshots, lookup, issues)
+        if (from === null) continue
         const r = parseItem(
           arg,
           n,
-          arg.id === undefined ? undefined : mine.get(arg.id),
+          prev,
           id,
           taken,
           units,
           size,
+          from === undefined ? {} : deviceFallbacks(from.device, units),
         )
         issues.push(...r.issues)
-        if (r.item !== undefined) {
-          taken.push(r.item.name)
-          items.push(plainCopy(r.item))
+        if (r.item === undefined) continue
+        taken.push(r.item.name)
+        const edited = plainCopy(r.item)
+        const placed =
+          from === undefined ? undefined : placeDevice(edited, from.device, size, units)
+        // Q138: a device value given and different detaches the item: an own item, one undo step
+        if (from === undefined || placed === undefined || detaches(arg, edited, placed)) {
+          items.push(edited)
+          continue
         }
+        let copyId = from.copyId
+        if ('item' in from) {
+          const copy = deviceCopy(snapshots, from.item, newCopyId, now)
+          if (copy.isErr()) return Err(copy.unwrapErr().withContext(where))
+          copyId = copy.unwrap().id
+        }
+        items.push({ ...placed, copyId })
       }
     }
     let margin: ReturnType<typeof lengthDTO> | undefined
@@ -419,10 +544,15 @@ export const workholdingSet = defineCommand({
     }
     if (issues.length > 0) return fail('input.malformed', issueSummary(issues), { issues, where })
     if (args.auto !== undefined) {
+      const clamp = autoDevice(args.autoItemId, lookup, ctx.services, units, where)
+      if (clamp.isErr()) return clamp
+      const copy = deviceCopy(snapshots, clamp.unwrap(), newCopyId, now)
+      if (copy.isErr()) return Err(copy.unwrapErr().withContext(where))
       const auto = autoItems(baseOf(draft as ProjectDoc), loaded.unwrap(), setup, {
         units,
         services: ctx.services,
         fresh,
+        device: { item: clamp.unwrap(), copyId: copy.unwrap().id },
         ...(margin === undefined
           ? {}
           : { margin: Quantity.fromDTO(margin).mapOr(0, (q) => q.canonical) }),
@@ -442,22 +572,35 @@ export const workholdingSet = defineCommand({
     if (items !== undefined) {
       if (items.length === 0) delete target.workholding
       else target.workholding = items
+      const p = draft.plans[args.planId]!
+      const kept = pruneWorkholdingCopies({ snapshots, setups: plainCopy(p.setups) as SetupDTO[] })
+      if (!deepEqual(kept, plainCopy(p.snapshots))) p.snapshots = kept
     }
     if (margin !== undefined) target.workholdingMargin = margin
     // the result is read from a plain copy (the draft's proxies do not outlive the command)
     const after = plainCopy(target as SetupDTO)
     const plan = loaded.unwrap()
     const h = setupWorkholding(after, plan.stock)
-    const updated = { ...plan, setups: plan.setups.map((s) => (s.id === after.id ? after : s)) }
+    const copies = plainCopy(draft.plans[args.planId]!.snapshots) as PlanDTO['snapshots']
+    const updated = {
+      ...plan,
+      dto: { ...plan.dto, snapshots: copies },
+      setups: plan.setups.map((s) => (s.id === after.id ? after : s)),
+    }
     return Ok({
       items: h.items.map((i) => {
         const prisms = h.prisms.filter((p) => p.itemId === i.id)
         const boxes = prisms.map((p) => footprintBounds(p.footprint))
+        const stored = after.workholding?.find((w) => w.id === i.id) ?? {}
+        const libraryItemId = itemDevice(copies, stored)?.copy.libraryItemId
+        const device = deviceLabel(copies, stored)
+        const summary = itemSummary(i, units === 'mm' ? 'mm' : 'in')
         return {
           id: i.id,
           name: i.name,
           kind: i.kind,
-          summary: itemSummary(i, units === 'mm' ? 'mm' : 'in'),
+          ...(libraryItemId === undefined ? {} : { libraryItemId }),
+          summary: device === undefined ? summary : `${summary} · ${device}`,
           bounds:
             boxes.length === 0
               ? null
@@ -531,7 +674,14 @@ function autoItems(
   doc: ProjectDoc,
   plan: LoadedPlan,
   setup: SetupDTO,
-  o: { units: UnitSystem; services: Services; fresh: () => string; margin?: number },
+  o: {
+    units: UnitSystem
+    services: Services
+    fresh: () => string
+    margin?: number
+    /** The toe clamp placed (`autoDevice`) and its copy in the plan. */
+    device: { item: LibraryItem; copyId: string }
+  },
 ): AppResult<WorkholdingItemDTO[]> {
   const where = 'plan.workholding.set'
   const { units, services } = o
@@ -571,12 +721,29 @@ function autoItems(
   const ctxL = fieldContext('length', units)
   const parse = (src: string): Length | undefined =>
     Quantity.parse(src, ctxL).mapOr(undefined, (q: Quantity) => lengthDTO(q))
-  const dto = {
-    width: parse(ITEM_DEFAULTS.width[units])!,
-    grip: parse(ITEM_DEFAULTS.grip[units])!,
-    reach: parse(ITEM_DEFAULTS.reach[units])!,
-    top: parse(ITEM_DEFAULTS.top[units])!,
-  }
+  const device = o.device.item.values as Workholding
+  // the device's sizes, grip the middle of its range (W6-C's fixed size is the built-in's)
+  const sample = placeDevice(
+    {
+      id: 'wh0',
+      name: device.name,
+      kind: 'toeClamp',
+      edge: 'vMin',
+      at: parse('0')!,
+      grip: deviceGrip(device, units),
+      width: parse(ITEM_DEFAULTS.width[units])!,
+      reach: parse(ITEM_DEFAULTS.reach[units])!,
+      top: parse(ITEM_DEFAULTS.top[units])!,
+    },
+    device,
+    h.stock,
+    units,
+  )
+  if (sample?.kind !== 'toeClamp')
+    return fail('internal.unexpected', `${device.name} does not place as a toe clamp`, { where })
+  const dto = { width: sample.width, grip: sample.grip, reach: sample.reach, top: sample.top }
+  // a device of the user's library is named in the refusal; a built-in is "toe clamps"
+  const what = isBuiltinWorkholding(o.device.item.id) ? 'toe clamps' : device.name
   const mm = (l: Length) => Quantity.fromDTO(l).mapOr(0, (q) => q.canonical)
   const clamp = { width: mm(dto.width), grip: mm(dto.grip), reach: mm(dto.reach), top: mm(dto.top) }
   const waste = wasteTest(plan, setup, port, margin)
@@ -595,7 +762,7 @@ function autoItems(
   if (!('clamps' in arrangement))
     return fail(
       'plan.workholding',
-      `Four toe clamps do not fit in ${setup.name} clear of the toolpaths${waste === undefined ? '' : ' and in the waste'} (two on each of two opposite edges; clamps per edge: ${arrangement.edges.map((r) => roomText(r, units)).join('; ')}): place them by hand (items), or hold the stock with a vise, screws or tape`,
+      `Four ${what} do not fit in ${setup.name} clear of the toolpaths${waste === undefined ? '' : ' and in the waste'} (two on each of two opposite edges; clamps per edge: ${arrangement.edges.map((r) => roomText(r, units)).join('; ')}): place them by hand (items), or hold the stock with a vise, screws or tape`,
       {
         issues: arrangement.edges.map((r) => ({
           path: ['auto'],
@@ -618,7 +785,15 @@ function autoItems(
     taken.push(name)
     const a = at(c.at)
     if (a === undefined) continue
-    clamps.push({ id: o.fresh(), name, kind: 'toeClamp', edge: c.edge, at: a, ...dto })
+    clamps.push({
+      id: o.fresh(),
+      name,
+      copyId: o.device.copyId,
+      kind: 'toeClamp',
+      edge: c.edge,
+      at: a,
+      ...dto,
+    })
   }
   return Ok([...kept.map((i) => plainCopy(i)), ...clamps])
 }

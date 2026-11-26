@@ -95,6 +95,7 @@ One union-style tool keeps the agent API small ([llm-api.md](../architecture/llm
 
 - A `document` command (undoable, one step); `items` and `copyFrom` are exclusive; `copyFrom` copies another setup's items by edge and position (both are face-frame relative, so a flip keeps "front edge at X45").
 - Items without `id` get new ids; items with an id keep it (so the UI's drag sends the edited list and selection survives).
+- Library devices (DF121 WL2): an item may name `libraryItemId` (its device's sizes, the item keeps `copyId` to the plan's copy), and `autoItemId` picks the toe clamp `auto` places (default: the default toe clamp); a different device value detaches the item ([workholding-library.md § Implementation (WL2)](workholding-library.md#implementation-wl2)).
 - It is an **instant reaction** for the plan record and a deferred one for toolpaths of region operations ([apply.md](../architecture/apply.md#instant-and-deferred-reactions)).
 - Reading: the items are part of the setup records in `plan.get` and `plan.setup` results; no separate `list` tool. `plan.get` also returns `effectiveClearance` per setup (hardening DF90): the clearance height the program uses (mm) and why (`set`, `default` or `workholding` with the item and margin), beside the stored setting, which a raise by the items leaves unchanged.
 

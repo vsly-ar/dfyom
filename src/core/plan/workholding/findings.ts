@@ -18,6 +18,7 @@ import type { LoadedPlan } from '../plan'
 import type { SetupDTO } from '../plan.dto'
 import { checkWorkholding, type CheckOperation, type Collision } from './check'
 import { heldFindings } from './held'
+import { rangeFindings } from './devices'
 import { highestTop } from './obstacles'
 import { setupWorkholding, type SetupWorkholding } from './setup'
 
@@ -46,6 +47,8 @@ export function staticWorkholdingFindings(plan: LoadedPlan, setupId?: string): P
       })
       continue
     }
+    // WL2: an item placed from a library device outside the device's range (warning)
+    out.push(...rangeFindings(plan.dto, setup, h.stock))
     const top = highestTop(h.prisms)
     if (top !== undefined && h.clearanceSet && h.clearance < top.zMax + h.margin - 1e-6)
       out.push({

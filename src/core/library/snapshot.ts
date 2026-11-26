@@ -28,6 +28,8 @@ export const SnapshotDtoSchema = z.discriminatedUnion('kind', [
   snapshotOf('stock'),
   snapshotOf('tool'),
   snapshotOf('machine'),
+  // a plan's copy of a workholding device (docs/modes/workholding-library.md#snapshots-and-persistence)
+  snapshotOf('workholding'),
 ])
 export type SnapshotDTO = z.output<typeof SnapshotDtoSchema>
 
@@ -102,9 +104,21 @@ export function ownSnapshot(values: ItemValues, id: string, takenAt: string): Ap
   return Snapshot.create({ id, libraryItemId: undefined, takenAt, values })
 }
 
+/**
+ * The values a snapshot copies of an item: all of them, except a workholding device's `default`
+ * flag, which is about the library (which device Add and Arrange take), not the device, so
+ * marking another default does not make every plan's copy "library changed"
+ * (docs/modes/workholding-library.md#implementation-wl2).
+ */
+export function copiedValues(values: ItemValues): ItemValues {
+  return values.kind === 'workholding' && values.isDefault
+    ? values.with({ isDefault: false }).unwrapOr(values)
+    : values
+}
+
 /** Copy an item's values into a new snapshot. */
 export function takeSnapshot(item: LibraryItem, id: string, takenAt: string): AppResult<Snapshot> {
-  return Snapshot.create({ id, libraryItemId: item.id, takenAt, values: item.values })
+  return Snapshot.create({ id, libraryItemId: item.id, takenAt, values: copiedValues(item.values) })
 }
 
 /**
@@ -121,7 +135,7 @@ export function refreshSnapshot(
       where: 'refreshSnapshot',
       data: { snapshotId: snapshot.id, libraryItemId: snapshot.libraryItemId, itemId: item.id },
     })
-  return Snapshot.create({ ...snapshot, takenAt, values: item.values })
+  return Snapshot.create({ ...snapshot, takenAt, values: copiedValues(item.values) })
 }
 
 /** What the library currently holds for an id (an unreadable file is listed with its error). */
@@ -144,7 +158,9 @@ export function snapshotStatus(snapshot: Snapshot, lookup: ItemLookup): Snapshot
   const r = lookup(snapshot.kind, snapshot.libraryItemId)
   if (r.state === 'missing') return 'libraryRemoved'
   if (r.state === 'unreadable') return 'libraryUnreadable'
-  return deepEqual(snapshot.values.toDTO(), r.item.values.toDTO()) ? 'current' : 'libraryChanged'
+  return deepEqual(snapshot.values.toDTO(), copiedValues(r.item.values).toDTO())
+    ? 'current'
+    : 'libraryChanged'
 }
 
 /** The "used item changed" notice as data: one entry per snapshot whose item is not current. */

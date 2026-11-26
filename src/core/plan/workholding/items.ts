@@ -46,6 +46,12 @@ const Angle = quantityDto('angle')
 const Common = {
   id: z.string().regex(/^wh[0-9]{1,6}$/),
   name: z.string().min(1).max(NAME_MAX),
+  /**
+   * The plan's library copy (snapshot, kind `workholding`) of the device this item was placed
+   * from; absent = an own item. The item still stores the device's values, kept equal to the
+   * copy by every write (workholding-library.md § Implementation (WL2)).
+   */
+  copyId: z.string().min(1).max(120).optional(),
 }
 
 export const WorkholdingItemDtoSchema = z.discriminatedUnion('kind', [

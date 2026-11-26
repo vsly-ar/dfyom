@@ -7,6 +7,7 @@ import { fail, Ok, type AppResult } from '../../shared/result'
 import { disabledState, enabledPart } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { LibraryItemKind } from '../library/item'
+import { withBuiltinWorkholding } from '../library/workholding-builtins'
 import {
   Snapshot,
   snapshotStatus,
@@ -194,14 +195,16 @@ export function planStale(
       operations.push(s)
   }
   const libraryCopies: LibraryCopyStale[] = []
-  if (lookup !== undefined)
+  // a copy of a built-in workholding device compares with the built-in of the project's units
+  const look = lookup === undefined ? undefined : withBuiltinWorkholding(lookup, doc.unitSystem)
+  if (look !== undefined)
     for (const dto of plan.snapshots) {
       const snap = Snapshot.fromDTO(dto)
       if (snap.isErr()) continue
-      const status = snapshotStatus(snap.unwrap(), lookup)
+      const status = snapshotStatus(snap.unwrap(), look)
       // a part's own stock (no libraryItemId, DF13) is always current
       if (status === 'current' || dto.libraryItemId === undefined) continue
-      const found = lookup(dto.kind, dto.libraryItemId)
+      const found = look(dto.kind, dto.libraryItemId)
       const blocked =
         status === 'libraryChanged' && found.state === 'found'
           ? libraryUpdateBlocker(plan, dto, found.item, port)

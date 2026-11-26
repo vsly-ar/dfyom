@@ -8,7 +8,7 @@ import { Quantity } from '../quantity/quantity'
 import type { UnitSystem } from '../project/document'
 import { LibraryItem } from './library-item'
 import type { Library } from './library'
-import type { ItemLookupResult } from './snapshot'
+import type { ItemLookup, ItemLookupResult } from './snapshot'
 import { Workholding, type WorkholdingSize } from './workholding'
 import type { BaseType, SurfaceType, WorkholdingType } from './workholding.dto'
 
@@ -185,4 +185,22 @@ export function lookupWorkholding(
     return item === undefined ? { state: 'missing' } : { state: 'found', item }
   }
   return library.lookup('workholding', id)
+}
+
+/**
+ * `lookup` that also finds the built-ins (value set of `units`, the project's: a plan's copy of a
+ * built-in is compared with the set it took). For the plan's library copies (stale check, Update
+ * from library, the `draft` follow); without a library (`undefined`) only the built-ins exist.
+ */
+export function withBuiltinWorkholding(
+  lookup: ItemLookup | undefined,
+  units: UnitSystem,
+): ItemLookup {
+  return (kind, id) => {
+    if (kind === 'workholding' && isBuiltinWorkholding(id)) {
+      const item = builtinWorkholding(units).find((i) => i.id === id)
+      return item === undefined ? { state: 'missing' } : { state: 'found', item }
+    }
+    return lookup === undefined ? { state: 'missing' } : lookup(kind, id)
+  }
 }

@@ -150,7 +150,7 @@ function newPlanOperation(ids: IdGenerator, designOperationIds: string[]): PlanO
 
 /**
  * Removes tool copies neither a plan operation nor a design tool field of the plan's part
- * references (stock and machine copies stay).
+ * references, and workholding copies no setup item names (stock and machine copies stay).
  */
 export function pruneSnapshots(plan: PlanDTO): void {
   const used = new Set([
@@ -161,7 +161,13 @@ export function pruneSnapshots(plan: PlanDTO): void {
       o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [],
     ),
   ])
-  plan.snapshots = plan.snapshots.filter((s) => s.kind !== 'tool' || used.has(s.id))
+  // and workholding copies no setup item names (a rebuild may drop a setup, WL2)
+  const devices = new Set(
+    plan.setups.flatMap((s) => (s.workholding ?? []).flatMap((i) => i.copyId ?? [])),
+  )
+  plan.snapshots = plan.snapshots.filter((s) =>
+    s.kind === 'tool' ? used.has(s.id) : s.kind !== 'workholding' || devices.has(s.id),
+  )
 }
 
 /**

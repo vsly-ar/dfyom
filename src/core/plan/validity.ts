@@ -15,10 +15,11 @@ import { partIssueText } from '../design/issue-text'
 import { checkReferences } from '../design/surfaces'
 import { checkOperations } from '../design/validate'
 import type { LibraryItem } from '../library/library-item'
-import { Snapshot, type SnapshotDTO } from '../library/snapshot'
+import { copiedValues, Snapshot, type SnapshotDTO } from '../library/snapshot'
 import { Stock } from '../library/stock'
 import type { ProjectDoc } from '../project/document'
 import type { PlanDTO } from './plan.dto'
+import { reresolveCopy } from './workholding/devices'
 
 /**
  * References and constraints of a loaded part against a stock: with the 2D port the shape checks
@@ -103,6 +104,7 @@ export function libraryUpdateBlocker(
   item: LibraryItem,
   port?: Region2dPort,
 ): Blocker | undefined {
+  if (copy.kind === 'workholding') return deviceUpdateBlocker(plan, copy, item)
   if (copy.kind !== 'stock' || item.values.kind !== 'stock') return undefined
   const next = { ...copy, values: item.values.toDTO() } as SnapshotDTO
   const part = plan.design.part
@@ -113,6 +115,31 @@ export function libraryUpdateBlocker(
         ...why,
         reason: `library update of stock "${item.values.name}" can't be applied: the part doesn't fit (${why.reason})`,
       }
+}
+
+/**
+ * WL2: why updating a workholding copy cannot be applied: an item placed from it would break its
+ * setup's rules with the new device (a strap now shorter than the grip).
+ */
+function deviceUpdateBlocker(
+  plan: PlanDTO,
+  copy: SnapshotDTO,
+  item: LibraryItem,
+): Blocker | undefined {
+  const stockCopy = plan.snapshots.find((s) => s.id === plan.design.part.stock)
+  const stock = stockCopy === undefined ? undefined : Snapshot.fromDTO(stockCopy)
+  const values = stock?.isOk() === true ? stock.unwrap().values : undefined
+  if (values?.kind !== 'stock') return undefined
+  const next = JSON.parse(JSON.stringify(plan)) as PlanDTO
+  next.snapshots = next.snapshots.map((s) =>
+    s.id === copy.id ? ({ ...s, values: copiedValues(item.values).toDTO() } as SnapshotDTO) : s,
+  )
+  const issues = reresolveCopy(next, copy.id, values, 'mm')
+  if (issues.length === 0) return undefined
+  return {
+    reason: `library update of workholding "${item.values.name}" can't be applied: ${issues.map((i) => i.message).join('; ')}`,
+    fields: issues.map((i) => i.path.join('.')),
+  }
 }
 
 /**
