@@ -26,6 +26,7 @@ import type { Stock } from '../library/stock'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { Tolerance } from '../quantity/tolerance'
+import { roundRadius, roundRadiusHolds } from './round'
 import {
   bottomEdgeFace,
   isGeneralShape,
@@ -488,7 +489,22 @@ export function recalculate(
     if (r.isErr()) return Err(dependantError(r.unwrapErr(), opId, path))
     next[index] = withParam(op, path, r.unwrap())
   }
-  return Ok(followEdges(next))
+  return Ok(followRound(followEdges(next)))
+}
+
+/**
+ * DF120: every Round rectangle's `cornerRadius` set to half its narrowest side again, after a
+ * recalculation changed its sizes (docs/modes/hole-slots-and-round-corners.md#model). Pure;
+ * unchanged operations keep their identity.
+ */
+export function followRound(ops: readonly Operation[]): Operation[] {
+  return ops.map((op) => {
+    if (op.kind !== 'pocket' && op.kind !== 'profile') return op
+    const s = op.shape
+    if (s.kind !== 'rectangle' || s.round !== true) return op
+    if (roundRadiusHolds(s.length, s.width, s.cornerRadius)) return op
+    return { ...op, shape: { ...s, cornerRadius: roundRadius(s.length, s.width) } }
+  })
 }
 
 /**

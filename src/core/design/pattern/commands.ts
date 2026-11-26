@@ -41,6 +41,7 @@ const CellArg = z
     sides: Src.optional(),
     across: z.enum(POLYGON_ACROSS).optional(),
     cornerRadius: Src.optional(),
+    round: z.boolean().optional(),
     shapeId: ShapeIdSchema.optional(),
     rotation: Src.optional(),
   })
@@ -50,7 +51,7 @@ const CellArg = z
         ctx.addIssue({ code: 'custom', path: [k], message: `A ${c.kind} cell needs ${k}` })
   })
   .describe(
-    'circle: diameter; rectangle: length, width, cornerRadius?; obround: length, width; polygon: sides, diameter, across?, cornerRadius?; shape: shapeId (a closed shape, centred by its box). Centred on each node, turned by rotation. Default circle 8 mm / 5/16"',
+    'circle: diameter; rectangle: length, width, cornerRadius? (or "round"), round?; obround: length, width; polygon: sides, diameter, across?, cornerRadius?; shape: shapeId (a closed shape, centred by its box). Centred on each node, turned by rotation. Default circle 8 mm / 5/16"',
   )
 
 const params = {
@@ -124,14 +125,25 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
             rotation: rot,
             diameter: f.q('cell.diameter', 'length', c?.diameter ?? DEFAULTS.patternCell[units]),
           }
-        case 'rectangle':
-          return {
-            kind: 'rectangle',
-            rotation: rot,
-            length: f.q('cell.length', 'length', need(c.length)),
-            width: f.q('cell.width', 'length', need(c.width)),
-            cornerRadius: f.q('cell.cornerRadius', 'length', c.cornerRadius ?? '0'),
-          }
+        case 'rectangle': {
+          const length = f.q('cell.length', 'length', need(c.length))
+          const width = f.q('cell.width', 'length', need(c.width))
+          const p = prev?.cell
+          // DF120: a Round cell keeps Round (following its sizes) unless the edit changes it
+          const before =
+            p?.kind === 'rectangle' && (c.cornerRadius !== undefined || p.round === true)
+              ? { ...p, round: p.round === true }
+              : undefined
+          const corner = f.roundCorner(
+            'cell.cornerRadius',
+            { length, width },
+            c.cornerRadius,
+            c.round,
+            before,
+            () => f.q('cell.cornerRadius', 'length', '0'),
+          )
+          return { kind: 'rectangle', rotation: rot, length, width, ...corner }
+        }
         case 'obround':
           return {
             kind: 'obround',

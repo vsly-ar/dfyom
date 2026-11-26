@@ -28,6 +28,7 @@ import { regionLoops } from '../../geometry/2d/model'
 import { quantityDto, quantityFromDTO } from '../../library/item'
 import type { QuantityDTO } from '../../quantity/quantity.dto'
 import { derivedLength } from '../hole'
+import { roundRadiusHolds } from '../round'
 import type { Stock } from '../../library/stock'
 import { Quantity } from '../../quantity/quantity'
 import { Rational } from '../../quantity/rational'
@@ -63,6 +64,8 @@ export type PatternCell = { readonly rotation: Quantity } & (
       readonly length: Quantity
       readonly width: Quantity
       readonly cornerRadius: Quantity
+      /** DF120 Round: `cornerRadius` is half the narrowest side (absent = off). */
+      readonly round?: true
     }
   | { readonly kind: 'obround'; readonly length: Quantity; readonly width: Quantity }
   | {
@@ -150,6 +153,7 @@ const CellDtoSchema = z.discriminatedUnion('kind', [
     length: length(),
     width: length(),
     cornerRadius: length(),
+    round: z.literal(true).optional(),
     rotation: angle().optional(),
   }),
   z.object({
@@ -257,7 +261,14 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       c.kind === 'circle'
         ? { kind: 'circle', rotation: rot!, diameter: a! }
         : c.kind === 'rectangle'
-          ? { kind: 'rectangle', rotation: rot!, length: a!, width: b!, cornerRadius: r! }
+          ? {
+              kind: 'rectangle',
+              rotation: rot!,
+              length: a!,
+              width: b!,
+              cornerRadius: r!,
+              ...(c.round === true ? { round: true as const } : {}),
+            }
           : c.kind === 'obround'
             ? { kind: 'obround', rotation: rot!, length: a!, width: b! }
             : c.kind === 'polygon'
@@ -313,6 +324,8 @@ function cellToDTO(c: PatternCell): z.input<typeof CellDtoSchema> {
         length: c.length.toDTO(),
         width: c.width.toDTO(),
         cornerRadius: c.cornerRadius.toDTO(),
+        // DF120: left out when off (records without Round stay byte-identical)
+        ...(c.round === true ? { round: true } : {}),
         ...rotation,
       } as never
     case 'obround':
@@ -425,6 +438,14 @@ function patternInvariants(p: Pattern): Issue[] {
     positive(c.length, 'cell', 'length')
     positive(c.width, 'cell', 'width')
   }
+  // DF120: the commands keep a Round radius derived; this guards hand-edited records
+  if (c.kind === 'rectangle' && c.round === true)
+    check(
+      roundRadiusHolds(c.length, c.width, c.cornerRadius),
+      ['cell', 'cornerRadius'],
+      'roundRadius',
+      'must be half the narrowest size (Round)',
+    )
   if (c.kind === 'polygon') positive(c.diameter, 'cell', 'diameter')
   if (c.kind === 'shape')
     check(

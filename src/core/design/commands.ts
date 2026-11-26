@@ -109,13 +109,14 @@ import { reanchor, type Extents } from './anchor'
 import type { Region2dPort } from '../geometry/2d/port'
 import { exactExtents, placeShape, shapeFacts } from './placement'
 import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
-import { SHAPE_ID_PATTERN } from './shape.dto'
+import { ROUND_DESCRIPTION, SHAPE_ID_PATTERN } from './shape.dto'
 
 import { designChangeTargets } from './shape-users'
 import { featureOwnedError, nestingFeature, spanUnits, type LoadedFeature } from './feature'
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
 import { derivedLength } from './hole'
 import { placedOperation, PlacedSchema } from './placed'
+import { AdjustedSchema, ROUND, settleRound, type Adjusted, type RoundPrev } from './round'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -131,7 +132,8 @@ const ShapeArg = z.discriminatedUnion('kind', [
     center: PointArg,
     length: Src.describe('Size along u'),
     width: Src.describe('Size along v'),
-    cornerRadius: Src.optional().describe('Default 3 mm / 1/8"'),
+    cornerRadius: Src.optional().describe(ROUND_DESCRIPTION),
+    round: z.boolean().optional(),
     rotation: RotationArg,
   }),
   z.object({ kind: z.literal('circle'), center: PointArg, diameter: Src }),
@@ -272,11 +274,51 @@ const toPath = (path: string) => path.split('.').map((s) => (/^\d+$/.test(s) ? N
  */
 export class Fields {
   private readonly results: AppResult<unknown>[] = []
+  /** Values the apply rule changed (DF120 Round), for the command's `adjusted` result. */
+  readonly adjusted: Adjusted[] = []
   constructor(
     readonly units: UnitSystem,
     private readonly resolver: ReferenceResolver,
     private readonly env: ShapeEnv = { dto: {} },
   ) {}
+
+  /**
+   * A rectangle's corner radius and Round flag by the DF120 apply rule (round.ts `settleRound`):
+   * `radius` is the arg (`"round"` = Round on), `round` the explicit flag; a change is recorded
+   * in `adjusted`. Without a given radius it is `prev`'s, else the default. `"round"` wins over
+   * `round: false` (as for shape items).
+   */
+  roundCorner(
+    path: string,
+    size: { length: Quantity; width: Quantity },
+    radius: string | undefined,
+    round: boolean | undefined,
+    prev: RoundPrev | undefined,
+    def: () => Quantity,
+  ): { cornerRadius: Quantity; round?: true } {
+    const given = radius !== undefined && radius !== ROUND
+    const cornerRadius = given ? this.q(path, 'length', radius) : (prev?.cornerRadius ?? def())
+    // a size or radius that did not parse is reported instead
+    if (
+      this.results.some((r) => r.isErr()) ||
+      size.length === undefined ||
+      size.width === undefined
+    )
+      return { cornerRadius }
+    const r = settleRound(
+      {
+        ...size,
+        cornerRadius,
+        radiusGiven: given,
+        round: radius === ROUND ? true : round,
+        units: this.units,
+        path,
+      },
+      prev,
+    )
+    if (r.adjusted !== undefined) this.adjusted.push(r.adjusted)
+    return { cornerRadius: r.cornerRadius, ...(r.round ? { round: true as const } : {}) }
+  }
 
   q(path: string, kind: FieldKind, source: string): Quantity {
     const r = quantityFromSource(source, fieldContext(kind, this.units), this.resolver).mapErr(
@@ -308,8 +350,11 @@ export class Fields {
     return prev ?? this.q(path, kind, DEFAULTS[def][this.units])
   }
 
-  /** The shape from its args; `center` gives the point `anchor` names. */
-  shape(a: ShapeArgs, anchor: Anchor): Shape {
+  /**
+   * The shape from its args; `center` gives the point `anchor` names. `prev` (an update) keeps
+   * a Round rectangle Round (DF120).
+   */
+  shape(a: ShapeArgs, anchor: Anchor, prev?: Shape): Shape {
     const center = [
       this.q('shape.center.0', 'length', a.center[0]),
       this.q('shape.center.1', 'length', a.center[1]),
@@ -345,21 +390,27 @@ export class Fields {
         mirror: a.mirror === true,
       }
     }
-    return {
-      kind: 'rectangle',
-      center,
-      anchor,
-      length: this.q('shape.length', 'length', a.length),
-      width: this.q('shape.width', 'length', a.width),
-      cornerRadius: this.pick(
-        'shape.cornerRadius',
-        'length',
-        a.cornerRadius,
-        undefined,
-        'cornerRadius',
-      ),
-      rotation,
-    }
+    const length = this.q('shape.length', 'length', a.length)
+    const width = this.q('shape.width', 'length', a.width)
+    const before: RoundPrev | undefined =
+      prev?.kind === 'rectangle'
+        ? {
+            length: prev.length,
+            width: prev.width,
+            cornerRadius: prev.cornerRadius,
+            round: prev.round === true,
+          }
+        : undefined
+    // a shape arg without a radius takes the default, as before Round; only Round follows prev
+    const corner = this.roundCorner(
+      'shape.cornerRadius',
+      { length, width },
+      a.cornerRadius,
+      a.round,
+      a.cornerRadius === undefined && before?.round !== true ? undefined : before,
+      () => this.q('shape.cornerRadius', 'length', DEFAULTS.cornerRadius[this.units]),
+    )
+    return { kind: 'rectangle', center, anchor, length, width, ...corner, rotation }
   }
 
   /** A Line's `paths[i]`: a named shape placed by its centre (engraved-patterns.md E1). */
@@ -451,7 +502,7 @@ export class Fields {
     prev: Shape | undefined,
   ): Shape {
     if (prev === undefined) return this.shape(a!, anchor ?? CENTRE_ANCHOR)
-    const shape = a !== undefined ? this.shape(a, prev.anchor) : prev
+    const shape = a !== undefined ? this.shape(a, prev.anchor, prev) : prev
     if (anchor === undefined) return shape
     // a shape arg that failed to parse has holes: its own errors are reported instead
     if (this.results.some((r) => r.isErr())) return shape
@@ -1060,6 +1111,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       toolLocked: z.boolean(),
       warnings: Warnings,
       placed: PlacedSchema.optional(),
+      ...ROUND_RESULT,
     }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.add`
@@ -1117,6 +1169,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         operationId: id,
         ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
         toolLocked: op.toolLocked,
+        ...roundResult(settled.unwrap(), id, f.adjusted),
       }
       return withPlaced(
         withWarnings(result, loaded.unwrap(), settled.unwrap(), ctx, where),
@@ -1143,7 +1196,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       ...optionalParams,
     }),
     ...(spec.updateListed === undefined ? {} : { listedArgs: spec.updateListed }),
-    result: z.object({ warnings: Warnings, placed: PlacedSchema.optional() }),
+    result: z.object({ warnings: Warnings, placed: PlacedSchema.optional(), ...ROUND_RESULT }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
       const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
@@ -1161,7 +1214,16 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         if (owned.isErr()) return owned
       }
       const l = loaded.unwrap()
-      const settled = applyUpdate(spec, l, args.operationId, args, where, ctx.services.region2d)
+      const adjusted: Adjusted[] = []
+      const settled = applyUpdate(
+        spec,
+        l,
+        args.operationId,
+        args,
+        where,
+        ctx.services.region2d,
+        adjusted,
+      )
       if (settled.isErr())
         return Err(mapFeatureIssues(settled.unwrapErr(), l.part.operations, l.features))
       // feature fields written as expressions follow the edit (design-v0.4.md#implementation-f3)
@@ -1172,7 +1234,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       writeOperations(draft, args.partId, ops)
       writeFeatures(draft, args.partId, features, changed)
       return withPlaced(
-        withWarnings({}, l, ops, ctx, where, features),
+        withWarnings(roundResult(ops, args.operationId, adjusted), l, ops, ctx, where, features),
         l,
         ops,
         args.operationId,
@@ -1181,6 +1243,29 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
     },
   })
   return [add, update]
+}
+
+/** DF120 output fields of pocket and profile results (output schema only, tools/list unchanged). */
+const ROUND_RESULT = {
+  round: z.literal(true).optional().describe('The rectangle is Round after the edit'),
+  adjusted: AdjustedSchema.optional(),
+}
+
+/** `round` and `adjusted` of operation `id` after an edit, each only when there is one. */
+function roundResult(
+  ops: readonly Operation[],
+  id: string,
+  adjusted: readonly Adjusted[],
+): { round?: true; adjusted?: Adjusted[] } {
+  const op = ops.find((o) => o.id === id)
+  const round =
+    (op?.kind === 'pocket' || op?.kind === 'profile') &&
+    op.shape.kind === 'rectangle' &&
+    op.shape.round === true
+  return {
+    ...(round ? { round: true as const } : {}),
+    ...(adjusted.length > 0 ? { adjusted: [...adjusted] } : {}),
+  }
 }
 
 type UpdateArgs<P extends z.ZodRawShape> = {
@@ -1199,6 +1284,8 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   args: UpdateArgs<P>,
   where: string,
   port?: Region2dPort,
+  /** Receives what the DF120 apply rule changed (`adjusted`). */
+  adjusted?: Adjusted[],
 ): AppResult<readonly Operation[]> {
   const { part, stock, units } = loaded
   const env = shapeEnv(loaded, port)
@@ -1218,6 +1305,7 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   } as O
   const parsed = f.done()
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
+  adjusted?.push(...f.adjusted)
   const next = ops.map((o, k) => (k === i ? op : o))
   return settle(next, stock, prev.id, true, where, env, ops)
 }

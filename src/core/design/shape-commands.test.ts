@@ -141,7 +141,7 @@ describe('editing shapes', () => {
     expect(e3.issues[0]!.rule).toBe('shapeEmpty')
     const e4 = await s.fail(
       'design.shape.item.update',
-      { partId: s.partId, shapeId: 'shape1', index: 0, cornerRadius: '11' },
+      { partId: s.partId, shapeId: 'shape1', index: 0, cornerRadius: '11', round: false },
       'model.invariant',
     )
     expect(e4.issues[0]!.path).toEqual(['items', 0, 'cornerRadius'])

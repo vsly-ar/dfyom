@@ -172,62 +172,73 @@ describe('DF115 depth pick, DF116 Through, DF117 not applied (TG #369)', () => {
     )
   })
 
-  it("keeps a refused Length as not applied, across selecting another operation (DF117, the user's steps)", async () => {
+  // DF120: a Length below 2 × the corner radius now applies as Round, so the refused value
+  // here is a Depth below the floor fillet radius (the error lands at the Floor fillet radius)
+  const floorField = async (user: { click: (el: Element) => Promise<void> }) => {
+    const more = within(inspector()).queryByRole('button', { name: 'More (Floor fillet radius)' })
+    if (more !== null && more.getAttribute('aria-expanded') !== 'true') await user.click(more)
+    return field('Floor fillet radius')
+  }
+
+  it("keeps a refused Depth as not applied, across selecting another operation (DF117, the user's steps)", async () => {
     const { user, op, select } = await renderClamp()
     await select('Pocket for M5')
-    // 1. corner radius 5.5: applied
-    const radius = field('Corner radius')
-    await user.clear(radius)
-    await user.type(radius, '5.5{Enter}', { skipClick: true })
+    // 1. floor fillet radius 1.5: applied
+    const floor = await floorField(user)
+    await user.clear(floor)
+    await user.type(floor, '1.5{Enter}', { skipClick: true })
     await waitFor(() =>
-      expect(op('Pocket for M5')).toMatchObject({ shape: { cornerRadius: { source: '5.5' } } }),
+      expect(op('Pocket for M5')).toMatchObject({ floorRadius: { source: '1.5' } }),
     )
-    // 2. Length below 2 × the corner radius: refused, the error at the Corner radius
-    const length = field('Length (u)')
-    await user.clear(length)
-    await user.type(length, '10{Enter}', { skipClick: true })
-    await waitFor(() => expect(radius).toHaveAttribute('aria-invalid', 'true'))
-    expect(op('Pocket for M5')).toMatchObject({ shape: { length: { source: '11.3 mm' } } })
-    // 3. the Length shows 10 and says it is not the part's value (no copy of the error)
-    expect(length).toHaveValue('10')
-    expect(length).not.toHaveAttribute('aria-invalid')
-    expect(length.closest('[data-pending]')).not.toBeNull()
-    expect(within(inspector()).getByText('Not applied: the part still uses 11.3 mm')).toBeVisible()
+    // 2. Depth below the floor fillet radius: refused, the error at the Floor fillet radius
+    const depth = field('Depth')
+    await user.clear(depth)
+    await user.type(depth, '1{Enter}', { skipClick: true })
+    await waitFor(() => expect(floor).toHaveAttribute('aria-invalid', 'true'))
+    expect(op('Pocket for M5')).toMatchObject({ depth: { source: '2 mm' } })
+    // 3. the Depth shows 1 and says it is not the part's value (no copy of the error)
+    expect(depth).toHaveValue('1')
+    expect(depth).not.toHaveAttribute('aria-invalid')
+    expect(depth.closest('[data-pending]')).not.toBeNull()
+    expect(within(inspector()).getByText('Not applied: the part still uses 2 mm')).toBeVisible()
     await expectNoAxeViolations()
     // 4. another operation and back: the same draft, marker and error, not the old value
     await select('M5 long hole')
     await select('Pocket for M5')
-    const again = field('Length (u)')
-    expect(again).toHaveValue('10')
+    const again = field('Depth')
+    expect(again).toHaveValue('1')
     expect(again.closest('[data-pending]')).not.toBeNull()
-    expect(field('Corner radius')).toHaveAttribute('aria-invalid', 'true')
+    expect(field('Floor fillet radius')).toHaveAttribute('aria-invalid', 'true')
     // Revert: back to the applied value, the marker and the error go
     await user.click(within(inspector()).getByRole('button', { name: 'Revert' }))
-    expect(field('Length (u)')).toHaveValue('11.3 mm')
-    expect(field('Length (u)').closest('[data-pending]')).toBeNull()
-    expect(field('Corner radius')).not.toHaveAttribute('aria-invalid')
+    expect(field('Depth')).toHaveValue('2 mm')
+    expect(field('Depth').closest('[data-pending]')).toBeNull()
+    expect(field('Floor fillet radius')).not.toHaveAttribute('aria-invalid')
   })
 
   it('a refused value sent again once the cause is fixed is applied and the marker goes (DF117)', async () => {
     const { user, op, select } = await renderClamp()
     await select('Pocket for M5')
-    const length = field('Length (u)')
-    await user.clear(length)
-    await user.type(length, '10{Enter}', { skipClick: true })
-    await waitFor(() => expect(length.closest('[data-pending]')).not.toBeNull())
-    const radius = field('Corner radius')
-    await user.clear(radius)
-    await user.type(radius, '4{Enter}', { skipClick: true })
+    const floor = await floorField(user)
+    await user.clear(floor)
+    await user.type(floor, '1.5{Enter}', { skipClick: true })
     await waitFor(() =>
-      expect(op('Pocket for M5')).toMatchObject({ shape: { cornerRadius: { source: '4' } } }),
+      expect(op('Pocket for M5')).toMatchObject({ floorRadius: { source: '1.5' } }),
     )
-    // the Length is still not applied until it is sent again
-    expect(length.closest('[data-pending]')).not.toBeNull()
-    length.focus()
+    const depth = field('Depth')
+    await user.clear(depth)
+    await user.type(depth, '1{Enter}', { skipClick: true })
+    await waitFor(() => expect(depth.closest('[data-pending]')).not.toBeNull())
+    await user.clear(floor)
+    await user.type(floor, '0.5{Enter}', { skipClick: true })
+    await waitFor(() =>
+      expect(op('Pocket for M5')).toMatchObject({ floorRadius: { source: '0.5' } }),
+    )
+    // the Depth is still not applied until it is sent again
+    expect(depth.closest('[data-pending]')).not.toBeNull()
+    depth.focus()
     await user.keyboard('{Enter}')
-    await waitFor(() =>
-      expect(op('Pocket for M5')).toMatchObject({ shape: { length: { source: '10' } } }),
-    )
-    await waitFor(() => expect(length.closest('[data-pending]')).toBeNull())
+    await waitFor(() => expect(op('Pocket for M5')).toMatchObject({ depth: { source: '1' } }))
+    await waitFor(() => expect(depth.closest('[data-pending]')).toBeNull())
   })
 })

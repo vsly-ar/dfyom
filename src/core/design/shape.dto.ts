@@ -67,6 +67,8 @@ export type ShapeItem<Q> =
       length: Q
       width: Q
       cornerRadius: Q
+      /** DF120 Round: `cornerRadius` is half the narrowest side (kept by the commands). */
+      round?: true | undefined
       rotation?: Q | undefined
     }
   | { kind: 'circle'; op: ShapeOp; center: ShapePoint<Q>; diameter: Q }
@@ -136,6 +138,13 @@ export interface ShapeSource {
 type QuantityField = 'length' | 'angle' | 'scalar'
 
 /**
+ * A rectangle's `cornerRadius` arg (pockets, profiles, shape items): `"round"` (DF120); the primer's
+ * operation-args line explains Round once (docs/modes/hole-slots-and-round-corners.md#agent-api,
+ * tools/list budget).
+ */
+export const ROUND_DESCRIPTION = 'Default 3 mm / 1/8", or "round"'
+
+/**
  * The item union for the DTO (`dto`: every default written) or the command args (`args`:
  * defaults may be left out). `q(kind)` is the quantity schema of a field.
  */
@@ -168,7 +177,10 @@ function itemSchema(q: (kind: QuantityField) => z.ZodType, mode: 'dto' | 'args')
       center: point('centre'),
       length: len().describe('Size along x'),
       width: len().describe('Size along y'),
-      cornerRadius: dflt(len()).describe('Default 3 mm / 1/8"'),
+      cornerRadius: dflt(len()).describe(
+        mode === 'dto' ? 'Default 3 mm / 1/8"' : ROUND_DESCRIPTION,
+      ),
+      round: mode === 'dto' ? z.literal(true).optional() : z.boolean().optional(),
       rotation,
     }),
     z.object({ kind: z.literal('circle'), op, center: point('centre'), diameter: len() }),

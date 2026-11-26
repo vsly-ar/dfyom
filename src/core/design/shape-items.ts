@@ -460,6 +460,9 @@ function polygonCorners(c: Vec2, sides: number, R: number, deg: number): Vec2[] 
  * The chain of item `n` (closed loops counter-clockwise), or undefined with issues at
  * `items.<n>.…`.
  */
+/** A Round item's radius against half its narrowest side (float mm of exact values). */
+const ROUND_EPS = 1e-9
+
 export function itemChain(
   item: ShapeItem<number>,
   n: number,
@@ -486,6 +489,17 @@ export function itemChain(
             max,
             actual: item.cornerRadius,
           },
+        )
+        return undefined
+      }
+      // DF120: the commands keep a Round radius derived; this guards hand-edited records
+      if (item.round === true && Math.abs(item.cornerRadius - max) > ROUND_EPS) {
+        issue(
+          issues,
+          [...base, 'cornerRadius'],
+          'roundRadius',
+          'must be half the narrowest size (Round)',
+          { expected: max, actual: item.cornerRadius },
         )
         return undefined
       }
