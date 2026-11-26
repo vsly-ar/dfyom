@@ -47,10 +47,10 @@ const add = async (d: D, kind: string, values: object) =>
 describe('library commands', () => {
   it('are registered in the app registry: add/update/remove and get/list per kind', () => {
     const reg = expectOk(createAppRegistry())
-    for (const kind of ['stock', 'tool', 'machine'])
+    for (const kind of ['stock', 'tool', 'machine', 'workholding'])
       for (const verb of ['add', 'update', 'remove'])
         expect(reg.command(`library.${kind}.${verb}`).unwrap().kind).toBe('effect')
-    expect(LIBRARY_COMMANDS).toHaveLength(10)
+    expect(LIBRARY_COMMANDS).toHaveLength(13)
     expect(LIBRARY_QUERIES.map((q) => q.name)).toContain('library.tool.list')
   })
 

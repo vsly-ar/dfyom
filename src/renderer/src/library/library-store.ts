@@ -6,7 +6,7 @@
 // library commands like agents do; main pushes library writes (`onChanged`) and the context.
 // Doc: docs/conventions/ui-library-window.md#decisions-assumed, #behaviour-with-projects
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import type { LibraryItemKind } from '../../../core/library/item'
+import type { LibraryTabKind } from '../../../core/library/item'
 import type { LibraryChange } from '../../../core/library/library'
 import type { LibraryItemDTO } from '../../../core/library/library-item'
 import type { UnitSystem } from '../../../core/project/document'
@@ -30,7 +30,7 @@ import {
   type DraftValues,
 } from './form'
 
-export const KINDS: readonly LibraryItemKind[] = ['machine', 'tool', 'stock']
+export const KINDS: readonly LibraryTabKind[] = ['machine', 'tool', 'stock']
 
 export interface Listing {
   readonly items: readonly LibraryItemDTO[]
@@ -39,7 +39,7 @@ export interface Listing {
 }
 
 export interface Draft {
-  readonly kind: LibraryItemKind
+  readonly kind: LibraryTabKind
   /** null: a new item, not in the library yet. */
   readonly id: string | null
   readonly revision: number | null
@@ -58,9 +58,9 @@ export type Conflict = 'stale' | 'removed'
 export const NEW = '\u0000new'
 
 export interface LibraryState {
-  readonly tab: LibraryItemKind
-  readonly lists: Readonly<Record<LibraryItemKind, Listing>>
-  readonly selected: Readonly<Record<LibraryItemKind, string | null>>
+  readonly tab: LibraryTabKind
+  readonly lists: Readonly<Record<LibraryTabKind, Listing>>
+  readonly selected: Readonly<Record<LibraryTabKind, string | null>>
   readonly draft: Draft | null
   readonly saving: boolean
   /** The last failed save or remove (issues show at their field). */
@@ -86,9 +86,9 @@ export interface LibraryActions {
   units(): UnitSystem
   setUnits(units: UnitSystem): void
   setSearch(search: string): void
-  setTab(tab: LibraryItemKind): void
-  select(kind: LibraryItemKind, id: string): void
-  newItem(kind?: LibraryItemKind): void
+  setTab(tab: LibraryTabKind): void
+  select(kind: LibraryTabKind, id: string): void
+  newItem(kind?: LibraryTabKind): void
   duplicate(): void
   /** A new stock variant of the selected stock (or a sibling of the selected variant), DF13. */
   newVariant(): void
@@ -111,7 +111,7 @@ export interface LibraryActions {
   /** The names of the draft kind's other items (all of them for a new item; DF47). */
   otherNames(): readonly string[]
   /** The item list's rows: the kind's items, filtered by the search. */
-  load(kind: LibraryItemKind): Promise<void>
+  load(kind: LibraryTabKind): Promise<void>
 }
 
 export type LibraryStore = StoreApi<LibraryState & LibraryActions>
@@ -137,7 +137,7 @@ export function sameValues(a: unknown, b: unknown): boolean {
 function draftOf(item: LibraryItemDTO): Draft {
   const values = itemValues(item) as DraftValues
   return {
-    kind: item.kind,
+    kind: item.kind as LibraryTabKind, // the window lists its tab kinds only
     id: item.id,
     revision: item.revision,
     values,
@@ -170,10 +170,10 @@ export function createLibraryStore(deps: {
       if (!get().isDirty()) return next()
       set({ prompt: { name: get().draftName(), next } })
     }
-    const itemOf = (kind: LibraryItemKind, id: string | null) =>
+    const itemOf = (kind: LibraryTabKind, id: string | null) =>
       id === null ? undefined : get().lists[kind].items.find((i) => i.id === id)
 
-    const showItem = (kind: LibraryItemKind, id: string | null) => {
+    const showItem = (kind: LibraryTabKind, id: string | null) => {
       const item = itemOf(kind, id)
       patch({
         tab: kind,
@@ -201,6 +201,7 @@ export function createLibraryStore(deps: {
     }
 
     const onChange = (change: LibraryChange) => {
+      if (change.kind === 'workholding') return // its tab comes with WL3 (workholding-library.md)
       void get().load(change.kind)
       const s = get()
       if (s.saving || s.draft === null || s.draft.id !== change.id) return
@@ -213,7 +214,7 @@ export function createLibraryStore(deps: {
       set({ conflict: change.change === 'removed' ? 'removed' : 'stale' })
     }
 
-    const refreshDraft = async (kind: LibraryItemKind, id: string) => {
+    const refreshDraft = async (kind: LibraryTabKind, id: string) => {
       const item = reply<LibraryItemDTO>(await call(`library.${kind}.get`, { id }))
       if (item !== undefined && get().draft?.id === id && !get().isDirty())
         set({ draft: draftOf(item) })

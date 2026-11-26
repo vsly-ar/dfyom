@@ -6,7 +6,7 @@
 // Doc: docs/conventions/ui-library-window.md
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useStore } from 'zustand'
-import type { LibraryItemKind } from '../../../core/library/item'
+import type { LibraryTabKind } from '../../../core/library/item'
 import type { UnitSystem } from '../../../core/project/document'
 import type { MenuAction } from '../../../shared/preload-api'
 import { libraryMessages } from '../messages/library'
@@ -119,8 +119,8 @@ function LibraryTabs({
   tab,
   onTab,
 }: {
-  tab: LibraryItemKind
-  onTab: (tab: LibraryItemKind) => void
+  tab: LibraryTabKind
+  onTab: (tab: LibraryTabKind) => void
 }): React.JSX.Element {
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const at = KINDS.indexOf(tab)

@@ -86,3 +86,16 @@ export const machineValues = () => ({
   programUnits: 'mm' as const,
   toolChanger: 'none' as const,
 })
+
+/** A user toe clamp (workholding-library.md § Item model). */
+export const toeClampValues = () => ({
+  kind: 'workholding' as const,
+  name: 'Strap clamp M8',
+  type: 'toeClamp' as const,
+  width: len('25'),
+  length: len('70'),
+  top: len('30'),
+  gripMin: len('5'),
+  gripMax: len('20'),
+  stud: 'M8',
+})

@@ -11,7 +11,7 @@ import type { FittedLoop } from '../core/design/reference-section'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunProgram, RunStatus } from '../core/run/service'
-import type { LibraryItemKind } from '../core/library/item'
+import type { LibraryTabKind } from '../core/library/item'
 import type { LibraryChange } from '../core/library/library'
 import type { UnitSystem } from '../core/project/document'
 import type { AppErrorData } from './errors/app-error'
@@ -167,7 +167,7 @@ export interface ShapeEditorTarget {
 
 /** Which tab and item the Library window shows when it is opened. */
 export interface LibraryTarget {
-  readonly kind?: LibraryItemKind
+  readonly kind?: LibraryTabKind
   readonly itemId?: string
 }
 
@@ -187,13 +187,13 @@ export interface LibraryContext {
   /** The last open request's tab and item; `seq` grows with every request. */
   readonly target: (LibraryTarget & { readonly seq: number }) | null
   /** The tab to start on (the last one of this app instance). */
-  readonly tab: LibraryItemKind
+  readonly tab: LibraryTabKind
 }
 
 /** What the Library window reports to main: its unsaved draft (item name) and tab. */
 export interface LibraryWindowState {
   readonly draft: string | null
-  readonly tab: LibraryItemKind
+  readonly tab: LibraryTabKind
 }
 
 /** Closing the Library window (or quitting) with a draft: the window asks Save / Discard / Cancel. */

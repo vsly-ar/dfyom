@@ -2,7 +2,7 @@
 // Doc: docs/architecture/library.md#storage
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { stockValues } from './library.fixture'
+import { stockValues, toeClampValues } from './library.fixture'
 import type { LibraryStorage } from './storage'
 
 const T = '2026-11-17T10:00:00.000Z'
@@ -30,6 +30,21 @@ export function libraryStorageContract(
       const got = expectOk(await s.get('stock', 'a'))
       expect(expectOk(got.unwrap().content)).toEqual(dto('a', 1))
       expect(expectOk(await s.get('stock', 'b')).isNone()).toBe(true)
+    })
+
+    it('keeps workholding items in their own kind (workholding-library.md#snapshots-and-persistence)', async () => {
+      const s = await make()
+      expect(expectOk(await s.list('workholding'))).toEqual([])
+      const clamp = { id: 'a', revision: 1, updatedAt: T, ...toeClampValues() }
+      expectOk(await s.put('workholding', clamp, null))
+      expectOk(await s.put('stock', dto('a', 1), null)) // same id, other kind: another file
+      const listed = expectOk(await s.list('workholding'))
+      expect(listed.map((e) => [e.id, expectOk(e.content)])).toEqual([['a', clamp]])
+      expectErrCode(await s.put('workholding', { ...clamp, revision: 2 }, 2), 'command.conflict')
+      expectOk(await s.put('workholding', { ...clamp, revision: 2, name: 'Strap' }, 1))
+      expectOk(await s.remove('workholding', 'a', 2))
+      expect(expectOk(await s.list('workholding'))).toEqual([])
+      expect(expectOk(await s.list('stock')).map((e) => e.id)).toEqual(['a'])
     })
 
     it('put checks the stored revision (null = must not exist)', async () => {

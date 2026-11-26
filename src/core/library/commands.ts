@@ -1,5 +1,6 @@
 /**
- * Library commands `library.{stock,tool,machine}.{add,update,remove}` and queries `.get`/`.list`;
+ * Library commands `library.{stock,tool,machine,workholding}.{add,update,remove}` and queries
+ * `.get`/`.list` (workholding: built-ins and the default rule, workholding-library.md#agent-api);
  * the GRBL `$$` import `library.machine.settings.{preview,import}` (library.md#grbl--import).
  * Doc: docs/architecture/library.md#storage, docs/architecture/commands.md
  *
@@ -14,7 +15,12 @@ import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../c
 import { listedAs } from '../commands/json-schema'
 import { ItemIdSchema, ItemMetaDtoSchema, type LibraryItemKind } from './item'
 import type { Library } from './library'
-import { valuesFromDTO, type ItemValuesDTO, type LibraryItemDTO } from './library-item'
+import {
+  valuesFromDTO,
+  type ItemValuesDTO,
+  type LibraryItem,
+  type LibraryItemDTO,
+} from './library-item'
 import { applySettingsChanges, machineSettingsDiff, type SettingsDiff } from './grbl-import'
 import { MachineValuesDtoSchema, type MachineValuesDTO } from './machine.dto'
 import { parseSettingsText } from '../run/grbl/settings'
@@ -22,6 +28,18 @@ import { StockValuesDtoSchema } from './stock.dto'
 import { ToolValuesDtoSchema } from './tool.dto'
 import { followRecommended } from '../feeds-speeds/preset'
 import { valuesFromInput, valuesInputSchema } from './values-input'
+import {
+  WorkholdingValuesDtoSchema,
+  WORKHOLDING_TYPES,
+  type WorkholdingValuesDTO,
+} from './workholding.dto'
+import { withTypeDefaults } from './workholding'
+import {
+  builtinWorkholding,
+  defaultWorkholding,
+  isBuiltinWorkholding,
+  lookupWorkholding,
+} from './workholding-builtins'
 import { UnitSystemSchema, type UnitSystem } from '../project/document'
 
 /** Stored values without `kind` (the command name says it). */
@@ -29,6 +47,7 @@ const VALUES = {
   stock: StockValuesDtoSchema.omit({ kind: true }),
   tool: ToolValuesDtoSchema.omit({ kind: true }),
   machine: MachineValuesDtoSchema.omit({ kind: true }),
+  workholding: WorkholdingValuesDtoSchema.omit({ kind: true }),
 }
 
 /** Command args take quantities as strings (library.md#command-input); results are stored DTOs. */
@@ -38,9 +57,31 @@ const ITEM_RESULTS = {
   stock: StockValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
   tool: ToolValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
   machine: MachineValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
+  workholding: WorkholdingValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
 }
 
-const LABEL: Record<LibraryItemKind, string> = { stock: 'stock', tool: 'tool', machine: 'machine' }
+const LABEL: Record<LibraryItemKind, string> = {
+  stock: 'stock',
+  tool: 'tool',
+  machine: 'machine',
+  workholding: 'workholding device',
+}
+
+/**
+ * The workholding `values` description: which type takes which field, said once (no field
+ * descriptions; workholding-library.md#agent-api).
+ */
+const WORKHOLDING_VALUES_HELP =
+  'Per type: toeClamp width, length (toe to heel), top (above stock top), gripMin, gripMax, stud; vise jawWidth, jawThickness, jawHeight, maxOpening, soft; screw headDiameter, headHeight (above stock top), thread; block length, width, height; base baseType, sacrificial, thickness; surface surfaceType'
+
+/** `update` and `remove` refuse a built-in item (workholding-library.md#built-in-items). */
+function refuseBuiltin(kind: LibraryItemKind, id: string, where: string): AppResult<void> {
+  if (kind !== 'workholding' || !isBuiltinWorkholding(id)) return Ok(undefined)
+  return fail('input.malformed', `${id} is a built-in item; add a copy instead`, {
+    issues: [{ path: ['id'], rule: 'builtIn', message: 'built-in items are read-only' }],
+    where,
+  })
+}
 
 function libraryOf(services: Services, where: string): AppResult<Library> {
   return services.library === undefined
@@ -51,7 +92,7 @@ function libraryOf(services: Services, where: string): AppResult<Library> {
 function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: QueryDef[] } {
   const label = LABEL[kind]
   const valuesArg: z.ZodType<object> = valuesInputSchema(VALUES[kind]).describe(
-    `The ${label} values; quantities as strings`,
+    kind === 'workholding' ? WORKHOLDING_VALUES_HELP : `The ${label} values; quantities as strings`,
   ) as z.ZodType<object>
   /**
    * Parsed quantities, `kind`, recommended presets following the calculator (tools,
@@ -68,6 +109,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
           })
         dto = followed.values
       }
+      if (dto.kind === 'workholding') dto = withTypeDefaults(dto)
       return valuesFromDTO(dto).mapErr((e) => e.prefixIssues('values'))
     })
   const itemResult: z.ZodType<LibraryItemDTO> = ITEM_RESULTS[kind]
@@ -111,7 +153,8 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     machine: false,
     args: z.object({
       id: ItemIdSchema,
-      revision: z.number().int().min(1).describe('Revision you read; stale → command.conflict'),
+      // no description: the primer's library line says it (tools/list budget, WL1)
+      revision: z.number().int().min(1),
       values: valuesArg,
       units: UNITS_ARG,
     }),
@@ -120,6 +163,8 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     result: itemResult,
     async run(_doc, args, ctx) {
       const where = `library.${kind}.update`
+      const builtIn = refuseBuiltin(kind, args.id, where)
+      if (builtIn.isErr()) return Err(builtIn.unwrapErr())
       const lib = libraryOf(ctx.services, where)
       if (lib.isErr()) return lib
       const values = modelValues(args.values, args.units)
@@ -139,18 +184,13 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     machine: false,
     args: z.object({
       id: ItemIdSchema,
-      revision: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe(
-          'Revision you read; omit only to remove an item that does not load (else conflict)',
-        ),
+      revision: z.number().int().min(1).optional(),
       confirm: z.literal(true).describe('Must be true: the user confirmed the deletion'),
     }),
     result: z.object({ id: z.string() }),
     async run(_doc, args, ctx) {
+      const builtIn = refuseBuiltin(kind, args.id, `library.${kind}.remove`)
+      if (builtIn.isErr()) return Err(builtIn.unwrapErr())
       const lib = libraryOf(ctx.services, `library.${kind}.remove`)
       if (lib.isErr()) return lib
       const r = await lib.unwrap().remove(kind, args.id, args.revision)
@@ -204,7 +244,85 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     },
   })
 
+  if (kind === 'workholding')
+    return { commands: [add, update, remove], queries: workholdingQueries() }
   return { commands: [add, update, remove], queries: [get, list] }
+}
+
+// ── workholding get/list: built-ins and the default rule (workholding-library.md#agent-api) ──
+
+const WorkholdingResult = ITEM_RESULTS.workholding.extend({
+  builtIn: z.literal(true).optional().describe('Read-only; add a copy to change it'),
+  isDefault: z
+    .literal(true)
+    .optional()
+    .describe("Its type's default (a user item marked default, else the built-in)"),
+})
+type WorkholdingResultDTO = z.output<typeof WorkholdingResult>
+
+const LIST_UNITS = UnitSystemSchema.default('mm').describe("Built-ins' value set")
+
+function workholdingQueries(): QueryDef[] {
+  const withFlags = (item: LibraryItem, userItems: readonly LibraryItem[], units: UnitSystem) => {
+    const dto = item.toDTO() as WorkholdingResultDTO
+    const type = (dto as WorkholdingValuesDTO).type
+    const def = defaultWorkholding(userItems, type, units)
+    return {
+      ...dto,
+      ...(isBuiltinWorkholding(item.id) ? { builtIn: true as const } : {}),
+      ...(def.isSome() && def.unwrap().id === item.id ? { isDefault: true as const } : {}),
+    }
+  }
+
+  const get = defineQuery({
+    name: 'library.workholding.get',
+    summary: 'Get a workholding device (library or built-in).',
+    readsDocument: false,
+    args: z.object({ id: ItemIdSchema, units: UnitSystemSchema.default('mm') }),
+    result: WorkholdingResult,
+    run(_doc, args, ctx) {
+      const where = 'library.workholding.get'
+      const lib = libraryOf(ctx.services, where)
+      if (lib.isErr()) return lib
+      const l = lib.unwrap()
+      const found = lookupWorkholding(l, args.id, args.units)
+      if (found.state === 'found')
+        return Ok(withFlags(found.item, l.list('workholding').items, args.units))
+      if (found.state === 'unreadable') {
+        const err = l.list('workholding').errors.find((e) => e.id === args.id)
+        if (err !== undefined) return Err(err.error.withContext(where, { id: args.id }))
+      }
+      return fail('input.malformed', `workholding device ${args.id} does not exist`, {
+        issues: [{ path: ['id'], rule: 'unknownItem', message: 'no such library item' }],
+        where,
+      })
+    },
+  })
+
+  const list = defineQuery({
+    name: 'library.workholding.list',
+    summary: 'List workholding devices (library, then built-ins) and files that do not load.',
+    readsDocument: false,
+    args: z.object({ type: z.enum(WORKHOLDING_TYPES).optional(), units: LIST_UNITS }),
+    result: z.object({
+      items: z.array(WorkholdingResult),
+      errors: z.array(z.object({ id: z.string(), code: z.string(), message: z.string() })),
+    }),
+    run(_doc, args, ctx) {
+      const lib = libraryOf(ctx.services, 'library.workholding.list')
+      if (lib.isErr()) return lib
+      const l = lib.unwrap().list('workholding')
+      const ofType = (i: LibraryItem) =>
+        args.type === undefined || (i.values.kind === 'workholding' && i.values.type === args.type)
+      const items = [...l.items, ...builtinWorkholding(args.units)].filter(ofType)
+      return Ok({
+        items: items.map((i) => withFlags(i, l.items, args.units)),
+        errors: l.errors.map((e) => ({ id: e.id, code: e.error.code, message: e.error.message })),
+      })
+    },
+  })
+
+  return [get, list]
 }
 
 // ── GRBL `$$` import (library.md#grbl--import) ──────────────────────────────────────────
@@ -335,7 +453,7 @@ const settingsImport = defineCommand({
   },
 })
 
-const ALL = (['stock', 'tool', 'machine'] as const).map(forKind)
+const ALL = (['stock', 'tool', 'machine', 'workholding'] as const).map(forKind)
 
 export const LIBRARY_COMMANDS: readonly AnyCommand[] = [
   ...ALL.flatMap((k) => k.commands),
