@@ -170,6 +170,7 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(depth).toBeVisible()
 
   // ── P5: the Triangles preset turns every other cell (Flip) ─────────────────────────────────
+  await revealField(inspector, 'Flip every other cell')
   const flip = inspector.getByRole('switch', { name: 'Flip every other cell' })
   await expect(flip).not.toBeChecked()
   await inspector.getByRole('button', { name: 'Presets…' }).click()
