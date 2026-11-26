@@ -50,6 +50,14 @@ Drawn to the rules above for [ui.md § Icons (v0.4)](../../docs/conventions/ui.m
 - Clones: the source square, two dashed copies and the dotted path between them (amber).
 - Row kinds (`row-grid`, `row-offset`, `row-polar`, `row-arc`, `row-point`, `row-along`): grid, arc, point and along read at 16 px; offset (three dots on a diagonal) and polar (the same with a ray from a small origin) are close at 16 px, so for L2: keep them or show the Add row menu's labels alone.
 
+### v0.4-llm-first L1: workholding, offset, deviation
+
+Drawn to the rules above for [ui.md § Icons (workholding, offset, deviation)](../../docs/conventions/ui.md#icons-workholding-offset-deviation), reviewed in that plan's L2. Contact sheet: `renders/llm-first-l1-contact-{light,dark}.png` (as the L1 sheet, with unchanged neighbours: Stock and Setups, the shape kinds and the Clones `row-offset`, Reference model and Measure). `RENDER_SCALE=1 node design/icons/render.mjs <dir>` renders the sheets at 1× for the small-size check.
+
+- Already existed: the B22 "Workholding" drawing (`clamp`: strap, stud and heel) is a toe clamp, so it was renamed `toe-clamp`; no other of the eight existed (the rows showed `clamp` or `stock`, the offset item `kind-path`).
+- New: `vise`, `screw`, `block`, `base`, `surface-hold` (front views, the holding element amber), `kind-offset` (no accent, like the other shape kinds), `deviation`.
+- At 16 px: the vise and the block are the weakest (two boxes); the surface hold reads by the fixed-support hatching. The Clones `row-offset` and `kind-offset` share the label "Offset" but never a list.
+
 ### DF11: stock size field illustrations
 
 Dogfood DF11 ([ui.md § Stock dialog](../../docs/conventions/ui.md#stock-dialog-df11df13)): the Stock dialog showed the slot's length, width and depth drawings for the stock's Length, Width and Thickness. `stock-length`, `stock-width` and `stock-thickness` are field illustrations (viewBox 20, 1 px grey, one amber measured line) of one oblique block with its front bottom edge, receding bottom edge and front right vertical edge highlighted; the data is in [`ui/icons/field/stockSize.ts`](../../src/renderer/src/ui/icons/field/stockSize.ts), which `FieldIcon` and `render.mjs` both read. Review sheet: `renders/df11-stock-size-{light,dark}.png` (28 px beside the label at rest and focused, then 16 / 20 / 28 / 32 px, then the slot drawing replaced).

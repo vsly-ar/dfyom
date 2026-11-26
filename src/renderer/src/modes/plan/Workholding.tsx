@@ -28,6 +28,7 @@ import {
   Select,
   Switch,
   type FieldMessage,
+  type IconName,
   type MenuEntry,
   InspectorGroup,
 } from '../../ui'
@@ -82,7 +83,25 @@ function allowed(kind: AddKind, items: readonly Item[]): boolean {
   return true
 }
 
-const iconOf = (item: Item) => (item.kind === 'base' || item.kind === 'surface' ? 'stock' : 'clamp')
+/** Each item kind's icon (v0.4-llm-first L1, ui.md § Icons (workholding)). */
+const KIND_ICON = {
+  toeClamp: 'toe-clamp',
+  vise: 'vise',
+  screw: 'screw',
+  block: 'block',
+  base: 'base',
+  surface: 'surface-hold',
+} as const satisfies Record<Item['kind'], IconName>
+const ADD_ICON = {
+  toeClamp: 'toe-clamp',
+  vise: 'vise',
+  screw: 'screw',
+  block: 'block',
+  spoilboard: 'base',
+  fixturePlate: 'base',
+  tape: 'surface-hold',
+  vacuum: 'surface-hold',
+} as const satisfies Record<AddKind, IconName>
 
 export function Workholding({
   doc,
@@ -153,6 +172,7 @@ export function Workholding({
   const addItems: MenuEntry[] = (Object.keys(m.kinds) as AddKind[]).map((kind) => ({
     label: m.kinds[kind],
     description: m.kindHints[kind],
+    icon: <Icon name={ADD_ICON[kind]} />,
     onSelect: () => void add(kind),
     ...(allowed(kind, items) ? {} : { disabled: true, disabledReason: 'One per setup' }),
   }))
@@ -189,7 +209,7 @@ export function Workholding({
                       )
                   }
                 >
-                  <Icon name={iconOf(item)} className={styles['icon']} />
+                  <Icon name={KIND_ICON[item.kind]} className={styles['icon']} />
                   <span className={styles['name']}>{item.name}</span>
                   <span className={styles['summary']}>
                     {resolved === undefined ? '' : itemSummary(resolved, summaryUnits)}

@@ -8,7 +8,7 @@ import { useState } from 'react'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
 import { referenceMessages } from '../../messages/reference'
 import { useUi } from '../../shell/ShellContext'
-import { Button, ErrorMessage, InspectorGroup, QuantityInput, Switch } from '../../ui'
+import { Button, ErrorMessage, Icon, InspectorGroup, QuantityInput, Switch } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, type DesignPart } from './model'
 import {
@@ -162,7 +162,10 @@ export function CompareLegend(): React.JSX.Element | null {
   const band = L(settings.threshold)
   return (
     <div className={styles['compareLegend']} aria-busy={state.busy}>
-      <span className={styles['compareLegendTitle']}>{c.overlayTitle}</span>
+      <span className={styles['compareLegendTitle']}>
+        <Icon name="deviation" />
+        {c.overlayTitle}
+      </span>
       <div role="img" aria-label={`${c.legend}: ${c.legendText(missing, band, extra)}`}>
         <div className={styles['compareBar']} aria-hidden="true" />
         <div className={styles['compareEnds']} aria-hidden="true">
