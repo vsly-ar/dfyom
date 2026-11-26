@@ -12,7 +12,8 @@ import type { Quantity } from '../quantity/quantity'
 import { arc, line, type Element, type Loop } from '../geometry/2d/model'
 import { definitionOf, requirePort } from './shape'
 import { pathLevelProfile } from './shape-items'
-import type { ShapeItem } from './shape.dto'
+import type { EngravingRecord, ShapeItem } from './shape.dto'
+import { resolveEngraving } from './engraving/resolve'
 import type {
   Contour,
   LineCutter,
@@ -310,18 +311,35 @@ function operationGeometry(
       })
     }
     case 'line': {
-      const paths = collect(
-        op.paths.map((p) =>
-          shapeGeometry(p, shapes, port).map((g) =>
-            p.scale === undefined || p.scale === 1 ? g : scaledShape(g, p),
-          ),
-        ),
+      // E3: an engraved pattern's owned shape is many lines (its motif placed in the face frame)
+      const placed = collect(
+        op.paths.map((p) => {
+          const rec = shapes?.get(p.shapeId)?.engraving
+          if (rec !== undefined)
+            return engravingPaths(p, rec, shapes, port) as AppResult<
+              { shape: ShapeGeometry; levels: LinePathLevels | null | undefined }[]
+            >
+          return shapeGeometry(p, shapes, port).map(
+            (g): { shape: ShapeGeometry; levels: LinePathLevels | null | undefined }[] => [
+              {
+                shape: p.scale === undefined || p.scale === 1 ? g : scaledShape(g, p),
+                levels: undefined,
+              },
+            ],
+          )
+        }),
       )
-      if (paths.isErr()) return Err(paths.unwrapErr())
+      if (placed.isErr()) return Err(placed.unwrapErr())
+      const entries = op.paths.flatMap((p, i) =>
+        placed.unwrap()[i]!.map((x) => ({ path: p, ...x })),
+      )
+      const paths = Ok(entries.map((x) => x.shape))
       // E2: levels only with `{ min, max }`, so constant and start → end inputs stay as they were
       const levels =
         op.depth.kind === 'levels'
-          ? op.paths.map((p, i) => linePathLevels(p, paths.unwrap()[i]!, shapes))
+          ? entries.map((x) =>
+              x.levels !== undefined ? x.levels : linePathLevels(x.path, x.shape, shapes),
+            )
           : []
       return Ok({
         kind: 'line',
@@ -338,6 +356,28 @@ function operationGeometry(
       })
     }
   }
+}
+
+/**
+ * An engraved pattern's owned shape on a Line path (engraved-patterns.md E3): its lines placed in
+ * the face frame (engraving/resolve.ts), moved by the path's centre (the owned Line's is [0, 0];
+ * a Clones copy's is its offset), each with its levels.
+ */
+function engravingPaths(
+  p: LinePath,
+  rec: EngravingRecord,
+  shapes: Part['shapes'],
+  port: Region2dPort | undefined,
+): AppResult<{ shape: ShapeGeometry; levels: LinePathLevels | null }[]> {
+  const at: Vec2 = [p.center[0].canonical, p.center[1].canonical]
+  return resolveEngraving(rec, shapes, port)
+    .mapErr((e) => e.prefixIssues('shapes', p.shapeId))
+    .map((r) =>
+      r.lines.map((l) => ({
+        shape: at[0] === 0 && at[1] === 0 ? l.shape : { ...l.shape, center: at },
+        levels: l.levels,
+      })),
+    )
 }
 
 /**

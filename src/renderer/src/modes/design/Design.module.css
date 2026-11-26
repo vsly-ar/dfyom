@@ -2010,3 +2010,45 @@
   align-items: end;
   gap: var(--space-2);
 }
+
+/* The engraved pattern's Presets dialog and motif thumbnail (engraved-patterns.md E3): the
+   pattern dialog's cards with a heading per group and the motif drawn as its grooves. */
+.engravingPresetGroup {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.engravingLine {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.engravingThumb {
+  display: block;
+  width: 56px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-muted);
+}
+
+/* The engraving inspector's read-out row: thumbnail, read-out, Presets…. */
+.engravingRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.engravingRow > p {
+  margin: 0;
+}

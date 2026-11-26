@@ -24,6 +24,7 @@ import type { ShapeDTO } from './shape.dto'
 import { holeSpec } from './hole'
 import { clonesKindSpec } from './clones/clones'
 import { patternSpec } from './pattern/pattern'
+import { engravingSpec } from './engraving/engraving'
 
 /** Fields every feature model has; a kind adds its parameters (as quantities). */
 export interface FeatureBase {
@@ -197,6 +198,7 @@ const BUILT_IN_KINDS: readonly FeatureKindSpec[] = [
   holeSpec as unknown as FeatureKindSpec,
   clonesKindSpec as unknown as FeatureKindSpec,
   patternSpec as unknown as FeatureKindSpec,
+  engravingSpec as unknown as FeatureKindSpec,
 ]
 
 const kinds = new Map<string, FeatureKindSpec>(BUILT_IN_KINDS.map((k) => [k.kind, k]))

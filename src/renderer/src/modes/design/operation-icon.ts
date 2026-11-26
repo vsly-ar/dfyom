@@ -40,10 +40,11 @@ export function facingIconRotation(on: string | undefined): IconRotation {
         : 0
 }
 
-/** A feature's icon (L1, ui.md § Icons (v0.4)): the hole type, Clones or a pattern. */
+/** A feature's icon (L1, ui.md § Icons (v0.4)): the hole type, Clones, a pattern or an engraving. */
 export function featureIcon(feature: Pick<FeatureDTO, 'kind'> & Record<string, unknown>): IconName {
   if (feature.kind === 'clones') return 'clones'
   if (feature.kind === 'pattern') return 'pattern'
+  if (feature.kind === 'engraving') return 'engraving'
   if (feature.kind !== 'hole') return 'design'
   return feature['type'] === 'counterbore'
     ? 'hole-counterbore'

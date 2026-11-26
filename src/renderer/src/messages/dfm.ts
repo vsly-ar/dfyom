@@ -208,6 +208,11 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `The line is ${L(p['depth'])} deep but the tool cuts only ${L(p['cuts'])} deep. Make it shallower or pick a longer tool.`,
   'dfm.lineShallow': (p, L) =>
     `The line is only ${L(p['depth'])} deep at its shallowest: an uneven stock top can erase it.`,
+  // engraved pattern E3 (engraved-patterns.md § DFM)
+  'dfm.engravingEmpty': () =>
+    'No line lies inside the boundary less the margin: make the margin smaller or move the motif.',
+  'dfm.engravingHeavy': (p, L) =>
+    `${num(p['elements'])} lines and arcs, ${L(p['length'])} in all: the part updates more slowly.`,
   'dfm.chamferTabs': (p, L, name) =>
     `The bottom bevel stops ${L(p['gap'])} short across each of the ${String(p['count'])} tabs of ${name.item(String(p['edgeOf']))}, so they keep holding the part. Finish those stretches by hand when you remove the tabs.`,
 }

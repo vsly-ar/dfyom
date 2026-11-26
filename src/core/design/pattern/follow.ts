@@ -28,6 +28,12 @@ import { operationToDTO } from '../operation'
 
 const WHERE = 'design.patternFollow'
 
+/**
+ * Kinds whose owned records are expanded from the stock and earlier operations: patterns, and
+ * engraved patterns (engraved-patterns.md E3: the face rectangle in their owned shape record).
+ */
+const FOLLOWING = new Set(['pattern', 'engraving'])
+
 /** Does expanding the pattern now give exactly its stored owned operations and shape? */
 function isCurrent(l: LoadedPart, { spec, feature }: LoadedFeature): boolean {
   const ops = l.part.operations
@@ -73,7 +79,7 @@ export function followPatterns(draft: Draft<ProjectDoc>, ctx: CommandContext): A
     const part = draft.parts[id]!
     // pieces carry their source's records (the split follow regenerates them after this)
     if (part.derivedFrom !== undefined) continue
-    if (!(part.features ?? []).some((f) => f.kind === 'pattern')) continue
+    if (!(part.features ?? []).some((f) => FOLLOWING.has(f.kind))) continue
     const stock = Object.hasOwn(draft.snapshots, part.stock)
       ? baseOf(draft.snapshots[part.stock])
       : undefined
@@ -85,7 +91,7 @@ export function followPatterns(draft: Draft<ProjectDoc>, ctx: CommandContext): A
       const l = loaded.unwrap()
       const ops = l.part.operations
       const stale = l.features
-        .filter((f) => f.spec.kind === 'pattern' && !done.has(f.feature.id))
+        .filter((f) => FOLLOWING.has(f.spec.kind) && !done.has(f.feature.id))
         .sort(
           (a, b) => featureBlock(ops, a.feature.id).start - featureBlock(ops, b.feature.id).start,
         )

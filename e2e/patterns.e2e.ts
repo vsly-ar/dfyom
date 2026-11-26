@@ -46,7 +46,7 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await page
     .getByRole('menu')
     .getByRole('group', { name: 'Features' })
-    .getByRole('menuitem', { name: 'Pattern' })
+    .getByRole('menuitem', { name: 'Pattern', exact: true })
     .click()
   await expect(inspector.getByRole('heading', { name: 'Pattern 1' })).toBeVisible()
   const readout = inspector.locator('[data-pattern-readout]')

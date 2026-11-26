@@ -30,6 +30,7 @@ import { memoByRecord } from './frozen-memo'
 import { AREA_EPSILON, itemChain } from './shape-items'
 import { resolvePattern, type PatternDefinition, type PatternFacts } from './pattern/layout'
 import type {
+  EngravingRecord,
   PatternRecord,
   ShapeDTO,
   ShapeItem,
@@ -48,6 +49,8 @@ export interface NamedShape {
   /** The feature owning it (patterns P1): no items, its geometry in `pattern`. */
   readonly owner?: string | undefined
   readonly pattern?: PatternRecord | undefined
+  /** An engraved pattern's owned shape (engraved-patterns.md E3): its lines' record. */
+  readonly engraving?: EngravingRecord | undefined
 }
 
 /** Default name of `shape<n>`: "Shape n" (design-v0.3.md § What a shape is). */
@@ -170,6 +173,7 @@ function parseShape(dto: ShapeDTO): AppResult<NamedShape> {
     ...(dto.source === undefined ? {} : { source: dto.source }),
     ...(dto.owner === undefined ? {} : { owner: dto.owner }),
     ...(dto.pattern === undefined ? {} : { pattern: dto.pattern }),
+    ...(dto.engraving === undefined ? {} : { engraving: dto.engraving }),
   }))
 }
 
@@ -185,6 +189,7 @@ export function shapeToDTO(s: NamedShape): ShapeDTO {
     ...(s.source === undefined ? {} : { source: { ...s.source } }),
     ...(s.owner === undefined ? {} : { owner: s.owner }),
     ...(s.pattern === undefined ? {} : { pattern: s.pattern }),
+    ...(s.engraving === undefined ? {} : { engraving: s.engraving }),
   }
 }
 

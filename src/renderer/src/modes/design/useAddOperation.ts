@@ -26,6 +26,8 @@ export interface AddOperation {
   addHole(): Promise<void>
   /** A pattern with the core defaults on the selected face (patterns P1). */
   addPattern(): Promise<void>
+  /** An engraved pattern (engraved-patterns.md E3) on the selected face, else the top. */
+  addEngraving(): Promise<void>
 }
 
 export function useAddOperation(part: DesignPart): AddOperation {
@@ -89,5 +91,12 @@ export function useAddOperation(part: DesignPart): AddOperation {
     })
     if (r.ok) select((r.value as { featureId: string }).featureId)
   }
-  return { face, add, addHole, addPattern }
+  const addEngraving = async () => {
+    const r = await call('design.engraving.add', {
+      partId: part.dto.id,
+      ...(face !== undefined ? { on: face.id } : {}),
+    })
+    if (r.ok) select((r.value as { featureId: string }).featureId)
+  }
+  return { face, add, addHole, addPattern, addEngraving }
 }

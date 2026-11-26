@@ -25,6 +25,7 @@ import { importSvg } from '../../import/svg'
 import { definitionOf } from '../../design/shape'
 import { svgShapeItems } from '../../design/shape-import'
 import { pathLevelProfile } from '../../design/shape-items'
+import { resolveEngraving } from '../../design/engraving/resolve'
 import type { Move, Toolpath, Vec3 } from '../../toolpath/model'
 import { generatePocket } from '../../toolpath/pocket'
 import { generateProfile } from '../../toolpath/profile'
@@ -185,6 +186,44 @@ const lineLevelsOps = (): ExportOperation[] => {
   return [
     operation(
       generateLine(lineInput(stock, op, tool, {}, { stepdown: 0.8, feedRate: 1200 })).unwrap(),
+      tool,
+    ),
+  ]
+}
+
+/**
+ * An engraved pattern (engraved-patterns.md E3): the Rosette preset fitted to a 100 × 100 coaster
+ * face less a 10 mm margin (Ø 80), its 14 rings cut 0.2–1 mm by their levels with a 60° V-bit;
+ * the lines as the feature's owned shape resolves them.
+ */
+const engravingRosetteOps = (): ExportOperation[] => {
+  const r = expectOk(
+    resolveEngraving(
+      {
+        motif: { preset: 'rosette' },
+        boundary: { min: [0, 0], max: [100, 100] },
+        margin: 10,
+        rotation: 0,
+        fit: 'boundary',
+      },
+      new Map(),
+      undefined,
+    ),
+  )
+  const tool = chamferMill(6, 60)
+  const op = {
+    kind: 'line',
+    id: 'engraving1_line',
+    onZ: 0,
+    paths: r.lines.map((l) => l.shape),
+    depth: { min: 0.2, max: 1 },
+    levels: r.lines.map((l) => l.levels),
+    cutter: { kind: 'vBit', diameter: 6, angle: 60, tipDiameter: 0 },
+  } as const
+  const stock = { length: 100, width: 100, thickness: 6 }
+  return [
+    operation(
+      generateLine(lineInput(stock, op, tool, {}, { stepdown: 0.5, feedRate: 1500 })).unwrap(),
       tool,
     ),
   ]
@@ -588,6 +627,7 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['line-ramp', lineRampOps],
     ['line-vgroove-closed', lineClosedOps],
     ['line-levels', lineLevelsOps],
+    ['engraving-rosette', engravingRosetteOps],
     [
       'multi-tool-inch-manual-spindle',
       facedMultiToolOps,

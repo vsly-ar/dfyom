@@ -14,7 +14,7 @@ const f = designMessages.features
 
 /** An operation kind Add makes from the stock (not a chamfer: it needs an edge). */
 export type AddKind = Exclude<OperationKind, 'chamfer'>
-export type AddItemId = AddKind | 'hole' | 'pattern'
+export type AddItemId = AddKind | 'hole' | 'pattern' | 'engraving'
 /** Where Add items are offered. */
 export type AddSurface = 'menu' | 'empty' | 'face'
 
@@ -35,6 +35,7 @@ export const ADD_ITEMS: readonly AddItem[] = [
   { id: 'line', group: 'operations', icon: 'groove', command: 'design.line.add' },
   { id: 'hole', group: 'features', icon: 'hole-counterbore', command: 'design.hole.add' },
   { id: 'pattern', group: 'features', icon: 'pattern', command: 'design.pattern.add' },
+  { id: 'engraving', group: 'features', icon: 'engraving', command: 'design.engraving.add' },
 ]
 
 /** Items a surface leaves out on purpose, with the reason (none today). */
@@ -69,6 +70,12 @@ export function addItemLabel(id: AddItemId, surface: AddSurface): string {
       : surface === 'empty'
         ? m.navigator.empty.addPattern
         : m.face.addPattern
+  if (id === 'engraving')
+    return surface === 'menu'
+      ? f.addEngraving
+      : surface === 'empty'
+        ? m.navigator.empty.addEngraving
+        : m.face.addEngraving
   return surface === 'menu' ? m.kinds[id] : surface === 'empty' ? m.add(id) : m.face.addHere(id)
 }
 
@@ -81,5 +88,6 @@ export function addItemDescription(id: AddItemId): string {
 export function runAddItem(add: AddOperation, id: AddItemId): Promise<void> {
   if (id === 'hole') return add.addHole()
   if (id === 'pattern') return add.addPattern()
+  if (id === 'engraving') return add.addEngraving()
   return add.add(id)
 }

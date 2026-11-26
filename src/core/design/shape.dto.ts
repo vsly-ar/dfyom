@@ -16,10 +16,11 @@ export const SHAPE_ID_PATTERN = /^shape[1-9][0-9]{0,5}$/
 export const ShapeIdSchema = z.string().regex(SHAPE_ID_PATTERN).describe('Shape id, e.g. shape1')
 /**
  * A feature's owned shape (patterns P1, docs/modes/patterns.md#owned-shape-and-operations):
- * `<featureId>_cells`. Stored and placed like a named shape, never an argument of the shape
- * tools (which take `ShapeIdSchema`).
+ * `<featureId>_cells`; an engraved pattern's (engraved-patterns.md E3) `<featureId>_lines`.
+ * Stored and placed like a named shape, never an argument of the shape tools (which take
+ * `ShapeIdSchema`).
  */
-export const OWNED_SHAPE_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*_cells$/
+export const OWNED_SHAPE_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*_(cells|lines)$/
 /** Any stored shape id: a named shape's or a feature's owned shape's. */
 export const StoredShapeIdSchema = z
   .string()
@@ -286,9 +287,47 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
     .optional(),
 }) as unknown as z.ZodType<PatternRecord>
 
+// ── engraving (owned shape of an engraved pattern, engraved-patterns.md E3) ──────────────────
+
+/**
+ * The engraving record of an owned shape `<featureId>_lines`: the feature's motif and placement
+ * resolved to numbers (mm, degrees) by its expansion, read by the Line's geometry (engraving/
+ * resolve.ts: the motif's lines placed in the face frame). `motif` is a preset id or named shapes
+ * of the part (their joint bounding box is the motif's frame, so they follow edits). `boundary`
+ * is the face rectangle (face frame), `area` a named closed boundary shape placed as a pattern's.
+ * The motif's frame centre goes to `center` (absent: the centre of the boundary less the margin),
+ * turned by `rotation`, at `size` (the frame's width; absent: its own) or, with `fit: 'boundary'`,
+ * scaled so its lines fit the boundary less the margin, centred. Layout `single` only (E3).
+ */
+export interface EngravingRecord {
+  motif: { preset: string } | { shapeIds: string[] }
+  boundary: { min: [number, number]; max: [number, number] }
+  area?: { shapeId: string; center: [number, number]; rotation: number } | undefined
+  margin: number
+  center?: [number, number] | undefined
+  size?: number | undefined
+  rotation: number
+  fit?: 'boundary' | undefined
+}
+
+export const EngravingRecordSchema: z.ZodType<EngravingRecord> = z.object({
+  motif: z.union([
+    z.object({ preset: z.string().min(1).max(64) }),
+    z.object({ shapeIds: z.array(ShapeIdSchema).min(1).max(50) }),
+  ]),
+  boundary: z.object({ min: pair, max: pair }),
+  area: z.object({ shapeId: ShapeIdSchema, center: pair, rotation: num }).optional(),
+  margin: num,
+  center: pair.optional(),
+  size: num.optional(),
+  rotation: num,
+  fit: z.literal('boundary').optional(),
+}) as unknown as z.ZodType<EngravingRecord>
+
 /**
  * A part's named shape (docs/modes/design-v0.3.md#what-a-shape-is), or a feature's owned shape
- * (`owner`, patterns P1): read-only, no items, its geometry in `pattern`.
+ * (`owner`, patterns P1): read-only, no items, its geometry in `pattern` (`<owner>_cells`) or
+ * `engraving` (`<owner>_lines`, engraved-patterns.md E3).
  */
 export const ShapeDtoSchema = z
   .object({
@@ -298,22 +337,30 @@ export const ShapeDtoSchema = z
     source: ShapeSourceDtoSchema.optional().describe('Import origin, information only'),
     owner: z.string().optional().describe('The feature owning this shape (read-only)'),
     pattern: PatternRecordSchema.optional(),
+    engraving: EngravingRecordSchema.optional(),
   })
   .refine(
     (s) =>
       s.owner === undefined
-        ? s.items.length > 0 && s.pattern === undefined && SHAPE_ID_PATTERN.test(s.id)
-        : s.items.length === 0 && s.pattern !== undefined && s.id === `${s.owner}_cells`,
-    'a named shape has items; an owned shape <owner>_cells has a pattern and no items',
+        ? s.items.length > 0 &&
+          s.pattern === undefined &&
+          s.engraving === undefined &&
+          SHAPE_ID_PATTERN.test(s.id)
+        : s.items.length === 0 &&
+          (s.pattern !== undefined
+            ? s.engraving === undefined && s.id === `${s.owner}_cells`
+            : s.engraving !== undefined && s.id === `${s.owner}_lines`),
+    'a named shape has items; an owned shape has no items and a pattern (<owner>_cells) or an engraving (<owner>_lines)',
   )
 export interface ShapeDTO {
   id: string
   name: string
   items: ShapeItemDTO[]
   source?: ShapeSource | undefined
-  /** A feature's owned shape (patterns P1): its id is `<owner>_cells`. */
+  /** A feature's owned shape (patterns P1): its id is `<owner>_cells` (engraving: `_lines`). */
   owner?: string | undefined
   pattern?: PatternRecord | undefined
+  engraving?: EngravingRecord | undefined
 }
 
 /** Quantity as entered, as for operation parameters (commands.ts `Src`). */

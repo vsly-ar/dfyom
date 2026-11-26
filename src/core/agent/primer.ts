@@ -18,5 +18,6 @@ export const PRIMER = [
   '- An unknown argument error suggests the closest valid name. project_close without key closes the bound project.',
   '- confirm: true asserts that the user agreed to a destructive step (replace a file, discard changes).',
   '- Run mode: open the virtual machine with run_connection_open { target: "virtual", planId } before other run tools; continue tool changes and pauses with run_job_continue (default: the wait the run is at; name it to be safe on a retry).',
+  "- design_engraving_add places one Line-cut motif on a face (one owned Line): motif.preset is one of waves, chevrons, crosshatch, scales, seigaiha, basket-weave, greek-key, wood-grain (tiles, placed once), vine, rosette, sunburst, ripples, mandala (round: fitted to the boundary less the margin), or motif.shapeIds (named shapes, depth from their levels); depth { min, max } maps the motif's levels.",
   '- A result may end with a line about what the user or other agents did since your last call; project_log_list has the details, history_list shows whose step history_undo would undo.',
 ].join('\n')
