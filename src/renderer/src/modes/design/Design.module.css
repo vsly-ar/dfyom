@@ -289,6 +289,22 @@
   font-size: var(--text-xs);
 }
 
+/* DF135: an already-cut row (cut-state.md#marking): muted, a check and "Cut" */
+.op:has([data-cut-marker]) .opName,
+.op:has([data-cut-marker]) .featureReadout {
+  color: var(--text-muted);
+}
+
+.opCut {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.opCut svg,
 .opBadge svg,
 .opFailed svg {
   width: var(--icon-sm);

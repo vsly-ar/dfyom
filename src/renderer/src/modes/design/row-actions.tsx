@@ -2,7 +2,8 @@
 // drilling, circle pocket or inside circle profile (its edge), Make Clones… on anything that can be
 // a Clones source, Disable / Enable and Remove on top-level rows. On a pattern's pocket Chamfer
 // turns the pattern's chamfer on (patterns P3). A row that is off (DF106) offers nothing that
-// builds on it: no Chamfer, no Make Clones…. The same entries open by right-click, Shift+F10 / the
+// builds on it: no Chamfer, no Make Clones…. Mark as already cut / not cut on top-level rows
+// (DF135, docs/modes/cut-state.md#marking). The same entries open by right-click, Shift+F10 / the
 // Menu key and the row's actions (…) button; only applicable items are listed.
 // Doc: docs/conventions/ui.md#feature-rows-and-add (Row menu), #clones,
 // docs/modes/design.md#disabling-operations-and-features-df106
@@ -64,6 +65,11 @@ export function useRowActions(part: DesignPart): RowActions {
     (list: readonly string[]) => void call('design.part.update', { partId, disabled: list }),
     [call, partId],
   )
+  // DF135: the already-cut list, the same way (cut-state.md#marking)
+  const setCut = useCallback(
+    (list: readonly string[]) => void call('design.part.update', { partId, alreadyCut: list }),
+    [call, partId],
+  )
 
   return (id, remove) => {
     const items: MenuItem[] = []
@@ -76,6 +82,7 @@ export function useRowActions(part: DesignPart): RowActions {
       if (remove === undefined) return []
       return [...toggle, 'separator', removeItem(remove)]
     }
+    const cut = remove === undefined ? [] : [cutItem(part.dto.alreadyCut ?? [], id, setCut)]
     const op = part.dto.operations.find((o) => o.id === id)
     const pattern =
       op?.featureRole === 'pocket'
@@ -121,8 +128,27 @@ export function useRowActions(part: DesignPart): RowActions {
         },
       })
     if (remove === undefined) return items
-    return [...items, ...toggle, 'separator', removeItem(remove)]
+    return [...items, ...cut, ...toggle, 'separator', removeItem(remove)]
   }
+}
+
+/** Mark as already cut / Mark as not cut of a top-level row (DF135, cut-state.md#marking). */
+function cutItem(
+  list: readonly string[],
+  id: string,
+  set: (list: readonly string[]) => void,
+): MenuItem {
+  return list.includes(id)
+    ? {
+        label: m.navigator.unmarkCut,
+        icon: <Icon name="undo" />,
+        onSelect: () => set(list.filter((x) => x !== id)),
+      }
+    : {
+        label: m.navigator.markCut,
+        icon: <Icon name="success" />,
+        onSelect: () => set([...list, id]),
+      }
 }
 
 function removeItem(remove: RowRemove): MenuItem {

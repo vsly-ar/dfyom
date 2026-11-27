@@ -1031,3 +1031,27 @@ button.deviationRow[aria-pressed='true'] {
 .swatch[data-sign='undercut'] {
   background: var(--info);
 }
+
+/* DF135: an already-cut row (cut-state.md § What a cut operation means): muted, a check */
+.op[data-cut] .opName {
+  color: var(--text-muted);
+}
+
+.op[data-cut] .opSelect > svg {
+  opacity: 0.5;
+}
+
+.opCut {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.opCut svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}

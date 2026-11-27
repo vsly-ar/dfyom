@@ -37,6 +37,9 @@ export const PLAN_WARNING_CODES = [
   'plan.rebuildBlocked',
   'plan.broken',
   'plan.zRef',
+  // DF135 C1: docs/modes/cut-state.md
+  'plan.cutSetupOrder',
+  'plan.zRefGone',
   'plan.links.clampHeightUnknown',
   'plan.links.collision',
   'plan.alignment',

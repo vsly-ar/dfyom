@@ -313,6 +313,33 @@ describe('Setup panel', () => {
     expect(row).not.toHaveTextContent('Removed from design')
   })
 
+  it('shows an operation already cut in Design muted with a check; its toolpath only on request (DF135)', async () => {
+    const t = await renderSetups(async (s, planId) => {
+      const id = s.plan(planId).setups[1]!.operations[0]!.designOperationIds[0]!
+      await s.run('design.part.update', { partId: s.partId, alreadyCut: [id] })
+      await s.run('project.apply', {})
+    })
+    const rows = () => within(t.opsOf('Top')).getAllByRole('button')
+    const row = rows().find((b) => b.closest('[data-cut]') !== null)!
+    expect(row).toBeDefined()
+    expect(row).toHaveTextContent(/Cut: Already cut \(marked in Design\)/)
+    expect(rows().filter((b) => b.closest('[data-cut]') !== null)).toHaveLength(1)
+    // the Top setup is the window's setup once its row is chosen: its toolpaths without the cut one
+    await t.user.click(t.setupRows()[1]!)
+    await t.user.click(t.setupRows()[1]!)
+    const shown = await screen.findByRole('switch', { name: 'Show cut toolpaths' })
+    expect(shown).toHaveAttribute('aria-checked', 'false')
+    await waitFor(() =>
+      expect(probe.scene?.lines?.starts.length).toBe(t.plan().setups[1]!.operations.length - 1),
+    )
+    await t.user.click(shown)
+    expect(shown).toHaveAttribute('aria-checked', 'true')
+    await waitFor(() =>
+      expect(probe.scene?.lines?.starts.length).toBe(t.plan().setups[1]!.operations.length),
+    )
+    await expectNoAxeViolations()
+  })
+
   it('splits an operation into a new setup, moves operations across setups of one direction and merges them', async () => {
     const t = await renderSetups()
     const top = t.plan().setups[1]!

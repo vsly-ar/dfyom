@@ -25,6 +25,7 @@ import {
   type PointerEvent,
 } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
+import { cutIds } from '../../../../core/plan/cut'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -135,6 +136,8 @@ export function SetupList({
   const store = usePlanStore()
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const canMove = allows(plan, 'plan.operation.move')
+  // DF135: operations already cut (marked in Design) are muted, with a check
+  const cut = cutIds(plan)
   // rows with a menu are described by one hint (DF70, ui.md decision 27)
   const hintId = useId()
   const menuKeys = canMove
@@ -327,6 +330,7 @@ export function SetupList({
                     failure={failures[op.id]}
                     selected={selected === op.id}
                     canMove={canMove}
+                    cut={cut.has(op.id)}
                     menuKeys={menuKeys}
                     reorder={reorder}
                     index={i}
@@ -489,6 +493,7 @@ function OperationRow({
   failure,
   selected,
   canMove,
+  cut,
   menuKeys,
   reorder,
   index,
@@ -509,6 +514,8 @@ function OperationRow({
   failure: AppErrorData | undefined
   selected: boolean
   canMove: boolean
+  /** Already cut (DF135): muted with a check, out of the program, keeps its place. */
+  cut: boolean
   /** The row button's keys and the row menu hint (DF70). */
   menuKeys: { 'aria-keyshortcuts': string; 'aria-describedby'?: string }
   /** The setup's operation list reorder (its grip and row props). */
@@ -589,6 +596,7 @@ function OperationRow({
         data-selected={selected ? '' : undefined}
         data-aid={op.aid === undefined ? undefined : op.aid.kind}
         data-off={stale === 'offInDesign' ? '' : undefined}
+        data-cut={cut ? '' : undefined}
       >
         {canMove && setup.operations.length > 1 ? (
           <RowGrip grip={reorder.gripProps(index)} />
@@ -618,6 +626,13 @@ function OperationRow({
             </span>
           </span>
           <span className={styles['opStatus']}>
+            {cut ? (
+              <span className={styles['opCut']} title={m.cut.markerTip}>
+                <Icon name="success" />
+                {m.cut.marker}
+                <span className={styles['srOnly']}>{`: ${m.cut.markerTip}`}</span>
+              </span>
+            ) : null}
             {stale === 'offInDesign' ? (
               <span className={styles['opOff']} title={m.stale.rowOffInDesign} data-where="design">
                 {m.off.inDesign}

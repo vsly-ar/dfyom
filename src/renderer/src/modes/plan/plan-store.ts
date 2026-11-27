@@ -269,6 +269,11 @@ export interface PlanState {
   /** DF78: the alignment point focused in the setup inspector (drawn larger in the viewport). */
   readonly alignmentPoint: string | undefined
   /**
+   * DF135: the toolpaths of already-cut operations are drawn (hidden by default,
+   * docs/modes/cut-state.md#what-a-cut-operation-means-in-its-plan).
+   */
+  readonly showCutToolpaths: boolean
+  /**
    * DF78 S22: the setup whose alignment points are being picked in the viewport (its valid
    * sources are drawn as targets); undefined: not picking.
    */
@@ -299,6 +304,8 @@ export interface PlanState {
   previewZRef(planOperationId: string | undefined): void
   /** Marks an alignment point in the viewport; undefined: none. */
   focusAlignmentPoint(id: string | undefined): void
+  /** DF135: "Show cut toolpaths". */
+  setShowCutToolpaths(show: boolean): void
   /** Starts (a setup id) or ends (undefined) picking alignment points in the viewport. */
   pickAlignment(setupId: string | undefined): void
   /** Opens a workholding item in the setup inspector; undefined closes it. */
@@ -361,6 +368,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     fieldRequest: undefined,
     zRefPreview: undefined,
     alignmentPoint: undefined,
+    showCutToolpaths: false,
     pickingAlignment: undefined,
     workholdingItem: undefined,
     exported: undefined,
@@ -378,6 +386,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     findingsShown: () => set({ findingsRequest: undefined }),
     revealField: (planOperationId, field) => set({ fieldRequest: { planOperationId, field } }),
     fieldShown: () => set({ fieldRequest: undefined }),
+    setShowCutToolpaths: (showCutToolpaths) => set({ showCutToolpaths }),
     focusAlignmentPoint: (alignmentPoint) => {
       if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
     },

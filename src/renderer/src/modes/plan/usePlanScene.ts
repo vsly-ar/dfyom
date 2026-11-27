@@ -38,6 +38,7 @@ import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import { resolveHolder } from '../../../../core/library/holder'
 import { holderSizes } from '../../../../core/plan/workholding/findings'
 import { runStickoutNeeded, toolRuns } from '../../../../core/plan/tool-runs'
+import { cutIds, cutTest } from '../../../../core/plan/cut'
 import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
@@ -137,6 +138,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const focusedPoint = usePlanState((s) => s.alignmentPoint)
   const picking = usePlanState((s) => s.pickingAlignment)
   const openItem = usePlanState((s) => s.workholdingItem)
+  const showCut = usePlanState((s) => s.showCutToolpaths)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
   const [heldAid, setHeldAid] = useState<HeldAid | null>(null)
@@ -422,10 +424,16 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     // toolpath of the setup is current (the links are computed from exactly those)
     const lowered = data.links.find((l) => l.setupId === setup.id)?.links?.lowered ?? []
     const generated = drawn.map((e) => e.toolpath as Toolpath)
-    const toolpaths =
+    const linked =
       lowered.length > 0 && drawn.length === setup.operations.length && !outdated.some(Boolean)
         ? linkedToolpaths(generated, lowered)
         : generated
+    // DF135: a cut operation's toolpath is hidden unless "Show cut toolpaths" is on
+    const cut = cutIds(plan)
+    const drawnIds = setup.operations.flatMap((o) => (data.toolpaths[o.id]?.toolpath ? [o.id] : []))
+    const shown = (_: unknown, i: number) => showCut || !cut.has(drawnIds[i]!)
+    const toolpaths = linked.filter(shown)
+    const shownOutdated = outdated.filter(shown)
     const stock = planStockSize(doc, plan)
     // workholding.md#ui-summary: the setup's items, the open item's keep-out, collision hits;
     // a dragged clamp drawn where it is held (X2-6)
@@ -452,7 +460,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     // DF122: the selected owner's (or its roughing's) rest region
     const rest = shownRest(plan, setup, selected, data.toolpaths)
     // DF132 H5: the shown operation's holder ghost
-    const ghostOp = shownHolderOperation(setup, selected, preview, data)
+    const ghostOp = shownHolderOperation(setup, selected, preview, data, cutTest(plan.design.part))
     const loaded = ghostOp === undefined ? undefined : loadedPlanOf(doc, plan)
     const tool = ghostOp?.tool === undefined ? undefined : loaded?.tools.get(ghostOp.tool)
     // H6: the tool's own holder, else the machine's
@@ -489,7 +497,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
       tool: null,
-      ...(outdated.some(Boolean) ? { outdated } : {}),
+      ...(shownOutdated.some(Boolean) ? { outdated: shownOutdated } : {}),
       ...(stock === undefined
         ? {}
         : { frame: setupPlacement(setup, stock, setupZeroOf(setup, info)) }),
@@ -520,6 +528,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     holding,
     heldClamp,
     clamps,
+    showCut,
   ])
 }
 
@@ -534,11 +543,13 @@ export function shownHolderOperation(
   selected: string | null,
   preview: string | undefined,
   data: Pick<PlanData, 'operations' | 'warnings'>,
+  /** DF135: already-cut operations are in no tool run. */
+  isCut: (op: PlanOperationDTO) => boolean = () => false,
 ): PlanOperationDTO | undefined {
   const run =
     preview === undefined
       ? undefined
-      : toolRuns(setup.operations).find((r) => r.operations[0]?.id === preview)
+      : toolRuns(setup.operations, isCut).find((r) => r.operations[0]?.id === preview)
   if (run === undefined) return setup.operations.find((o) => o.id === selected)
   const colliding = run.operations.find((o) =>
     data.warnings.some(

@@ -9,7 +9,9 @@
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
+import { cutIds } from '../plan/cut'
 import { withoutOperationName } from '../plan/labels'
+import type { PlanDTO } from '../plan/plan.dto'
 import {
   runLinkSavings,
   runStickoutNeeded,
@@ -309,6 +311,11 @@ export class ResultShaper {
     // DF69: a length (mm) in the project's units
     const length = (v: number) =>
       inch ? Math.round((v / 25.4) * 1e4) / 1e4 : Math.round(v * 1e3) / 1e3
+    // DF135: operations whose design operations are already cut are not in the program
+    const cut: ReadonlySet<string> = isObj(design['part'])
+      ? cutIds(plan as unknown as PlanDTO)
+      : new Set()
+    const isCut = (o: { id: string }) => cut.has(o.id)
     const rawSetups = ((plan['setups'] as Obj[]) ?? []).map((s) => ({
       operations: ((s['operations'] as Obj[]) ?? []).map((o) => ({
         id: o['id'] as string,
@@ -339,7 +346,9 @@ export class ResultShaper {
         const tp = peek('plan.toolpath.get', { planId, planOperationId: id })
         const path = tp?.['toolpath'] as { stats?: { estimatedSeconds?: number } } | null
         const seconds = path?.stats?.estimatedSeconds ?? null
-        if (seconds === null || tp?.['stale'] === true) setupSeconds = null
+        if (cut.has(id)) {
+          // not in the program, nor in its time
+        } else if (seconds === null || tp?.['stale'] === true) setupSeconds = null
         else if (setupSeconds !== null) setupSeconds += seconds
         const reachOf = isObj(tp?.['overreach']) ? (tp['overreach'] as Record<Side, number>) : null
         if (reachOf === null || tp?.['stale'] === true) reach = null
@@ -360,6 +369,7 @@ export class ResultShaper {
           designOperationIds: o['designOperationIds'],
           // an alignment aid (alignment.md S13): its kind, name and setup-frame position
           ...(isObj(o['aid']) ? { aid: o['aid'] } : {}),
+          ...(cut.has(id) ? { alreadyCut: true } : {}),
           tool: nameOf(o['tool']),
           feeds,
           seconds,
@@ -382,7 +392,7 @@ export class ResultShaper {
       const secondsOf = new Map(operations.map((o) => [o.id, o.seconds]))
       const indexOf = new Map(operations.map((o, i) => [o.id, i]))
       const lowered = loweredOf.get(s['id'] as string) ?? []
-      const toolRunList = toolRuns(rawSetups[si]?.operations ?? []).map((r) => {
+      const toolRunList = toolRuns(rawSetups[si]?.operations ?? [], isCut).map((r) => {
         let seconds: number | null = 0
         for (const o of r.operations) {
           const t = secondsOf.get(o.id) ?? null
@@ -461,7 +471,7 @@ export class ResultShaper {
         overreach: reach === null ? null : overreachIn(reach, inch),
         operations,
         seconds: setupSeconds,
-        toolChanges: setupToolChanges(rawSetups, si),
+        toolChanges: setupToolChanges(rawSetups, si, isCut),
         toolRuns: toolRunList,
       }
     })

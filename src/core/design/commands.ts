@@ -1529,6 +1529,10 @@ const partUpdate = defineCommand({
       .array(z.string().min(1))
       .optional()
       .describe('Ids switched off (replaces the list)'),
+    alreadyCut: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Ids already cut in the stock (replaces the list)'),
   }),
   // the stock is listed on design.part.add only (tools/list budget, DF95); validated in full
   listedArgs: { stock: listedAs('object', 'design.part.add stock (changes the stock)') },
@@ -1577,6 +1581,22 @@ const partUpdate = defineCommand({
       if (issues.length > 0) return invalid(issues, where)
       if (list.length === 0) delete target.disabled
       else if (!deepEqual(target.disabled, list)) target.disabled = list
+    }
+    if (args.alreadyCut !== undefined) {
+      // DF135 (cut-state.md#marking): material already gone from the stock, one undo step
+      const { list, issues } = checkDisabledList(baseOf(target), args.alreadyCut, 'alreadyCut')
+      const unknown = issues.filter((i) => i.rule === 'unknownItem')
+      if (unknown.length > 0) return malformed(unknown, where)
+      if (issues.length > 0)
+        return invalid(
+          issues.map((i) => ({
+            ...i,
+            message: `${String(i.params?.['id'])} is part of ${String(i.params?.['featureId'])}: mark ${String(i.params?.['featureId'])} instead`,
+          })),
+          where,
+        )
+      if (list.length === 0) delete target.alreadyCut
+      else if (!deepEqual(target.alreadyCut, list)) target.alreadyCut = list
     }
     if (args.name !== undefined) target.name = args.name
     if (args.blank !== undefined) {

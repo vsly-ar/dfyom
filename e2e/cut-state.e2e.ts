@@ -1,0 +1,165 @@
+// Cut state C1 (hardening DF135, TG #442 / TG #447) in the built app: a pocket is planned and
+// exported (the real cut), then marked "already cut" from its Design row menu; a new pocket in it
+// is added in Design, and the plan (a draft, following the design) shows the cut pocket muted with
+// a check and exports only the new pocket. With DFYOM_C1_DIR set it captures light and dark
+// renders of the plan with the cut row (df135-cut-{light,dark}.png; review captures, not asserted).
+// Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import type { Locator, Page } from '@playwright/test'
+import type { PreloadApi } from '../src/shared/preload-api'
+import { closeDialog, expect, test } from './app.fixture'
+
+const SHOTS = process.env['DFYOM_C1_DIR']
+
+async function setField(scope: Locator, label: string, value: string): Promise<void> {
+  const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
+  await field.fill(value)
+  await field.press('Enter')
+  await field.blur()
+}
+
+/** `name`-light.png and -dark.png of the window (only with DFYOM_C1_DIR). */
+async function shoot(page: Page, name: string): Promise<void> {
+  if (SHOTS === undefined) return
+  const dir = resolve(SHOTS)
+  mkdirSync(dir, { recursive: true })
+  for (const theme of ['light', 'dark'] as const) {
+    // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+    await page.evaluate((t) => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', t)
+    }, theme)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: join(dir, `${name}-${theme}.png`) })
+  }
+}
+
+test('cut state: mark a pocket already cut in Design, add a pocket in it, export only that', async ({
+  dfyom,
+}) => {
+  test.setTimeout(180_000)
+  await dfyom.app.evaluate(({ dialog }, dir) => {
+    dialog.showSaveDialog = ((...args: unknown[]) => {
+      const o = (args.at(-1) ?? {}) as { defaultPath?: string }
+      const name = (o.defaultPath ?? 'out.nc').split(/[\\/]/).at(-1)!
+      return Promise.resolve({ canceled: false, filePath: `${dir}/${name}` })
+    }) as typeof dialog.showSaveDialog
+  }, dfyom.dataDir)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (SHOTS !== undefined) await page.setViewportSize({ width: 1440, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const added = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    [
+      'library.tool.add',
+      {
+        values: {
+          name: 'Flat 3',
+          type: 'flatEndMill',
+          diameter: '3',
+          fluteLength: '12',
+          overallLength: '50',
+          fluteCount: '2',
+          toolMaterial: 'carbide',
+          presets: [
+            {
+              name: 'Alu',
+              materialClass: 'aluminum',
+              spindleSpeed: '18000',
+              feedRate: '450',
+              plungeRate: '200',
+              stepdown: '0.75',
+              stepover: '1.2',
+            },
+          ],
+        },
+      },
+    ] as const,
+  )
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+
+  // ── a 100 × 72 × 12 part with a 60 × 40 pocket, 6 deep ───────────────────────────────────
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Cut state')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '100')
+  await setField(setup, 'Width (Y)', '72')
+  await setField(setup, 'Thickness (Z)', '12')
+  await stock.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
+  await navigator.getByRole('button', { name: 'Add pocket' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  await setField(inspector, 'Length (X)', '60')
+  await setField(inspector, 'Width (Y)', '40')
+  await setField(inspector, 'Depth', '6')
+  await setField(inspector, 'Corner radius', '1.5')
+
+  // ── Plan: the first program (the real cut) ─────────────────────────────────────────────────
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const start = page.getByRole('dialog', { name: 'Plan the part' })
+  await start.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
+  await setField(newMachine, 'Travel Z', '100')
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
+  await start.getByRole('button', { name: 'Create plan' }).click()
+  await expect(start).toBeHidden()
+  const exportProgram = async (): Promise<string> => {
+    await navigator
+      .getByRole('button', { name: /^Export (.* )?gCode…$/ })
+      .first()
+      .click()
+    const done = page.getByRole('dialog', { name: 'gCode exported' })
+    await expect(done).toBeVisible({ timeout: 60_000 })
+    await closeDialog(done, 'Close')
+    const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
+    return readFileSync(join(dfyom.dataDir, file), 'utf8')
+  }
+  expect(await exportProgram()).toContain('(Pocket 1)')
+
+  // ── Design: Pocket 1 is already cut; a pocket in it, below its floor ───────────────────────
+  await page.keyboard.press('ControlOrMeta+1')
+  const pocket1 = navigator.getByRole('button', { name: /^Pocket 1/ })
+  await pocket1.click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Actions for Pocket 1' })
+  await menu.getByRole('menuitem', { name: 'Mark as already cut' }).click()
+  await expect(pocket1).toContainText('Cut')
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Pocket' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 2' })).toBeVisible()
+  await setField(inspector, 'Length (X)', '20')
+  await setField(inspector, 'Width (Y)', '10')
+  await setField(inspector, 'Depth', '9')
+  await setField(inspector, 'Corner radius', '1.5')
+
+  // ── Plan: Pocket 1 muted with a check, the export holds only Pocket 2 ───────────────────────
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const list = navigator
+    .getByRole('list', { name: 'Setups in machining order' })
+    .getByRole('list', { name: 'Plan operations in machining order' })
+  const cutRow = list.getByRole('button', { name: /^Pocket 1/ })
+  await expect(cutRow).toContainText('Cut', { timeout: 30_000 })
+  await expect(list.getByRole('button', { name: /^Pocket 2/ })).toBeVisible()
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await expect(navigator.getByRole('switch', { name: 'Show cut toolpaths' })).not.toBeChecked()
+  await shoot(page, 'df135-cut')
+  const program = await exportProgram()
+  expect(program).toContain('(Pocket 2)')
+  expect(program).not.toContain('(Pocket 1)')
+  expect(dfyom.rendererErrors).toEqual([])
+})

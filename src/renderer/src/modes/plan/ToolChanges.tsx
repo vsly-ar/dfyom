@@ -25,6 +25,7 @@ import {
   shownStickout,
   toolRuns,
 } from '../../../../core/plan/tool-runs'
+import { cutTest } from '../../../../core/plan/cut'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
@@ -250,8 +251,10 @@ export function ToolChanges({
 }): React.JSX.Element | null {
   const call = usePlanCommand()
   const index = plan.setups.findIndex((s) => s.id === setup.id)
-  const runs = toolRuns(setup.operations)
-  const carried = carriedTool(plan.setups, index)
+  // DF135: already-cut operations are in no tool run (not in the program)
+  const isCut = cutTest(plan.design.part)
+  const runs = toolRuns(setup.operations, isCut)
+  const carried = carriedTool(plan.setups, index, isCut)
   const before = plan.setups[index - 1]
   const canMove = allows(plan, 'plan.operation.move') && runs.length > 1
   const [announcement, setAnnouncement] = useState('')
@@ -316,7 +319,7 @@ export function ToolChanges({
   const zRun = (id: string) =>
     zRefs?.find((r) => r.setupId === setup.id && r.planOperationId === id)
   if (runs.length === 0) return null
-  const count = setupToolChanges(plan.setups, index)
+  const count = setupToolChanges(plan.setups, index, isCut)
   return (
     <InspectorGroup title={m.title} meta={m.count(count)} className={styles['section']}>
       <ol

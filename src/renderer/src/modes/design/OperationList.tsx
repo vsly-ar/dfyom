@@ -447,12 +447,27 @@ function RowGrip({ actions }: { actions: RowActions | undefined }): React.JSX.El
 
 /** The "Off" marker of a disabled row (DF106); its tooltip says whether it follows another item. */
 function OffMarker({ ctx, id }: { ctx: ListContext; id: string }): React.JSX.Element | null {
-  if (!isDisabled(ctx.off, id)) return null
+  // DF135: an already-cut row (cut-state.md#marking), muted with a check
+  const cut = ctx.part.dto.alreadyCut?.includes(id) === true ? <CutMarker /> : null
+  if (!isDisabled(ctx.off, id)) return cut
   const title = ctx.off.dependants.has(id) ? m.navigator.offFollows : m.navigator.offTitle
   return (
-    <span className={styles['opOff']} title={title}>
-      {m.navigator.off}
-      <span className={styles['srOnly']}>{`: ${title}`}</span>
+    <>
+      {cut}
+      <span className={styles['opOff']} title={title}>
+        {m.navigator.off}
+        <span className={styles['srOnly']}>{`: ${title}`}</span>
+      </span>
+    </>
+  )
+}
+
+function CutMarker(): React.JSX.Element {
+  return (
+    <span className={styles['opCut']} title={m.navigator.cutTitle} data-cut-marker="">
+      <Icon name="success" />
+      {m.navigator.cut}
+      <span className={styles['srOnly']}>{`: ${m.navigator.cutTitle}`}</span>
     </span>
   )
 }

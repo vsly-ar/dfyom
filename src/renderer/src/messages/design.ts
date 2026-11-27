@@ -840,6 +840,12 @@ export const designMessages = {
     off: 'Off',
     offTitle: 'Disabled: kept here, left out of the 3D view, checks and Plan.',
     offFollows: 'Off: it builds on a disabled item. Enable that item to bring it back.',
+    /** DF135 (cut-state.md § Marking): material already gone from the stock, whoever cut it. */
+    markCut: 'Mark as already cut',
+    unmarkCut: 'Mark as not cut',
+    cut: 'Cut',
+    cutTitle:
+      'Already cut: the stock no longer has this material. Plans keep it as removed and export nothing for it.',
     actions: (name: string) => `Actions for ${name}`,
     /** The description of a row with a row menu (DF70: no action buttons on rows). */
     rowMenuHint: 'Right-click or Shift+F10 for actions.',
