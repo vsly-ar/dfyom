@@ -4,7 +4,8 @@
  * envelope (tool, collet nut, spindle body) and the per-move test of the workholding collision
  * check, plus the stock top for the nut and body (Q188), and shortens it to just before the first
  * contact. A move that starts inside an item may leave it, never go deeper. `nearestClearance` is
- * the live read-out's distance. Jogs reach it through `guardedJog` (RW3).
+ * the live read-out's distance, `itemClearances` the scene's item colours (RW5). Jogs reach it
+ * through `guardedJog` (RW3).
  * Doc: docs/modes/run-workholding.md#the-guard, #implementation-rw2
  *
  * Pure and headless; mm in the setup frame (the frame of the items, Z0 on the stock top).
@@ -231,9 +232,33 @@ export interface Clearance {
 }
 
 /**
- * `nearestClearance(at, envelope, prisms, margin)`: the item nearest to any part of the envelope
- * at tip `at` (the distance from a part's side and bottom to the prism's footprint and top), or
- * undefined without items.
+ * `itemClearances(at, envelope, prisms)` (RW5): per item, its nearest part of the envelope at tip
+ * `at` and the distance (a part's side and bottom to the prism's footprint and top, combined as
+ * `hypot`); one entry per item that has prisms, in the prisms' order.
+ */
+export function itemClearances(
+  at: Vec3,
+  envelope: readonly EnvelopeSegment[],
+  prisms: readonly Prism[],
+): Clearance[] {
+  const best = new Map<string, Clearance>()
+  for (const p of prisms) {
+    const d = segmentDistance(p.footprint, xy(at), xy(at)).distance
+    for (const e of envelope) {
+      const side = Math.max(0, d - e.radius)
+      const up = Math.max(0, at[2] + e.zFrom - p.zMax)
+      const gap = Math.hypot(side, up)
+      const b = best.get(p.itemId)
+      if (b === undefined || gap < b.gap - 1e-12)
+        best.set(p.itemId, { itemId: p.itemId, part: e.part, gap })
+    }
+  }
+  return [...best.values()]
+}
+
+/**
+ * `nearestClearance(at, envelope, prisms)`: the item nearest to any part of the envelope at tip
+ * `at` (the smallest of `itemClearances`; the first item on a tie), or undefined without items.
  */
 export function nearestClearance(
   at: Vec3,
@@ -241,15 +266,7 @@ export function nearestClearance(
   prisms: readonly Prism[],
 ): Clearance | undefined {
   let best: Clearance | undefined
-  for (const p of prisms) {
-    const d = segmentDistance(p.footprint, xy(at), xy(at)).distance
-    for (const e of envelope) {
-      const side = Math.max(0, d - e.radius)
-      const up = Math.max(0, at[2] + e.zFrom - p.zMax)
-      const gap = Math.hypot(side, up)
-      if (best === undefined || gap < best.gap - 1e-12)
-        best = { itemId: p.itemId, part: e.part, gap }
-    }
-  }
+  for (const c of itemClearances(at, envelope, prisms))
+    if (best === undefined || c.gap < best.gap - 1e-12) best = c
   return best
 }

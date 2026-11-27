@@ -394,3 +394,39 @@ describe('Go to and the dialogs’ moves through the workholding guard (DF133 RW
     expect(t.jogs()).toHaveLength(2)
   })
 })
+
+describe('recovery and the workholding guard (DF133 RW5)', () => {
+  it('after a power loss the guard is off until home and zero, then guards the recovery moves', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const line = () => document.querySelector('[data-workholding-trust]')
+    const chip = () => document.querySelector('[data-clearance]')
+    // the power came back: connected, Alarm, not homed (G54 is kept in the controller's EEPROM)
+    t.push({ state: 'Alarm', homed: false })
+    await waitFor(() =>
+      expect(line()).toHaveTextContent('Home the machine to check jogs against the workholding.'),
+    )
+    expect(chip()).toBeNull()
+    const into = [{ to: [c.midX + G54[0], c.midY + G54[1], 5 + G54[2]] as const, feed: 500 }]
+    // the guard is off: a move would go as today (the host refuses it unhomed anyway)
+    let sent = false
+    await act(async () => {
+      sent = await t.run().getState().moveTo(into)
+    })
+    expect(sent).toBe(true)
+    // homed with the work zero (Step 4, Step 5): the guard is on, the chip names the clamp
+    t.push({ homed: true })
+    t.at([c.midX, c.midY - 40, c.top + 20])
+    await waitFor(() =>
+      expect(line()).toHaveTextContent('Checks the clamps as placed in Plan, at the work zero.'),
+    )
+    await waitFor(() => expect(chip()).toHaveTextContent(/^Clear: [\d.]+ mm to Toe clamp 1 \(/))
+    // "Go to last position" and the panel's moves go through the store's guarded moveTo
+    await act(async () => {
+      sent = await t.run().getState().moveTo(into)
+    })
+    expect(sent).toBe(false)
+    expect(t.jogs()).toHaveLength(1)
+  })
+})

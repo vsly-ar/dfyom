@@ -3,15 +3,22 @@
 // it is on (Q184: homed, G54 set, items; the Jog menu's switch, Q186), where a jog starts (the end
 // of the jogs this window queued, else the last report while Idle and settled) and the notice a
 // guarded stop writes in the jog pads. RW4: the steps of a Go to or a touch-off move through the
-// guard (`moveGuard`). Pure.
-// Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3, #implementation-rw4
+// guard (`moveGuard`). RW5: the live clearance at the tool (`liveClearance`): the nearest item for
+// the Position panel's chip and each item's tone for the scene. Pure.
+// Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3, #implementation-rw4,
+// #implementation-rw5
 import type { UnitSystem } from '../../../../core/project/document'
 import {
   guardedMoves,
   type GuardedMoveHit,
   type GuardSetup,
 } from '../../../../core/run/guarded-jog'
-import { STOCK_TOP, type JogContact } from '../../../../core/run/jog-guard'
+import {
+  itemClearances,
+  STOCK_TOP,
+  type Clearance,
+  type JogContact,
+} from '../../../../core/run/jog-guard'
 import type { RunStatus } from '../../../../core/run/service'
 import type { Vec3 } from '../../../../core/toolpath/model'
 import { lengthSource } from '../../messages/dfm'
@@ -135,5 +142,60 @@ export function guardNoticeText(n: GuardNotice, units: UnitSystem): string {
       return g.moving
     case 'pastOnce':
       return g.pastOnceArmed
+  }
+}
+
+/**
+ * RW5: how close the envelope is to an item: `clear`, `close` (under 2 × margin, the Plan check's
+ * "close" distance: amber), `inside` (at or within the margin: red; a guarded stop leaves the
+ * margin less the guard's backoff, so "at the margin" counts).
+ */
+export type ClearanceTone = 'clear' | 'close' | 'inside'
+
+/** Within this (mm) past the margin a position is at the margin (a guarded stop: red). */
+export const AT_MARGIN_MM = 0.05
+
+export function clearanceTone(gap: number, margin: number): ClearanceTone {
+  if (gap <= margin + AT_MARGIN_MM) return 'inside'
+  return gap < 2 * margin ? 'close' : 'clear'
+}
+
+/** RW5: the clearance at the tool: the nearest item (the chip) and the items' tones (the scene). */
+export interface LiveClearance {
+  readonly nearest: Clearance & { readonly item: string; readonly tone: ClearanceTone }
+  /** Item id → tone, for the items that are not `clear`. */
+  readonly tones: Readonly<Record<string, ClearanceTone>>
+}
+
+/**
+ * The live clearance at the status' tool tip (WPos + the setup's work zero X, Y and `zeroLevel`:
+ * the setup frame), or undefined without items.
+ */
+export function liveClearance(
+  status: Pick<RunStatus, 'wpos' | 'zeroLevel'>,
+  setup: JogGuardSetup,
+): LiveClearance | undefined {
+  const tip: Vec3 = [
+    status.wpos[0] + setup.zero[0],
+    status.wpos[1] + setup.zero[1],
+    status.wpos[2] + (status.zeroLevel ?? 0),
+  ]
+  const all = itemClearances(tip, setup.setup.envelope, setup.setup.prisms)
+  if (all.length === 0) return undefined
+  const margin = setup.setup.margin
+  const tones: Record<string, ClearanceTone> = {}
+  let nearest = all[0]!
+  for (const c of all) {
+    const tone = clearanceTone(c.gap, margin)
+    if (tone !== 'clear') tones[c.itemId] = tone
+    if (c.gap < nearest.gap - 1e-12) nearest = c
+  }
+  return {
+    nearest: {
+      ...nearest,
+      item: setup.names[nearest.itemId] ?? runMessages.guard.anItem,
+      tone: clearanceTone(nearest.gap, margin),
+    },
+    tones,
   }
 }

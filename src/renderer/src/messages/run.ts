@@ -492,6 +492,18 @@ export const runMessages = {
       `Step ${n} (${step}) takes the ${part} deeper into ${item}.`,
     anyway: 'Go anyway (the clamps are not where the plan says)',
     anywayPastOnce: 'Jog past once is armed: this move is not checked.',
+    /** RW5 (Q192): the live clearance chip under the Position table. */
+    clearance: (gap: string, item: string, part: string) => `Clear: ${gap} to ${item} (${part})`,
+    clearanceInside: (gap: string, item: string, part: string) =>
+      `Within the margin: ${gap} to ${item} (${part})`,
+    /** Its polite announcement: only a change of item or colour is read. */
+    clearanceSays: {
+      clear: (item: string) => `Nearest item: ${item}.`,
+      close: (item: string) => `Close to ${item}.`,
+      inside: (item: string) => `Within the margin of ${item}.`,
+    },
+    /** RW5 (Q189, Q190): the tool-change dialog's line under its jog pad. */
+    toolChangeChecks: (tool: string) => `Jogs here are checked against the clamps with ${tool}.`,
     /** Q186: the Jog menu's switch. */
     switchLabel: 'Workholding guard',
     switchHint:

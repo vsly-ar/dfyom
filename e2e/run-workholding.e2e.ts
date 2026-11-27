@@ -8,8 +8,10 @@
 // at the margin with the notice, a further step is not sent, "Jog past once" lets one step
 // through, the Jog menu switches the guard off (df133-rw3-stopped). RW4: a Go to down onto the
 // front clamp is refused with the finding and a red target, then "Go anyway" goes
-// (df133-rw4-goto-blocked). RW6 completes the guard's e2e.
+// (df133-rw4-goto-blocked). RW5: the live clearance chip, red at the stop by the front clamp. RW6
+// completes the guard's e2e.
 // Docs: docs/modes/run-workholding.md#implementation-rw1, #implementation-rw3, #implementation-rw4,
+// #implementation-rw5,
 // docs/conventions/ui.md#workholding
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -150,6 +152,8 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw1-solid')
 
+  await expect(inspector.locator('[data-clearance]')).toHaveText(/^Clear: [\d.]+ mm to /)
+
   // RW3: in front of the front clamp, below its top; a held Y+ stops at the margin, not at the
   // stock (Y 0) and not at the travel edge
   await call(page, 'run.machine.jog', { to: [-230, -200, -65], feed: 5000 })
@@ -166,6 +170,10 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   const y = await at('Work position Y')
   expect(y).toBeGreaterThan(-40)
   expect(y).toBeLessThan(-5)
+  // RW5: the live clearance chip names the front clamp, red at the stop point (the margin)
+  const clearance = inspector.locator('[data-clearance]')
+  await expect(clearance).toHaveText(/^Within the margin: [\d.]+ mm to Toe clamp 1 \(tool\)$/)
+  await expect(clearance).toHaveAttribute('data-clearance', 'inside')
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw3-stopped')
   // further in: not moved

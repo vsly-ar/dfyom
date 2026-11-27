@@ -3,9 +3,12 @@
 // setup-change prompt between setups (SetupChangeDialog, task E2), and
 // the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
 // carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
-// Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
+// DF133 RW5: the tool-change dialog says, under its jog pad, which tool the workholding guard checks
+// its jogs with (the incoming tool, Q189) and, until Z is set, the Z note (Q190).
+// Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui,
+// docs/modes/run-workholding.md#recovery-and-the-tool-change-dialog
 import { useEffect, useId, useMemo, useRef } from 'react'
-import type { ProjectDoc } from '../../../../core/project/document'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
@@ -22,6 +25,9 @@ import { WorkZeroButtons } from './RunNavigator'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { TouchOffButton } from './TouchOffButton'
+import { guardActive } from './run-guard'
+import { guardToolLabel } from './run-workholding'
+import { useRunWorkholding } from './useRunWorkholding'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
@@ -374,6 +380,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
           ))}
         </ol>
         <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} />
+        <ToolChangeGuardLine units={units} />
         {/* DF69: back over the surface's touch-off spot after jogging away */}
         <TouchOffButton doc={doc} toolChange={tc} gate={gates.jog} reasonId={ids.jog} />
         <WorkZeroButtons
@@ -612,5 +619,24 @@ function Announcer({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element 
     <div aria-live="assertive" className={styles['srOnly']}>
       {text}
     </div>
+  )
+}
+
+/**
+ * DF133 RW5 (Q189, Q190): while the workholding guard is on, the tool-change dialog's line under
+ * its jog pad: the tool the guard checks the jogs with (the incoming one), and the Z note until
+ * Probe Z or Set Z zero.
+ */
+function ToolChangeGuardLine({ units }: { units: UnitSystem }): React.JSX.Element | null {
+  const on = useRun((s) => guardActive(s.status, s.guardSetup, s.guardOff))
+  const zUnset = useRun((s) => s.zUnset)
+  const tool = useRunWorkholding()?.tool
+  if (!on || tool === undefined) return null
+  const g = runMessages.guard
+  return (
+    <p className={styles['hint']} data-guard-tool="">
+      {g.toolChangeChecks(guardToolLabel(tool, units))}
+      {zUnset ? ` ${g.zUnset}` : ''}
+    </p>
   )
 }

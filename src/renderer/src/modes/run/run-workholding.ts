@@ -6,6 +6,7 @@
 // the setup's first). Pure.
 // Doc: docs/modes/run-workholding.md#trust-what-the-guard-knows, #scene, #implementation-rw1
 import type { Tool } from '../../../../core/library/tool'
+import type { UnitSystem } from '../../../../core/project/document'
 import { resolveHolder } from '../../../../core/library/holder'
 import { stickoutOf } from '../../../../core/plan/evaluate'
 import type { LoadedPlan } from '../../../../core/plan/plan'
@@ -21,6 +22,8 @@ import type { RunStatus } from '../../../../core/run/service'
 import type { HolderGhostOverlay, WorkholdingOverlay } from '../../viewport'
 import { bodyShown } from '../plan/holder-ghost'
 import { shiftOverlay, workholdingOverlay } from '../plan/workholding-scene'
+import { lengthSource } from '../../messages/dfm'
+import { runMessages } from '../../messages/run'
 import { isConnected } from './machine-state'
 
 /**
@@ -133,4 +136,14 @@ export function runHolderGhost(
     colliding: false,
     label: label(g),
   }
+}
+
+/** The tool the guard assumes, as its chip names it: "T1 Ø6 mm · stickout 30 mm · ER11". */
+export function guardToolLabel(g: GuardTool, units: UnitSystem): string {
+  return runMessages.guard.tool(
+    g.n,
+    lengthSource(g.tool.diameter.canonical, units),
+    lengthSource(g.stickout, units),
+    g.holder?.name ?? runMessages.guard.nut(lengthSource(g.holder?.nutDiameter ?? 0, units)),
+  )
 }

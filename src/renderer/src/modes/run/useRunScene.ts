@@ -14,7 +14,9 @@
 // toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6). DF133 RW1: the
 // setup's workholding, outlined until homed with the work zero set, hidden while G54 was never
 // set, and the holder ghost of the tool in the spindle at the tool marker
-// (docs/modes/run-workholding.md#implementation-rw1).
+// (docs/modes/run-workholding.md#implementation-rw1). RW5: the items amber while the tool and
+// holder are within 2 × margin, red at or within the margin, the holder ghost red with them; the
+// interrupted run's ghost tool red when it was inside an item (#implementation-rw5).
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
 // docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -44,8 +46,16 @@ import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
 import { skippedSegments } from './start-at'
 import { useStartPreview } from './StartAt'
-import { runHolderGhost, runWorkholdingOverlay, type GuardTool } from './run-workholding'
+import {
+  guardEnvelope,
+  guardToolLabel,
+  runHolderGhost,
+  runWorkholdingOverlay,
+} from './run-workholding'
+import { useLiveClearance } from './useLiveClearance'
 import { useRunWorkholding } from './useRunWorkholding'
+import { itemClearances } from '../../../../core/run/jog-guard'
+import { GAP_TOLERANCE } from '../../../../core/plan/workholding/check'
 
 export function useRunScene(mode: AppMode): RunScene | null {
   const { bridge, replica: events } = useShell()
@@ -246,7 +256,7 @@ export function useRunScene(mode: AppMode): RunScene | null {
     }
     // the offset by value (a new status each report)
   }, [preview, wco?.[0], wco?.[1], wco?.[2], level])
-  const workholding = useSceneWorkholding(tool, units)
+  const workholding = useSceneWorkholding(tool, units, ghost)
   return useMemo(
     () =>
       active
@@ -261,6 +271,7 @@ export function useRunScene(mode: AppMode): RunScene | null {
             ...(zRef === undefined ? {} : { zRef }),
             ...(goTo === undefined ? {} : { goTo }),
             ...(ghost === undefined ? {} : { ghost }),
+            ...(workholding.ghostInside ? { ghostColliding: true } : {}),
           }
         : null,
     [active, lines, done, tool, frame, envelope, zRef, goTo, ghost, workholding],
@@ -275,35 +286,57 @@ export function useRunScene(mode: AppMode): RunScene | null {
 function useSceneWorkholding(
   tool: readonly [number, number, number] | null,
   units: UnitSystem,
+  ghost: readonly [number, number, number] | undefined,
 ): {
   overlay: RunScene['workholding']
   holder: RunScene['holder']
+  ghostInside: boolean
 } {
   const wh = useRunWorkholding()
   const status = useRun((s) => s.status)
-  const overlay = useMemo(
+  // RW5: the items' tones while the guard is on (by value: a report that changes no tone keeps
+  // the overlay, so the meshes only change colour when a tone does)
+  const live = useLiveClearance()
+  const tones = live?.on === true ? live.clearance.tones : undefined
+  const tonesKey = tones === undefined ? '' : JSON.stringify(tones)
+  const base = useMemo(
     () =>
       wh === undefined
         ? undefined
         : runWorkholdingOverlay(wh.holding, wh.setup.id, wh.zero, wh.trust),
     [wh],
   )
+  const overlay = useMemo(() => {
+    if (base === undefined || tonesKey === '') return base
+    const t = JSON.parse(tonesKey) as Record<string, string>
+    return {
+      ...base,
+      solids: base.solids.map((s) =>
+        t[s.itemId] === 'inside'
+          ? { ...s, colliding: true }
+          : t[s.itemId] === 'close'
+            ? { ...s, close: true }
+            : s,
+      ),
+    }
+  }, [base, tonesKey])
+  const holderRed = live?.on === true && live.clearance.nearest.tone === 'inside'
   // the tool the guard assumes (Q189: the store's `spindleTool`, RW3)
   const spindle = wh?.tool
   const known = isConnected(status) && status.homed
-  const holder = useMemo(
-    () =>
-      runHolderGhost(spindle, known ? tool : null, (g: GuardTool) =>
-        runMessages.guard.tool(
-          g.n,
-          lengthSource(g.tool.diameter.canonical, units),
-          lengthSource(g.stickout, units),
-          g.holder?.name ?? runMessages.guard.nut(lengthSource(g.holder?.nutDiameter ?? 0, units)),
-        ),
-      ),
-    [spindle, known, tool, units],
-  )
-  return useMemo(() => ({ overlay, holder }), [overlay, holder])
+  const holder = useMemo(() => {
+    const h = runHolderGhost(spindle, known ? tool : null, (g) => guardToolLabel(g, units))
+    return h === undefined || !holderRed ? h : { ...h, colliding: true }
+  }, [spindle, known, tool, units, holderRed])
+  // RC6 + RW5: the interrupted run's last seen tip inside an item (touching or in): red ghost
+  const ghostInside = useMemo(() => {
+    if (ghost === undefined || wh === undefined || spindle === undefined) return false
+    const at: [number, number, number] = [ghost[0] + wh.zero[0], ghost[1] + wh.zero[1], ghost[2]]
+    return itemClearances(at, guardEnvelope(spindle), wh.holding.prisms).some(
+      (c) => c.gap <= GAP_TOLERANCE,
+    )
+  }, [ghost, wh, spindle])
+  return useMemo(() => ({ overlay, holder, ghostInside }), [overlay, holder, ghostInside])
 }
 
 const noDrag = (): void => {}
