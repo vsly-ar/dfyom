@@ -10,6 +10,7 @@
 // df69-z-inspector-*.png, df69-z-spot-*.png mid-drag). DF69 with M4: in Run, the tool change
 // onto the faced floor names it and its spot, shows them in the viewport, moves back over the spot
 // after a jog away, and Probe Z lays the virtual plate on the floor (G54 Z 0.5 mm lower).
+// DF130: each run shows its minimum stickout ("Needs ≥ 6 mm stickout"; renders df130-stickout-*.png).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
@@ -160,9 +161,13 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
   await expect(runs.nth(1)).toContainText('Flat 3')
   await expect(title).toContainText('1 tool change')
   await expect(runs.nth(0)).toContainText(/\d+ (min|s)/)
+  // DF130: each run's minimum stickout: the 1 mm pockets + 5 mm for the collet nut
+  await expect(runs.nth(0)).toContainText('Needs ≥ 6 mm stickout')
+  await expect(runs.nth(1)).toContainText('Needs ≥ 6 mm stickout')
   // the inspector is taller than the window since DF64/DF78: the section in view for the renders
   await list.scrollIntoViewIfNeeded()
   await render(page, 'df66-tool-changes')
+  await render(page, 'df130-stickout')
 
   // Alt+↓: the Flat 6 run after Flat 3; now both tools are changes
   await runs.nth(0).focus()
