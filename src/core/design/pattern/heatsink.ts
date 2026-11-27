@@ -5,10 +5,11 @@
  * fields, so it is always true. Fin terms and pattern fields: the pattern's Gap is the web between
  * cells, i.e. the **fin**, and the cell's width is the **slot**.
  * H2: the pin-fin steps (square, round and staggered pins: inverted cells, margin 0), the pin
- * read-out and the channel suggestion.
+ * read-out and the channel suggestion. H3: the Radial fins step (slots on a `radial` lattice, the
+ * count from the fin at the hub) and its read-out.
  * Doc: docs/modes/pattern-presets.md#mapping-onto-the-pattern-model,
  * docs/modes/pattern-presets.md#what-a-preset-stores, docs/modes/pattern-presets.md#implementation-h1,
- * docs/modes/pattern-presets.md#implementation-h2
+ * docs/modes/pattern-presets.md#implementation-h2, docs/modes/pattern-presets.md#implementation-h3
  *
  * Numbers are mm; args are metric sources (the core parses units). Headless.
  */
@@ -156,6 +157,8 @@ export interface FinsFields {
   readonly margin: readonly [number, number]
   /** Material under the face; undefined: no base in the read-out. */
   readonly thickness?: number | undefined
+  /** H3: a radial lattice's count and radius. */
+  readonly radial?: { readonly count: number; readonly radius: number } | undefined
 }
 
 /** The heatsink read-out (derived): "11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm". */
@@ -420,5 +423,172 @@ export function pinsReadout(f: FinsFields): PinsReadout | undefined {
     height: f.depth,
     ratio: ratioOf(f.depth, pin),
     ...(f.thickness === undefined ? {} : { base: Math.round((f.thickness - f.depth) * 1e6) / 1e6 }),
+  }
+}
+
+// ── H3: radial fins (pattern-presets.md § Mapping, § Implementation (H3)) ───────────────────
+
+/** What the Radial fins step asks for, plus where the round part is (mm, face frame). */
+export interface RadialFinsStep {
+  /** The least fin at the hub: fin(r) = 2πr / count − slot at the hub radius. */
+  readonly fin: number
+  /** Slot width: the cell's width. */
+  readonly slot: number
+  /** Fin height: the pattern's depth. */
+  readonly height: number
+  /** Hub Ø: the slots start on it (their round inner ends touch it). */
+  readonly hub: number
+  /** The round part's Ø: the slots run one slot width past its rim. */
+  readonly outer: number
+  /** The round part's centre (face frame): the lattice's origin. */
+  readonly centre: readonly [number, number]
+  /** A count chosen in the step (absent: the most that keep the fin at the hub). */
+  readonly count?: number | undefined
+  readonly thickness?: number | undefined
+}
+
+/** The layout a Radial fins step gives. */
+export interface RadialFinsLayout {
+  readonly count: number
+  /** The most slots that keep the step's fin at the hub (the step's computed count; 0: none). */
+  readonly most: number
+  /** fin(r) at the hub and at the rim. */
+  readonly hubFin: number
+  readonly rimFin: number
+  /** The narrowest web between two neighbouring slots (where their round ends are). */
+  readonly web: number
+  /** The slots' middle: the lattice's radius; and the cell's length (hub to rim + slot). */
+  readonly radius: number
+  readonly length: number
+  /** Fin height over the fin at the hub. */
+  readonly ratio: number
+  readonly base?: number | undefined
+}
+
+/**
+ * § DFM Radial fins: the fin at radius `r` between `count` slots of width `slot`,
+ * fin(r) = 2πr / count − slot (the arc between the slots' sides). Thinnest at the hub.
+ */
+export function radialFin(r: number, slot: number, count: number): number {
+  return (2 * Math.PI * r) / count - slot
+}
+
+/**
+ * The narrowest web between two neighbouring round-ended slots whose inner ends touch the circle
+ * of radius `hub`: their end arcs' centres are a chord apart on the circle of hub + slot / 2, so
+ * 2 (hub + slot / 2) sin(π / count) − slot (what `dfm.patternThinWeb` measures; ≥ fin(hub)).
+ */
+export function radialWeb(hub: number, slot: number, count: number): number {
+  return 2 * (hub + slot / 2) * Math.sin(Math.PI / count) - slot
+}
+
+const mm6 = (x: number) => Math.round(x * 1e6) / 1e6
+const mm2 = (x: number) => Math.round(x * 100) / 100
+
+/**
+ * The most slots that keep `fin` at the hub, ⌊2π r / (slot + fin)⌋ (2π · 12 / 3.5 ≈ 21.5 → 21
+ * for the worked example), or the step's own count; the cell runs from the hub to one slot width
+ * past the rim. Undefined when a size is not positive, the hub is not inside the part, or the
+ * slots would touch.
+ */
+export function radialFins(s: RadialFinsStep): RadialFinsLayout | undefined {
+  if (!(s.fin > 0 && s.slot > 0 && s.height > 0 && s.hub > 0 && s.outer > s.hub)) return undefined
+  const ri = s.hub / 2
+  const most = Math.floor((2 * Math.PI * ri) / (s.slot + s.fin) + 1e-9)
+  const count = s.count ?? most
+  if (!(Number.isInteger(count) && count >= 2) || !(radialWeb(ri, s.slot, count) > 0))
+    return undefined
+  const ro = s.outer / 2 + s.slot
+  const hubFin = radialFin(ri, s.slot, count)
+  return {
+    count,
+    most: most >= 2 ? most : 0,
+    hubFin: mm2(hubFin),
+    rimFin: mm2(radialFin(s.outer / 2, s.slot, count)),
+    web: mm2(radialWeb(ri, s.slot, count)),
+    radius: mm6((ri + ro) / 2),
+    length: mm6(ro - ri),
+    ratio: hubFin > EPS ? ratioOf(s.height, hubFin) : Infinity,
+    ...(s.thickness === undefined ? {} : { base: mm6(s.thickness - s.height) }),
+  }
+}
+
+/**
+ * The `design.pattern.update` args of the Radial fins preset (one update, one undo step): a
+ * round-ended slot cell (a Round rectangle hub-to-rim-plus-a-slot × slot, as the tool leaves a
+ * closed slot's end; turned 90° so it faces out) on a `radial` lattice of `count` about the
+ * part's centre, the first slot at 90° (along +v), margin 0 on the face and `clip` (a slot
+ * crossing a stock edge is cut there), depth = fin height. The slots run past the rim, so the
+ * part's outline profile opens them.
+ */
+export function radialFinsArgs(
+  s: RadialFinsStep,
+  layout: RadialFinsLayout,
+): Record<string, unknown> {
+  return {
+    cell: {
+      kind: 'rectangle',
+      length: mmSource(layout.length),
+      width: mmSource(s.slot),
+      round: true,
+      rotation: '90°',
+    },
+    lattice: 'radial',
+    count: String(layout.count),
+    radius: mmSource(layout.radius),
+    alternate: 'none',
+    angle: '90°',
+    origin: s.centre.map(mmSource),
+    boundary: null,
+    margin: '0 mm',
+    fit: 'clip',
+    invert: false,
+    through: false,
+    depth: mmSource(s.height),
+  }
+}
+
+/** The radial read-out (derived): "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm". */
+export interface RadialReadout {
+  readonly slots: number
+  readonly slot: number
+  /** fin(r) at the hub and at the rim. */
+  readonly hubFin: number
+  readonly rimFin: number
+  readonly height: number
+  readonly ratio: number
+  /** Hub and part Ø (the rim one slot width inside the cell's outer end). */
+  readonly hub: number
+  readonly outer: number
+  readonly base?: number | undefined
+}
+
+/**
+ * A pattern that is radial fins (a rectangle, sharp or Round, at least twice as long as wide,
+ * turned 90° so its length faces out, on a `radial` lattice, not inverted or through, no flip)
+ * reads as radial fins; else undefined (the cell read-out). The hub is the cells' inner end.
+ */
+export function radialReadout(f: FinsFields): RadialReadout | undefined {
+  const c = f.cell
+  const r = f.radial
+  if (c.kind !== 'rectangle' || f.lattice !== 'radial' || r === undefined) return undefined
+  if (c.cornerRadius > EPS && Math.abs(c.cornerRadius - c.width / 2) > 1e-6) return undefined
+  if (f.invert || f.through || f.alternate !== 'none' || f.cells < 1) return undefined
+  // the radial turn faces the cell's +v out: a length along u needs the 90° turn
+  if (quarter(c.rotation) !== 90 || c.length < 2 * c.width) return undefined
+  const ri = r.radius - c.length / 2
+  const hubFin = radialFin(ri, c.width, r.count)
+  if (!(ri > 0) || !(hubFin > 0)) return undefined
+  const outer = 2 * (r.radius + c.length / 2 - c.width)
+  return {
+    slots: f.cells,
+    slot: c.width,
+    hubFin: mm2(hubFin),
+    rimFin: mm2(radialFin(outer / 2, c.width, r.count)),
+    height: f.depth,
+    ratio: ratioOf(f.depth, hubFin),
+    hub: mm6(2 * ri),
+    outer: mm6(outer),
+    ...(f.thickness === undefined ? {} : { base: mm6(f.thickness - f.depth) }),
   }
 }

@@ -7,7 +7,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
-import { PatternPresetsDialog, PRESET_COLUMNS, type CurrentHeatsink } from './PatternPresetsDialog'
+import {
+  PatternPresetsDialog,
+  PRESET_COLUMNS,
+  type CurrentHeatsink,
+  type HeatsinkFace,
+} from './PatternPresetsDialog'
 
 const mm = (n: number, kind = 'length') => ({
   kind,
@@ -115,7 +120,7 @@ describe('PatternPresetsDialog (DF107)', () => {
     expect(onApply).toHaveBeenCalledWith(PATTERN_PRESETS.find((x) => x.id === 'speakerGrille'))
   })
 
-  describe('Heatsink group (pattern-presets.md H1, H2)', () => {
+  describe('Heatsink group (pattern-presets.md H1, H2, H3)', () => {
     const tools = [
       { id: 'flat1', name: 'Flat 1', diameter: 1, fluteLength: 4 },
       { id: 'flat2', name: 'Flat 2 x 12', diameter: 2, fluteLength: 12 },
@@ -123,7 +128,9 @@ describe('PatternPresetsDialog (DF107)', () => {
     ]
     /** Not a preset (gap 7): the dialog opens on the last group used. */
     const custom = { ...honeycomb, spacing: { gap: mm(7) } } as unknown as FeatureDTO
-    const setup = (over: { current?: CurrentHeatsink; lastGroup?: 'heatsink' } = {}) => {
+    const setup = (
+      over: { current?: CurrentHeatsink; lastGroup?: 'heatsink'; face?: HeatsinkFace } = {},
+    ) => {
       const apply = vi.fn()
       const onGroup = vi.fn()
       const r = renderUi(
@@ -131,7 +138,7 @@ describe('PatternPresetsDialog (DF107)', () => {
           feature={over.lastGroup === undefined ? honeycomb : custom}
           onApply={() => {}}
           heatsink={{
-            face: { across: 40, along: 40, thickness: 14 },
+            face: over.face ?? { across: 40, along: 40, thickness: 14 },
             units: 'mm',
             current: over.current,
             tools,
@@ -216,6 +223,7 @@ describe('PatternPresetsDialog (DF107)', () => {
         'Square pin fins',
         'Round pin fins',
         'Staggered pin fins',
+        'Radial fins',
       ])
       const square = screen.getByRole('radio', { name: 'Square pin fins' })
       expect(square).toHaveTextContent('pins 3 mm · channels 2.5 mm · 8 mm high')
@@ -284,6 +292,79 @@ describe('PatternPresetsDialog (DF107)', () => {
       expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
         '36 pins 4 mm · 6 mm high (1:1.5) · base 8 mm · channels 3 mm · border 0.5 mm',
       )
+    })
+
+    /** The worked example's plate: 80 × 80 × 12 with the Ø 60 part's circle at its centre. */
+    const plate: HeatsinkFace = {
+      across: 80,
+      along: 80,
+      thickness: 12,
+      round: { centre: [40, 40], diameter: 60, name: 'Circle 1' },
+    }
+
+    it('H3: the radial card opens its step with the worked example: 21 slots from the count', async () => {
+      const { user } = setup({ lastGroup: 'heatsink', face: plate })
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      const card = screen.getByRole('radio', { name: 'Radial fins' })
+      expect(card).toHaveTextContent('21 slots · hub Ø 24 mm · 8 mm high')
+      expect(card.querySelectorAll('svg[class*=presetPreview] circle')).toHaveLength(2)
+      await user.click(card)
+      const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+      expect(dialog.querySelector('[data-heatsink-step="radialFins"]')).not.toBeNull()
+      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
+        '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
+      )
+      expect(within(dialog).getByRole('combobox', { name: 'Part diameter' })).toHaveValue('60 mm')
+      expect(dialog).toHaveTextContent('Centred on Circle 1 (40 mm, 40 mm)')
+      expect(dialog).toHaveTextContent('21 keep the fin at the hub.')
+      expect(dialog).toHaveTextContent('Slot = tool: one pass per level.')
+      await expectNoAxeViolations(dialog)
+    })
+
+    it('H3: a count above the most warns with a fix; Apply sends the radial lattice and tool', async () => {
+      const { user, apply } = setup({ lastGroup: 'heatsink', face: plate })
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      await user.click(screen.getByRole('radio', { name: 'Radial fins' }))
+      const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+      const count = within(dialog).getByRole('combobox', { name: 'Count' })
+      await user.type(count, '24{Enter}')
+      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(/^24 slots 2 mm/)
+      await user.click(within(dialog).getByRole('button', { name: 'Use 21' }))
+      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(/^21 slots/)
+      await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+      expect(apply).toHaveBeenCalledTimes(1)
+      const [args, tool] = apply.mock.calls[0]!
+      expect(tool).toBe('flat2')
+      expect(args).toMatchObject({
+        cell: { kind: 'rectangle', length: '20 mm', width: '2 mm', round: true, rotation: '90°' },
+        lattice: 'radial',
+        count: '21',
+        radius: '22 mm',
+        angle: '90°',
+        origin: ['40 mm', '40 mm'],
+        boundary: null,
+        fit: 'clip',
+        depth: '8 mm',
+      })
+    })
+
+    it('H3: opens on the current radial card with the pattern sizes; no circle: the face', async () => {
+      const { user } = setup({
+        face: { across: 70, along: 50, thickness: 12 },
+        current: {
+          id: 'radialFins',
+          values: { fin: 1.59, slot: 2, height: 6, hub: 24, outer: 46, count: 18 },
+        },
+      })
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      const card = screen.getByRole('radio', { name: 'Radial fins' })
+      expect(card).toHaveAttribute('aria-checked', 'true')
+      await user.click(card)
+      const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
+        /^18 slots 2 mm · fins 2.19 mm at the hub · 6 mm high/,
+      )
+      expect(dialog).toHaveTextContent('Centred on the face (35 mm, 25 mm)')
     })
   })
 })

@@ -5,8 +5,12 @@
 // as a heatsink: "11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm". With
 // DFYOM_H1_DIR (or DFYOM_HEATSINK_DIR) set it captures light and dark renders of the step and the
 // part (review captures). H2: square pin fins the same way (3 × 3 pins, channel 2.5, 8 high:
-// "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"). Windows stay hidden (app.fixture.ts).
+// "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"). H3: radial fins on a Ø 60 round part (an
+// 80 × 80 × 12 plate with its Ø 60 outline profile): the step centres on the profile and counts
+// 21 slots, "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at
+// the rim". Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/pattern-presets.md#implementation-h1, docs/modes/pattern-presets.md#implementation-h2,
+// docs/modes/pattern-presets.md#implementation-h3,
 // docs/conventions/ui.md
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -182,7 +186,7 @@ test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom
   await inspector.getByRole('button', { name: 'Presets…' }).click()
   const presets = page.getByRole('dialog', { name: 'Pattern presets' })
   await presets.getByRole('radio', { name: 'Heatsink' }).click()
-  await expect(presets.locator('[data-preset]')).toHaveCount(4)
+  await expect(presets.locator('[data-preset]')).toHaveCount(5)
   await shoot(page, 'h2-cards')
   await presets.getByRole('radio', { name: 'Square pin fins' }).click()
   const step = presets.locator('[data-heatsink-step="squarePins"]')
@@ -204,6 +208,102 @@ test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom
   // reopening lands on the current card
   await inspector.getByRole('button', { name: 'Presets…' }).click()
   await expect(presets.getByRole('radio', { name: 'Square pin fins' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await page.keyboard.press('Escape')
+  await expect(presets).toBeHidden()
+  // one undo step takes back the fields and the tool
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(readout).toHaveText(/^\d+ cells/)
+})
+
+test('heatsink: radial fins on a round part through the Presets dialog (H3)', async ({ dfyom }) => {
+  test.setTimeout(150_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (SHOTS !== undefined) await page.setViewportSize({ width: 1440, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const call = (name: string, args: object) =>
+    page.evaluate(([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a), [
+      name,
+      args,
+    ] as const)
+  const added = await call('library.tool.add', {
+    values: {
+      name: 'Flat 2 x 12',
+      type: 'flatEndMill',
+      diameter: '2',
+      fluteLength: '12',
+      overallLength: '50',
+      fluteCount: '2',
+      toolMaterial: 'carbide',
+      presets: [],
+    },
+  })
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+
+  // ── an 80 × 80 × 12 plate, the Ø 60 part's outline profile, a pattern on the top ────────────
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Radial heatsink')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '80')
+  await setField(setup, 'Width (Y)', '80')
+  await setField(setup, 'Thickness (Z)', '12')
+  await stock.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
+  const parts = await call('design.part.list', {})
+  const partId = parts.ok ? (parts.value as { parts: { id: string }[] }).parts[0]!.id : ''
+  const profile = await call('design.profile.add', {
+    partId,
+    name: 'Outline',
+    shape: { kind: 'circle', center: ['40', '40'], diameter: '60' },
+    tabs: { count: '4', width: '6', thickness: '2' },
+  })
+  expect(profile.ok, JSON.stringify(profile)).toBe(true)
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Features' })
+    .getByRole('menuitem', { name: 'Pattern', exact: true })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Pattern 1' })).toBeVisible()
+  const readout = inspector.locator('[data-pattern-readout]')
+  await expect(readout).toHaveText(/^\d+ cells/)
+
+  // ── Presets… → Heatsink → Radial fins: centred on the profile, 21 slots ───────────────────
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  const presets = page.getByRole('dialog', { name: 'Pattern presets' })
+  await presets.getByRole('radio', { name: 'Heatsink' }).click()
+  await expect(presets.locator('[data-preset]')).toHaveCount(5)
+  await shoot(page, 'h3-cards')
+  await presets.getByRole('radio', { name: 'Radial fins' }).click()
+  const step = presets.locator('[data-heatsink-step="radialFins"]')
+  await expect(step).toBeVisible()
+  await expect(presets.locator('[data-heatsink-readout]')).toHaveText(
+    '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
+  )
+  await expect(step).toContainText('Centred on Outline (40 mm, 40 mm)')
+  await expect(step).toContainText('21 keep the fin at the hub.')
+  await expect(presets.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 2 x 12/)
+  await shoot(page, 'h3-step')
+  await presets.getByRole('button', { name: 'Apply' }).click()
+  await expect(presets).toBeHidden()
+
+  // ── the pattern reads as radial fins; the pocket's tool is the Ø 2 ─────────────────────────
+  await expect(readout).toHaveText(
+    '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
+  )
+  await expect(inspector.locator('[data-feature-field="count"] input')).toHaveValue('21')
+  await expect(inspector.getByText('Flat 2 x 12').first()).toBeVisible()
+  await shoot(page, 'h3-part')
+  // reopening lands on the current card
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  await expect(presets.getByRole('radio', { name: 'Radial fins' })).toHaveAttribute(
     'aria-checked',
     'true',
   )

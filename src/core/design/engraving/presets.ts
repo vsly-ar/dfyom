@@ -11,7 +11,7 @@
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import { elementLength, type Element } from '../../geometry/2d/model'
 import { importSvg, type SvgImportWarning } from '../../import/svg/import'
-import type { PatternLattice } from '../shape.dto'
+import type { EngravingLattice } from '../shape.dto'
 import { PRESET_SVGS } from './preset-svgs'
 
 /** `tile`: made to repeat on a lattice (E4); `single`: one motif; `round`: one round motif. */
@@ -24,7 +24,7 @@ export interface EngravingPreset {
   readonly size: readonly [number, number]
   readonly svg: string
   /** A tile's default lattice (E4; gap 0, the tiles join at their frames' edges). */
-  readonly lattice?: PatternLattice
+  readonly lattice?: EngravingLattice
 }
 
 const svg = (id: string): string => PRESET_SVGS[id] ?? ''

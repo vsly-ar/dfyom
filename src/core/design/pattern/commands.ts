@@ -62,8 +62,10 @@ const params = {
   lattice: z
     .enum(PATTERN_LATTICES)
     .describe(
-      'staggered: odd rows shifted half a pitch; hex: rows 60° apart; polar: rings. Default staggered',
+      'staggered: odd rows shifted half a pitch; hex: rows 60° apart; polar: rings; radial: count cells on one circle, facing out. Default staggered',
     ),
+  count: Src.describe('radial'),
+  radius: Src.describe('radial'),
   spacing: z
     .union([z.object({ gap: Src }), z.object({ pitch: PointArg })])
     .describe(
@@ -110,7 +112,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
   required: [],
   // the heatsink recipe (pattern-presets.md § Agent API, Q210: no preset argument)
   addSummary:
-    'Add a pattern feature at the end of the part; it creates its operations. Heatsink fins: cell rectangle (length = face, width = slot, rotation 90°), square lattice, gap = fin, margin [wall, 0]; pins: cell = pin (square or circle), square or staggered lattice, gap = channel, margin 0, invert.',
+    'Add a pattern feature at the end of the part; it creates its operations. Heatsink fins: cell rectangle (length = face, width = slot, rotation 90°), square lattice, gap = fin, margin [wall, 0]; pins: cell = pin (square or circle), square or staggered lattice, gap = channel, margin 0, invert; radial fins: slot cell on radial, radius = mid-slot.',
   // listed as sketches: the full args are add's (tools/list budget, P2)
   updateParams: {
     cell: listedAs('object', 'design.pattern.add cell'),
@@ -226,6 +228,14 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
         side: c.side ?? old?.side ?? 'top',
       })
     }
+    const radialOf = (): { count?: Quantity; radius?: Quantity } => {
+      const count = a.count !== undefined ? f.q('count', 'scalar', a.count) : prev?.count
+      const radius = a.radius !== undefined ? f.q('radius', 'length', a.radius) : prev?.radius
+      return {
+        ...(count === undefined ? {} : { count }),
+        ...(radius === undefined ? {} : { radius }),
+      }
+    }
     // H1: `[u, v]` (docs/modes/pattern-presets.md#model-changes); a value not given keeps the old
     const margin = (): PatternMargin => {
       const m = a.margin
@@ -247,6 +257,8 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
           : (prev?.angle ?? f.q('angle', 'angle', '0')),
       origin,
       spacing: spacing(),
+      // H3: kept across lattices (docs/modes/pattern-presets.md#model-changes)
+      ...radialOf(),
       alternate: a.alternate ?? prev?.alternate ?? 'none',
       boundary: boundary(),
       margin: margin(),

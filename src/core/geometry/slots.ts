@@ -6,8 +6,11 @@
  * **open**: the centre line runs past the edge as an open pocket's tool centre does (DF61's
  * `openReach`), so the slot opens fully, and the tool steps down there with no ramp; a closed end
  * stops a radius short of it and is entered by a ramp along the centre line. No finishing ring
- * (the walls are as the tool leaves them). Generic: any pocket, not only patterns.
- * Doc: docs/modes/pattern-presets.md#plan, docs/modes/pattern-presets.md#implementation-h1
+ * (the walls are as the tool leaves them). Generic: any pocket, not only patterns. H3: a slot with
+ * round ends (two parallel lines joined by arcs of half its width: an obround, a Round rectangle)
+ * is one too; its ends are where the tool's own round ends are.
+ * Doc: docs/modes/pattern-presets.md#plan, docs/modes/pattern-presets.md#implementation-h1,
+ * docs/modes/pattern-presets.md#implementation-h3
  *
  * The DFM rest-material check (shape-measure.ts) takes the same slots out first: the centre line
  * leaves nothing in them.
@@ -58,6 +61,76 @@ function rectangleCorners(piece: RegionPiece): Vec2[] | undefined {
   return c
 }
 
+/** A slot's two ends: each the end's two corners and its far point on the centre line. */
+interface SlotEnds {
+  readonly e1: readonly [Vec2, Vec2]
+  readonly e2: readonly [Vec2, Vec2]
+  readonly m1: Vec2
+  readonly m2: Vec2
+  readonly width: number
+}
+
+/** A sharp rectangle's ends: its short sides. */
+function rectangleEnds(piece: RegionPiece): SlotEnds | undefined {
+  const c = rectangleCorners(piece)
+  if (c === undefined) return undefined
+  const s0 = len(sub(c[1]!, c[0]!))
+  const s1 = len(sub(c[2]!, c[1]!))
+  const [e1, e2, width] =
+    s0 <= s1
+      ? [[c[0]!, c[1]!] as const, [c[2]!, c[3]!] as const, s0]
+      : [[c[1]!, c[2]!] as const, [c[3]!, c[0]!] as const, s1]
+  return { e1, e2, m1: mid(e1[0], e1[1]), m2: mid(e2[0], e2[1]), width }
+}
+
+/**
+ * H3: a round-ended slot's ends: exactly two lines, antiparallel, the elements between them arcs
+ * about one centre each side of radius half the lines' distance (within `SLOT_FIT_TOLERANCE`).
+ * The corners are where the arcs start; the far point is the arc centre plus that radius.
+ */
+function roundEnds(piece: RegionPiece): SlotEnds | undefined {
+  if (piece.holes.length > 0) return undefined
+  const els = piece.outer.elements
+  const lines = els.flatMap((e, i) => (e.kind === 'line' ? [i] : []))
+  if (lines.length !== 2 || lines.length === els.length) return undefined
+  const [i, j] = lines as [number, number]
+  const l1 = els[i]!
+  const l2 = els[j]!
+  const u = sub(l1.b, l1.a)
+  const v = sub(l2.b, l2.a)
+  const lu = len(u)
+  const lv = len(v)
+  if (lu <= 0 || lv <= 0) return undefined
+  // antiparallel (the loop runs up one side and down the other)
+  if ((u[0] * v[0] + u[1] * v[1]) / (lu * lv) > -1 + SQUARE) return undefined
+  if (Math.abs(u[0] * v[1] - u[1] * v[0]) / (lu * lv) > SQUARE) return undefined
+  const d: Vec2 = [u[0] / lu, u[1] / lu]
+  const width = Math.abs(-d[1] * (l2.a[0] - l1.a[0]) + d[0] * (l2.a[1] - l1.a[1]))
+  /** The arcs from element `from` + 1 up to `to` − 1 (cyclic): one centre, radius width / 2. */
+  const end = (from: number, to: number): Vec2 | undefined => {
+    let centre: Vec2 | undefined
+    for (let k = (from + 1) % els.length; k !== to; k = (k + 1) % els.length) {
+      const e = els[k]!
+      if (e.kind !== 'arc') return undefined
+      if (centre !== undefined && len(sub(e.centre, centre)) > SLOT_FIT_TOLERANCE) return undefined
+      if (Math.abs(len(sub(e.a, e.centre)) - width / 2) > SLOT_FIT_TOLERANCE) return undefined
+      centre ??= e.centre
+    }
+    return centre
+  }
+  const c2 = end(i, j)
+  const c1 = end(j, i)
+  if (c1 === undefined || c2 === undefined) return undefined
+  const r = width / 2
+  return {
+    e1: [l2.b, l1.a],
+    e2: [l1.b, l2.a],
+    m1: [c1[0] - d[0] * r, c1[1] - d[1] * r],
+    m2: [c2[0] + d[0] * r, c2[1] + d[1] * r],
+    width,
+  }
+}
+
 /** Whether a point lies on the edge of the face rectangle (within `ON_EDGE`) or beyond it. */
 const onOrBeyond = (p: Vec2, face: Pick<StockGeometry, 'length' | 'width'>) =>
   p[0] <= ON_EDGE ||
@@ -93,18 +166,12 @@ function slotOf(
   allowance: number,
   face: Pick<StockGeometry, 'length' | 'width'> | undefined,
 ): SlotPass | undefined {
-  const c = rectangleCorners(piece)
-  if (c === undefined) return undefined
-  // the short sides are the slot's ends
-  const s0 = len(sub(c[1]!, c[0]!))
-  const s1 = len(sub(c[2]!, c[1]!))
-  const [e1, e2, width, length] =
-    s0 <= s1
-      ? [[c[0]!, c[1]!] as const, [c[2]!, c[3]!] as const, s0, s1]
-      : [[c[1]!, c[2]!] as const, [c[3]!, c[0]!] as const, s1, s0]
+  // the short sides (round ends: the arcs) are the slot's ends
+  const ends = rectangleEnds(piece) ?? roundEnds(piece)
+  if (ends === undefined) return undefined
+  const { e1, e2, m1, m2, width } = ends
+  const length = len(sub(m2, m1))
   if (Math.abs(width - 2 * R) > 2 * SLOT_FIT_TOLERANCE + 1e-9 || length <= width) return undefined
-  const m1 = mid(e1[0], e1[1])
-  const m2 = mid(e2[0], e2[1])
   const d: Vec2 = [(m2[0] - m1[0]) / length, (m2[1] - m1[1]) / length]
   const open = (e: readonly [Vec2, Vec2]) =>
     face !== undefined && onOrBeyond(e[0], face) && onOrBeyond(e[1], face)

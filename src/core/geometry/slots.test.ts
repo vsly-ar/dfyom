@@ -2,10 +2,10 @@
 // a straight slot as wide as the tool, open at both ends and closed, cut once per level along its
 // centre line, alternating, nothing outside the slot's tool-centre line, no finishing ring, cut
 // length = slot length × levels (+ the entries); 0.02 mm wider still uses the rule, 0.03 mm keeps
-// the rings.
+// the rings. H3 (docs/modes/pattern-presets.md#implementation-h3): a slot with round ends.
 import { describe, expect, it } from 'vitest'
 import type { Loop, Region } from './2d/model'
-import { rect } from './2d/testing/fixtures'
+import { bulgeLoop, rect } from './2d/testing/fixtures'
 import { nodeRegion2d } from './2d/testing/node-wasm'
 import type { PocketStrategy, Toolpath } from '../toolpath/model'
 import { TOOL_FIT_TOLERANCE } from '../toolpath/pocket'
@@ -88,6 +88,35 @@ describe('slot rule', () => {
     // a rounded slot, a square and a wide pocket keep the rings
     const other = norm([rect(2, 2, 2, 20, 0.5), rect(10, 2, 2, 2), rect(20, 2, 10, 20)])
     expect(slotSplit(other, 2, 0.2, FACE).slots).toEqual([])
+  })
+
+  it('H3: a round-ended slot as wide as the tool: its centre line ends at the arc centres', () => {
+    // x 19–21, y 5–35 with semicircular ends (the tool's own closed-slot ends)
+    const stadium = (w: number) =>
+      norm([
+        bulgeLoop([
+          [20 + w / 2, 5 + w / 2, 0],
+          [20 + w / 2, 35 - w / 2, 1],
+          [20 - w / 2, 35 - w / 2, 0],
+          [20 - w / 2, 5 + w / 2, 1],
+        ]),
+      ])
+    const split = slotSplit(stadium(2), 2, 0.2, FACE)
+    expect(split.region.pieces).toEqual([])
+    const s = split.slots[0]!
+    expect(s.openA || s.openB).toBe(false)
+    expect([s.a[1], s.b[1]].sort((x, y) => x - y)).toEqual([6, 34])
+    expect(s.a[0]).toBeCloseTo(20, 9)
+    expect(slotSplit(stadium(2.02), 2, 0.2, FACE).slots).toHaveLength(1)
+    expect(slotSplit(stadium(2.04), 2, 0.2, FACE).slots).toEqual([])
+    // its ramped cut stays on the centre line between the arc centres
+    const { tp } = generate(stadium(2), 1, 0.25)
+    expect(tp.passes.map((p) => p.kind)).not.toContain('finish')
+    for (const m of feeds(tp)) {
+      expect(m.to[0]).toBeCloseTo(20, 9)
+      expect(m.to[1]).toBeGreaterThanOrEqual(6 - 1e-9)
+      expect(m.to[1]).toBeLessThanOrEqual(34 + 1e-9)
+    }
   })
 
   it('open slot: once per level on the centre line, alternating, stepped down past the edge', () => {
