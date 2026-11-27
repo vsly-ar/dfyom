@@ -10,7 +10,8 @@
 // An external gCode file (DF93) draws its own moves instead (`fileMoves`, work coordinates, no
 // setup frame). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
 // marker (docs/modes/run-goto.md#preview). DF129 RC6: after an interrupted run, a ghost tool at
-// its last seen position and the toolpath before it dimmed (docs/modes/run-recovery.md#implementation-rc6).
+// its last seen position and the toolpath before it dimmed; after a crash the interrupted plan's
+// toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6).
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
 // docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -42,7 +43,7 @@ import { skippedSegments } from './start-at'
 import { useStartPreview } from './StartAt'
 
 export function useRunScene(mode: AppMode): RunScene | null {
-  const { bridge } = useShell()
+  const { bridge, replica: events } = useShell()
   const replica = useReplica()
   const status = useRun((s) => s.status)
   const planId = useRun((s) => s.planId)
@@ -64,6 +65,8 @@ export function useRunScene(mode: AppMode): RunScene | null {
     [plan, setupId, units],
   )
   const [read, setRead] = useState<{ toolpaths: Toolpath[]; current: boolean } | null>(null)
+  // toolpaths generated meanwhile (the recovery's generation below, Plan mode, another window)
+  const [generated, setGenerated] = useState(0)
   const [lowered, setLowered] = useState<readonly LoweredLinkView[]>([])
   const active = mode === 'run'
 
@@ -92,7 +95,28 @@ export function useRunScene(mode: AppMode): RunScene | null {
     return () => {
       live = false
     }
-  }, [active, bridge, planId, operations, jobId])
+  }, [active, bridge, planId, operations, jobId, generated])
+  useEffect(
+    () =>
+      events.onEvent((e) => {
+        if (e.type === 'job' && e.name === 'plan.toolpath.generate' && e.state === 'finished')
+          setGenerated((n) => n + 1)
+      }),
+    [events],
+  )
+
+  // DF129 RC6: after a crash the toolpath cache went with the app, so the interrupted run's plan
+  // has none to draw: generate them once (the run had, and a resume would), then read them again
+  const recoveringPlan =
+    status.lastRun?.interruption !== undefined && status.lastRun.planId === planId
+  const missing = read !== null && read.toolpaths.length < operations.length
+  const asked = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!active || !recoveringPlan || !missing || planId === undefined) return
+    if (asked.current === planId) return
+    asked.current = planId
+    void bridge.call('plan.toolpath.generate', { planId })
+  }, [active, recoveringPlan, missing, planId, bridge])
 
   // DF64 L3: the lowered links between operations (`plan.warning.list`), read when the setup is
   // shown, not again when a run starts: the checks are not recomputed while the run streams

@@ -232,7 +232,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             />
           ) : null}
           {doc === undefined ? <RunFileSection idle={job === undefined} /> : null}
-          {job === undefined && !ended && (doc !== undefined || fileReady) ? (
+          {/* RC6: never under the recovery panel (an interrupted run is not "no run yet") */}
+          {job === undefined && !ended && !recovering && (doc !== undefined || fileReady) ? (
             <p id={idleId} className={styles['hint']}>
               {m.idle}
             </p>

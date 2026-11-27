@@ -1990,8 +1990,13 @@ describe('Recovery panel (DF129 RC5)', () => {
     await t.user.click(within(sheet).getByRole('button', { name: 'Show the steps' }))
     const inspector = screen.getByRole('complementary', { name: 'Inspector' })
     const panel = within(inspector).getByRole('region', { name: 'The run was interrupted' })
-    // no "Start run" while the panel shows
+    // no "Start run" while the panel shows, nor "No run yet…" (RC6 screenshots)
     expect(within(inspector).queryByRole('button', { name: 'Start run' })).toBeNull()
+    expect(within(inspector).queryByText(/^No run yet/)).toBeNull()
+    // the run scene asks once for the plan's missing toolpaths, to draw them with the ghost (RC6)
+    await waitFor(() =>
+      expect(t.callsOf('plan.toolpath.generate')).toEqual([{ planId: t.plan().id }]),
+    )
     // where the job was, each with its source
     expect(panel).toHaveTextContent('Pocket 1 (operation 1 of')
     expect(panel).toHaveTextContent('Tool 1: Flat 6')
@@ -2181,6 +2186,8 @@ describe('After a crash (DF129 RC6)', () => {
     await waitFor(() =>
       expect(within(panel).queryByRole('button', { name: 'Open file' })).toBeNull(),
     )
+    // the file is ready, but an interrupted run is not "No run yet…"
+    expect(within(inspector).queryByText(/^No run yet/)).toBeNull()
     // the checklist, then connect: never by itself after a restart (Q158)
     await t.user.click(within(panel).getByRole('button', { name: 'Checked' }))
     expect(
