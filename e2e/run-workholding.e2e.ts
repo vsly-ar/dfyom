@@ -6,8 +6,12 @@
 // (fixture). With DFYOM_RENDERS=1: df133-rw1-outlined and df133-rw1-solid (light and dark) in
 // design/features/renders/, or in DFYOM_RENDERS_DIR. RW3: a held Y+ toward the front clamp stops
 // at the margin with the notice, a further step is not sent, "Jog past once" lets one step
-// through, the Jog menu switches the guard off (df133-rw3-stopped). RW6 completes the guard's e2e.
-// Docs: docs/modes/run-workholding.md#implementation-rw1, #implementation-rw3,
+// through, the Jog menu switches the guard off (df133-rw3-stopped). RW4: a Go to down onto the
+// front clamp is refused with the finding and a red target, then "Go anyway" goes
+// (df133-rw4-goto-blocked). RW5: the live clearance chip, red at the stop by the front clamp. RW6
+// completes the guard's e2e.
+// Docs: docs/modes/run-workholding.md#implementation-rw1, #implementation-rw3, #implementation-rw4,
+// #implementation-rw5,
 // docs/conventions/ui.md#workholding
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -148,6 +152,8 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw1-solid')
 
+  await expect(inspector.locator('[data-clearance]')).toHaveText(/^Clear: [\d.]+ mm to /)
+
   // RW3: in front of the front clamp, below its top; a held Y+ stops at the margin, not at the
   // stock (Y 0) and not at the travel edge
   await call(page, 'run.machine.jog', { to: [-230, -200, -65], feed: 5000 })
@@ -164,6 +170,10 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   const y = await at('Work position Y')
   expect(y).toBeGreaterThan(-40)
   expect(y).toBeLessThan(-5)
+  // RW5: the live clearance chip names the front clamp, red at the stop point (the margin)
+  const clearance = inspector.locator('[data-clearance]')
+  await expect(clearance).toHaveText(/^Within the margin: [\d.]+ mm to Toe clamp 1 \(tool\)$/)
+  await expect(clearance).toHaveAttribute('data-clearance', 'inside')
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw3-stopped')
   // further in: not moved
@@ -177,6 +187,38 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await yPlus.click()
   await expect.poll(() => at('Work position Y')).toBeCloseTo(y + 1, 3)
   await expect(notice).toHaveText('')
+
+  // RW4: above the front clamp's X, in front of it; Go to down onto it is refused, then Go anyway
+  await call(page, 'run.machine.jog', { to: [-230, -200, -40], feed: 5000 })
+  await expect.poll(() => at('Work position Z')).toBeCloseTo(35, 3)
+  await expect(machineGroup.getByText('Idle')).toBeVisible()
+  await dro.getByRole('button', { name: /^Go to: X .* work$/ }).click()
+  const goTo = page.getByRole('dialog', { name: 'Go to' })
+  for (const [axis, v] of [
+    ['X', '60'],
+    ['Y', '0'],
+    ['Z', '5'],
+  ] as const)
+    await goTo.getByRole('textbox', { name: axis }).fill(v)
+  const finding = goTo.locator('[data-guard-finding]')
+  await expect(finding).toContainText(
+    /Step \d \(down to Z 5\.000\) hits Toe clamp 1: the tool stops/,
+  )
+  const go = goTo.getByRole('button', { name: 'Go', exact: true })
+  await expect(go).toBeDisabled()
+  await expect(page.locator('[data-goto-target][data-hit]')).toHaveCount(1)
+  await render(page, 'df133-rw4-goto-blocked')
+  const anyway = goTo.getByRole('checkbox', { name: /^Go anyway/ })
+  await anyway.click()
+  await expect(go).toBeEnabled()
+  await go.click()
+  await expect(goTo).toHaveCount(0)
+  await expect.poll(() => at('Work position Z')).toBeCloseTo(5, 3)
+  expect(await at('Work position Y')).toBeCloseTo(0, 3)
+  await call(page, 'run.machine.jog', { to: [-230, -200, -40], feed: 5000 })
+  await expect.poll(() => at('Work position Z')).toBeCloseTo(35, 3)
+  await expect(machineGroup.getByText('Idle')).toBeVisible()
+
   // the Jog menu's switch: off, the status line warns
   await navigator.getByRole('button', { name: 'Jog options' }).click()
   await page.getByRole('menuitemradio', { name: /Workholding guard/ }).click()

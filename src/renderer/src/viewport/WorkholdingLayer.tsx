@@ -15,7 +15,8 @@
 // as a thin layer under the stock, `--vp-grid-major` hatched in `--vp-edge`. DF133 RW1: in the Run
 // scene, read-only, `outlined` while the scene cannot vouch for the items' place (not homed, no
 // connection): no fill, dashed `--vp-edge` rims and corner edges; turning solid fades the fill in
-// over `--motion-fast` (instant with reduced motion).
+// over `--motion-fast` (instant with reduced motion). RW5: an item the tool and holder are close to
+// (under 2 × margin) in `--warning`, at or within the margin in `--danger` (`close`, `colliding`).
 // Doc: docs/modes/workholding.md#toe-clamp-drag-x2-6, docs/conventions/ui.md#workholding,
 // docs/modes/run-workholding.md#scene
 import { Html, Line, type CameraControlsImpl } from '@react-three/drei'
@@ -48,6 +49,8 @@ export interface WorkholdingOverlay {
     readonly zMax: number
     /** A collision finding names the item: drawn in `--danger`. */
     readonly colliding?: boolean
+    /** Run scene (DF133 RW5): the tool or holder is close to it: drawn in `--warning`. */
+    readonly close?: boolean
   }[]
   /** The open item's keep-out zone: outlines grown by the margin, drawn at `z`. */
   readonly halo?: { readonly outlines: readonly (readonly P[])[]; readonly z: number } | undefined
@@ -360,6 +363,7 @@ export function WorkholdingLayer({
   const edge = useMemo(() => colour(palette.edge), [palette])
   const halo = useMemo(() => colour(palette.edge), [palette])
   const danger = useMemo(() => colour(palette.danger), [palette])
+  const warning = useMemo(() => colour(palette.warning), [palette])
   const clamps = workholding.clamps
   const ghosted = (id: string) => isGhost(workholding, id)
   const handles = pickableClamps(workholding)
@@ -479,8 +483,8 @@ export function WorkholdingLayer({
             outline={s.outline}
             zMin={s.zMin}
             zMax={s.zMax}
-            fill={s.colliding ? danger : fill}
-            edge={s.colliding ? danger : edge}
+            fill={s.colliding ? danger : s.close ? warning : fill}
+            edge={s.colliding ? danger : s.close ? warning : edge}
             strong={
               s.itemId === workholding.selected || s.itemId === hovered || h?.dragging === true
             }

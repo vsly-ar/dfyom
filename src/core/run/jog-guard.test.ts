@@ -12,7 +12,7 @@ import { checkWorkholding } from '../plan/workholding/check'
 import { toolEnvelope, type HolderSizes } from '../plan/workholding/envelope'
 import type { ResolvedItem } from '../plan/workholding/items'
 import { itemPrisms, type Footprint, type Prism } from '../plan/workholding/obstacles'
-import { jogGuard, nearestClearance, STOCK_TOP } from './jog-guard'
+import { itemClearances, jogGuard, nearestClearance, STOCK_TOP } from './jog-guard'
 
 const ER11: HolderSizes = { nutDiameter: 19, nutLength: 12, bodyDiameter: 52, name: 'ER11' }
 const FLAT6 = { diameter: 6 }
@@ -211,6 +211,25 @@ describe('nearestClearance', () => {
     expect(c).toMatchObject({ part: 'nut' })
     expect(c.gap).toBeCloseTo(5.5, 9)
     expect(nearestClearance([0, 0, 0], tool, [])).toBeUndefined()
+  })
+})
+
+describe('itemClearances (RW5)', () => {
+  it('one entry per item with its nearest part; the nearest of them is nearestClearance', () => {
+    const at = [30, 30, 10] as const
+    const all = itemClearances(at, tool, [BLOCK, SCREW])
+    expect(all.map((c) => c.itemId)).toEqual(['wh1', 'wh2'])
+    // the block: 10 off its corner sideways (axis to (20, 10) less the radius 3), at its height
+    expect(all[0]!.gap).toBeCloseTo(Math.hypot(10, 20) - 3, 9)
+    // the screw: the tip 7 above its top, the axis 20√2 − 4 − 3 off sideways
+    expect(all[1]!.gap).toBeCloseTo(Math.hypot(20 * Math.SQRT2 - 7, 7), 9)
+    const near = nearestClearance(at, tool, [BLOCK, SCREW])!
+    expect(near).toEqual(all.reduce((a, b) => (b.gap < a.gap ? b : a)))
+    // two prisms of one item (vise jaws): one entry, the nearer prism
+    const jaw2: Prism = { ...BLOCK, footprint: rect(25, 0, 35, 10) }
+    const one = itemClearances([0, 5, 5], tool, [BLOCK, jaw2])
+    expect(one).toHaveLength(1)
+    expect(one[0]!.gap).toBe(7)
   })
 })
 

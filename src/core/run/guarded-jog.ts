@@ -4,7 +4,8 @@
  * the jog is exactly today's command (`{ by }`, or `{ by, continuous }` to the travel edge); a
  * contact shortens it to the stop point, sent as an absolute machine target (`{ to }`), so GRBL
  * plans the deceleration to it (Q185); a move that may not start at all sends nothing.
- * Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3
+ * RW4: `guardedMoves`, the steps of a Go to or a touch-off move checked one after the other.
+ * Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3, #implementation-rw4
  *
  * Pure and headless. Machine positions are MPos (mm); the guard works in the setup frame:
  * setup = MPos − WCO + offset, WCO = MPos − WPos of the last status (G54 plus any G92) and offset
@@ -134,4 +135,62 @@ export function guardedJog(input: GuardedJogInput): GuardedJog {
   if (Math.abs(stop[request.axis] - from[request.axis]) < MIN_JOG_MM)
     return { kind: 'blocked', contact: r.contact }
   return { kind: 'send', args: { to: stop, feed: request.feed }, end: stop, contact: r.contact }
+}
+
+/** The first step of a multi-step move (Go to, touch-off spot) that comes within the margin. */
+export interface GuardedMoveHit {
+  /** The step (0-based) whose straight move first comes within the margin of an item. */
+  readonly step: number
+  readonly contact: JogContact
+  /** Where that step would stop, the guard's `allowed` (MPos, mm; the step's start when blocked). */
+  readonly stop: Vec3
+  /** Where the contact begins (MPos, mm). */
+  readonly at: Vec3
+}
+
+export interface GuardedMovesInput {
+  /** Where the move starts (MPos, mm). */
+  readonly from: Vec3
+  /** Each step's end (MPos, mm): straight lines one after the other. */
+  readonly to: readonly Vec3[]
+  /** MPos − WPos of the last status (mm). */
+  readonly wco: Vec3
+  /** The setup frame's offset from the WCS (as `GuardedJogInput.offset`). */
+  readonly offset: Vec3
+  readonly setup: GuardSetup
+}
+
+/**
+ * `guardedMoves` (DF133 RW4, Q187): each step of a Go to or a touch-off move through `jogGuard`,
+ * from the previous step's end; the first contact, or undefined when every step is clear. Steps
+ * after a contact are not checked (the move would not get there). Nothing is shortened: a move
+ * with a contact is not sent unless the user ticks "Go anyway" (or "Jog past once" is armed).
+ */
+export function guardedMoves(input: GuardedMovesInput): GuardedMoveHit | undefined {
+  const { wco, offset, setup } = input
+  const toSetup = (m: Vec3): Vec3 => [
+    m[0] - wco[0] + offset[0],
+    m[1] - wco[1] + offset[1],
+    m[2] - wco[2] + offset[2],
+  ]
+  const toMachine = (p: Vec3): Vec3 => [
+    p[0] + wco[0] - offset[0],
+    p[1] + wco[1] - offset[1],
+    p[2] + wco[2] - offset[2],
+  ]
+  let from = input.from
+  for (const [step, to] of input.to.entries()) {
+    const r = jogGuard({
+      from: toSetup(from),
+      to: toSetup(to),
+      envelope: setup.envelope,
+      prisms: setup.prisms,
+      margin: setup.margin,
+      ...(setup.stock === undefined ? {} : { stock: setup.stock }),
+    })
+    if (r.contact !== undefined)
+      return { step, contact: r.contact, stop: toMachine(r.allowed), at: toMachine(r.contact.at) }
+    from = to
+  }
+  return undefined
 }

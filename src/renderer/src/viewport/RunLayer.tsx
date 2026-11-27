@@ -7,7 +7,8 @@
 // (WorkholdingLayer.tsx, workholding.md; in the run scene too, outlined until the place is
 // known, DF133 RW1); an operation's rest after its roughing (DF122,
 // RestLayer.tsx); the shown operation's holder ghost (DF132 H5, HolderGhost.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx); an interrupted
-// run's last seen tool position as a translucent ghost tool (DF129 RC6). Props only.
+// run's last seen tool position as a translucent ghost tool (DF129 RC6; `--danger` when it was
+// inside an item, DF133 RW5). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -94,6 +95,8 @@ export interface RunScene {
    * tool (docs/modes/run-recovery.md#implementation-rc6); absent: none.
    */
   readonly ghost?: readonly [number, number, number] | undefined
+  /** DF133 RW5: the ghost tool was inside an item (what probably happened): drawn in `--danger`. */
+  readonly ghostColliding?: boolean | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -204,7 +207,7 @@ export function RunLayer({
     attr.needsUpdate = true
     invalidate()
   }, [geometry, lines, done, outdated, palette, invalidate])
-  useEffect(() => invalidate(), [tool, run.ghost, invalidate])
+  useEffect(() => invalidate(), [tool, run.ghost, run.ghostColliding, invalidate])
   const travel = useMemo(() => {
     if (envelope === undefined) return null
     const g = new BufferGeometry()
@@ -215,6 +218,10 @@ export function RunLayer({
   const travelColour = useMemo(() => colour(palette.gridMajor), [palette])
 
   const toolColour = useMemo(() => colour(palette.tool), [palette])
+  const ghostColour = useMemo(
+    () => colour(run.ghostColliding === true ? palette.danger : palette.tool),
+    [palette, run.ghostColliding],
+  )
   return (
     <group {...(matrix === undefined ? {} : { matrix, matrixAutoUpdate: false })}>
       {geometry ? (
@@ -280,15 +287,15 @@ export function RunLayer({
         <group position={[run.ghost[0], run.ghost[1], run.ghost[2]]}>
           <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
             <coneGeometry args={[3, 6, 24]} />
-            <meshBasicMaterial color={toolColour} transparent opacity={0.3} depthWrite={false} />
+            <meshBasicMaterial color={ghostColour} transparent opacity={0.3} depthWrite={false} />
           </mesh>
           <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
             <cylinderGeometry args={[3, 3, 20, 24]} />
-            <meshBasicMaterial color={toolColour} transparent opacity={0.18} depthWrite={false} />
+            <meshBasicMaterial color={ghostColour} transparent opacity={0.18} depthWrite={false} />
           </mesh>
           <mesh raycast={noRaycast}>
             <ringGeometry args={[4, 4.8, 32]} />
-            <meshBasicMaterial color={toolColour} transparent opacity={0.6} depthWrite={false} />
+            <meshBasicMaterial color={ghostColour} transparent opacity={0.6} depthWrite={false} />
           </mesh>
         </group>
       ) : null}

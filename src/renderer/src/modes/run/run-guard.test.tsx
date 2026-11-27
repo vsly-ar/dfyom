@@ -97,8 +97,10 @@ async function clamp(t: T) {
   const g = t.run().getState().guardSetup!
   const all = g.setup.prisms.map((p) => p.footprint)
   const minX = Math.min(...all.flatMap(xs))
+  const midX = (minX + Math.max(...all.flatMap(xs))) / 2
   const midY = (Math.min(...all.flatMap(ys)) + Math.max(...all.flatMap(ys))) / 2
-  return { minX, midY, margin: g.setup.margin, radius: g.setup.envelope[0]!.radius }
+  const top = Math.max(...g.setup.prisms.map((p) => p.zMax))
+  return { minX, midX, midY, top, margin: g.setup.margin, radius: g.setup.envelope[0]!.radius }
 }
 
 const jogButton = (t: T, name: string) => within(t.nav()).getByRole('button', { name })
@@ -269,5 +271,162 @@ describe('jogs through the workholding guard (DF133 RW3)', () => {
     // Probe Z / Set Z zero: G54 Z changes, the note goes
     t.push({ workZero: [G54[0], G54[1], G54[2] - 1.5] })
     await waitFor(() => expect(line()).not.toHaveTextContent('Z not set'))
+  })
+})
+
+// ── DF133 RW4: Go to and the dialogs' moves through the guard ────────────────────────────────────
+
+const goTo = () => screen.getByRole('dialog', { name: 'Go to' })
+const goButton = () => within(goTo()).getByRole('button', { name: 'Go' })
+const anywayBox = () =>
+  within(goTo()).getByRole('checkbox', {
+    name: 'Go anyway (the clamps are not where the plan says)',
+  })
+
+/** Opens Go to (work frame) and types the target. */
+async function typeTarget(t: T, target: readonly [number, number, number]) {
+  if (t.run().getState().goTo === undefined)
+    act(() => t.run().getState().openGoTo({ frame: 'work', axis: 'x' }))
+  for (const [i, axis] of (['X', 'Y', 'Z'] as const).entries()) {
+    const f = within(goTo()).getByRole('textbox', { name: axis })
+    await t.user.clear(f)
+    await t.user.type(f, String(target[i]))
+  }
+}
+
+describe('Go to and the dialogs’ moves through the workholding guard (DF133 RW4)', () => {
+  it('a Go to down onto the clamp: a finding names the step, Go disabled, red path; Go anyway resets with the target', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.midX, c.midY - 40, c.top + 20])
+    await typeTarget(t, [c.midX, c.midY, 5])
+    const finding = await waitFor(() => {
+      const f = goTo().querySelector('[data-guard-finding]')
+      expect(f).not.toBeNull()
+      return f!
+    })
+    expect(finding).toHaveTextContent(
+      /^Step 2 \(down to Z 5\.000\) hits Toe clamp 1: the tool stops 2 mm above it at Z 2\d\.\d{3}\./,
+    )
+    expect(goButton()).toBeDisabled()
+    expect(goButton()).toHaveAccessibleDescription(/Step 2 \(down to Z 5\.000\) hits Toe clamp 1/)
+    // the 3D path turns red from the contact on (the down step, above the clamp)
+    const hit = t.run().getState().goToPreview?.hit
+    expect(hit?.step).toBe(1)
+    expect(hit!.at[2] - G54[2]).toBeGreaterThan(c.top)
+    // Enter does nothing either
+    await t.user.type(within(goTo()).getByRole('textbox', { name: 'Z' }), '{Enter}')
+    expect(t.jogs()).toHaveLength(0)
+    await expectNoAxeViolations()
+
+    // Go anyway: Go enabled for this target; a changed target unticks it
+    await t.user.click(anywayBox())
+    expect(anywayBox()).toBeChecked()
+    expect(goButton()).toBeEnabled()
+    await typeTarget(t, [c.midX, c.midY, 6])
+    expect(anywayBox()).not.toBeChecked()
+    expect(goButton()).toBeDisabled()
+    await t.user.click(anywayBox())
+    await t.user.click(goButton())
+    await waitFor(() => expect(t.jogs()).toHaveLength(2))
+    expect(t.jogs()[1]).toEqual({
+      to: [c.midX + G54[0], c.midY + G54[1], 6 + G54[2]],
+      feed: expect.any(Number),
+    })
+  })
+
+  it('a clear target: no finding, the steps as before', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.midX, c.midY - 40, c.top + 20])
+    await typeTarget(t, [c.midX - 60, c.midY - 40, c.top + 20])
+    expect(goTo().querySelector('[data-guard-finding]')).toBeNull()
+    await t.user.click(goButton())
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    expect(t.jogs()[0]).toEqual({
+      to: [c.midX - 60 + G54[0], c.midY - 40 + G54[1], c.top + 20 + G54[2]],
+      feed: expect.any(Number),
+    })
+  })
+
+  it('Jog past once also covers the next Go to (no checkbox), and only that one', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.midX, c.midY - 40, c.top + 20])
+    act(() => t.run().getState().jogPastOnce())
+    await typeTarget(t, [c.midX, c.midY, 5])
+    const finding = goTo().querySelector('[data-guard-finding]')
+    expect(finding).toHaveTextContent('Jog past once is armed: this move is not checked.')
+    expect(within(goTo()).queryByRole('checkbox', { name: /Go anyway/ })).toBeNull()
+    expect(goButton()).toBeEnabled()
+    await t.user.click(goButton())
+    await waitFor(() => expect(t.jogs()).toHaveLength(2))
+    expect(t.run().getState().pastOnceUntil).toBeUndefined()
+  })
+
+  it('the store guards every move (touch-off spot, recovery): a hit sends nothing, anyway or guard off sends as today', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.midX, c.midY, c.top + 20])
+    const down = [{ to: [c.midX + G54[0], c.midY + G54[1], 5 + G54[2]] as const, feed: 500 }]
+    let sent = true
+    await act(async () => {
+      sent = await t.run().getState().moveTo(down)
+    })
+    expect(sent).toBe(false)
+    expect(t.jogs()).toHaveLength(0)
+    await waitFor(() =>
+      expect(notice(t)).toHaveTextContent(
+        'Not moved: the tool would come within the margin of Toe clamp 1.',
+      ),
+    )
+    await act(async () => {
+      sent = await t.run().getState().moveTo(down, { anyway: true })
+    })
+    expect(sent).toBe(true)
+    expect(t.jogs()).toEqual([{ to: [...down[0]!.to], feed: 500 }])
+    // G54 never set: the guard is off, today's move
+    t.push({ workZero: [0, 0, 0] })
+    await act(async () => {
+      sent = await t.run().getState().moveTo(down)
+    })
+    expect(sent).toBe(true)
+    expect(t.jogs()).toHaveLength(2)
+  })
+})
+
+describe('recovery and the workholding guard (DF133 RW5)', () => {
+  it('after a power loss the guard is off until home and zero, then guards the recovery moves', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const line = () => document.querySelector('[data-workholding-trust]')
+    const chip = () => document.querySelector('[data-clearance]')
+    // the power came back: connected, Alarm, not homed (G54 is kept in the controller's EEPROM)
+    t.push({ state: 'Alarm', homed: false })
+    await waitFor(() =>
+      expect(line()).toHaveTextContent('Home the machine to check jogs against the workholding.'),
+    )
+    expect(chip()).toBeNull()
+    const into = [{ to: [c.midX + G54[0], c.midY + G54[1], 5 + G54[2]] as const, feed: 500 }]
+    // the guard is off: a move would go as today (the host refuses it unhomed anyway)
+    let sent = false
+    await act(async () => {
+      sent = await t.run().getState().moveTo(into)
+    })
+    expect(sent).toBe(true)
+    // homed with the work zero (Step 4, Step 5): the guard is on, the chip names the clamp
+    t.push({ homed: true })
+    t.at([c.midX, c.midY - 40, c.top + 20])
+    await waitFor(() =>
+      expect(line()).toHaveTextContent('Checks the clamps as placed in Plan, at the work zero.'),
+    )
+    await waitFor(() => expect(chip()).toHaveTextContent(/^Clear: [\d.]+ mm to Toe clamp 1 \(/))
+    // "Go to last position" and the panel's moves go through the store's guarded moveTo
+    await act(async () => {
+      sent = await t.run().getState().moveTo(into)
+    })
+    expect(sent).toBe(false)
+    expect(t.jogs()).toHaveLength(1)
   })
 })

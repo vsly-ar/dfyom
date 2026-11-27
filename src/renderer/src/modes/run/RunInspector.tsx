@@ -9,7 +9,8 @@
 // inspectors' group header style, DF110 S6); Reset has no title, only the rule above it.
 // DF129 RC6: the Position header's menu, "The machine lost power…" while idle (Q171).
 // DF133 RW1: under the DRO, one line on the setup's workholding in the view (outlined until homed,
-// hidden until the work zero is set; docs/modes/run-workholding.md#trust-what-the-guard-knows).
+// hidden until the work zero is set; docs/modes/run-workholding.md#trust-what-the-guard-knows);
+// RW5: under it the live clearance chip (#live-clearance).
 // Doc: docs/modes/run.md#run-without-a-project-df80, #run-an-external-g-code-file-df93
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress,
 // docs/conventions/inspector-layout.md#group-header-style
@@ -29,6 +30,7 @@ import {
 } from '../../ui'
 import { useShell } from '../../shell/ShellContext'
 import { AlignmentPanel } from './AlignmentPanel'
+import { ClearanceChip } from './ClearanceChip'
 import { Dro } from './Dro'
 import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
@@ -180,6 +182,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             {workholding.line}
           </p>
         )}
+        <ClearanceChip units={units} />
         {/* DF78 (Q107): the alignment step docked beside the DRO */}
         {doc === undefined ? null : <AlignmentPanel doc={doc} />}
 

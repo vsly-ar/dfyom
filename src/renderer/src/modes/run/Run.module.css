@@ -329,6 +329,50 @@
   color: var(--text);
 }
 
+/* DF133 RW5: the live clearance chip under the Position table; amber close, red at the margin */
+.clearance {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  justify-self: start;
+  margin: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-chrome);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.clearance::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.clearance[data-clearance='close'] {
+  border-color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.clearance[data-clearance='close']::before {
+  background: var(--warning);
+}
+
+.clearance[data-clearance='inside'] {
+  border-color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.clearance[data-clearance='inside']::before {
+  background: var(--danger);
+}
+
 .jogPad[data-z-only] {
   grid-template-columns: var(--control-lg);
   grid-template-rows: repeat(2, var(--control-lg));
