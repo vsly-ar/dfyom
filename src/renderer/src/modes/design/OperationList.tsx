@@ -18,7 +18,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { isDisabled, type DisabledState } from '../../../../core/design/disabled'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
-import type { OperationDTO } from '../../../../core/design/part.dto'
+import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
+import { cutChangedUnits, cutMarkOf } from '../../../../core/design/already-cut'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
@@ -448,7 +449,10 @@ function RowGrip({ actions }: { actions: RowActions | undefined }): React.JSX.El
 /** The "Off" marker of a disabled row (DF106); its tooltip says whether it follows another item. */
 function OffMarker({ ctx, id }: { ctx: ListContext; id: string }): React.JSX.Element | null {
   // DF135: an already-cut row (cut-state.md#marking), muted with a check
-  const cut = ctx.part.dto.alreadyCut?.includes(id) === true ? <CutMarker /> : null
+  const cut =
+    ctx.part.dto.alreadyCut?.includes(id) === true ? (
+      <CutMarker part={ctx.part.dto} id={id} />
+    ) : null
   if (!isDisabled(ctx.off, id)) return cut
   const title = ctx.off.dependants.has(id) ? m.navigator.offFollows : m.navigator.offTitle
   return (
@@ -462,12 +466,37 @@ function OffMarker({ ctx, id }: { ctx: ListContext; id: string }): React.JSX.Ele
   )
 }
 
-function CutMarker(): React.JSX.Element {
+/** Day of an ISO time, as the user's locale writes it ("27 Nov 2026"). */
+function markDay(at: string): string {
+  const d = new Date(at)
+  return Number.isNaN(d.getTime())
+    ? at
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/**
+ * DF135: the "Cut" marker; a run's mark says when (C2) and warns once its geometry is edited
+ * (`plan.cutChanged`, docs/modes/cut-state.md#editing-an-already-cut-operation).
+ */
+function CutMarker({ part, id }: { part: PartDTO; id: string }): React.JSX.Element {
+  const mark = cutMarkOf(part, id)
+  const run = mark?.by === 'run' && mark.at !== ''
+  const changed = run && cutChangedUnits(part).has(id)
+  const title = changed
+    ? m.navigator.cutChangedTitle(markDay(mark.at))
+    : run
+      ? m.navigator.cutByRunTitle(markDay(mark.at))
+      : m.navigator.cutTitle
   return (
-    <span className={styles['opCut']} title={m.navigator.cutTitle} data-cut-marker="">
-      <Icon name="success" />
-      {m.navigator.cut}
-      <span className={styles['srOnly']}>{`: ${m.navigator.cutTitle}`}</span>
+    <span
+      className={styles['opCut']}
+      title={title}
+      data-cut-marker={mark?.by ?? 'hand'}
+      data-tone={changed ? 'warning' : undefined}
+    >
+      <Icon name={changed ? 'warning' : 'success'} />
+      {changed ? m.navigator.cutChanged : m.navigator.cut}
+      <span className={styles['srOnly']}>{`: ${title}`}</span>
     </span>
   )
 }

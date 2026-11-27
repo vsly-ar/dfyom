@@ -6,7 +6,8 @@
  * Doc: docs/modes/cut-state.md
  */
 import { fail, type AppResult } from '../../shared/result'
-import { alreadyCutOperations } from '../design/already-cut'
+import { alreadyCutOperations, cutChangedUnits } from '../design/already-cut'
+import { unitOfOperation } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { PlanWarning } from './checks'
 import { planOpLabel } from './labels'
@@ -73,6 +74,7 @@ export function cutFindings(plan: LoadedPlan): PlanWarning[] {
   const out: PlanWarning[] = []
   const part = plan.dto.design.part
   const isCut = cutTest(part)
+  out.push(...cutChangedFindings(plan))
   const lastCut = plan.setups.findLastIndex((s) => s.operations.some(isCut))
   if (lastCut < 0) return out
   const later = plan.setups[lastCut]!
@@ -90,6 +92,44 @@ export function cutFindings(plan: LoadedPlan): PlanWarning[] {
       })
     }
   })
+  return out
+}
+
+/** A top-level unit's name in the design (the operation's or the feature's). */
+function unitName(part: PartDTO, id: string): string {
+  return (
+    part.operations.find((o) => o.id === id)?.name ??
+    part.features?.find((f) => f.id === id)?.name ??
+    id
+  )
+}
+
+/**
+ * `plan.cutChanged` (DF135 C2, Q198 as revised: warning): a plan operation machining a unit that
+ * a run marked already cut and whose geometry was edited since. Marks set by hand never warn.
+ * Doc: docs/modes/cut-state.md#editing-an-already-cut-operation
+ */
+function cutChangedFindings(plan: LoadedPlan): PlanWarning[] {
+  const part = plan.dto.design.part
+  const changed = cutChangedUnits(part)
+  if (changed.size === 0) return []
+  const out: PlanWarning[] = []
+  for (const s of plan.setups)
+    for (const op of s.operations) {
+      const unit = op.designOperationIds
+        .map((d) => unitOfOperation(part, d))
+        .find((u) => changed.has(u))
+      if (unit === undefined) continue
+      const at = part.alreadyCutMarks?.[unit]?.at
+      out.push({
+        code: 'plan.cutChanged',
+        severity: 'warning',
+        message: `${unitName(part, unit)} changed since the run cut it`,
+        planOperationId: op.id,
+        rule: 'cutChanged',
+        params: { unitId: unit, ...(at === undefined ? {} : { markedAt: at }) },
+      })
+    }
   return out
 }
 

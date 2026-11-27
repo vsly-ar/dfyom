@@ -15,6 +15,8 @@ import { checkNoRunJob, prepareWorkZero } from './commands'
 import { machineKeyOf } from './machine-key'
 import { prepareGcodeFile } from './gcode-file'
 import { runPlanHash } from './plan-hash'
+import { runCutMarks } from './cut-marks'
+import { topLevelUnits, unitOfOperation } from '../design/disabled'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
 import type { MachineService, RunStatus } from './service'
@@ -64,6 +66,8 @@ async function setup(
     files?: ReadonlyMap<string, string>
     /** The 2D geometry port (chamfers, DF137). */
     region2d?: boolean
+    /** DF135 C2's test seam: virtual runs count as real for the already-cut marks. */
+    virtualCutMarks?: boolean
   } = {},
 ) {
   const s: PlanSetup = await planSetup()
@@ -93,6 +97,7 @@ async function setup(
       ...(serial === undefined ? {} : { serial }),
     }),
     logLevel: 'warn',
+    ...(opts.virtualCutMarks === true ? { virtualCutMarks: true } : {}),
   })
   clients.push(client)
   const d = createDispatcher({
@@ -998,6 +1003,13 @@ describe('run commands', { timeout: 60_000 }, () => {
       planOperationId: stoppedIn,
       planHash: runPlanHash(t.s.plan(t.planId), t.s.plan(t.planId).setups[0]!.id),
       operations: ops.map((o) => o.id),
+      // DF135 C2: the operations before the one it stopped in (cut-state.md#marking)
+      finished: ops
+        .slice(
+          0,
+          ops.findIndex((o) => o.id === stoppedIn),
+        )
+        .map((o) => o.id),
     })
     // not an operation of the setup
     const bad = await t.job('run.job.start', { planId: t.planId, from: 'nope' })
@@ -1028,6 +1040,39 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(summary.lines).toBeLessThan(full.lines)
     expect(t.status().lastRun).toMatchObject({ jobId: resumed.jobId, outcome: 'done' })
     expect(t.status().lastRun?.planOperationId).toBeUndefined()
+    // DF135 C2: the resumed run keeps what the stopped one finished; the virtual machine is no
+    // real run, so nothing is marked
+    expect(t.status().lastRun?.finished).toEqual(ops.map((o) => o.id))
+    expect(t.status().lastRun?.real).toBeUndefined()
+    const part = t.s.d.doc.parts[t.s.partId]!
+    expect(runCutMarks(t.status().lastRun, t.s.plan(t.planId), part)).toEqual({
+      kind: 'none',
+      reason: 'notReal',
+    })
+  })
+
+  it('DF135 C2 test seam: with virtualCutMarks a virtual run to the end counts as real', async () => {
+    const t = await setup({ virtualCutMarks: true })
+    expectOk(await t.open({ prepare: true }))
+    const run = await t.job('run.job.start', { planId: t.planId })
+    let finished = false
+    void run.result.then(() => (finished = true))
+    for (;;) {
+      const waiting = () => /toolChange|programPause/.test(t.status().job?.phase ?? '')
+      expect(await waitFor(() => finished || waiting())).toBe(true)
+      if (finished) break
+      const job = t.status().job!
+      const which =
+        job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+      expectOk(await t.run('run.job.continue', { jobId: run.jobId, ...which }))
+      await waitFor(() => finished || t.status().job?.phase === 'streaming')
+    }
+    expectOk(await run.result)
+    const plan = t.s.plan(t.planId)
+    const last = t.status().lastRun!
+    expect(last).toMatchObject({ outcome: 'done', real: true })
+    expect(last.finished).toEqual(plan.setups[0]!.operations.map((o) => o.id))
+    expect(runCutMarks(last, plan, t.s.d.doc.parts[t.s.partId]!).kind).toBe('mark')
   })
 
   it('a run stopped, the plan edited and finalized again, resumes from the current plan (DF85)', async () => {
@@ -1524,6 +1569,105 @@ describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, ()
     }
     return { t, jobId, result, port, done: () => settled !== undefined, streaming, advance }
   }
+
+  // DF135 C2 (docs/modes/cut-state.md#marking): what a real run finished, and Run's marks
+  const unitsOf = (t: Awaited<ReturnType<typeof setup>>, planOps: readonly string[]) => {
+    const plan = t.s.plan(t.planId)
+    const part = plan.design.part
+    const ids = new Set(
+      plan.setups
+        .flatMap((s) => s.operations)
+        .filter((o) => planOps.includes(o.id))
+        .flatMap((o) => o.designOperationIds.map((d) => unitOfOperation(part, d))),
+    )
+    return topLevelUnits(part).filter((u) => ids.has(u))
+  }
+  /** Runs on until the wait at a tool change of an operation after the first. */
+  const toSecondTool = (r: Awaited<ReturnType<typeof realRun>>, first: string) =>
+    r.advance(() => {
+      const j = r.t.status().job
+      return j?.phase === 'toolChange' && j.planOperationId !== first
+    })
+
+  it('DF135 C2: a real run to the end finished every operation; Run marks them, by run', async () => {
+    const r = await realRun()
+    const { t } = r
+    await r.advance(() => false)
+    expectOk(await r.result)
+    const plan = t.s.plan(t.planId)
+    const ops = plan.setups[0]!.operations.map((o) => o.id)
+    const last = t.status().lastRun!
+    expect(last).toMatchObject({ outcome: 'done', real: true, finished: ops })
+    const part = () => t.d.doc.parts[t.s.partId]!
+    const marks = runCutMarks(last, plan, part())
+    expect(marks).toEqual({ kind: 'mark', planId: t.planId, units: unitsOf(t, ops) })
+    if (marks.kind !== 'mark') return
+    expectOk(
+      await t.run(
+        'design.part.update',
+        { partId: t.s.partId, alreadyCut: marks.units, cutByRun: t.planId },
+        ui,
+      ),
+    )
+    expect(part().alreadyCut).toEqual(marks.units)
+    for (const u of marks.units)
+      expect(part().alreadyCutMarks?.[u]).toMatchObject({
+        by: 'run',
+        fingerprint: expect.any(String),
+      })
+    // marked already: nothing more to mark
+    expect(runCutMarks(last, plan, part())).toEqual({ kind: 'none', reason: 'nothing' })
+  })
+
+  it('DF135 C2: a stopped real run offers only the finished operations, not the one in progress', async () => {
+    const r = await realRun()
+    const { t } = r
+    const ops = t.s.plan(t.planId).setups[0]!.operations.map((o) => o.id)
+    await toSecondTool(r, ops[0]!)
+    expectOk(await t.run('job.abort', { jobId: r.jobId }, ui))
+    expectErrCode(await r.result, 'op.aborted')
+    expect(await waitFor(() => t.status().lastRun?.jobId === r.jobId)).toBe(true)
+    const last = t.status().lastRun!
+    const stoppedIn = ops.indexOf(last.planOperationId!)
+    expect(stoppedIn).toBeGreaterThan(0)
+    expect(last).toMatchObject({
+      outcome: 'stopped',
+      real: true,
+      finished: ops.slice(0, stoppedIn),
+    })
+    const marks = runCutMarks(last, t.s.plan(t.planId), t.s.d.doc.parts[t.s.partId]!)
+    expect(marks.kind).toBe('offer')
+    if (marks.kind !== 'offer') return
+    expect(marks.units.length).toBeGreaterThan(0)
+    // a unit the stopped operation machines is not offered (Q197: it stays not cut)
+    for (const u of unitsOf(t, [ops[stoppedIn]!])) expect(marks.units).not.toContain(u)
+  })
+
+  it('DF135 C2: an interrupted real run offers nothing while a resume is pending, then its finished operations', async () => {
+    const r = await realRun()
+    const { t } = r
+    const ops = t.s.plan(t.planId).setups[0]!.operations.map((o) => o.id)
+    // streaming in the third operation: the first is certainly finished
+    await r.advance(() => {
+      const j = t.status().job
+      return j?.phase === 'streaming' && ops.indexOf(j.planOperationId ?? '') >= 2
+    })
+    r.port().unplug()
+    expectErrCode(await r.result, 'machine.connection')
+    expect(await waitFor(() => t.status().lastRun?.interruption !== undefined)).toBe(true)
+    const plan = t.s.plan(t.planId)
+    const part = t.s.d.doc.parts[t.s.partId]!
+    expect(runCutMarks(t.status().lastRun, plan, part)).toEqual({
+      kind: 'none',
+      reason: 'resumePending',
+    })
+    t.client.dismissInterruption()
+    const last = t.status().lastRun!
+    const stoppedIn = ops.indexOf(last.planOperationId!)
+    expect(stoppedIn).toBeGreaterThan(0)
+    expect(last.finished).toEqual(ops.slice(0, stoppedIn))
+    expect(runCutMarks(last, plan, part).kind).toBe('offer')
+  })
 
   it('a pulled cable mid-run fails the job (machine.connection) and closes the connection', async () => {
     const r = await realRun()

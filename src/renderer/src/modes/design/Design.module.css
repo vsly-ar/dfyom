@@ -2236,3 +2236,12 @@
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
+
+/* DF135 C2: a run's mark whose geometry was edited since (docs/modes/cut-state.md#editing-an-already-cut-operation) */
+.opCut[data-tone='warning'] {
+  color: var(--text);
+}
+
+.opCut[data-tone='warning'] svg {
+  color: var(--warning);
+}

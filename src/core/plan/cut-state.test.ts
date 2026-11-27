@@ -385,3 +385,83 @@ describe('cut state C1: marks', () => {
     ).toEqual([opOf(s.plan(second), 'facing1').id])
   })
 })
+
+describe('cut state C2: marks from Run (Q196–Q198 as revised)', () => {
+  const cutChanged = (s: PlanSetup, planId: string) =>
+    (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }).warnings.filter(
+      (w) => w.code === 'plan.cutChanged',
+    )
+
+  it('a run mark records its source, date and geometry; editing it warns plan.cutChanged', async () => {
+    const { s, svc } = await setup()
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const program = expectOk(await exportPlan(s.d.doc, planId, svc as never)).text
+    await s.run('design.part.update', {
+      partId: s.partId,
+      alreadyCut: ['facing1', 'pocket1'],
+      cutByRun: planId,
+    })
+    await s.run('project.apply', {})
+    const part = () => s.d.doc.parts[s.partId]!
+    expect(part().alreadyCutMarks?.['pocket1']).toEqual({
+      by: 'run',
+      at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+      fingerprint: expect.any(String),
+    })
+    const pocket = opOf(s.plan(planId), 'pocket1').id
+    expect(cutChanged(s, planId)).toEqual([])
+    // a rename re-describes nothing that was cut
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', name: 'P2' })
+    await s.run('project.apply', {})
+    expect(cutChanged(s, planId)).toEqual([])
+    // deeper than the run cut it: a warning, kept on the cut operation (a cut finding)
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '7' })
+    await s.run('project.apply', {})
+    expect(cutChanged(s, planId)).toMatchObject([
+      {
+        severity: 'warning',
+        planOperationId: pocket,
+        rule: 'cutChanged',
+        message: expect.stringMatching(/^P2 .*changed since the run cut it$/),
+      },
+    ])
+    // back as cut: no warning; cleared: no marks, the program as before (not in the hash)
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
+    await s.run('project.apply', {})
+    expect(cutChanged(s, planId)).toEqual([])
+    await s.run('design.pocket.update', {
+      partId: s.partId,
+      operationId: 'pocket1',
+      name: 'Pocket 1',
+    })
+    await alreadyCut(s, [])
+    expect(part().alreadyCutMarks).toBeUndefined()
+    expect(expectOk(await exportPlan(s.d.doc, planId, svc as never)).text).toBe(program)
+  })
+
+  it('hand marks never warn; marks follow their ids; an unknown plan is refused', async () => {
+    const { s } = await setup()
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    await alreadyCut(s, ['pocket1'])
+    expect(s.d.doc.parts[s.partId]!.alreadyCutMarks?.['pocket1']).toMatchObject({ by: 'hand' })
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '7' })
+    await s.run('project.apply', {})
+    expect(cutChanged(s, planId)).toEqual([])
+    // a run adds facing1: pocket1 keeps its hand mark
+    await s.run('design.part.update', {
+      partId: s.partId,
+      alreadyCut: ['facing1', 'pocket1'],
+      cutByRun: planId,
+    })
+    const marks = s.d.doc.parts[s.partId]!.alreadyCutMarks!
+    expect([marks['facing1']?.by, marks['pocket1']?.by]).toEqual(['run', 'hand'])
+    await s.run('design.operation.remove', { partId: s.partId, operationId: 'pocket1' })
+    expect(Object.keys(s.d.doc.parts[s.partId]!.alreadyCutMarks!)).toEqual(['facing1'])
+    const e = await s.failWith(
+      'design.part.update',
+      { partId: s.partId, alreadyCut: ['facing1'], cutByRun: 'nope' },
+      'input.malformed',
+    )
+    expect(e.issues[0]).toMatchObject({ rule: 'unknownPlan' })
+  })
+})

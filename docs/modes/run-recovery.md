@@ -47,7 +47,7 @@ So "where it stopped" is a **range**: from the executing line at the last report
 
 ## What DFYOM keeps
 
-**In memory** (main, `MachineClient`), extending `RunStatus.lastRun` ([run-machine.md M5](run-machine.md#section-resume-m5)): an `interruption` record from the moment a run ends unintentionally.
+**In memory** (main, `MachineClient`), extending `RunStatus.lastRun` ([run-machine.md M5](run-machine.md#section-resume-m5)): an `interruption` record from the moment a run ends unintentionally. DF135 C2 adds `finished` (the plan operations the run finished: all for `done`, else those before the operation it stopped in, plus those a resumed run had finished) and `real` (a serial connection), from which Run marks operations already cut ([cut-state.md § Implementation (C2)](cut-state.md#implementation-c2)).
 
 **On disk**, the **run journal** `<appData>/run-journal.json` ([persistence.md § Files and folders](../architecture/persistence.md#files-and-folders); one per app instance, since there is one machine connection per instance), so a crash or power loss of the computer loses at most a second ([Q159](#questions-for-the-user)):
 

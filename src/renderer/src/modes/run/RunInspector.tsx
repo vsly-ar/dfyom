@@ -35,6 +35,7 @@ import { Dro } from './Dro'
 import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
+import { CutMarksNote } from './CutMarks'
 import { RecoveryPanel } from './RecoveryPanel'
 import { RunFileSection } from './RunFile'
 import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
@@ -216,6 +217,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             />
           ) : null}
           {job === undefined && ended && !recovering ? <EndNote ended={ended} /> : null}
+          {/* DF135 C2: the run's finished operations marked or offered as already cut */}
+          {job === undefined && !recovering ? <CutMarksNote doc={doc} /> : null}
           {/* DF129 RC5: the recovery panel in place of "Start run" after an interrupted run */}
           {recovering ? <RecoveryPanel doc={doc} /> : null}
           {/* Q171: after a Stop or a failure, the machine's power may have gone unseen */}
