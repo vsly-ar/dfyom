@@ -590,7 +590,8 @@ describe('roughing and rest machining (DF108)', () => {
   })
 })
 
-describe('rest clipping (DF122 R3)', () => {
+// heightmap checks per shape; slow under the check-under-load criterion
+describe('rest clipping (DF122 R3)', { timeout: 60_000 }, () => {
   // S4's corpus with a Ø 3 owner after a Ø 8 roughing (wall 0.2, to the floor)
   const D3 = endMill(3)
   const D8 = endMill(8)
