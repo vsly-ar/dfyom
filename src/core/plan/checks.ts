@@ -29,6 +29,8 @@ export const PLAN_WARNING_CODES = [
   'plan.restMaterial',
   // DF122: docs/modes/roughing.md#stock-to-leave-wall-and-floor
   'plan.roughingWallThin',
+  // DF136 H2 (Q208): docs/modes/pattern-presets.md#implementation-h2
+  'plan.thinWallFinish',
   'plan.stepoverClamped',
   'plan.designToolReplaced',
   'plan.designToolFailed',

@@ -110,7 +110,7 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
   required: [],
   // the heatsink recipe (pattern-presets.md § Agent API, Q210: no preset argument)
   addSummary:
-    'Add a pattern feature at the end of the part; it creates its operations. Heatsink fins: cell rectangle (length = face, width = slot, rotation 90°), square lattice, gap = fin, margin [wall, 0]; pins: invert.',
+    'Add a pattern feature at the end of the part; it creates its operations. Heatsink fins: cell rectangle (length = face, width = slot, rotation 90°), square lattice, gap = fin, margin [wall, 0]; pins: cell = pin (square or circle), square or staggered lattice, gap = channel, margin 0, invert.',
   // listed as sketches: the full args are add's (tools/list budget, P2)
   updateParams: {
     cell: listedAs('object', 'design.pattern.add cell'),

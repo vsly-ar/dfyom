@@ -3,7 +3,10 @@
  * plan's tool leaves material in a pocket's necks, and `plan.stepoverClamped` (info, T-H) where the
  * region generators clamp the stepover to the tool radius. They need the 2D port, so only
  * `plan.warning.list` (which has `services.region2d`) lists them; neither ever blocks.
- * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
+ * Heatsink presets H2 (Q208): `plan.thinWallFinish` (info, at Finish stepdown) on a pattern pocket
+ * whose finishing ring runs round a web (inverted: island) of at most `THIN_WALL` in levels deeper
+ * than `THIN_WALL`; its fix sets the finish stepdown to `THIN_WALL`.
+ * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2, docs/modes/pattern-presets.md#implementation-h2
  */
 import { toGeometryInput } from '../design/geometry-input'
 import { isGeneralShape, type Operation } from '../design/operation'
@@ -18,9 +21,17 @@ import { toolpathTool } from '../toolpath/inputs'
 import { clearingStep, stepoverClamped } from '../toolpath/region-pocket'
 import { profileStep, profileStepClamped } from '../toolpath/region-profile'
 import { findRestMaterial } from '../geometry/2d/rest-material'
+import { slotSplit } from '../geometry/slots'
+import { patternWebUnder } from '../design/pattern/pattern'
 import type { PlanWarning } from './checks'
 import { evaluateOperation } from './evaluate'
 import type { LoadedPlan } from './plan'
+
+/**
+ * Q208: a web this thin or thinner is finished in levels of at most this much (mm): a free-standing
+ * aluminium wall under 3 mm bends when one full-height finishing level loads it.
+ */
+export const THIN_WALL = 3
 
 /** Rounded for messages (params keep the exact value). */
 const mm = (v: number): string => String(Math.round(v * 1000) / 1000)
@@ -79,6 +90,7 @@ export function shapeFindings(plan: LoadedPlan, port: Region2dPort): PlanWarning
       }
       // DF108: a pattern's roughing leaves rest on purpose (its pocket cuts it)
       if (g.kind !== 'pocket' || g.roughing === true) continue
+      out.push(...thinWallFinish(plan, port, o, g, e.strategy, tool.diameter, planOperationId))
       // a pocket on the stock edge is cut as its open region (DF61): its rest inside the stock
       const R = tool.diameter / 2
       const face = localStock(g.direction ?? '+z', geometry.unwrap().stock)
@@ -106,4 +118,49 @@ export function shapeFindings(plan: LoadedPlan, port: Region2dPort): PlanWarning
     }
   }
   return out
+}
+
+/**
+ * Q208's hint: a pattern pocket (`<feature>_pocket`) with a finishing ring (an allowance, and a
+ * piece the slot rule does not take) whose narrowest web or island is at most `THIN_WALL`, finished
+ * in levels deeper than `THIN_WALL`: "finish in steps of at most 3 mm" at Finish stepdown.
+ */
+function thinWallFinish(
+  plan: LoadedPlan,
+  port: Region2dPort,
+  o: Operation,
+  g: Extract<OperationGeometry, { kind: 'pocket' }>,
+  strategy: ReturnType<typeof evaluateOperation>['strategy'],
+  diameter: number,
+  planOperationId: string,
+): PlanWarning[] {
+  if (strategy.kind !== 'pocket' || o.owner.isNone()) return []
+  const { featureId, role } = o.owner.unwrap()
+  if (role !== 'pocket' || strategy.finishAllowance <= 0) return []
+  const steps = strategy.finishStepdown
+  if (steps <= THIN_WALL + 1e-9) return []
+  // the slot rule's slots have no finishing ring (H1)
+  const own = pocketRegion(g).region
+  if (slotSplit(own, diameter, strategy.finishAllowance).region.pieces.length === 0) return []
+  // a web of exactly 3 mm counts (the web is bisected to 0.01 mm)
+  const web = patternWebUnder(featureId, plan.dto.design.part.shapes ?? [], port, THIN_WALL + 0.01)
+  if (web === undefined || web.width <= 0) return []
+  const what = web.island ? 'pins' : 'webs'
+  return [
+    {
+      code: 'plan.thinWallFinish',
+      severity: 'info',
+      planOperationId,
+      field: 'strategy.finishStepdown',
+      rule: 'thinWallFinish',
+      message: `${featureId}: ${what} of ${mm(web.width)} mm are finished in levels of ${mm(steps)} mm; finish thin walls in steps of at most ${THIN_WALL} mm (finishStepdown)`,
+      params: {
+        feature: featureId,
+        web: web.width,
+        what,
+        finishStepdown: steps,
+        suggested: THIN_WALL,
+      },
+    },
+  ]
 }

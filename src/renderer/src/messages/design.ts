@@ -215,10 +215,18 @@ export const designMessages = {
       presetGroupLabel: 'Preset group',
       presetGroups: { decorative: 'Decorative', heatsink: 'Heatsink' } as Record<string, string>,
       heatsinkDescription:
-        'Fills the cell, lattice, gap, margin and depth from fin sizes, and sets the slot tool. Nothing stays linked.',
-      heatsinkNames: { straightFins: 'Straight fins' } as Record<string, string>,
+        'Fills the cell, lattice, gap, margin and depth from fin or pin sizes, and sets the tool. Nothing stays linked.',
+      heatsinkNames: {
+        straightFins: 'Straight fins',
+        squarePins: 'Square pin fins',
+        roundPins: 'Round pin fins',
+        staggeredPins: 'Staggered pin fins',
+      } as Record<string, string>,
       heatsinkDescriptions: {
         straightFins: 'Parallel slots across the face, open at both ends.',
+        squarePins: 'A grid of square pins left standing, open all round.',
+        roundPins: 'A grid of round pins left standing, open all round.',
+        staggeredPins: 'Round pins in offset rows, open all round.',
       } as Record<string, string>,
       heatsinkNumbers: (fin: string, slot: string, height: string) =>
         `fins ${fin} · slots ${slot} · ${height} high`,
@@ -261,6 +269,44 @@ export const designMessages = {
       finsWalls: (wall: string) => `walls ${wall}`,
       tallFins: (ratio: number) =>
         `Fins taller than 8 × their thickness (1:${ratio}) chatter and bend.`,
+      /** H2: the pin-fin cards and steps. */
+      pinNumbers: (pin: string, channel: string, height: string) =>
+        `pins ${pin} · channels ${channel} · ${height} high`,
+      pinSize: 'Pin size',
+      pinDiameter: 'Pin diameter',
+      channel: 'Channel',
+      pinHeight: 'Pin height',
+      channelToolNone: 'No flat end mill ≤ the channel in the library',
+      channelCut: {
+        twice: 'Channel = tool: each channel is cut twice, once round each pin.',
+        finishing: 'Finishing pass round every pin.',
+        thinFinish: 'Finishing pass round every pin, thinner than the allowance.',
+        tooWide: 'The tool is wider than the channel.',
+      } as Record<string, string>,
+      /** The channel suggestion's fix (Ø + 0.5 mm: the second pass finishes). */
+      useChannel: (channel: string) => `Use ${channel}`,
+      pinFluteNote: (depth: string, flute: string, short: boolean) =>
+        short
+          ? `${depth} high needs ≥ ${depth} of flute; this tool has ${flute}: the shank rubs the pins.`
+          : `${depth} high, ${flute} of flute.`,
+      pinChipsNote: 'Blow the chips out of the channels (air blast or mist); 1–2 flutes.',
+      noPinFit: 'No pin fits: make the face larger, or the pins or channels smaller.',
+      /** "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm" (the pin read-out). */
+      pinsReadout: (
+        pins: number,
+        pin: string,
+        round: boolean,
+        height: string,
+        ratio: number,
+        base: string | undefined,
+      ) =>
+        [
+          `${pins === 1 ? '1 pin' : `${pins} pins`} ${round ? 'Ø ' : ''}${pin}`,
+          `${height} high (1:${ratio})`,
+          ...(base === undefined ? [] : [`base ${base}`]),
+        ].join(' · '),
+      pinsChannels: (channel: string, border: string) => `channels ${channel} · border ${border}`,
+      tallPins: (ratio: number) => `Pins taller than 8 × their size (1:${ratio}) chatter and bend.`,
     },
     /** The row menu's actions (dogfood DF16). */
     chamfer: 'Chamfer',
