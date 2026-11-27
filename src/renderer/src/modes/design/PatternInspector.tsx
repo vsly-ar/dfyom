@@ -70,6 +70,7 @@ import {
   type CurrentHeatsink,
   useFlatEndMills,
   type Group,
+  ReadoutList,
 } from './PatternPresetsDialog'
 import { adjustedNote, RoundField } from './RoundField'
 import { ToolField } from './ToolField'
@@ -566,6 +567,42 @@ export function PatternInspector({
   // H3: radial fins read out as slots with the fin at the hub
   const radialFins = ff === undefined ? undefined : radialReadout(ff)
   const currentHeatsink = ff === undefined ? undefined : currentCard(ff, fins, pins, radialFins)
+  // H4: a heatsink reads out as key/value rows, the same as the dialog step's Result
+  const len = (x: number) => lengthSource(x, units)
+  const heatsinkRows =
+    facts === undefined
+      ? undefined
+      : radialFins !== undefined
+        ? p.radialRows(
+            radialFins.slots,
+            len(radialFins.slot),
+            len(radialFins.hubFin),
+            len(radialFins.rimFin),
+            len(radialFins.height),
+            radialFins.ratio,
+            radialFins.base === undefined ? undefined : len(radialFins.base),
+          )
+        : fins !== undefined && ff !== undefined && ff.cell.kind === 'rectangle'
+          ? p.finsRows(
+              fins.slots,
+              len(Math.min(ff.cell.length, ff.cell.width)),
+              fins.fins,
+              len(fins.fin),
+              len(fins.height),
+              fins.ratio,
+              fins.base === undefined ? undefined : len(fins.base),
+            )
+          : pins !== undefined
+            ? p.pinsRows(
+                pins.pins,
+                len(pins.pin),
+                pins.kind !== 'square',
+                len(pins.channel),
+                len(pins.height),
+                pins.ratio,
+                pins.base === undefined ? undefined : len(pins.base),
+              )
+            : undefined
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -577,47 +614,19 @@ export function PatternInspector({
           onCommit={(name) => void update({ name }, 'name')}
         />
         <div className={styles['turnRow']}>
-          <p className={styles['muted']} data-pattern-readout>
-            {facts === undefined
-              ? ''
-              : radialFins !== undefined
-                ? [
-                    p.radialReadout(
-                      radialFins.slots,
-                      lengthSource(radialFins.slot, units),
-                      lengthSource(radialFins.hubFin, units),
-                      lengthSource(radialFins.height, units),
-                      radialFins.ratio,
-                      radialFins.base === undefined
-                        ? undefined
-                        : lengthSource(radialFins.base, units),
-                    ),
-                    p.radialRim(lengthSource(radialFins.rimFin, units)),
-                  ].join(' · ')
-                : fins !== undefined
-                  ? p.finsReadout(
-                      fins.slots,
-                      fins.fins,
-                      lengthSource(fins.fin, units),
-                      lengthSource(fins.height, units),
-                      fins.ratio,
-                      fins.base === undefined ? undefined : lengthSource(fins.base, units),
-                    )
-                  : pins !== undefined
-                    ? p.pinsReadout(
-                        pins.pins,
-                        lengthSource(pins.pin, units),
-                        pins.kind !== 'square',
-                        lengthSource(pins.height, units),
-                        pins.ratio,
-                        pins.base === undefined ? undefined : lengthSource(pins.base, units),
-                      )
-                    : p.readoutFull(
-                        facts.cells,
-                        facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
-                        facts.dropped,
-                      )}
-          </p>
+          {heatsinkRows !== undefined ? (
+            <ReadoutList rows={heatsinkRows} label={p.heatsinkReadout} data-pattern-readout />
+          ) : (
+            <p className={styles['muted']} data-pattern-readout>
+              {facts === undefined
+                ? ''
+                : p.readoutFull(
+                    facts.cells,
+                    facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
+                    facts.dropped,
+                  )}
+            </p>
+          )}
           <PatternPresetsDialog
             feature={feature}
             onApply={(preset) => void update({ ...preset.args }, 'cell')}
