@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { deg, feed, flatEndMillValues, len, num, rpm } from './library.fixture'
+import { None, Some, type Option } from '../../shared/result'
+import { presetHolderDTO, resolveHolder, type Holder } from './holder'
 import { taperHeights, Tool } from './tool'
 import { ToolValuesDtoSchema } from './tool.dto'
 
@@ -246,5 +248,48 @@ describe('Tool', () => {
     const e = expectErrCode(t.with({ type: 'bullNoseEndMill' }), 'model.invariant')
     expect(e.issues.map((i) => i.path.join('.'))).toEqual(['cornerRadius'])
     expect(expectOk(t.with({ name: 'Renamed' })).presets).toEqual(t.presets)
+  })
+})
+
+describe("a tool's own holder (tool-holder.md#model, DF132 H6)", () => {
+  const machineWith = (h: Option<Holder>) => Some({ holder: h })
+
+  it('round-trips a holder; a preset id alone fills the sizes; none by default', () => {
+    expect(expectOk(load(flat())).holder.isNone()).toBe(true)
+    const own = { ...flat(), holder: presetHolderDTO('er16') }
+    expect(expectOk(load(own)).toDTO()).toEqual(own)
+    const t = expectOk(load({ ...flat(), holder: { preset: 'er16' } }))
+    expect(t.toDTO().holder).toEqual(presetHolderDTO('er16'))
+    expect(t.holder.unwrap().nutDiameter.canonical).toBe(32)
+  })
+
+  it("checks the holder's rules below holder.", () => {
+    expect(issues({ ...flat(), holder: { nutDiameter: len('19') } })).toEqual([
+      ['holder.nutLength', 'required'],
+      ['holder.bodyDiameter', 'required'],
+    ])
+    expect(
+      issues({ ...flat(), holder: { ...presetHolderDTO('er11'), bodyDiameter: len('10') } }),
+    ).toEqual([['holder.bodyDiameter', 'atLeastNutDiameter']])
+  })
+
+  it('resolves tool override, then machine holder, then none', () => {
+    const er11 = expectOk(load({ ...flat(), holder: { preset: 'er11' } })).holder
+    const own = expectOk(load({ ...flat(), holder: { preset: 'er20' } }))
+    const plain = expectOk(load(flat()))
+    // the override wins over the machine's, and holds without a machine
+    expect(resolveHolder(own, machineWith(er11)).unwrap().preset.unwrap()).toBe('er20')
+    expect(resolveHolder(own, None).unwrap().preset.unwrap()).toBe('er20')
+    // no override: the machine's; neither: none
+    expect(resolveHolder(plain, machineWith(er11)).unwrap().preset.unwrap()).toBe('er11')
+    expect(resolveHolder(plain, machineWith(None)).isNone()).toBe(true)
+    expect(resolveHolder(plain, None).isNone()).toBe(true)
+    expect(resolveHolder(undefined, machineWith(er11)).isSome()).toBe(true)
+  })
+
+  it('with() keeps or removes the holder', () => {
+    const t = expectOk(load({ ...flat(), holder: { preset: 'er11' } }))
+    expect(expectOk(t.with({ name: 'Long reach' })).holder.isSome()).toBe(true)
+    expect(expectOk(t.with({ holder: None })).toDTO()).not.toHaveProperty('holder')
   })
 })

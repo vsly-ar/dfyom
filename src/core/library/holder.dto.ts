@@ -1,6 +1,6 @@
 /**
  * Persisted shape of a tool holder (collet nut and spindle body) on a machine; the tool's
- * override reuses it in slice H6. Shape only; domain rules live in holder.ts.
+ * override reuses it (slice H6). Shape only; domain rules live in holder.ts.
  * Doc: docs/modes/tool-holder.md#model
  */
 import { z } from 'zod'

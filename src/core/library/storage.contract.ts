@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { presetHolderDTO } from './holder'
-import { machineValues, stockValues, toeClampValues } from './library.fixture'
+import { flatEndMillValues, machineValues, stockValues, toeClampValues } from './library.fixture'
 import type { LibraryStorage } from './storage'
 
 const T = '2026-11-17T10:00:00.000Z'
@@ -59,6 +59,19 @@ export function libraryStorageContract(
       const { holder: _h, ...without } = machine
       expectOk(await s.put('machine', { ...without, revision: 2 }, 1))
       const again = expectOk(await s.get('machine', 'm')).unwrap()
+      expect(expectOk(again.content)).not.toHaveProperty('holder')
+    })
+
+    it("keeps a tool's own holder as stored (tool-holder.md#model, DF132 H6)", async () => {
+      const s = await make()
+      const holder = { ...presetHolderDTO('er16'), nutLength: presetHolderDTO('er11').nutLength }
+      const tool = { id: 't', revision: 1, updatedAt: T, ...flatEndMillValues(), holder }
+      expectOk(await s.put('tool', tool, null))
+      const got = expectOk(await s.get('tool', 't')).unwrap()
+      expect(expectOk(got.content)).toEqual(tool)
+      const { holder: _h, ...without } = tool
+      expectOk(await s.put('tool', { ...without, revision: 2 }, 1))
+      const again = expectOk(await s.get('tool', 't')).unwrap()
       expect(expectOk(again.content)).not.toHaveProperty('holder')
     })
 

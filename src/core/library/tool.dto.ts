@@ -3,6 +3,7 @@
  * Shape only; domain rules live in Tool / CuttingPreset. Doc: docs/architecture/library.md#tool
  */
 import { z } from 'zod'
+import { HolderDtoSchema } from './holder.dto'
 import { commonValuesShape, MaterialClassSchema, quantityDto } from './item'
 
 export const TOOL_TYPES = [
@@ -87,6 +88,8 @@ export const ToolValuesDtoSchema = z.object({
     ),
   toolMaterial: z.enum(TOOL_MATERIALS).optional(),
   coating: z.string().max(COATING_MAX).optional(),
+  // per-tool holder override (docs/modes/tool-holder.md#model, hardening DF132 H6)
+  holder: HolderDtoSchema.optional().describe("Overrides the machine's holder for this tool"),
   presets: z.array(CuttingPresetDtoSchema).default([]).describe('Feeds-and-speeds presets'),
 })
 export type ToolValuesDTO = z.output<typeof ToolValuesDtoSchema>

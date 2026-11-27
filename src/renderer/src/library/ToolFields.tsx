@@ -1,6 +1,6 @@
 // The tool form, shared by the Library window's editor (`full`: every field of library.md#tool in
 // the groups Geometry with the tool drawing, Presets, and Details collapsed: material, coating,
-// notes, DF1) and the quick "New tool…" dialog (`quick`: the fields v0.1 needs). Per-type fields
+// notes, DF1; DF132 H6: the tool's own holder, `HolderGroup`) and the quick "New tool…" dialog (`quick`: the fields v0.1 needs). Per-type fields
 // show for their type only (corner radius for a bull nose, point angle for a drill); a tapered ball
 // end mill's in vendor order with their read-outs (tapered-ball-nose.md § Library window, T3).
 // Doc: docs/conventions/ui-library-window.md#layout, L4
@@ -27,6 +27,7 @@ import {
   WithAside,
   type FormProps,
 } from './fields'
+import { HolderGroup, holderChoiceLabel } from './HolderGroup'
 import { PresetTable } from './PresetTable'
 import { ToolDrawing, type ToolDimension } from './ToolDrawing'
 import styles from './LibraryForm.module.css'
@@ -80,10 +81,22 @@ export const TOOL_FIELDS: readonly string[] = [
   'coating',
   'presets',
   'notes',
+  'holder',
+  'holder.preset',
+  'holder.nutDiameter',
+  'holder.nutLength',
+  'holder.bodyDiameter',
+  'holder.maxShank',
 ]
 
 /** The full form's collapsed Details group (DF1): secondary fields, the cutting geometry stays open. */
-const DETAIL_FIELDS: readonly string[] = ['overallLength', 'toolMaterial', 'coating', 'notes']
+const DETAIL_FIELDS: readonly string[] = [
+  'overallLength',
+  'toolMaterial',
+  'coating',
+  'notes',
+  ...TOOL_FIELDS.filter((f) => f.startsWith('holder')),
+]
 
 const DIMENSIONS: ReadonlySet<string> = new Set([
   'diameter',
@@ -128,6 +141,9 @@ export function ToolFields({
     [
       values.toolMaterial === undefined ? undefined : m.materials[values.toolMaterial],
       values.coating,
+      values.holder === undefined
+        ? undefined
+        : libraryMessages.tool.holder.summary(holderChoiceLabel(values.holder)),
     ]
       .filter((x) => x !== undefined && x !== '')
       .join(' · ') || undefined
@@ -312,6 +328,14 @@ export function ToolFields({
             onChange={(e) => set({ coating: e.target.value === '' ? undefined : e.target.value })}
           />
         </Field>
+        {/* DF132 H6: a tool in its own holder (an extension) overrides the machine's */}
+        <HolderGroup
+          variant="tool"
+          value={values.holder}
+          units={units}
+          messages={messages}
+          onChange={(holder) => set({ holder })}
+        />
         <NotesField
           value={values.notes}
           messages={messages('notes')}

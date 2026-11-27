@@ -5,7 +5,7 @@
 // tests. The Workholding tab (WL3): duplicate the built-in toe clamp, change a size, make it the
 // default. A tapered ball end mill (DF124 T3): typed in, read-outs (the groove width at 1 mm too) and
 // hint, saved and listed, then picked in a Line's tool field and an engraved pattern's Cut, whose
-// read-out shows its groove width (T3 follow-up). Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
+// read-out shows its groove width (T3 follow-up). A tool's own holder (DF132 H6) on the chamfer mill. Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
 // docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -156,6 +156,14 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   await editor.getByRole('textbox', { name: 'Notes' }).scrollIntoViewIfNeeded()
   await expect(editor.getByRole('combobox', { name: 'Tool material' })).toBeVisible()
   await render(page, lib, 'df1-tool-details')
+  // DF132 H6: the tool's own holder (it replaces the machine's), a preset filling the sizes
+  const holder = editor.getByRole('combobox', { name: 'Holder' })
+  await expect(holder).toHaveText("Machine's holder")
+  await holder.click()
+  await lib.getByRole('option', { name: 'ER16 nut' }).click()
+  await expect(input(editor, 'Nut diameter')).toHaveValue('32')
+  await input(editor, 'Nut length').scrollIntoViewIfNeeded()
+  await render(page, lib, 'df132-tool-holder')
   await editor.getByRole('button', { name: 'Save' }).click()
   // the saved row is listed a moment before the draft row goes: wait for the draft row to go
   await expect(grid.getByRole('row', { name: /Unsaved/ })).toHaveCount(0)
@@ -163,6 +171,9 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(row).toContainText('90°')
   await expect(row).not.toContainText('Unsaved')
+  // the saved tool keeps its holder
+  await expect(holder).toHaveText('ER16 nut')
+  await expect(input(editor, 'Body diameter')).toHaveValue('65')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

@@ -3,8 +3,9 @@
  * `.unmachined` (warning, one per operation, needs the 2D port), `.inPart` and `.partLoose` (warnings, W5,
  * `held.ts`), and on a setup's current toolpaths `.collision` (error), `.close` (warning) and
  * `.breakthrough` (error; DF132 H2: kind `holder` for the collet nut or spindle body), and
- * `plan.holder.unknown` (info: items but no holder on the machine). Errors block `plan.export` and
- * `run.job.start` of their setup (the export guard), never toolpath generation.
+ * `plan.holder.unknown` (info: items, no holder on the machine and a tool without its own, H6).
+ * Errors block `plan.export` and `run.job.start` of their setup (the export guard), never
+ * toolpath generation.
  * Doc: docs/modes/workholding.md#collision-check
  */
 import type { Region2dPort } from '../../geometry/2d/port'
@@ -13,11 +14,12 @@ import { toGeneratorInputs } from '../../toolpath/inputs'
 import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
 import { setupZero } from '../alignment'
 import { STICKOUT_CLEARANCE, type PlanWarning } from '../checks'
-import { HOLDER_PRESET_NAMES, type Holder } from '../../library/holder'
+import { HOLDER_PRESET_NAMES, resolveHolder, type Holder } from '../../library/holder'
+import type { Option } from '../../../shared/result'
 import type { PlanOperationInput } from '../inputs'
 import { aidName, planOpLabel } from '../labels'
 import type { LoadedPlan } from '../plan'
-import type { SetupDTO } from '../plan.dto'
+import type { PlanOperationDTO, SetupDTO } from '../plan.dto'
 import { checkWorkholding, type CheckOperation, type Collision } from './check'
 import type { HolderSizes } from './envelope'
 import { heldFindings } from './held'
@@ -53,8 +55,14 @@ export function staticWorkholdingFindings(plan: LoadedPlan, setupId?: string): P
     }
     // WL2: an item placed from a library device outside the device's range (warning)
     out.push(...rangeFindings(plan.dto, setup, h.stock))
-    // DF132 Q181: the clamps are checked against the tool only while the machine has no holder
-    if (h.prisms.length > 0 && plan.machine.mapOr(false, (m) => m.holder.isNone()))
+    // DF132 Q181: the clamps are checked against the tool only while the machine has no holder;
+    // H6: unless every tool of the setup carries its own
+    if (
+      h.prisms.length > 0 &&
+      plan.machine.mapOr(false, (m) => m.holder.isNone()) &&
+      (setup.operations.length === 0 ||
+        setup.operations.some((op) => operationHolder(plan, op).isNone()))
+    )
       out.push({
         code: 'plan.holder.unknown',
         severity: 'info',
@@ -95,8 +103,9 @@ export function checkOperations(
   const back = (tp: Toolpath) =>
     zx === 0 && zy === 0 ? tp : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] })
   return pairs.map(({ input, toolpath }) => {
-    // DF132 H2: the machine's holder and the operation's stickout make the stepped envelope
-    const holder = input.machine.andThen((m) => m.holder)
+    // DF132 H2: the holder (H6: the tool's own, else the machine's) and the operation's stickout
+    // make the stepped envelope
+    const holder = resolveHolder(input.tool, input.machine)
     return {
       planOperationId: input.planOperationId,
       tool: {
@@ -112,6 +121,19 @@ export function checkOperations(
       ...(input.stickoutNeeded === undefined ? {} : { stickoutNeeded: input.stickoutNeeded }),
     }
   })
+}
+
+/**
+ * The holder a plan operation's tool runs in (DF132 H6, `resolveHolder`): the tool copy's own
+ * override, else the plan machine's; none without a tool on the operation and on the machine.
+ */
+export function operationHolder(plan: LoadedPlan, op: PlanOperationDTO): Option<Holder> {
+  return resolveHolder(op.tool === undefined ? undefined : plan.tools.get(op.tool), plan.machine)
+}
+
+/** Whether any plan operation's tool runs in a holder (H6: its own or the machine's). */
+export function planHasHolder(plan: LoadedPlan): boolean {
+  return plan.operations.some((op) => operationHolder(plan, op).isSome())
 }
 
 /** A holder's sizes in mm and its short name for messages (tool-holder.md § Checks). */
@@ -366,7 +388,7 @@ export function planStickouts(
   port?: Region2dPort,
 ): Map<string, PlanStickout> {
   const out = new Map<string, PlanStickout>()
-  if (plan.machine.mapOr(true, (m) => m.holder.isNone())) return out
+  if (!planHasHolder(plan)) return out
   for (const setup of plan.setups) {
     if (setupWorkholding(setup, plan.stock).prisms.length === 0) continue
     const ready = (inputs ?? []).flatMap((input) => {
@@ -376,6 +398,8 @@ export function planStickouts(
     const zero = setupZero(plan, setup, port)
     const needs = setupStickouts(plan, setup, checkOperations(ready, zero), zero)
     for (const op of setup.operations) {
+      // H6: an operation whose tool runs in no holder keeps DF130's number (nothing to check)
+      if (operationHolder(plan, op).isNone()) continue
       const need = needs?.get(op.id)
       out.set(op.id, need === undefined ? { clamps: 'pending' } : { ...need, clamps: 'checked' })
     }

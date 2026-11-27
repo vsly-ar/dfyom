@@ -10,7 +10,7 @@ import type { OperationKind } from '../design/part.dto'
 import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
 import type { CuttingPreset, Tool } from '../library/tool'
-import { HOLDER_PRESET_NAMES, type Holder } from '../library/holder'
+import { HOLDER_PRESET_NAMES, resolveHolder, type Holder } from '../library/holder'
 import { Quantity } from '../quantity/quantity'
 import {
   feedFindings,
@@ -264,13 +264,12 @@ export function evaluateOperation(
     ))
       push(f, 'plan.check', severity)
   plan.machine.map((m) => feedFindings(feeds, m).forEach((f) => push(f, 'plan.machine', 'warning')))
-  // DF132 Q183: a shank the machine's collet cannot take (a sleeve or a wrong value is possible)
-  plan.machine
-    .andThen((m) => m.holder)
-    .map((h) => {
-      const f = shankFinding(t, h)
-      if (f !== undefined) push(f, 'plan.holder.shankTooLarge', 'warning')
-    })
+  // DF132 Q183: a shank the collet cannot take (a sleeve or a wrong value is possible); H6: the
+  // tool's own holder, else the machine's
+  resolveHolder(t, plan.machine).map((h) => {
+    const f = shankFinding(t, h)
+    if (f !== undefined) push(f, 'plan.holder.shankTooLarge', 'warning')
+  })
   for (const w of feeds.warnings)
     findings.push({
       code: w.code,

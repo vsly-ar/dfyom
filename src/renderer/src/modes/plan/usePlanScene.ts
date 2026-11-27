@@ -35,6 +35,7 @@ import {
   lengthText as summaryLength,
 } from '../../../../core/plan/workholding/items'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
+import { resolveHolder } from '../../../../core/library/holder'
 import { holderSizes } from '../../../../core/plan/workholding/findings'
 import { runStickoutNeeded, toolRuns } from '../../../../core/plan/tool-runs'
 import { linkedToolpaths } from '../../../../core/toolpath/links'
@@ -453,8 +454,12 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     // DF132 H5: the shown operation's holder ghost
     const ghostOp = shownHolderOperation(setup, selected, preview, data)
     const loaded = ghostOp === undefined ? undefined : loadedPlanOf(doc, plan)
-    const holder = loaded?.machine.andThen((m) => m.holder).mapOr(undefined, holderSizes)
     const tool = ghostOp?.tool === undefined ? undefined : loaded?.tools.get(ghostOp.tool)
+    // H6: the tool's own holder, else the machine's
+    const holder =
+      loaded === undefined
+        ? undefined
+        : resolveHolder(tool, loaded.machine).mapOr(undefined, holderSizes)
     const entry = ghostOp === undefined ? undefined : data.toolpaths[ghostOp.id]
     const current =
       entry?.toolpath != null && !entry.stale && entry.pendingApply !== true && !data.pendingApply

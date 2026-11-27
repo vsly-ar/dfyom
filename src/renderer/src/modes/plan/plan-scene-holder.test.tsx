@@ -2,7 +2,8 @@
 // project runtime: tool-holder.md's user case (a 25 mm toe clamp 9 mm from a 6 mm deep pocket, an
 // ER11 holder). With the tool's 25 mm stickout the ghost stands at the holder collision's first
 // hit, colliding; with the 36 mm the read-out names, at the stickout reason's move, neutral. None
-// with nothing or the setup selected, and none on a machine without a holder.
+// with nothing or the setup selected, and none on a machine without a holder; H6: a tool's own
+// holder draws its nut on a machine without one.
 // Doc: docs/modes/tool-holder.md#implementation-h5
 import { act, waitFor } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
@@ -13,7 +14,7 @@ import { createInProcessWorkers } from '../../../../core/commands/jobs'
 import { uiSource } from '../../../../core/commands/testing'
 import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
 import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
-import { planSetup } from '../../../../core/plan/plan.fixture'
+import { flat6, planSetup } from '../../../../core/plan/plan.fixture'
 import { createToolpathCache } from '../../../../core/toolpath/cache'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
@@ -63,7 +64,7 @@ const CLAMP = {
   top: '25',
 }
 
-async function holderScene(holder: object | undefined) {
+async function holderScene(holder: object | undefined, toolHolder?: object) {
   const region2d = nodeRegion2d()
   const svc = {
     region2d,
@@ -107,11 +108,19 @@ async function holderScene(holder: object | undefined) {
   const planId = await s.create({ machineLibraryItemId: machineId })
   const setup = s.plan(planId).setups[0]!
   const op = setup.operations[0]!
-  await s.run('plan.tool.assign', {
-    planId,
-    planOperationId: op.id,
-    toolLibraryItemId: s.tools.flat6,
-  })
+  // DF132 H6: the Flat 6 with its own holder (the override)
+  const toolId =
+    toolHolder === undefined
+      ? s.tools.flat6
+      : (
+          (await s.run('library.tool.add', {
+            values: {
+              ...libraryInput({ ...flat6(), name: 'Flat 6, own holder' }),
+              holder: toolHolder,
+            },
+          })) as { id: string }
+        ).id
+  await s.run('plan.tool.assign', { planId, planOperationId: op.id, toolLibraryItemId: toolId })
   await s.run('plan.workholding.set', { planId, setupId: setup.id, items: [CLAMP] })
   const generate = async () => {
     const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
@@ -166,6 +175,19 @@ describe('plan scene holder ghost (DF132 H5)', () => {
     expect(clear.tip[2]).toBeCloseTo(-6, 6)
     expect(clear.tip[0]).toBeGreaterThan(10)
     expect(clear.parts[1]).toEqual({ part: 'nut', radius: 9.5, zFrom: 36, zTo: 48 })
+  })
+
+  it("a tool's own holder (H6): the ghost on a machine without one, with the tool's nut", async () => {
+    const { opId, select } = await holderScene(undefined, { preset: 'er16' })
+    select(opId)
+    await waitFor(() => expect(probe.scene?.holder).toBeDefined())
+    const ghost = probe.scene!.holder!
+    expect(ghost.colliding).toBe(true)
+    expect(ghost.parts.map((p) => [p.part, p.radius, p.zFrom])).toEqual([
+      ['tool', 3, 0],
+      ['nut', 16, 25],
+      ['body', 32.5, 43],
+    ])
   })
 
   it('none on a machine without a holder', async () => {

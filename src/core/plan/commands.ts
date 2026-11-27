@@ -94,6 +94,7 @@ import { workholdingSet } from './workholding/commands'
 import { reresolveCopy } from './workholding/devices'
 import {
   dropShadowedShortStickout,
+  planHasHolder,
   planStickouts,
   workholdingFindings,
 } from './workholding/findings'
@@ -1545,7 +1546,8 @@ const operationList = defineQuery({
     const port = ctx.services.region2d
     // DF132 H3: the clamp term over the current toolpaths (tool-holder.md#minimum-stickout-gains-the-clamp-term)
     const cache = ctx.services.toolpaths
-    const holderChecked = plan.machine.mapOr(false, (m) => m.holder.isSome())
+    // H6: a tool's own holder counts as the machine's does
+    const holderChecked = planHasHolder(plan)
     const inputs =
       holderChecked && cache !== undefined
         ? planOperationInputs(doc, args.planId, undefined, port).mapOr<

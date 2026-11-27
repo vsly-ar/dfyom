@@ -380,6 +380,24 @@ describe('planLinks', () => {
       ).toBeCloseTo(9, 9)
     })
 
+    it("an operation's own holder (H6) overrides the setup's; a link keeps both operations' holders clear", () => {
+      // the first operation's tool in a slim extension (Ø4 nut: 2 + 2 short of the item, 30 long)
+      const SLIM = { nutDiameter: 4, nutLength: 30, bodyDiameter: 52, above: 5 }
+      const both = ops().map((o) => ({ ...o, holder: SLIM }))
+      // both slim: the nut misses the item and the body is far above it, the link stays low
+      expect(planLinks(both, settings({ obstacles: near, holder: ER11 })).links[0]!.level).toBe(2)
+      // the machine has none, the later operation's tool carries an ER11: its nut decides
+      const own = ops()
+      own[1] = { ...own[1]!, holder: ER11 }
+      expect(planLinks(own, settings({ obstacles: near })).links[0]!.level).toBeCloseTo(7, 9)
+      // one slim, one on the setup's ER11: the safe envelope of both, the ER11's floor
+      const mixed = [both[0]!, ops()[1]!]
+      expect(
+        planLinks(mixed, settings({ obstacles: near, holder: ER11 })).links[0]!.level,
+      ).toBeCloseTo(7, 9)
+      expect(planLinks(mixed, settings({ obstacles: near, holder: ER11 })).collisions).toEqual([])
+    })
+
     it('the workholding check agrees: no holder hit on the linked moves; without the floor or lowered, the nut hits', () => {
       const prisms = near.prisms
       const holder = { nutDiameter: 19, nutLength: 12, bodyDiameter: 52 }

@@ -33,6 +33,11 @@ export interface ProgramTool {
     readonly item: string
     readonly holder?: string
   }
+  /**
+   * DF132 H6: the tool's own holder (a library tool's override), as the header's holder line
+   * ("ER16 nut dia 32 x 18 mm, body dia 65 mm"); absent = the machine's (`workholding.holder`).
+   */
+  readonly holder?: string
 }
 
 /**
@@ -123,7 +128,10 @@ export interface SetupHeader {
   readonly workholding?: {
     readonly items: readonly string[]
     readonly margin: number
-    /** DF132 H3: the machine's holder ("ER11 nut dia 19 x 12 mm, body dia 52 mm"); absent = none. */
+    /**
+     * DF132 H3: the machine's holder ("ER11 nut dia 19 x 12 mm, body dia 52 mm"); absent = none,
+     * or (H6) every tool has its own (`ProgramTool.holder`).
+     */
     readonly holder?: string
   }
 }
