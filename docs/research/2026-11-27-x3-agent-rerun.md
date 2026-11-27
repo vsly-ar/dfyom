@@ -124,7 +124,7 @@ Severity follows [hardening.md Q54](../plans/hardening.md#questions-for-the-user
 
 ### F5 (S3, feeds): recommended presets trip their own checks
 
-**Partly fixed in hardening DF138:** the chip load range allows 0.1 % for rounding, so `feeds.rubbing` at 0.076194 vs 0.0762 is gone. **Deferred:** power and Z max in recommended presets (library presets resolve without the plan machine; [feeds-speeds.md § Final-value check](../architecture/feeds-speeds.md#final-value-check)). Design: hardening DF139, [feeds-speeds.md § Recommended presets on the plan machine](../architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139) (draft).
+**Partly fixed in hardening DF138:** the chip load range allows 0.1 % for rounding, so `feeds.rubbing` at 0.076194 vs 0.0762 is gone. **Done in hardening DF139:** a plan adapts recommended presets down to its machine ([feeds-speeds.md § Recommended presets on the plan machine](../architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139)). Rechecked on this plan's feeds: the four Flat 6 cuts' `feeds.powerExceeded` (stepdown 1.8 → 1.6 mm) and the chamfer plunge (2,286 → 1,500 mm/min) are gone. The countersink keeps one `feeds.powerExceeded`: at the chip-load floor (feed 4,572 → 2,744 mm/min) it still needs 0.43 kW of 0.3 kW, so the warning is real and now says the preset is already adapted.
 
 - **Evidence**, with all presets `recommended: true` for hardwood:
   - **`feeds.rubbing` on 5 operations:** chip load 0.076194 against the data minimum 0.0762. The recommended feed is rounded to a whole 2,743 mm/min, which puts it under the minimum.

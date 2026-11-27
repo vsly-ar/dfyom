@@ -24,7 +24,7 @@ import { Tool } from '../library/tool'
 import { ToolValuesDtoSchema, type ToolValuesDTO } from '../library/tool.dto'
 import { Quantity } from '../quantity/quantity'
 import { feedFindings } from './checks'
-import { resolveFeeds, type FeedsInput, type ResolvedFeeds } from './feeds'
+import { resolveFeeds, type FeedsInput, type ResolvedFeed, type ResolvedFeeds } from './feeds'
 import { flat6, planSetup } from './plan.fixture'
 
 /** The X3 rerun's machine (research note F5): a 500 W spindle, Z max 1500 mm/min. */
@@ -284,5 +284,91 @@ describe('plan commands: adapted recommended presets (DF139 A2)', () => {
         (w.code === 'feeds.powerExceeded' || w.rule === 'maxFeedRate'),
     )
     expect(f5).toEqual([])
+  })
+})
+
+describe('X3 recheck: the rerun plan’s feeds on the X3 machine (DF139 A4, research note F5)', () => {
+  // The seven operations of the X3 rerun (research note § Phase 2): Bottom facing, two partial
+  // outside profiles, drilling ×4 (Flat 2, helix) and countersinks ×4 (Chamfer 82); Top cavity
+  // pocket and outline profile. Clones share their operation's feeds, so one input per operation.
+  const countersinkDepth = 4.861 / 2 / Math.tan((41 * Math.PI) / 180)
+  const ops = (): Record<string, FeedsInput> => {
+    const t = x3Tools()
+    return {
+      facing: x3Input(t.flat6, { kind: 'facing', facingDepth: 1 }),
+      partialProfile1: x3Input(t.flat6, { kind: 'profile' }),
+      partialProfile2: x3Input(t.flat6, { kind: 'profile' }),
+      drilling: x3Input(t.flat2, { kind: 'drilling' }),
+      countersink: x3Input(t.chamfer82, { kind: 'chamfer', chamferDepth: countersinkDepth }),
+      cavity: x3Input(t.flat6, { kind: 'pocket' }),
+      outline: x3Input(t.flat6, { kind: 'profile' }),
+    }
+  }
+  /** The same input with the preset's values as the user's own: the rerun's resolution. */
+  const unadapted = (i: FeedsInput): FeedsInput => {
+    const own = expectOk(
+      Tool.fromDTO({
+        ...i.tool.toDTO(),
+        presets: i.tool.toDTO().presets.map((p) => ({ ...p, recommended: false })),
+      }),
+    )
+    return { ...i, tool: own, preset: Some(own.presets[0]!) }
+  }
+  const findings = (r: ResolvedFeeds) => [
+    ...r.warnings.filter((w) => w.severity === 'warning').map((w) => w.code),
+    ...machineRules(r).map((m) => `plan.machine ${m}`),
+  ]
+  const perOp = <T>(f: (r: ResolvedFeeds) => T, adapt: boolean) =>
+    Object.fromEntries(
+      Object.entries(ops()).map(([k, i]) => [k, f(resolveFeeds(adapt ? i : unadapted(i)))]),
+    )
+
+  it('before: the rerun’s findings (powerExceeded on 5 operations, the chamfer plunge)', () => {
+    expect(perOp(findings, false)).toEqual({
+      facing: [],
+      partialProfile1: ['feeds.powerExceeded'],
+      partialProfile2: ['feeds.powerExceeded'],
+      drilling: [],
+      countersink: ['feeds.powerExceeded', 'plan.machine plungeRate:maxFeedRate'],
+      cavity: ['feeds.powerExceeded'],
+      outline: ['feeds.powerExceeded'],
+    })
+  })
+
+  it('after: only the countersink keeps a power warning, which says the preset is adapted', () => {
+    expect(perOp(findings, true)).toEqual({
+      facing: [],
+      partialProfile1: [],
+      partialProfile2: [],
+      drilling: [],
+      countersink: ['feeds.powerExceeded'],
+      cavity: [],
+      outline: [],
+    })
+    const r = resolveFeeds(ops()['countersink']!)
+    const w = r.warnings.find((x) => x.code === 'feeds.powerExceeded')
+    expect(w?.message).toMatch(/even with the preset adapted/)
+  })
+
+  it('after: the adapted values only lower the stored ones', () => {
+    const adapted = perOp(
+      (r) =>
+        r.applicable.flatMap((f) => {
+          const v = r.fields[f].mapOr<ResolvedFeed | undefined>(undefined, (x) => x)
+          if (v?.adapted === undefined) return []
+          expect(v.value).toBeLessThan(v.adapted.from)
+          return [`${f} ${v.adapted.from} → ${v.value} (${v.adapted.reason})`]
+        }),
+      true,
+    )
+    expect(adapted).toEqual({
+      facing: [],
+      partialProfile1: ['stepdown 1.8 → 1.6 (power)'],
+      partialProfile2: ['stepdown 1.8 → 1.6 (power)'],
+      drilling: [],
+      countersink: ['feedRate 4572 → 2744 (power)', 'plungeRate 2286 → 1500 (maxFeedRateZ)'],
+      cavity: ['stepdown 1.8 → 1.6 (power)'],
+      outline: ['stepdown 1.8 → 1.6 (power)'],
+    })
   })
 })
