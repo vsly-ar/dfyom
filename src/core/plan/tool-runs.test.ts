@@ -1,7 +1,13 @@
 // Tool runs and tool changes per setup (hardening DF66).
 // Spec: docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
 import { describe, expect, it } from 'vitest'
-import { carriedTool, setupToolChanges, toolRuns } from './tool-runs'
+import {
+  carriedTool,
+  runStickoutNeeded,
+  setupToolChanges,
+  shownStickout,
+  toolRuns,
+} from './tool-runs'
 
 const op = (id: string, tool?: string) => ({ id, ...(tool === undefined ? {} : { tool }) })
 const ids = (runs: ReturnType<typeof toolRuns<ReturnType<typeof op>>>) =>
@@ -49,5 +55,22 @@ describe('tool changes per setup', () => {
     const none = [{ operations: [op('a')] }, { operations: [op('b')] }]
     expect(carriedTool(none, 1)).toBeUndefined()
     expect(setupToolChanges(none, 1)).toBe(1)
+  })
+})
+
+// docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+describe('the minimum stickout of a tool run (DF130)', () => {
+  it('is the largest of its operations, undefined when none is known', () => {
+    expect(runStickoutNeeded([5.7, 25.54, null, undefined, 12])).toBe(25.54)
+    expect(runStickoutNeeded([null, undefined])).toBeUndefined()
+    expect(runStickoutNeeded([])).toBeUndefined()
+  })
+
+  it('is shown rounded up to 0.1 mm or 0.01 in', () => {
+    expect(shownStickout(25.51, false)).toBe(25.6)
+    expect(shownStickout(25.5, false)).toBe(25.5)
+    expect(shownStickout(5.7000000001, false)).toBe(5.7)
+    expect(shownStickout(25.51, true)).toBe(1.01)
+    expect(shownStickout(25.4, true)).toBe(1)
   })
 })

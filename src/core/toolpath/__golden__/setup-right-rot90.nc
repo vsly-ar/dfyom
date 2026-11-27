@@ -8,13 +8,13 @@
 (Tool stays within the stock outline)
 (Keep clamps below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 4, dia 4 mm)
+(Tool 1: Flat 4, dia 4 mm, min stickout 17 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1)
-(DFYOM TOOL CHANGE 1: Flat 4, 4 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 4, 4 mm flat, min stickout 17 mm)
 M3 S12128
 (Set spindle to 12128 rpm)
 M0 ;Set spindle to 12128 rpm

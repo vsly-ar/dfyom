@@ -108,6 +108,14 @@
   overflow-wrap: anywhere;
 }
 
+/* DF130: the run's minimum stickout, a quiet fact under its operations */
+.stickout {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .carried {
   font-size: var(--text-xs);
   line-height: var(--lh-xs);

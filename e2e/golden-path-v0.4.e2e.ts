@@ -615,10 +615,10 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     'Profile 1',
   ])
   expect(program.match(/^\(DFYOM TOOL CHANGE \d+: .*\)$/gm)).toEqual([
-    '(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)',
-    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
+    '(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat, min stickout 11.5 mm)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat, min stickout 11.5 mm)',
     '(DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)',
-    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat, min stickout 11.5 mm)',
   ])
   expect(program).toContain('(Clones 3 #7)')
   expect(program).not.toContain('(Clones 3 #4)')

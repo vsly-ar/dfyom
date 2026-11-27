@@ -443,6 +443,10 @@ export const planMessages = {
     timeTitle: 'Estimated time, without tool changes',
     noTime: 'Generate toolpaths to see the time.',
     carried: (setup: string) => `Stays in the spindle from ${setup}: no change at the setup start.`,
+    /** DF130: the run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130). */
+    stickout: (length: string) => `Needs ≥ ${length} stickout`,
+    stickoutTitle:
+      'Deepest cut of this tool run + 5 mm for the collet nut: chuck the tool with at least this much out.',
     refused: (message: string) => `Not moved: ${message}`,
     /** DF69: the tool run's Z reference surface (docs/modes/z-reference.md#ui). */
     zFrom: 'Z from',

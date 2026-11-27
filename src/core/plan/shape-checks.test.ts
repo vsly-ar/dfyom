@@ -163,13 +163,19 @@ describe('tool checks of general shapes', () => {
       args: { side: 'inside', slotWidth: '6', tabs: { count: '0' } },
     })
     const found = ofOp(warnings(inside.s, inside.planId), inside.planOp)
-    expect(found.map((f) => [f.severity, f.rule])).toEqual([['error', 'openingSize']])
-    expect(found[0]!.message).toContain('opening')
+    // DF130: the 25 mm default stickout leaves the collet nut 4.5 mm over a 20.5 mm through cut
+    expect(found.map((f) => [f.severity, f.rule])).toEqual([
+      ['warning', 'shortStickout'],
+      ['error', 'openingSize'],
+    ])
+    expect(found[1]!.message).toContain('opening')
     const outside = await onePlan([rect('5', '5', '0')], {
       kind: 'profile',
       args: { side: 'outside', slotWidth: '6', tabs: { count: '0' } },
     })
-    expect(ofOp(warnings(outside.s, outside.planId), outside.planOp)).toEqual([])
+    expect(ofOp(warnings(outside.s, outside.planId), outside.planOp).map((f) => f.rule)).toEqual([
+      'shortStickout',
+    ])
   })
 
   it('a set helix diameter must fit the region’s narrowest width', async () => {

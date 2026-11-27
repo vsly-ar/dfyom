@@ -13,13 +13,13 @@
 (Workholding: Toe clamp 4: back X205 grip 10 top Z25)
 (Every move checked: 2 mm clear of the workholding)
 (Units: mm)
-(Tool 1: Long flat 6, dia 6 mm)
+(Tool 1: Long flat 6, dia 6 mm, min stickout 45.5 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z27
 (Pocket 1)
-(DFYOM TOOL CHANGE 1: Long flat 6, 6 mm flat)
+(DFYOM TOOL CHANGE 1: Long flat 6, 6 mm flat, min stickout 45.5 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm

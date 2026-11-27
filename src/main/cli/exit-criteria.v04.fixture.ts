@@ -514,7 +514,8 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   // lid's plan has no roughing feeds findings (nor any other). DF74: Flat 6's two profiles
   // finish 0.2 mm in plywood at 18,000 rpm; the finishing feed that keeps the preset's chip load
   // is held at the router's 5000 mm/min, which leaves 0.05 mm chips (under half the 0.127 mm
-  // minimum): a true finishing-rub warning per profile
+  // minimum): a true finishing-rub warning per profile. DF130: the chamfer mill's 8 mm stickout
+  // (its flute length) leaves the collet nut 4.44 mm over the 3.56 mm countersinks: shortStickout
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
@@ -524,6 +525,7 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
       .map((f) => [f.severity, f.rule, Math.round(Number(f.params['chipLoad']) * 1000)]),
   ).toEqual([
     ['warning', 'finishRubbing', 50],
+    ['warning', 'shortStickout', NaN],
     ['warning', 'finishRubbing', 50],
   ])
 

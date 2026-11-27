@@ -13,6 +13,7 @@ import type { CuttingPreset, Tool } from '../library/tool'
 import { Quantity } from '../quantity/quantity'
 import {
   feedFindings,
+  neededStickout,
   rigidityFindings,
   stockFindings,
   toolFindings,
@@ -63,6 +64,11 @@ export interface OperationEvaluation {
   readonly autoRequested: boolean
   /** Resolved stickout (mm): the plan's, else the tool's stickout, else its flute length. */
   readonly stickout: Option<number>
+  /**
+   * Minimum stickout (mm, DF130): the deepest cut + the collet nut clearance (`neededStickout`);
+   * None without a tool. Doc: docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+   */
+  readonly stickoutNeeded: Option<number>
   readonly strategy: ResolvedStrategy
   readonly feeds: Option<ResolvedFeeds>
   readonly findings: readonly PlanWarning[]
@@ -164,6 +170,7 @@ export function evaluateOperation(
       preset,
       autoRequested,
       stickout: None,
+      stickoutNeeded: None,
       strategy,
       feeds: None,
       findings,
@@ -239,7 +246,7 @@ export function evaluateOperation(
     push(f)
   if (aid?.kind === 'witnessMark')
     for (const f of markToolFindings(t, stickout, markDepth)) push(f, f.code, 'error')
-  // DF73, DF75: warnings, never disqualifying (plan-v0.1.md § Reach and rigidity warnings)
+  // DF75, DF130: warnings, never disqualifying (plan-v0.1.md § Reach and rigidity warnings)
   for (const f of rigidityFindings(checkInput)) push(f, 'plan.check', 'warning')
   if (port !== undefined)
     for (const { severity, ...f } of shapeToolFindings(
@@ -274,6 +281,7 @@ export function evaluateOperation(
     preset,
     autoRequested,
     stickout: Some(stickout),
+    stickoutNeeded: Some(neededStickout(checkInput)),
     strategy,
     feeds: Some(feeds),
     findings,

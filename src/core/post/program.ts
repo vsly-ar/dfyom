@@ -18,6 +18,11 @@ export interface ProgramTool {
   /** Tapered ball end mill only: the ball Ø (mm) and the angle per side (degrees), for its description. */
   readonly tipDiameter?: number
   readonly taperAngle?: number
+  /**
+   * The tool run's minimum stickout (mm, hardening DF130) for the header tool line and the
+   * tool-change messages; absent = not written (grbl.md#pause-messages-hardening-df63).
+   */
+  readonly stickoutNeeded?: number
 }
 
 /**

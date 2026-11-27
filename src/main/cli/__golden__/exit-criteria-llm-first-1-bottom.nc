@@ -12,15 +12,15 @@
 (Workholding: Toe clamp 4: back X205 grip 10 top Z25)
 (Every move checked: 2 mm clear of the workholding)
 (Units: mm)
-(Tool 1: Long flat 6, dia 6 mm)
-(Tool 2: Flat 2, dia 2 mm, Z0 on Facing 1 floor)
-(Tool 3: Chamfer 82, dia 12 mm, Z0 on Facing 1 floor)
+(Tool 1: Long flat 6, dia 6 mm, min stickout 10.2 mm)
+(Tool 2: Flat 2, dia 2 mm, Z0 on Facing 1 floor, min stickout 10 mm)
+(Tool 3: Chamfe, dia 12 mm, Z0 on Facing 1 floor, min stickout 8.8 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z27
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Long flat 6, 6 mm flat)
+(DFYOM TOOL CHANGE 1: Long flat 6, 6 mm flat, min stickout 10.2 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm
@@ -791,7 +791,7 @@ X125 Y100
 (Z0 for tool 2: Facing 1 floor, 1.00 below the stock top)
 (Touch off Z here, X125 Y100: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 2, 2 mm flat)
+(DFYOM TOOL CHANGE 2: Flat 2, 2 mm flat, min stickout 10 mm)
 M0 ;Stop spindle, install T2 Flat 2, 2 mm flat, then zero Z
 G90 G94 G17 G21
 G54
@@ -1270,7 +1270,7 @@ X125 Y100
 (Z0 for tool 3: Facing 1 floor, 1.00 below the stock top)
 (Touch off Z here, X125 Y100: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 3: Chamfer 82, 12 mm chamfer)
+(DFYOM TOOL CHANGE 3: Chamfer 82, 12 mm chamfer, min stickout 8.8 mm)
 M0 ;Stop spindle, install T3 Chamfer 82, 12 mm chamfer, then zero Z
 G90 G94 G17 G21
 G54

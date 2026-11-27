@@ -8,16 +8,16 @@
 (Tool reaches past stock: left 7, right 7, front 1, back 1 mm)
 (Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 6, dia 6 mm)
-(Tool 2: Drill 6, dia 6 mm, Z0 on Facing 1 floor)
-(Tool 3: Flat 4, dia 4 mm, Z0 on Facing 1 floor)
-(Tool 4: Bull 6, dia 6 mm, Z0 on Facing 1 floor)
+(Tool 1: Flat 6, dia 6 mm, min stickout 25.5 mm)
+(Tool 2: Drill, dia 6 mm, Z0 on Facing 1 floor, min stickout 25.5 mm)
+(Tool 3: Flat 4, dia 4 mm, Z0 on Facing 1 floor, min stickout 17.5 mm)
+(Tool 4: Bull 6, dia 6 mm, Z0 on Facing 1 floor, min stickout 13.5 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 5.5 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm
@@ -72,7 +72,7 @@ X50 Y30
 (Z0 for tool 2: Facing 1 floor, 0.50 below the stock top)
 (Touch off Z here, X50 Y30: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Drill 6, 6 mm drill)
+(DFYOM TOOL CHANGE 2: Drill 6, 6 mm drill, min stickout 25.5 mm)
 M0 ;Stop spindle, install T2 Drill 6, 6 mm drill, then zero Z
 G90 G94 G17 G21
 G54
@@ -112,7 +112,7 @@ X50 Y30
 (Z0 for tool 3: Facing 1 floor, 0.50 below the stock top)
 (Touch off Z here, X50 Y30: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 3: Flat 4, 4 mm flat)
+(DFYOM TOOL CHANGE 3: Flat 4, 4 mm flat, min stickout 17.5 mm)
 M0 ;Stop spindle, install T3 Flat 4, 4 mm flat, then zero Z
 G90 G94 G17 G21
 G54
@@ -208,7 +208,7 @@ X50 Y30
 (Z0 for tool 4: Facing 1 floor, 0.50 below the stock top)
 (Touch off Z here, X50 Y30: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 4: Bull 6, 6 mm bull nose)
+(DFYOM TOOL CHANGE 4: Bull 6, 6 mm bull nose, min stickout 13.5 mm)
 M0 ;Stop spindle, install T4 Bull 6, 6 mm bull nose, then zero Z
 G90 G94 G17 G21
 G54
@@ -726,7 +726,7 @@ X17 Y30
 (Z0 for tool 1: Facing 1 floor, 0.50 below the stock top)
 (Touch off Z here, X17 Y30: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 25.5 mm)
 M0 ;Stop spindle, install T1 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
