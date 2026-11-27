@@ -72,6 +72,7 @@ import { SetupInspector } from './SetupInspector'
 import { useCancelGesture } from '../../shell/hooks'
 import { usePlanCommand, usePlanData, usePlanState, usePlanStore } from './plan-store'
 import styles from './Plan.module.css'
+import { AdaptedFeeds, type AdaptLimits } from './AdaptedFeeds'
 import { StrategyGroup } from './StrategyGroup'
 import { ZRefFields } from './ZRefFields'
 import { AidFields } from './AidFields'
@@ -130,6 +131,30 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 type MachineLimits = {
   maxFeedRate?: { x: QuantityDTO; y: QuantityDTO }
   spindle?: { maxSpeed?: QuantityDTO }
+}
+
+/** The plan machine's limits for the adapted-preset tooltips (DF139). */
+function adaptLimits(plan: PlanDTO): AdaptLimits {
+  const m = plan.snapshots.find((s) => s.id === plan.machine)?.values as
+    | {
+        maxFeedRate?: { x?: QuantityDTO; y?: QuantityDTO; z?: QuantityDTO }
+        spindle?: { minSpeed?: QuantityDTO; maxSpeed?: QuantityDTO; power?: QuantityDTO }
+      }
+    | undefined
+  const num = (d: QuantityDTO | undefined) =>
+    d === undefined ? undefined : quantityOf(d)?.canonical
+  const x = num(m?.maxFeedRate?.x)
+  const y = num(m?.maxFeedRate?.y)
+  const entries = {
+    minSpeed: num(m?.spindle?.minSpeed),
+    maxSpeed: num(m?.spindle?.maxSpeed),
+    maxFeedXY: x === undefined || y === undefined ? undefined : Math.min(x, y),
+    maxFeedZ: num(m?.maxFeedRate?.z),
+    power: num(m?.spindle?.power),
+  }
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, v]) => v !== undefined),
+  ) as AdaptLimits
 }
 
 /** The plan part's stock and its machine's max XY feed and spindle speed (step caps). */
@@ -716,6 +741,17 @@ function OperationInspector({
               />
             </Slot>
           ))}
+          <AdaptedFeeds
+            machine={snapshotName(plan, plan.machine)}
+            fields={fields.flatMap((f) => {
+              const v = view.feeds[f]
+              return v?.adapted === undefined || op.overrides[f] !== undefined
+                ? []
+                : [{ field: f, from: v.adapted.from, to: v.value, reason: v.adapted.reason }]
+            })}
+            limits={adaptLimits(plan)}
+            units={units}
+          />
           {view.chipLoad !== null ? (
             <p className={styles['muted']}>{t.chipLoad(lengthText(view.chipLoad, units))}</p>
           ) : null}
