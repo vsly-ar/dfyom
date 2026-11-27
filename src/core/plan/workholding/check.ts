@@ -2,8 +2,10 @@
  * The collision check of a setup's program against its workholding (WH-E, WH-F): every move
  * (rapids, links between operations, leads, ramps, helices, expanded drill cycles) against every
  * prism, with the tool as a vertical cylinder of radius max(cutting Ø, shank Ø) / 2 from its tip
- * upward; plus breakthrough into a fixture plate.
- * Doc: docs/modes/workholding.md#collision-check
+ * upward; plus breakthrough into a fixture plate. With a holder and a stickout (DF132 H2) the
+ * collet nut and the spindle body above the tool are checked too (`toolEnvelope`): a hit by them
+ * alone is kind `holder`.
+ * Doc: docs/modes/workholding.md#collision-check, docs/modes/tool-holder.md#checks
  *
  * Pure and headless; mm in the setup's WCS. Lines are exact; arcs and helices exact in XY to
  * `ARC_TOLERANCE` (chords, the sagitta subtracted) with Z taken as the move's lowest Z.
@@ -11,6 +13,8 @@
 import type { Vec2 } from '../../geometry/model'
 import type { Move, Vec3 } from '../../toolpath/model'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../../toolpath/stats'
+import { STICKOUT_CLEARANCE } from '../checks'
+import { toolEnvelope, type HolderSizes } from './envelope'
 import { segmentDistance, type Prism } from './obstacles'
 
 /** Chord sagitta of arcs in the check (mm). */
@@ -23,6 +27,10 @@ export interface CheckTool {
   readonly diameter: number
   /** Shank diameter (mm); absent = the cutting diameter. */
   readonly shankDiameter?: number
+  /** Stickout from the nut face (mm); with `holder` the nut and body are checked (DF132). */
+  readonly stickout?: number
+  /** The holder the tool sits in (DF132); absent = the WH-F cylinder only. */
+  readonly holder?: HolderSizes
 }
 
 /** One operation of the program, in machining order. */
@@ -43,7 +51,8 @@ export interface CheckInput {
   readonly fixturePlate?: { readonly itemId: string; readonly stockBottom: number }
 }
 
-export type CollisionKind = 'rapid' | 'link' | 'cut'
+/** `holder`: the tool clears the item but the collet nut or the spindle body does not (DF132). */
+export type CollisionKind = 'rapid' | 'link' | 'cut' | 'holder'
 
 export interface Collision {
   readonly kind: CollisionKind
@@ -56,6 +65,14 @@ export interface Collision {
   readonly lowestZ: number
   /** Gap between the tool envelope and the item (mm, 0 = touching or inside). */
   readonly gap: number
+  /** Kind `holder`: the part that hits and its lowest Z there (the tip's is `lowestZ`). */
+  readonly part?: 'nut' | 'body'
+  readonly partZ?: number
+  /**
+   * Kind `holder`: the stickout that lifts the nut and body `STICKOUT_CLEARANCE` above the item
+   * on every colliding move of the operation (mm, not rounded).
+   */
+  readonly needed?: number
 }
 
 export interface WorkholdingCheck {
@@ -128,12 +145,16 @@ export function checkWorkholding(input: CheckInput): WorkholdingCheck {
   const close: Collision[] = []
   const breakthrough: Collision[] = []
   const seen = new Set<string>()
+  // DF132: the first holder collision per operation and item, by its index in `collisions`
+  const firstHolder = new Map<string, number>()
   let count = 0
   let minGap: number | null = null
   let pos: Vec3 | undefined
   const eps = 1e-6
   for (const op of input.operations) {
-    const R = Math.max(op.tool.diameter, op.tool.shankDiameter ?? 0) / 2
+    const envelope = toolEnvelope(op.tool, op.tool.stickout, op.tool.holder)
+    const R = envelope[0]!.radius
+    const holder = envelope.slice(1)
     const moves: Exclude<Move, { kind: 'drill' }>[] = []
     for (const m of op.moves)
       if (m.kind === 'drill') {
@@ -188,7 +209,53 @@ export function checkWorkholding(input: CheckInput): WorkholdingCheck {
             if (nearest === undefined || gap < nearest.gap) nearest = { gap, at, lowest }
           }
         }
-        if (hit !== undefined) {
+        // DF132: the nut and the body, each from its height above the tip (the wider body covers
+        // the nut's top, the tool keeps WH-F's cylinder to infinity)
+        let held:
+          { gap: number; at: Vec3; lowest: number; part: 'nut' | 'body'; zFrom: number } | undefined
+        let needed = 0
+        if (hit === undefined)
+          for (const e of holder) {
+            if (e.part === 'tool') continue
+            for (const s of segs) {
+              const part = below(s, top - e.zFrom)
+              if (part === undefined) continue
+              const d = segmentDistance(p.footprint, [part.a[0], part.a[1]], [part.b[0], part.b[1]])
+              const gap = Math.max(0, d.distance - s.slack - e.radius)
+              if (gap >= margin - GAP_TOLERANCE) continue
+              const lowest = Math.min(part.a[2], part.b[2])
+              // the nut before the body (it is lower), then the smallest gap
+              if (held === undefined || (e.part === held.part ? gap < held.gap : e.part === 'nut'))
+                held = { gap, at: [d.at[0], d.at[1], lowest], lowest, part: e.part, zFrom: e.zFrom }
+              // the stickout that lifts this part STICKOUT_CLEARANCE above the item here
+              const above = e.zFrom - (op.tool.stickout ?? 0)
+              needed = Math.max(needed, p.zMax - lowest - above + STICKOUT_CLEARANCE)
+            }
+          }
+        if (hit === undefined && held !== undefined) {
+          count++
+          const key = `c:${op.planOperationId}:${p.itemId}:holder`
+          const first = firstHolder.get(key)
+          if (first === undefined) {
+            const c: Collision = {
+              kind: 'holder',
+              planOperationId: op.planOperationId,
+              itemId: p.itemId,
+              moveIndex: index,
+              at: held.at,
+              lowestZ: held.lowest,
+              gap: held.gap,
+              part: held.part,
+              partZ: held.lowest + held.zFrom,
+              needed,
+            }
+            firstHolder.set(key, collisions.length)
+            collisions.push(c)
+          } else {
+            const c = collisions[first]!
+            if (needed > (c.needed ?? 0)) collisions[first] = { ...c, needed }
+          }
+        } else if (hit !== undefined) {
           count++
           const key = `c:${op.planOperationId}:${p.itemId}:${kind}`
           if (!seen.has(key)) {

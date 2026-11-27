@@ -76,6 +76,18 @@ export const HOLDER_PRESETS: Readonly<
   },
 }
 
+/** Short preset names for plan messages ("Collet nut (ER11, Ø19)", DF132 H2). */
+export const HOLDER_PRESET_NAMES: Readonly<Record<HolderPresetId, string>> = {
+  er11: 'ER11',
+  er11Mini: 'ER11 mini',
+  er16: 'ER16',
+  er16Mini: 'ER16 mini',
+  er20: 'ER20',
+  er20Mini: 'ER20 mini',
+  trimRouter: 'trim router',
+  plungeRouter: 'router',
+}
+
 /** A length quantity DTO (the holder's sizes; the kind is a model invariant). */
 type LengthDTO = QuantityDTO & { kind: 'length' }
 

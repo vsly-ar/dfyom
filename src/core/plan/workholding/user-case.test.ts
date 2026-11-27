@@ -140,8 +140,12 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     expect(r.items[0]!.top).toBe(12)
     expect(r.clearanceHeight).toBe('14 mm')
     // what plan.warning.list says of the setup: the facing's uncut material under the clamps
-    // (design review R13: one finding per operation, naming both clamps)
-    expect(r.findings.map((f) => f.code)).toEqual(['plan.workholding.unmachined'])
+    // (design review R13: one finding per operation, naming both clamps), and the machine's
+    // missing holder (DF132 Q181: info, only in a setup with items)
+    expect(r.findings.map((f) => f.code)).toEqual([
+      'plan.holder.unknown',
+      'plan.workholding.unmachined',
+    ])
     const sv = services()
     const e = expectOk(await exportPlan(s.d.doc, planId, sv))
     const text = withoutAppVersion(e.text)

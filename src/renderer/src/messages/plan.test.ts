@@ -73,6 +73,39 @@ describe('plan finding texts', () => {
     for (const t of texts) expect(t).not.toMatch(/pocket1|profile1|op-2/)
   })
 
+  it('names where the collet nut size is entered (DF132 Q181) and shows the holder collision as the core words it', () => {
+    const names = { design: () => '', planOperation: () => '', setup: () => 'Top' }
+    expect(
+      findingText(
+        finding({
+          code: 'plan.holder.unknown',
+          severity: 'info',
+          rule: 'unknown',
+          field: 'machine.holder',
+          message: 'The machine has no collet nut size: …',
+          params: { setupId: 's1' },
+        }),
+        'mm',
+        names,
+      ),
+    ).toBe(
+      'The workholding of Top is checked against the tool only: the machine has no collet nut size. Enter it under Holder in the machine’s Spindle tab (Library) to check the nut and spindle body against the clamps.',
+    )
+    expect(
+      findingText(
+        finding({
+          code: 'plan.workholding.collision',
+          rule: 'holder',
+          field: 'stickout',
+          message:
+            'Pocket 1 (op-1): the collet nut (ER11, Ø19) at Z19 hits Toe clamp 1 near X19 Y40 (tip Z-6, Toe clamp 1 top Z25, margin 2 mm): chuck the tool with at least 36 mm out or move the item',
+        }),
+      ),
+    ).toBe(
+      'The collet nut (ER11, Ø19) at Z19 hits Toe clamp 1 near X19 Y40 (tip Z-6, Toe clamp 1 top Z25, margin 2 mm): chuck the tool with at least 36 mm out or move the item.',
+    )
+  })
+
   it('words a clamped stepover in the user units (task U2)', () => {
     const w = finding({
       code: 'plan.stepoverClamped',

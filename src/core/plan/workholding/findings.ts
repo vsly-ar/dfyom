@@ -2,7 +2,8 @@
  * Plan findings of workholding (WH-A–F): `plan.workholding.none` (info), `.clearanceLow` (error),
  * `.unmachined` (warning, one per operation, needs the 2D port), `.inPart` and `.partLoose` (warnings, W5,
  * `held.ts`), and on a setup's current toolpaths `.collision` (error), `.close` (warning) and
- * `.breakthrough` (error). Errors block `plan.export` and
+ * `.breakthrough` (error; DF132 H2: kind `holder` for the collet nut or spindle body), and
+ * `plan.holder.unknown` (info: items but no holder on the machine). Errors block `plan.export` and
  * `run.job.start` of their setup (the export guard), never toolpath generation.
  * Doc: docs/modes/workholding.md#collision-check
  */
@@ -12,11 +13,13 @@ import { toGeneratorInputs } from '../../toolpath/inputs'
 import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
 import { setupZero } from '../alignment'
 import type { PlanWarning } from '../checks'
+import { HOLDER_PRESET_NAMES, type Holder } from '../../library/holder'
 import type { PlanOperationInput } from '../inputs'
 import { aidName, planOpLabel } from '../labels'
 import type { LoadedPlan } from '../plan'
 import type { SetupDTO } from '../plan.dto'
 import { checkWorkholding, type CheckOperation, type Collision } from './check'
+import type { HolderSizes } from './envelope'
 import { heldFindings } from './held'
 import { rangeFindings } from './devices'
 import { highestTop } from './obstacles'
@@ -49,6 +52,16 @@ export function staticWorkholdingFindings(plan: LoadedPlan, setupId?: string): P
     }
     // WL2: an item placed from a library device outside the device's range (warning)
     out.push(...rangeFindings(plan.dto, setup, h.stock))
+    // DF132 Q181: the clamps are checked against the tool only while the machine has no holder
+    if (h.prisms.length > 0 && plan.machine.mapOr(false, (m) => m.holder.isNone()))
+      out.push({
+        code: 'plan.holder.unknown',
+        severity: 'info',
+        message: `The machine has no collet nut size: ${setup.name}'s workholding is checked against the tool only. Enter the collet nut size (machine holder) to check it against the clamps`,
+        field: 'machine.holder',
+        rule: 'unknown',
+        params: { setupId: setup.id },
+      })
     const top = highestTop(h.prisms)
     if (top !== undefined && h.clearanceSet && h.clearance < top.zMax + h.margin - 1e-6)
       out.push({
@@ -80,23 +93,43 @@ export function checkOperations(
   const [zx, zy] = zero
   const back = (tp: Toolpath) =>
     zx === 0 && zy === 0 ? tp : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] })
-  return pairs.map(({ input, toolpath }) => ({
-    planOperationId: input.planOperationId,
-    tool: {
-      diameter: input.tool.diameter.canonical,
-      ...(input.tool.shankDiameter.isSome()
-        ? { shankDiameter: input.tool.shankDiameter.unwrap().canonical }
-        : {}),
-    },
-    moves: back(toolpath).passes.flatMap((p) => p.moves),
-  }))
+  return pairs.map(({ input, toolpath }) => {
+    // DF132 H2: the machine's holder and the operation's stickout make the stepped envelope
+    const holder = input.machine.andThen((m) => m.holder)
+    return {
+      planOperationId: input.planOperationId,
+      tool: {
+        diameter: input.tool.diameter.canonical,
+        ...(input.tool.shankDiameter.isSome()
+          ? { shankDiameter: input.tool.shankDiameter.unwrap().canonical }
+          : {}),
+        ...(holder.isSome()
+          ? { stickout: input.stickout, holder: holderSizes(holder.unwrap()) }
+          : {}),
+      },
+      moves: back(toolpath).passes.flatMap((p) => p.moves),
+    }
+  })
+}
+
+/** A holder's sizes in mm and its short name for messages (tool-holder.md § Checks). */
+export function holderSizes(h: Holder): HolderSizes {
+  return {
+    nutDiameter: h.nutDiameter.canonical,
+    nutLength: h.nutLength.canonical,
+    bodyDiameter: h.bodyDiameter.canonical,
+    ...(h.preset.isSome() ? { name: HOLDER_PRESET_NAMES[h.preset.unwrap()] } : {}),
+  }
 }
 
 const KIND_WORD: Readonly<Record<Collision['kind'], string>> = {
   rapid: 'a rapid',
   link: 'the link between operations',
   cut: 'a cut',
+  holder: 'the holder',
 }
+
+const PART_WORD = { nut: 'collet nut', body: 'spindle body' } as const
 
 /**
  * The collision findings of one setup's program (`operations` in machining order, the final moves
@@ -137,10 +170,34 @@ export function moveFindings(
     y: y(c),
     lowestZ: c.lowestZ,
     gap: c.gap,
+    ...(c.part === undefined ? {} : { part: c.part }),
+    ...(c.partZ === undefined ? {} : { partZ: c.partZ }),
+    ...(c.needed === undefined ? {} : { neededStickout: c.needed }),
   })
   const out: PlanWarning[] = []
+  const holderOf = (id: string) => operations.find((o) => o.planOperationId === id)?.tool.holder
   for (const c of result.collisions) {
     const name = itemName(h, c.itemId)
+    if (c.kind === 'holder' && c.part !== undefined) {
+      // DF132 H2: the nut or body hits where the tool clears (tool-holder.md § Checks)
+      const holder = holderOf(c.planOperationId)
+      const size = c.part === 'nut' ? holder?.nutDiameter : holder?.bodyDiameter
+      const what = [holder?.name, size === undefined ? undefined : `Ø${mm(size)}`]
+        .filter((x) => x !== undefined)
+        .join(', ')
+      const part = PART_WORD[c.part]
+      const at = Math.ceil((c.needed ?? 0) * 10 - 1e-6) / 10
+      out.push({
+        code: 'plan.workholding.collision',
+        severity: 'error',
+        message: `${label(c.planOperationId)}: the ${part}${what === '' ? '' : ` (${what})`} at Z${mm(c.partZ ?? 0)} hits ${name} near X${mm(x(c))} Y${mm(y(c))} (tip Z${mm(c.lowestZ)}, ${name} top Z${mm(maxTop(h, c.itemId))}, margin ${mm(h.margin)} mm): chuck the tool with at least ${at} mm out or move the item`,
+        planOperationId: c.planOperationId,
+        field: 'stickout',
+        rule: 'holder',
+        params: params(c),
+      })
+      continue
+    }
     const fix =
       c.kind === 'cut'
         ? 'move the item, or cut this in a second setup'

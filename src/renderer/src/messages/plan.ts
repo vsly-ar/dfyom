@@ -974,6 +974,9 @@ export function findingText(
     case 'plan.workholding.none':
       // the core's text names the agent tool; the app names the inspector section
       return `No workholding in ${names.setup(String(p['setupId']))}: rapids and cuts are not checked against clamps. Add what holds the stock under Workholding in the setup.`
+    case 'plan.holder.unknown':
+      // DF132 Q181: the core's text names the machine field; the app names where it is entered
+      return `The workholding of ${names.setup(String(p['setupId']))} is checked against the tool only: the machine has no collet nut size. Enter it under Holder in the machine’s Spindle tab (Library) to check the nut and spindle body against the clamps.`
     case 'plan.machine': {
       // DF68: the Z headroom in the document's units
       const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : undefined)
