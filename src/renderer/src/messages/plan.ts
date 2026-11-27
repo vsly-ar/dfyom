@@ -506,6 +506,14 @@ export const planMessages = {
     enabledInPlan: (name: string) => `${name} is back in this plan`,
   },
 
+  /** Already-cut operations (DF135, docs/modes/cut-state.md): marked in Design. */
+  cut: {
+    marker: 'Cut',
+    markerTip:
+      'Already cut (marked in Design): not in the program; its material counts as removed for the operations after it.',
+    showToolpaths: 'Show cut toolpaths',
+  },
+
   /** Items switched off for this plan (DF106, plan-v0.4.md § Disabling in a plan). */
   off: {
     listLabel: 'Off in this plan or in design',

@@ -45,6 +45,7 @@ describe('shownZRefRun', () => {
       { id: 's1', operations: [op('a', 't1'), op('b', 't1'), op('c', 't2')] },
       { id: 's2', operations: [op('d', 't2')] },
     ],
+    design: { part: { operations: [] } },
   } as unknown as PlanDTO
 
   it('takes a previewed run start, else the selected operation’s run, else the setup’s first', () => {

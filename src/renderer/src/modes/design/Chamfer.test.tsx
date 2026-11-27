@@ -119,7 +119,7 @@ describe('chamfer UI (U4)', () => {
     const add = await openAdd()
     expect(within(add).queryByRole('menuitem', { name: /Chamfer/ })).toBeNull()
     await user.keyboard('{Escape}')
-    // a facing: neither Chamfer nor Make Clones…, only Disable and Remove
+    // a facing: neither Chamfer nor Make Clones…, only Mark as already cut, Disable and Remove
     const facing = await within(navigator()).findByRole('button', { name: /^Facing 1/ })
     await user.pointer({ keys: '[MouseRight]', target: facing })
     const menu = await screen.findByRole('menu', { name: 'Actions for Facing 1' })
@@ -127,7 +127,7 @@ describe('chamfer UI (U4)', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((i) => i.textContent),
-    ).toEqual(['Disable', 'Remove'])
+    ).toEqual(['Mark as already cut', 'Disable', 'Remove'])
     await user.keyboard('{Escape}')
     // focus goes back to the row
     await waitFor(() => expect(facing).toHaveFocus())
@@ -262,6 +262,36 @@ describe('chamfer UI (U4)', () => {
     await user.click(within(menu).getByRole('menuitem', { name: 'Enable' }))
     await waitFor(() => expect(part()).not.toHaveProperty('disabled'))
     expect(pocket.closest('[data-off]')).toBeNull()
+  })
+
+  it('marks a pocket already cut from the row menu, and not cut again (DF135)', async () => {
+    const { user, part } = await renderDesign(async (d) => {
+      ;(
+        await d.dispatch(
+          'design.pocket.add',
+          {
+            partId: partId(d),
+            shape: { kind: 'circle', center: ['30', '30'], diameter: '10' },
+            depth: '3',
+          },
+          ui,
+        )
+      ).unwrap()
+    })
+    const pocket = await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: pocket })
+    let menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Mark as already cut' }))
+    await waitFor(() => expect(part().alreadyCut).toEqual(['pocket1']))
+    // the row stays, muted with a check and "Cut"; anything can still build on it
+    expect(pocket).toHaveTextContent(/Cut: Already cut/)
+    await expectNoAxeViolations()
+    await user.pointer({ keys: '[MouseRight]', target: pocket })
+    menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    expect(within(menu).getByRole('menuitem', { name: 'Chamfer' })).toBeInTheDocument()
+    await user.click(within(menu).getByRole('menuitem', { name: 'Mark as not cut' }))
+    await waitFor(() => expect(part()).not.toHaveProperty('alreadyCut'))
+    expect(pocket).not.toHaveTextContent(/Already cut/)
   })
 
   it('chamfers a rectangle pocket from its row menu: Edge by name, Depth, no Diameter (edge chamfers E1)', async () => {

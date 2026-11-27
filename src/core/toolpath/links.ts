@@ -35,6 +35,11 @@ export interface LinkOperation {
    * `LinkSettings.holder` (the machine's).
    */
   readonly holder?: LinkHolder
+  /**
+   * Already cut (DF135, docs/modes/cut-state.md): not in the program, so never linked into or
+   * out of; its removal still lowers the field for the operations after it.
+   */
+  readonly cut?: boolean
 }
 
 /** What the links read of the setup's workholding (`WorkholdingObstacles` in plan/workholding). */
@@ -410,9 +415,14 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
     for (const op of ops) field.clear(op.tool, undefined, flat(op.toolpath), clearance, op.stickout)
   }
   const through = -s.stock[2]
+  // the program's operation before (cut ones are not in it, DF135)
+  let prev: LinkOperation | undefined
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i]!
-    const prev = ops[i - 1]
+    if (op.cut === true) {
+      field?.cut(op.tool, undefined, flat(op.toolpath), through)
+      continue
+    }
     if (prev !== undefined && !op.pauseBefore) {
       const exit = exitOf(prev.toolpath, clearance)
       const start = entryOf(op.toolpath, clearance)
@@ -477,6 +487,7 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
       }
     }
     field?.cut(op.tool, undefined, flat(op.toolpath), through)
+    prev = op
   }
   const low = links.filter((l) => l.low).length
   return {

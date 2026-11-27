@@ -46,6 +46,7 @@ import { takeDesignSnapshot } from './snapshot'
 import { designToolField, sameDesignToolField } from './design-tool'
 import { resolveTool } from './tool-resolution'
 import { isAid } from './aids'
+import { cutFirst, cutTest } from './cut'
 import { checkPartFits, sameValue } from './validity'
 
 export interface BuildContext {
@@ -482,6 +483,10 @@ export function rebuildPlan(
   for (const s of setups)
     for (const p of s.operations) for (const d of p.designOperationIds) owner.set(d, p.id)
   const heights = setups[0]!
+  // DF135: new work never goes into a setup before the last one with cut operations (the part
+  // would have to be flipped back): a new setup at the end (docs/modes/cut-state.md#setups-and-work-zero)
+  const isCut = cutTest(plan.design.part)
+  const lastCut = setups.findLastIndex((s) => s.operations.some(isCut))
   for (const p of placed) {
     const d = direction.get(p.id) ?? '+z'
     // after the setups holding its dependencies (E4b: a bottom chamfer after its through
@@ -494,12 +499,18 @@ export function rebuildPlan(
           : [...onDependencies(o), ...edgeDependencies(o)].flatMap((x) => owner.get(x) ?? [])
       }),
     )
-    const after = setups.findLastIndex((s) => s.operations.some((q) => deps.has(q.id)))
+    const after = Math.max(
+      setups.findLastIndex((s) => s.operations.some((q) => deps.has(q.id))),
+      isCut(p) ? -1 : lastCut - 1,
+    )
     // the last setup of its direction, else a new setup at its default position
-    let target = setups.findLast((s, i) => setupDirection(s) === d && i >= after)
+    let target = setups.findLast(
+      (s, i) => setupDirection(s) === d && i >= after && (isCut(p) || i >= lastCut),
+    )
     if (target === undefined) {
       target = newSetup(c.ids.next('setup'), d, heights, setups)
-      setups.splice(Math.max(defaultSetupIndex(setups, d), after + 1), 0, target)
+      const at = Math.max(defaultSetupIndex(setups, d), after + 1, isCut(p) ? 0 : lastCut + 1)
+      setups.splice(at, 0, target)
     }
     for (const id of p.designOperationIds) owner.set(id, p.id)
     // after the last operation of an earlier or equal group, and after its `on` dependencies
@@ -556,6 +567,10 @@ export function rebuildPlan(
   for (const s of plan.setups) {
     const placedByTool = placeByTool(s.operations, part.unwrap(), freshIds, c.region2d)
     s.operations = keepWithEdge(placedByTool, part.unwrap(), new Set(resolved))
+    // DF135: cut operations were machined before every uncut one
+    // (an `on` dependency still comes first: a repair moves it back)
+    if (s.operations.some(isCut))
+      s.operations = repairOrder(cutFirst(s.operations, isCut), part.unwrap())
   }
   return Ok(plan)
 }

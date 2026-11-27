@@ -6,6 +6,7 @@
 import { None, Option, Some } from '../../shared/result'
 import { partIssueText } from '../design/issue-text'
 import { roughingOwnerId, type Operation } from '../design/operation'
+import { cutFindings } from './cut'
 import type { OperationKind } from '../design/part.dto'
 import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
@@ -435,6 +436,8 @@ export function planFindings(
     ),
   )
   out.push(...setupFindings(plan.setups, plan.part))
+  // DF135 C1: docs/modes/cut-state.md#setups-and-work-zero
+  out.push(...cutFindings(plan))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
   if (stock !== undefined) {
     const fits = checkPartFits(plan.dto.design.part, stock, 'plan.warning.list', port)

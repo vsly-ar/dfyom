@@ -103,6 +103,7 @@ import { defaultClearance } from './build'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
 import { machineLimits } from '../feeds-speeds/suggest'
 import { checkAllowed, nextStatus } from './status'
+import { cutIds, cutLocked, firstCut } from './cut'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
@@ -859,6 +860,9 @@ const setupSplit = defineCommand({
     const loaded = loadedFor(draft, args.planId, where)
     if (loaded.isErr()) return loaded
     const plan = loaded.unwrap()
+    // DF135: already-cut operations keep their place (docs/modes/cut-state.md)
+    const cut = firstCut(plan.dto, args.planOperationIds)
+    if (cut !== undefined) return cutLocked(plan.dto, cut, where)
     const setups = splitSetup(plan.dto, args, ctx.ids, where)
     if (setups.isErr()) return setups
     const created = setups.unwrap()[plan.setups.findIndex((x) => x.id === args.setupId) + 1]!
@@ -881,6 +885,14 @@ const setupMerge = defineCommand({
     const loaded = loadedFor(draft, args.planId, where)
     if (loaded.isErr()) return loaded
     const plan = loaded.unwrap()
+    // DF135: a setup with already-cut operations keeps its order
+    const cut = firstCut(
+      plan.dto,
+      plan.setups
+        .filter((x) => args.setupIds.includes(x.id))
+        .flatMap((x) => x.operations.map((o) => o.id)),
+    )
+    if (cut !== undefined) return cutLocked(plan.dto, cut, where)
     const setups = mergeSetups(plan.dto, args.setupIds, where)
     if (setups.isErr()) return setups
     const into = setups.unwrap().find((x) => args.setupIds.includes(x.id))!
@@ -910,6 +922,11 @@ const setupMove = defineCommand({
     if (from < 0) return unknownSetup(args.setupId, 'setupId', where)
     if (args.toIndex >= plan.setups.length) return pastEnd(plan.setups.length - 1, where)
     if (from === args.toIndex) return Ok({})
+    const cut = firstCut(
+      plan.dto,
+      plan.setups[from]!.operations.map((o) => o.id),
+    )
+    if (cut !== undefined) return cutLocked(plan.dto, cut, where)
     const setups = [...plan.setups]
     const [moved] = setups.splice(from, 1)
     setups.splice(args.toIndex, 0, moved!)
@@ -987,6 +1004,8 @@ const operationUpdate = defineCommand({
     const plan = loaded.unwrap()
     const index = findPlanOperation(plan, args.planOperationId, where)
     if (index.isErr()) return index
+    if (cutIds(plan.dto).has(args.planOperationId))
+      return cutLocked(plan.dto, index.unwrap().op, where)
     const units = draft.unitSystem
     const op: PlanOperationDTO = plainCopy(index.unwrap().op)
     const kind = evaluateOperation(plan, op).kind
@@ -1266,6 +1285,12 @@ const operationMove = defineCommand({
     const setups = plan.setups.map((x) => ({ ...x, operations: [...x.operations] }))
     const moved = setups[si]!.operations.splice(index, count)
     setups[ti]!.operations.splice(args.toIndex, 0, ...moved)
+    // DF135: already-cut operations keep their place, and nothing moves before one in its setup
+    const cut = cutIds(plan.dto)
+    const cutMoved = moved.find((o) => cut.has(o.id))
+    if (cutMoved !== undefined) return cutLocked(plan.dto, cutMoved, where)
+    const passed = setups[ti]!.operations.slice(args.toIndex + count).find((o) => cut.has(o.id))
+    if (passed !== undefined) return cutLocked(plan.dto, passed, where)
     const written = writeSetups(draft, plan, setups, 'toIndex', where)
     return written.isErr() ? written : Ok({})
   },
@@ -1286,6 +1311,8 @@ const toolAssign = defineCommand({
     if (loaded.isErr()) return loaded
     const index = findPlanOperation(loaded.unwrap(), args.planOperationId, where)
     if (index.isErr()) return index
+    if (cutIds(loaded.unwrap().dto).has(args.planOperationId))
+      return cutLocked(loaded.unwrap().dto, index.unwrap().op, where)
     const item = libraryItem(ctx, 'tool', args.toolLibraryItemId, 'toolLibraryItemId', where)
     if (item.isErr()) return item
     const plan = plainCopy(loaded.unwrap().dto)
@@ -2010,6 +2037,21 @@ const warningList = defineQuery({
           },
         ]
     dropShadowedShortStickout(findings)
+    // DF135: an already-cut operation keeps its errors (they block its removal) and its cut
+    // findings only (docs/modes/cut-state.md#what-a-cut-operation-means-in-its-plan)
+    if (loaded.isOk()) {
+      const cut = cutIds(loaded.unwrap().dto)
+      for (let i = findings.length - 1; i >= 0; i--) {
+        const f = findings[i]!
+        if (
+          f.planOperationId !== undefined &&
+          cut.has(f.planOperationId) &&
+          f.severity !== 'error' &&
+          !f.code.startsWith('plan.cut')
+        )
+          findings.splice(i, 1)
+      }
+    }
     const stale = planStale(dto.unwrap(), doc, ctx.services.library?.lookup, ctx.services.region2d)
     for (const c of stale.libraryCopies)
       if (c.blocked !== null)
@@ -2109,7 +2151,8 @@ function planWorkholdingFindings(
   const cache = services.toolpaths
   return workholdingFindings(
     plan,
-    inputs.isOk() ? inputs.unwrap() : undefined,
+    // DF135: already-cut operations are not in the program
+    inputs.isOk() ? inputs.unwrap().filter((i) => i.cut !== true) : undefined,
     (i) => cache?.get(i.inputHash),
     services.region2d,
   )

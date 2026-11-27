@@ -1,6 +1,6 @@
 /**
  * Keeping a part's disabled list valid after every design command (hardening DF106): ids of
- * removed items are dropped (a later item may reuse the id), and nothing new may build on a
+ * removed items are dropped (a later item may reuse the id; the already-cut list too, DF135), and nothing new may build on a
  * disabled item (a chamfer on its edge, an operation on its floor, Clones of it): enable it first.
  * Doc: docs/modes/design.md#disabling-operations-and-features-df106
  */
@@ -56,7 +56,19 @@ export const disabledFollowHook: DocumentHook = {
       const part: PartDTO = baseOf(draftPart)
       // an unchanged part is a committed document's frozen record
       const unchanged: boolean = isFrozenRecord(part)
-      if (unchanged || part.disabled === undefined) continue
+      if (unchanged) continue
+      // DF135: the already-cut list drops removed items too (cut-state.md#what-is-stored)
+      const cut = part.alreadyCut
+      if (cut !== undefined) {
+        const ids = new Set([
+          ...part.operations.map((o) => o.id),
+          ...(part.features ?? []).map((f) => f.id),
+        ])
+        const kept = cut.filter((x) => ids.has(x))
+        if (kept.length === 0) delete draftPart.alreadyCut
+        else if (kept.length !== cut.length) draftPart.alreadyCut = kept
+      }
+      if (part.disabled === undefined) continue
       const before = isDraft(draftPart) ? (original(draftPart) as PartDTO | undefined) : undefined
       const r = follow(part, before, command.name)
       if (r.isErr()) return r.map(() => undefined)

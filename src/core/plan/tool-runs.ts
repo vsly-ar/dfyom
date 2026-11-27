@@ -9,6 +9,10 @@ import type { PlanOperationDTO } from './plan.dto'
 /** What a run needs of an operation: its tool copy (plan DTOs, or the agent summary's rows). */
 type WithTool = { readonly tool?: string | undefined }
 
+/** Whether an operation is already cut (DF135: `cutTest` of the plan's part); default none. */
+type IsCut<T> = (op: T) => boolean
+const NONE_CUT = () => false
+
 export interface ToolRun<T extends WithTool = PlanOperationDTO> {
   /** The tool copy's snapshot id; undefined: an operation without a tool (a run of its own). */
   readonly tool: string | undefined
@@ -17,10 +21,18 @@ export interface ToolRun<T extends WithTool = PlanOperationDTO> {
   readonly start: number
 }
 
-/** Consecutive operations with the same tool; each operation without a tool is a run of its own. */
-export function toolRuns<T extends WithTool>(operations: readonly T[]): ToolRun<T>[] {
+/**
+ * Consecutive operations with the same tool; each operation without a tool is a run of its own.
+ * Already-cut operations (DF135, `isCut`) are in no run: they are not in the program
+ * (docs/modes/cut-state.md#what-a-cut-operation-means-in-its-plan).
+ */
+export function toolRuns<T extends WithTool>(
+  operations: readonly T[],
+  isCut: IsCut<T> = NONE_CUT,
+): ToolRun<T>[] {
   const runs: { tool: string | undefined; operations: T[]; start: number }[] = []
   operations.forEach((op, i) => {
+    if (isCut(op)) return
     const last = runs.at(-1)
     if (last !== undefined && op.tool !== undefined && last.tool === op.tool)
       last.operations.push(op)
@@ -29,19 +41,31 @@ export function toolRuns<T extends WithTool>(operations: readonly T[]): ToolRun<
   return runs
 }
 
-type Setups = readonly { readonly operations: readonly WithTool[] }[]
+type Setups<T extends WithTool = WithTool> = readonly { readonly operations: readonly T[] }[]
 
-/** The tool that stays in the spindle into setup `index` from the setup before, if its first. */
-export function carriedTool(setups: Setups, index: number): string | undefined {
-  const first = setups[index]?.operations[0]?.tool
-  const before = index > 0 ? setups[index - 1]?.operations.at(-1)?.tool : undefined
+/**
+ * The tool that stays in the spindle into setup `index` from the setup before, if its first
+ * (already-cut operations are not in the program, DF135).
+ */
+export function carriedTool<T extends WithTool>(
+  setups: Setups<T>,
+  index: number,
+  isCut: IsCut<T> = NONE_CUT,
+): string | undefined {
+  const uncut = (i: number) => (setups[i]?.operations ?? []).filter((o) => !isCut(o))
+  const first = uncut(index)[0]?.tool
+  const before = index > 0 ? uncut(index - 1).at(-1)?.tool : undefined
   return first !== undefined && first === before ? first : undefined
 }
 
 /** Tool changes of setup `index`: one per run, less the start when the tool is carried over. */
-export function setupToolChanges(setups: Setups, index: number): number {
-  const runs = toolRuns(setups[index]?.operations ?? []).length
-  return carriedTool(setups, index) === undefined ? runs : runs - 1
+export function setupToolChanges<T extends WithTool>(
+  setups: Setups<T>,
+  index: number,
+  isCut: IsCut<T> = NONE_CUT,
+): number {
+  const runs = toolRuns(setups[index]?.operations ?? [], isCut).length
+  return carriedTool(setups, index, isCut) === undefined ? runs : runs - 1
 }
 
 /**
@@ -55,8 +79,10 @@ export function runLinkSavings(
   indices: readonly number[],
 ): number {
   const own = new Set(indices)
+  // links into the run's operations after its first (a cut operation between them is no break, DF135)
+  const first = Math.min(...indices)
   let saved = 0
-  for (const l of lowered) if (own.has(l.index) && own.has(l.index - 1)) saved += l.savedSeconds
+  for (const l of lowered) if (own.has(l.index) && l.index !== first) saved += l.savedSeconds
   return saved
 }
 

@@ -105,10 +105,14 @@ export function linkOperations(
   margin?: number,
 ): LinkOperation[] {
   const manual = machine.mapOr(false, (m) => m.spindle.control === 'manual')
+  // the program's toolpath before: already-cut operations are not in it (DF135)
+  let before: Toolpath | undefined
   return inputs.map((input, i) => {
     const tp = toolpaths[i]!
-    const before = toolpaths[i - 1]
+    const after = before
+    if (input.cut !== true) before = tp
     return {
+      ...(input.cut === true ? { cut: true } : {}),
       toolpath: tp,
       tool: toolpathTool(input.tool, input.toolSnapshotId),
       stickout: input.stickout,
@@ -116,9 +120,9 @@ export function linkOperations(
         ? {}
         : { holder: linkHolderOf(input.tool.holder.unwrap(), margin) }),
       pauseBefore:
-        before === undefined ||
-        before.tool !== tp.tool ||
-        (manual && before.spindleSpeed !== tp.spindleSpeed),
+        after === undefined ||
+        after.tool !== tp.tool ||
+        (manual && after.spindleSpeed !== tp.spindleSpeed),
     }
   })
 }
@@ -141,7 +145,11 @@ export function cachedSetupLinks(
   // the toolpaths are in the WCS: a moved work zero (alignment DF78) moves the stock and items
   const zero = inputs[0]?.setup.zero
   if (zero !== undefined) settings = { ...settings, zero: [zero[0], zero[1]] }
-  const key = JSON.stringify([inputs.map((i) => i.inputHash), settings])
+  // an already-cut operation (DF135) changes the links but not its hash
+  const key = JSON.stringify([
+    inputs.map((i) => (i.cut === true ? `${i.inputHash}:cut` : i.inputHash)),
+    settings,
+  ])
   const hit = cache.get(key)
   // the same toolpath objects too (the toolpath cache hands out one object per hash)
   if (hit !== undefined && hit.toolpaths.every((t, i) => t === toolpaths[i])) {

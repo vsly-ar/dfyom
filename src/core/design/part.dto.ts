@@ -404,6 +404,15 @@ export const PartDtoSchema = z.object({
     .array(OperationIdSchema)
     .optional()
     .describe('Switched-off operation and feature ids'),
+  /**
+   * Operations and features whose material is already gone from the stock (hardening DF135,
+   * docs/modes/cut-state.md#what-is-stored): top-level ids in design order; absent = none. Plans
+   * keep them as removed material and export nothing for them (design/already-cut.ts).
+   */
+  alreadyCut: z
+    .array(OperationIdSchema)
+    .optional()
+    .describe('Already-cut operation and feature ids'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
   /** Split parts 4a (docs/modes/split-parts.md#model): on a source part; absent = not split. */
   split: SplitDtoSchema.optional(),

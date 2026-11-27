@@ -19,6 +19,7 @@ import type { Stock } from '../library/stock'
 import type { Tool } from '../library/tool'
 import type { ProjectDoc } from '../project/document'
 import { Quantity } from '../quantity/quantity'
+import { cutTest } from './cut'
 import { evaluateOperation, planFindings } from './evaluate'
 import { namedPlanMessages } from './labels'
 import type { ResolvedFeeds } from './feeds'
@@ -112,6 +113,12 @@ export interface PlanOperationInput {
    * Absent = 0 (to the floor). Doc: docs/modes/roughing.md#stock-to-leave-wall-and-floor
    */
   readonly roughingFloor?: number
+  /**
+   * Already cut (DF135, its design operations are marked in Design, docs/modes/cut-state.md):
+   * generated (later operations and the links read its removal) but left out of the program.
+   * Not in the hash.
+   */
+  readonly cut?: true
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -177,7 +184,10 @@ export function planOperationInputs(
   // hash covers its position and everything before it. The whole part (`on` surfaces and
   // formulas depend on other operations) enters by its hash, taken once: hashing it per plan
   // operation made every export quadratic in operations (hardening P4).
-  const part = hashJson(plan.dto.design.part)
+  // DF135: the already-cut list only leaves operations out of the program, so their toolpaths
+  // (and every later one) stay cached when it changes
+  const part = hashJson({ ...plan.dto.design.part, alreadyCut: undefined })
+  const isCut = cutTest(plan.dto.design.part)
   let chain = ''
   let previous: string | undefined
   plan.operations.forEach((op, index) => {
@@ -298,6 +308,7 @@ export function planOperationInputs(
       ...(material === undefined ? {} : { material }),
       ...(materials.size === 0 ? {} : { materials }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
+      ...(isCut(op) ? { cut: true as const } : {}),
       ...(keepOut === undefined ? {} : { keepOut }),
       ...(aid === undefined ? {} : { aid }),
       ...(restAfter === undefined ? {} : { restAfter }),

@@ -144,6 +144,8 @@ The user: "add an ability to disable a feature or an operation in the RMB menu (
 - **Agent API:** `design.part.update { partId, disabled: [ids] }` replaces the list (`[]` enables all; unknown ids `input.malformed`, rule `unknownItem`); `design.part.get` shows the list, `design.operation.list` the effective state. No new tool ([llm-api.md § DF106](../architecture/llm-api.md#df106-disabling-operations-and-features)).
 - **Keyboard:** the row menu's Disable / Enable (right-click, `Shift+F10`); no dedicated shortcut yet (none is free of the text fields' and viewport's keys without a study; to add when dogfood asks).
 
+**Already cut** (DF135, [cut-state.md](cut-state.md)): a second list on the part, `PartDTO.alreadyCut`, with the same rules for what can be listed (top-level rows) and the same row menu place, says the material is already gone from the stock; unlike Disable the item stays in the model and everything builds on it, and plans keep it as removed material without exporting it.
+
 ## DFM checks
 
 - Derived, never stored: parameter and tool checks (sync, in the commands and `design.warning.list`) and geometry checks (worker, [evaluation rules](../architecture/geometry.md#evaluation-rules)). Codes, rules and the warning shape: [geometry.md](../architecture/geometry.md#evaluation-checks) (geometry) and [parameter and tool checks](../architecture/geometry.md#parameter-and-tool-checks) (`parameterChecks`). How they reach commands and queries: [below](#dfm-warnings-task-28-wiring).

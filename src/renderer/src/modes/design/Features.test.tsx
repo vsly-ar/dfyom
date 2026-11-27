@@ -296,7 +296,7 @@ describe('feature UI (U1)', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((i) => i.textContent),
-    ).toEqual(['Chamfer', 'Make Clones…', 'Disable', 'Remove'])
+    ).toEqual(['Chamfer', 'Make Clones…', 'Mark as already cut', 'Disable', 'Remove'])
     await user.click(within(menu).getByRole('menuitem', { name: 'Make Clones…' }))
     expect(pocket).toHaveAttribute('aria-pressed', 'true')
     // the draft (U3) writes nothing until Make clones

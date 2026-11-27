@@ -4,6 +4,7 @@
 // clearance radius). Pure.
 // Doc: docs/modes/z-reference.md#implementation-notes-df69
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
+import { cutTest } from '../../../../core/plan/cut'
 import { toolRuns } from '../../../../core/plan/tool-runs'
 import type { ZRefPolygonView } from './plan-store'
 
@@ -19,13 +20,15 @@ export function shownZRefRun(
   selected: string | null,
   preview: string | undefined,
 ): string | undefined {
+  // DF135: already-cut operations are in no tool run
+  const isCut = cutTest(plan.design.part)
   for (const setup of plan.setups) {
-    const runs = toolRuns(setup.operations)
+    const runs = toolRuns(setup.operations, isCut)
     if (preview !== undefined && runs.some((r) => r.operations[0]?.id === preview)) return preview
   }
   if (selected === null) return undefined
   for (const setup of plan.setups) {
-    const runs = toolRuns(setup.operations)
+    const runs = toolRuns(setup.operations, isCut)
     if (setup.id === selected) return runs[0]?.operations[0]?.id
     const run = runs.find((r) => r.operations.some((o) => o.id === selected))
     if (run !== undefined) return run.operations[0]?.id

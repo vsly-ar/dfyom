@@ -172,7 +172,7 @@ export async function exportPlan(
     opts.resumeFrom === undefined
       ? undefined
       : all.findIndex((x) => x.planOperationId === opts.resumeFrom)
-  if (resumeFrom === -1)
+  if (resumeFrom === -1 || (resumeFrom !== undefined && all[resumeFrom]!.cut === true))
     return fail('input.malformed', `operation ${opts.resumeFrom} is not in this setup`, {
       where,
       data: { planId, setupId: setup.id },
@@ -185,6 +185,22 @@ export async function exportPlan(
       where,
       data: { planId },
       issues: [{ path: ['planId'], rule: 'empty', message: 'the plan has no operations' }],
+    })
+  // DF135: already-cut operations are generated (their removal counts for the links) but never
+  // exported; a setup with only cut ones has no program (docs/modes/cut-state.md)
+  const kept = all.flatMap((x, i) => (x.cut === true ? [] : [i]))
+  if (kept.length === 0)
+    return fail('plan.check', `${setup.name} is cut: every operation is already cut`, {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: [
+        {
+          path: [setup.id],
+          rule: 'allCut',
+          message: 'every operation of the setup is already cut',
+          params: { setupId: setup.id },
+        },
+      ],
     })
   // DF69: the setup's Z references; their errors block its program like a plan finding
   const zRefs = setupZReferences(plan, setup.id, services.region2d)
@@ -275,23 +291,29 @@ export async function exportPlan(
         params: { z: c.to[2], needed: c.needed },
       })),
     })
-  const finalPath = (i: number) =>
+  const linkedPath = (i: number) =>
     (i < from ? undefined : links?.toolpaths[i - from]) ?? generated[i]!.toolpath
+  // from here on the exported operations only (DF135: cut ones left out)
+  const inProgram = kept.map((i) => all[i]!)
+  const finalPath = (k: number) => linkedPath(kept[k]!)
+  const exportedFrom = resumeFrom === undefined ? undefined : kept.indexOf(resumeFrom)
   // the items are in the setup frame, the moves in the WCS: a moved work zero is added back
   // (docs/modes/alignment.md S12, as workholdingFindings does)
   const zero = all[0]!.setup.zero ?? [0, 0]
   const checked = checkOperations(
-    all.map((input, i) => ({ input, toolpath: finalPath(i) })),
+    inProgram.map((input, i) => ({ input, toolpath: finalPath(i) })),
     zero,
   )
   // DF130: each tool run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130);
   // DF132 H3: with the clamp term over the final moves (tool-holder.md#minimum-stickout-gains-the-clamp-term)
   const needs = setupStickouts(plan, setup, checked, zero)
   // H6: each operation's holder (its tool's own, else the machine's)
-  const holderOf = all.map((input) => resolveHolder(input.tool, plan.machine).map(holderSizes))
-  const ownHolder = all.map((input) => input.tool.holder.isSome())
+  const holderOf = inProgram.map((input) =>
+    resolveHolder(input.tool, plan.machine).map(holderSizes),
+  )
+  const ownHolder = inProgram.map((input) => input.tool.holder.isSome())
   const runNeeded = toolRuns(
-    all.map((x, i) => ({
+    inProgram.map((x, i) => ({
       tool: x.toolSnapshotId,
       needed: needs?.get(x.planOperationId)?.needed ?? x.stickoutNeeded,
       reason: needs?.get(x.planOperationId)?.reason,
@@ -318,9 +340,9 @@ export async function exportPlan(
     return r.operations.map(() => ({ needed, reason }))
   })
   const programUnits = plan.machine.unwrap().programUnits
-  const operations: ExportOperation[] = all.map((input, i) => {
+  const operations: ExportOperation[] = inProgram.map((input, i) => {
     const { needed: stickoutNeeded, reason: stickoutReason } = runOf[i]!
-    const { ids, label } = generated[i]!
+    const { ids, label } = generated[kept[i]!]!
     const toolpath = finalPath(i)
     const positions: Record<string, string> = {}
     for (const id of ids) {
@@ -397,7 +419,7 @@ export async function exportPlan(
               width: plan.stock.width.canonical,
               thickness: plan.stock.thickness.canonical,
             },
-            maxOverreach(reaches),
+            maxOverreach(kept.map((i) => reaches[i]!)),
             headerAlignment(plan, setup, services.region2d),
             holding.items.length === 0
               ? undefined
@@ -436,12 +458,12 @@ export async function exportPlan(
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
-      ...(resumeFrom === undefined ? {} : { resumeFrom }),
+      ...(exportedFrom === undefined ? {} : { resumeFrom: exportedFrom }),
     },
     {
       generator: opts.generator ?? programGenerator(services.appVersion),
       // a resume always waits at its tool (run-machine.md#section-resume-m5)
-      ...(resumeFrom === undefined ? {} : { firstToolLoaded: false }),
+      ...(exportedFrom === undefined ? {} : { firstToolLoaded: false }),
     },
   )
   return exported
@@ -453,8 +475,8 @@ export async function exportPlan(
       lowLinks: links?.summary.low ?? 0,
       operationLines: operationLines(
         e.lines,
-        operations.slice(resumeFrom ?? 0).map((o) => o.label),
-        all.slice(resumeFrom ?? 0).map((x) => x.planOperationId),
+        operations.slice(exportedFrom ?? 0).map((o) => o.label),
+        inProgram.slice(exportedFrom ?? 0).map((x) => x.planOperationId),
       ),
     }))
     .mapErr((e) => e.withContext(where, { planId }))

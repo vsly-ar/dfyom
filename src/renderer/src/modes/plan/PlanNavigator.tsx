@@ -8,6 +8,7 @@
 // has several). Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#commands-and-queries-v01
 import { useId, useState } from 'react'
+import { cutIds } from '../../../../core/plan/cut'
 import type { PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { gcodeFileStem } from '../../../../core/post/file-name'
@@ -24,6 +25,7 @@ import {
   Menu,
   Progress,
   Select,
+  Switch,
   type IconName,
 } from '../../ui'
 import { ExportDialog } from './ExportDialog'
@@ -425,6 +427,7 @@ function ToolpathSection({
   const generateError = usePlanState((s) => s.generateError)
   const failures = usePlanState((s) => s.failures)
   const exporting = usePlanState((s) => s.exporting)
+  const showCut = usePlanState((s) => s.showCutToolpaths)
   const ids = { generate: useId(), export: useId() }
   const ops = allPlanOperations(plan)
   const ready = ops.filter(
@@ -475,6 +478,14 @@ function ToolpathSection({
       {generateError ? <ErrorMessage error={generateError} message={m.toolpaths.failed} /> : null}
       {failed > 0 && !busy ? (
         <p className={styles['why']}>{m.toolpaths.someFailed(failed)}</p>
+      ) : null}
+      {/* DF135: already-cut operations' toolpaths are hidden unless shown (cut-state.md) */}
+      {cutIds(plan).size > 0 ? (
+        <Switch
+          label={m.cut.showToolpaths}
+          checked={showCut}
+          onCheckedChange={(on) => store.getState().setShowCutToolpaths(on)}
+        />
       ) : null}
       <div className={styles['actions']}>
         <Button

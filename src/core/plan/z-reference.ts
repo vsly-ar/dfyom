@@ -30,6 +30,7 @@ import type { LoadedPlan } from './plan'
 import type { PlanOperationDTO } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { toolRuns } from './tool-runs'
+import { cutTest } from './cut'
 
 /** Touch-off clearance past the tool or plate (mm). */
 export const SPOT_MARGIN = 1
@@ -153,6 +154,9 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
   // the plan operation that cut each floor, and its machining index
   const cutBy = new Map<string, { op: PlanOperationDTO; index: number; flat: boolean }>()
   let index = 0
+  // DF135: a cut operation has run before (docs/modes/cut-state.md#setups-and-work-zero)
+  let afterCut = false
+  const isCut = cutTest(plan.dto.design.part)
   const out: ToolRunZRef[] = []
   for (const setup of plan.setups) {
     const direction = setupDirection(setup)
@@ -162,7 +166,7 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
         ? { toWcs: (p) => p, fromWcs: (p) => p }
         : { toWcs: (p) => toWcs(p, wcs), fromWcs: (p) => fromWcs(p, wcs) }
     const numbers = new Map<string, number>()
-    const runs = toolRuns(setup.operations)
+    const runs = toolRuns(setup.operations, isCut)
     const starts = new Map(runs.map((r, i) => [r.start, i]))
     setup.operations.forEach((op, i) => {
       const run = starts.get(i)
@@ -190,6 +194,7 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
             cutBy,
             index,
             byId,
+            afterCut,
           }),
         )
       } else if (op.zRef !== undefined)
@@ -222,6 +227,7 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
         patches.apply(g, flat)
         cutBy.set(id, { op, index, flat })
       }
+      if (isCut(op)) afterCut = true
       index++
     })
   }
@@ -244,6 +250,8 @@ interface RunInput {
   readonly cutBy: ReadonlyMap<string, { op: PlanOperationDTO; index: number; flat: boolean }>
   readonly index: number
   readonly byId: ReadonlyMap<string, OperationGeometry>
+  /** An already-cut operation comes before the run (DF135). */
+  readonly afterCut: boolean
 }
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -305,9 +313,11 @@ function runReference(r: RunInput): ToolRunZRef {
     message: string,
     params: Record<string, string | number> = {},
     fix?: ZRefCandidate,
+    code?: PlanWarning['code'],
   ) =>
     findings.push({
       ...base,
+      ...(code === undefined ? {} : { code }),
       severity,
       rule,
       message,
@@ -352,7 +362,19 @@ function runReference(r: RunInput): ToolRunZRef {
     else {
       zRef = undefined
       const why = unavailable(r, stored.surface)
-      finding('error', why.rule, why.message, { surface: stored.surface }, byDefault)
+      // DF135: the surface was there when the plan was cut but cut operations removed it
+      // (`plan.zRefGone`, docs/modes/cut-state.md#setups-and-work-zero)
+      const gone = why.rule === 'cutAway' && r.afterCut
+      finding(
+        'error',
+        gone ? 'zRefGone' : why.rule,
+        gone
+          ? `${why.message}: the operations already cut removed it; touch off on a surface that still exists`
+          : why.message,
+        { surface: stored.surface },
+        byDefault,
+        gone ? 'plan.zRefGone' : undefined,
+      )
     }
   }
   if (zRef !== undefined && stored?.at !== undefined) {
