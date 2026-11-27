@@ -2,7 +2,7 @@
 // Spec: docs/modes/run-v0.1.md#commands-and-queries, #run-job, #testing (Commands)
 import { afterEach, describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { Ok, type AppResult } from '../../shared/result'
+import { fail, Ok, type AppResult } from '../../shared/result'
 import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
@@ -13,6 +13,7 @@ import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
 import { checkNoRunJob, prepareWorkZero } from './commands'
 import { machineKeyOf } from './machine-key'
+import { prepareGcodeFile } from './gcode-file'
 import { runPlanHash } from './plan-hash'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
@@ -20,6 +21,13 @@ import type { MachineService, RunStatus } from './service'
 import { loopbackSerialPorts, type LoopbackOptions } from './grbl/loopback.fixture'
 import { machineSettings } from './grbl/emulator/settings'
 import { Machine } from '../library/machine'
+
+// core stays environment-neutral (no node: imports, eslint): the built-in fs as gcode-file.test.ts
+const fs = (
+  globalThis as unknown as {
+    process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, e: 'utf8'): string } }
+  }
+).process.getBuiltinModule('node:fs')
 
 const agent = agentSource()
 const ui = uiSource()
@@ -50,6 +58,8 @@ async function setup(
     wrap?: (client: MachineClient) => MachineService
     /** Loopback serial ports; the emulator gets the library machine's settings plus these. */
     serial?: (settings: Record<number, number>) => LoopbackOptions
+    /** gCode files by path for file runs (DF93). */
+    files?: ReadonlyMap<string, string>
   } = {},
 ) {
   const s: PlanSetup = await planSetup()
@@ -89,6 +99,14 @@ async function setup(
       library: s.library,
       toolpaths: createToolpathCache(),
       exportFiles: { write: async (target) => Ok({ filePath: target }) },
+      gcodeFiles: {
+        read: async (path: string) => {
+          const text = opts.files?.get(path)
+          return text === undefined
+            ? fail('persist.io', 'no such file', { where: 'test' })
+            : Ok(text)
+        },
+      },
       ...(opts.machine === false ? {} : { machine: opts.wrap?.(client) ?? client }),
     },
   })
@@ -492,6 +510,90 @@ describe('run commands', { timeout: 60_000 }, () => {
     }
     expect(r.findings).toEqual([])
     expect(r.setupId).toBe(t.s.plan(t.planId).setups[0]!.id)
+    expect(t.status().state).toBe('Idle')
+  })
+
+  it('starts a plan and a file at a line after a lead-in; refused when the program changed (DF129 RC2)', async () => {
+    const file = '/files/fusion-grbl.nc'
+    const text = fs.readFileSync(new URL('./__fixtures__/fusion-grbl.nc', import.meta.url), 'utf8')
+    const t = await setup({ files: new Map([[file, text]]) })
+    expectOk(await t.open({ prepare: true }))
+    const full = expectOk(await t.run('plan.export', { planId: t.planId, target: '/x.nc' })) as {
+      lines: number
+    }
+    type Check = {
+      findings: unknown[]
+      resume: { fromLine: number; programHash: string; leadIn: string[]; before?: number }
+    }
+    // the last line snaps back to the last resume point; then a check right there
+    const last = expectOk(
+      await t.run('run.job.check', { planId: t.planId, fromLine: full.lines }),
+    ) as Check
+    const at = last.resume.before!
+    const check = expectOk(
+      await t.run('run.job.check', { planId: t.planId, fromLine: at }),
+    ) as Check
+    expect(check.findings).toEqual([])
+    expect(check.resume).toMatchObject({ fromLine: at, before: at })
+    expect(check.resume.leadIn).toContain('M5')
+    expect(check.resume.leadIn.some((l) => l.startsWith('(DFYOM TOOL CHANGE'))).toBe(true)
+    // from and fromLine together; a plan changed since: refused before anything moves
+    const ops = t.s.plan(t.planId).setups[0]!.operations
+    expect(
+      expectErrCode(
+        await t.run('run.job.check', { planId: t.planId, fromLine: 0 }),
+        'input.malformed',
+      ).issues[0]?.rule,
+    ).toBe('range')
+    const both = await t.job('run.job.start', { planId: t.planId, from: ops[0]!.id, fromLine: at })
+    expect(expectErrCode(await both.result, 'input.malformed').issues[0]?.rule).toBe('oneOf')
+    const changed = await t.job('run.job.start', {
+      planId: t.planId,
+      fromLine: at,
+      programHash: '0'.repeat(64),
+    })
+    expect(expectErrCode(await changed.result, 'input.malformed').issues[0]?.rule).toBe(
+      'programChanged',
+    )
+    expect(t.status().job).toBeUndefined()
+    // the run: lead-in (waits at the tool), then the program from the line on, to the end
+    const runToEnd = async (args: object) => {
+      const { result } = await t.job('run.job.start', args)
+      let finished = false
+      void result.then(() => (finished = true))
+      let toolChanges = 0
+      for (;;) {
+        expect(
+          await waitFor(
+            () => finished || /toolChange|programPause/.test(t.status().job?.phase ?? ''),
+          ),
+        ).toBe(true)
+        if (finished) break
+        if (t.status().job?.phase === 'toolChange') toolChanges++
+        expectOk(await t.run('run.job.continue', {}))
+        await waitFor(() => finished || t.status().job?.phase === 'streaming')
+      }
+      return { summary: expectOk(await result) as { lines: number }, toolChanges }
+    }
+    const plan = await runToEnd({
+      planId: t.planId,
+      fromLine: at,
+      programHash: check.resume.programHash,
+    })
+    expect(plan.toolChanges).toBeGreaterThan(0)
+    expect(plan.summary.lines).toBe(check.resume.leadIn.length + full.lines - at + 1)
+    expect(t.status().state).toBe('Idle')
+    // a file (Q170): the second tool's operation start
+    const fileLines = prepareGcodeFile(text).lines.length
+    const fileCheck = expectOk(await t.run('run.job.check', { file, fromLine: fileLines })) as Check
+    expect(fileCheck.findings).toEqual([])
+    const fileAt = fileCheck.resume.before!
+    const changedFile = await t.job('run.job.start', { file, fromLine: fileAt, programHash: 'x' })
+    expect(expectErrCode(await changedFile.result, 'input.malformed').issues[0]?.message).toMatch(
+      /file changed/,
+    )
+    const fileRun = await runToEnd({ file, fromLine: fileAt })
+    expect(fileRun.toolChanges).toBe(1)
     expect(t.status().state).toBe('Idle')
   })
 

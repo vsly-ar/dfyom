@@ -88,6 +88,11 @@ describe('ModalTracker and tool changes', () => {
     expect(m.at(7)).toMatchObject({ motion: 1, feed: 300 })
     expect(m.at(8)).toMatchObject({ metric: false, absolute: false })
     expect(toolChanges(lines)).toEqual([{ line: 2, n: 1, name: '6 mm flat end mill' }])
+    // RC2: the plane and the coolant too
+    expect(new ModalTracker(['G17 G21', 'M8', 'G0 X1']).modalAt(3)).toMatchObject({
+      plane: 17,
+      coolant: { mist: false, flood: true },
+    })
   })
 })
 

@@ -49,6 +49,8 @@ const journal = (acknowledged: number, over: Partial<RunJournal> = {}): RunJourn
       spindle: 'cw',
       spindleSpeed: 18_000,
       toolWord: 1,
+      plane: 17,
+      coolant: { mist: false, flood: false },
     },
   },
   ...over,

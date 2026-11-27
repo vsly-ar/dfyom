@@ -9,9 +9,10 @@
  */
 import { z } from 'zod'
 import type { SenderProgram } from './grbl/sender'
-import { initialParserState, parseBlock, type ParserState } from './grbl/emulator/gcode'
+import type { ParserState } from './grbl/emulator/gcode'
 import { PLANNER_BLOCKS, type Vec3 } from './grbl/emulator/planner'
-import { DEFAULT_ARC_TOLERANCE, normalize } from './executing'
+import { DEFAULT_ARC_TOLERANCE } from './executing'
+import { initialModal, stepModal, type ModalState } from './recovery'
 import {
   PortSchema,
   TARGET_KINDS,
@@ -135,6 +136,10 @@ export const RunJournalSchema = z.object({
       spindleSpeed: Num,
       /** The last `T` word (0 = none). */
       toolWord: z.number().int(),
+      /** `G17` (RC2). */
+      plane: z.union([z.literal(17), z.literal(18), z.literal(19)]),
+      /** `M7` mist and `M8` flood (RC2). */
+      coolant: z.object({ mist: z.boolean(), flood: z.boolean() }),
     }),
   }),
 })
@@ -219,31 +224,30 @@ export function executingLine(input: {
 
 /**
  * The modal state at the start of each line, parsed forward with the virtual machine's parser
- * (the subset the controller runs) as the executing line advances: each line is parsed once.
+ * (the subset the controller runs; plus the plane and coolant, RC2's `stepModal`) as the
+ * executing line advances: each line is parsed once.
  */
 export class ModalTracker {
-  private state: ParserState
+  private state: ModalState = initialModal()
   /** Lines parsed (0-based index of the next one). */
   private next = 0
 
   constructor(
     private readonly lines: readonly string[],
     private readonly arcTolerance = DEFAULT_ARC_TOLERANCE,
-  ) {
-    this.state = initialParserState([0, 0, 0], [0, 0, 0])
+  ) {}
+
+  /** The parser state line `line` (1-based) starts in. */
+  at(line: number): ParserState {
+    return this.modalAt(line).parser
   }
 
   /** The state line `line` (1-based) starts in; lines before the last asked for are not re-parsed. */
-  at(line: number): ParserState {
+  modalAt(line: number): ModalState {
     const until = Math.min(Math.max(0, line - 1), this.lines.length)
     while (this.next < until) {
-      // as GRBL's protocol loop reads it (no comments, spaces or lower case); `$` lines are not gCode
-      const text = normalize(this.lines[this.next] ?? '')
+      this.state = stepModal(this.state, this.lines[this.next] ?? '', this.arcTolerance).state
       this.next++
-      if (text === '' || text.startsWith('$')) continue
-      const r = parseBlock(text, this.state, { arcTolerance: this.arcTolerance })
-      // a line the parser refuses leaves the state as it was, as GRBL does after an error
-      if (r.isOk()) this.state = r.unwrap().state
     }
     return this.state
   }
@@ -484,7 +488,8 @@ export class RunRecorder {
   }
 
   private modalAt(line: number): RunJournal['position']['modal'] {
-    const s = this.modal.at(line)
+    const m = this.modal.modalAt(line)
+    const s = m.parser
     return {
       motion: s.motion,
       units: s.metric ? 'mm' : 'inch',
@@ -493,6 +498,8 @@ export class RunRecorder {
       spindle: s.spindle,
       spindleSpeed: s.spindleSpeed,
       toolWord: s.tool,
+      plane: m.plane,
+      coolant: { ...m.coolant },
     }
   }
 
