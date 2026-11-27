@@ -321,6 +321,12 @@ export function withToolType(v: ToolDraft, type: ToolType, units: UnitSystem): T
     ...(type === 'chamferMill' && v.type !== 'chamferMill'
       ? { fluteLength: slantLength(v.diameter, angle, units) }
       : {}),
+    // becoming a tapered ball end mill: a typical R0.25 / 0.01″-radius tip at 3.6° per side
+    // (tapered-ball-nose.md § Implementation (T1)); a chamfer mill's tip stays optional
+    ...(type === 'taperedBallEndMill' && {
+      tipDiameter: v.tipDiameter ?? qdto('length', units === 'mm' ? '0.5' : '0.02', units),
+      taperAngle: v.taperAngle ?? qdto('angle', '3.6', units),
+    }),
     cornerRadius: v.cornerRadius ?? qdto('length', units === 'mm' ? '1' : '1/32', units),
     pointAngle: v.pointAngle ?? qdto('angle', '118', units),
     angle,
@@ -345,7 +351,7 @@ export function cleanValues(
   const issues: Issue[] = []
   const notes = values.notes?.trim() === '' ? undefined : values.notes
   if (values.kind === 'tool') {
-    const { cornerRadius, pointAngle, angle, tipDiameter, coating, ...rest } = values
+    const { cornerRadius, pointAngle, angle, tipDiameter, taperAngle, coating, ...rest } = values
     const name =
       autoName && values.name.trim() === '' ? toolName(values, taken) : values.name.trim()
     return {
@@ -356,6 +362,7 @@ export function cleanValues(
         ...(values.type === 'bullNoseEndMill' ? { cornerRadius } : {}),
         ...(values.type === 'drill' ? { pointAngle } : {}),
         ...(values.type === 'chamferMill' ? { angle, tipDiameter } : {}),
+        ...(values.type === 'taperedBallEndMill' ? { tipDiameter, taperAngle } : {}),
         ...(coating?.trim() ? { coating: coating.trim() } : {}),
       } as ToolValuesDTO,
       issues,

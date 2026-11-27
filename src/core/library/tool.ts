@@ -5,7 +5,7 @@
  * Machine limits and the calculator (task 2.12) are not here: plan mode checks them.
  */
 import { construct, invariants } from '../../shared/model'
-import { collect, type AppResult, type Option } from '../../shared/result'
+import { collect, None, Some, type AppResult, type Option } from '../../shared/result'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import {
@@ -26,6 +26,7 @@ import {
   CHAMFER_MILL_ANGLE,
   COATING_MAX,
   PRESET_NAME_MAX,
+  TAPER_ANGLE,
   type CuttingPresetDTO,
   type ToolMaterial,
   type ToolType,
@@ -138,14 +139,49 @@ export interface ToolProps {
   readonly pointAngle: Option<Quantity>
   /** Chamfer mill only (required): included angle, 10°–150°. */
   readonly angle: Option<Quantity>
-  /** Chamfer mill only: smallest cutting diameter, 0 ≤ tip < DC; None = pointed (0). */
+  /**
+   * Chamfer mill: smallest cutting diameter, 0 ≤ tip < DC; None = pointed (0). Tapered ball end
+   * mill (required): the ball Ø, 0 < tip < DC.
+   */
   readonly tipDiameter: Option<Quantity>
+  /** Tapered ball end mill only (required): angle of one side to the axis, 0.5°–30°. */
+  readonly taperAngle: Option<Quantity>
   readonly toolMaterial: Option<ToolMaterial>
   readonly coating: Option<string>
   readonly presets: readonly CuttingPreset[]
 }
 
 const TWO = Rational.int(2n)
+
+/** A tapered ball end mill's cone, measured up from the tip (mm). */
+export interface TaperHeights {
+  /** h_t = r (1 − sin θ): where the cone meets the ball, tangent. */
+  readonly tangent: number
+  /** The cone's radius there, r cos θ. */
+  readonly tangentRadius: number
+  /** h_D = h_t + (DC/2 − r cos θ) / tan θ: where the cone reaches the large end Ø DC. */
+  readonly largeEnd: number
+}
+
+/**
+ * The cone heights of a ball of Ø `tipDiameter` under a cone of `taperAngle` degrees per side,
+ * tangent to it, widening to Ø `diameter` (docs/modes/tapered-ball-nose.md#the-tool).
+ */
+export function taperHeights(
+  tipDiameter: number,
+  taperAngle: number,
+  diameter: number,
+): TaperHeights {
+  const r = tipDiameter / 2
+  const theta = (taperAngle * Math.PI) / 180
+  const tangent = r * (1 - Math.sin(theta))
+  const tangentRadius = r * Math.cos(theta)
+  return {
+    tangent,
+    tangentRadius,
+    largeEnd: tangent + (diameter / 2 - tangentRadius) / Math.tan(theta),
+  }
+}
 
 export class Tool implements ToolProps {
   readonly kind = 'tool'
@@ -164,6 +200,7 @@ export class Tool implements ToolProps {
     readonly pointAngle: Option<Quantity>,
     readonly angle: Option<Quantity>,
     readonly tipDiameter: Option<Quantity>,
+    readonly taperAngle: Option<Quantity>,
     readonly toolMaterial: Option<ToolMaterial>,
     readonly coating: Option<string>,
     readonly presets: readonly CuttingPreset[],
@@ -245,11 +282,56 @@ export class Tool implements ToolProps {
         }
       } else {
         c.check(angle.isNone(), ['angle'], 'notAllowed', 'is only stored for a chamfer mill')
+      }
+      // docs/modes/tapered-ball-nose.md#tool-model: the ball Ø and the angle per side
+      if (type === 'taperedBallEndMill') {
         c.check(
-          tipDiameter.isNone(),
+          tipDiameter.isSome(),
           ['tipDiameter'],
+          'required',
+          'is required for a tapered ball end mill (the ball Ø)',
+        )
+        if (tipDiameter.isSome() && checkKind(c, ['tipDiameter'], tipDiameter.unwrap(), 'length')) {
+          const dt = tipDiameter.unwrap()
+          c.check(
+            dt.exact.compare(Rational.ZERO) > 0 &&
+              (diameter.kind !== 'length' || dt.exact.compare(diameter.exact) < 0),
+            ['tipDiameter'],
+            'range',
+            'must be greater than 0 and less than the diameter (the large end of the cone)',
+            { min: 0, max: diameter.canonical, actual: dt.canonical },
+          )
+        }
+        c.check(
+          taperAngle.isSome(),
+          ['taperAngle'],
+          'required',
+          'is required for a tapered ball end mill (the angle per side)',
+        )
+        if (taperAngle.isSome() && checkKind(c, ['taperAngle'], taperAngle.unwrap(), 'angle')) {
+          const a = taperAngle.unwrap().canonical
+          const { min, max } = TAPER_ANGLE
+          c.check(
+            a >= min && a <= max,
+            ['taperAngle'],
+            'range',
+            `must be between ${min}° and ${max}° per side (half the included angle)`,
+            { min, max, actual: a },
+          )
+        }
+      } else {
+        if (type !== 'chamferMill')
+          c.check(
+            tipDiameter.isNone(),
+            ['tipDiameter'],
+            'notAllowed',
+            'is only stored for a chamfer mill or a tapered ball end mill',
+          )
+        c.check(
+          taperAngle.isNone(),
+          ['taperAngle'],
           'notAllowed',
-          'is only stored for a chamfer mill',
+          'is only stored for a tapered ball end mill',
         )
       }
       if (coating.isSome()) checkText(c, ['coating'], coating.unwrap(), 0, COATING_MAX)
@@ -310,6 +392,7 @@ export class Tool implements ToolProps {
           p.pointAngle,
           p.angle,
           p.tipDiameter,
+          p.taperAngle,
           p.toolMaterial,
           p.coating,
           [...p.presets],
@@ -335,6 +418,7 @@ export class Tool implements ToolProps {
       pointAngle: optionalQuantityFromDTO(dto.pointAngle, 'pointAngle'),
       angle: optionalQuantityFromDTO(dto.angle, 'angle'),
       tipDiameter: optionalQuantityFromDTO(dto.tipDiameter, 'tipDiameter'),
+      taperAngle: optionalQuantityFromDTO(dto.taperAngle, 'taperAngle'),
       presets,
     }).andThen((q) =>
       Tool.create({
@@ -348,13 +432,29 @@ export class Tool implements ToolProps {
     )
   }
 
-  /** RE as used for tip geometry: stored for bull nose, 0 for flat and drill, DC/2 for ball. */
+  /**
+   * RE as used for tip geometry: stored for bull nose, 0 for flat and drill, DC/2 for ball, the
+   * ball's radius (tip Ø / 2) for a tapered ball end mill.
+   */
   get effectiveCornerRadius(): Rational {
     if (this.type === 'ballEndMill') return this.diameter.exact.div(TWO).unwrap()
+    if (this.type === 'taperedBallEndMill')
+      return this.tipDiameter.mapOr(Rational.ZERO, (q) => q.exact.div(TWO).unwrap())
     return this.cornerRadius.isSome() ? this.cornerRadius.unwrap().exact : Rational.ZERO
   }
 
-  /** Chamfer mill: the tip diameter in mm (0 when pointed); 0 for other types. */
+  /**
+   * Tapered ball end mill: the cone's heights above the tip (mm, `taperHeights`); None for other
+   * types.
+   */
+  get taper(): Option<TaperHeights> {
+    if (this.type !== 'taperedBallEndMill' || this.taperAngle.isNone()) return None
+    return Some(
+      taperHeights(this.tipDiameterMm, this.taperAngle.unwrap().canonical, this.diameter.canonical),
+    )
+  }
+
+  /** Chamfer mill: the tip diameter in mm (0 when pointed); tapered ball: the ball Ø; else 0. */
   get tipDiameterMm(): number {
     return this.tipDiameter.mapOr(0, (q) => q.canonical)
   }
@@ -380,6 +480,7 @@ export class Tool implements ToolProps {
       ...optionalQuantityDTO('pointAngle', this.pointAngle),
       ...optionalQuantityDTO('angle', this.angle),
       ...optionalQuantityDTO('tipDiameter', this.tipDiameter),
+      ...optionalQuantityDTO('taperAngle', this.taperAngle),
       ...optionalField('toolMaterial', this.toolMaterial),
       ...optionalField('coating', this.coating),
       presets: this.presets.map((p) => p.toDTO()),

@@ -208,13 +208,15 @@ export const libraryMessages = {
       ballEndMill: 'Ball end mill',
       drill: 'Drill',
       chamferMill: 'Chamfer mill',
+      taperedBallEndMill: 'Tapered ball end mill',
     } satisfies Record<ToolType, string>,
     /** The chamfer mill type's hint: one type for chamfer mills and V-bits (H-F, task U4). */
     chamferHint: 'Also V-bits: a 90° V-bit is a 90° chamfer mill.',
     /** Search aliases per type (the item list's search, task U4). */
-    typeAliases: { chamferMill: ['v-bit', 'vbit', 'v bit', 'chamfer'] } as Partial<
-      Record<ToolType, readonly string[]>
-    >,
+    typeAliases: {
+      chamferMill: ['v-bit', 'vbit', 'v bit', 'chamfer'],
+      taperedBallEndMill: ['tapered', 'taper', 'carving'],
+    } as Partial<Record<ToolType, readonly string[]>>,
     tipPointed: '0: pointed',
     /** Short type word of the suggested name ("Flat 6"). */
     shortTypes: {
@@ -223,6 +225,7 @@ export const libraryMessages = {
       ballEndMill: 'Ball',
       drill: 'Drill',
       chamferMill: 'Chamfer',
+      taperedBallEndMill: 'Tapered ball',
     } satisfies Record<ToolType, string>,
     diameter: 'Diameter',
     cornerRadius: 'Corner radius',

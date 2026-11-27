@@ -98,7 +98,7 @@ export interface Toolpath {
 // ---------------------------------------------------------------- generator inputs
 
 export type ToolpathToolType =
-  'flatEndMill' | 'bullNoseEndMill' | 'ballEndMill' | 'drill' | 'chamferMill'
+  'flatEndMill' | 'bullNoseEndMill' | 'ballEndMill' | 'drill' | 'chamferMill' | 'taperedBallEndMill'
 
 /** The plan's tool copy, reduced to float64 mm (and degrees for `pointAngle`). */
 export interface ToolpathTool {
@@ -106,14 +106,17 @@ export interface ToolpathTool {
   readonly id: string
   readonly type: ToolpathToolType
   readonly diameter: number
-  /** Effective corner radius: 0 flat, RE bull nose, D/2 ball. */
+  /** Effective corner radius: 0 flat, RE bull nose, D/2 ball, the ball's radius of a tapered ball. */
   readonly cornerRadius: number
   readonly fluteLength: number
   /** Drill only (SIG, degrees). */
   readonly pointAngle?: number
   /** Chamfer mill only: included angle (degrees) and tip diameter (0 = pointed). */
   readonly angle?: number
+  /** Chamfer mill (0 = pointed) and tapered ball end mill (the ball Ø). */
   readonly tipDiameter?: number
+  /** Tapered ball end mill only: angle per side, degrees (docs/modes/tapered-ball-nose.md). */
+  readonly taperAngle?: number
 }
 
 /** Resolved feeds and speeds (override → preset → calculator → strategy fallback). */

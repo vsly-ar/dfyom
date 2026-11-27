@@ -673,6 +673,22 @@ describe('noDataFor', () => {
       noDataFor({ ...input, materialClass: 'other', machine: None }, TEST_DATA).unwrap().code,
     ).toBe('feeds.noData')
   })
+
+  it('a tapered ball end mill has no data yet (T2), never a flat end mill of its large end Ø', () => {
+    const taper = tool({
+      type: 'taperedBallEndMill',
+      diameter: len('3.175'),
+      tipDiameter: len('0.5'),
+      taperAngle: deg('3.6'),
+      presets: [],
+    })
+    const w = noDataFor(
+      { tool: taper, materialClass: 'aluminum', engagement: SLOT, machine: None },
+      TEST_DATA,
+    ).unwrap()
+    expect(w.code).toBe('feeds.noData')
+    expect(w.message).toMatch(/tapered ball end mill.*enter the values/)
+  })
 })
 
 // docs/architecture/feeds-speeds.md#final-value-check (task 3.14)

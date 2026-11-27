@@ -15,6 +15,9 @@ export interface ProgramTool {
   readonly diameter: number
   /** For the tool-change message's type word (grbl.md#pause-messages-hardening-df63). */
   readonly type: ToolpathToolType
+  /** Tapered ball end mill only: the ball Ø (mm) and the angle per side (degrees), for its description. */
+  readonly tipDiameter?: number
+  readonly taperAngle?: number
 }
 
 /**

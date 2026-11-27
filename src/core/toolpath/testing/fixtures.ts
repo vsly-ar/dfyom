@@ -47,6 +47,22 @@ export const chamferMill = (diameter: number, angle = 90, tipDiameter = 0): Tool
   tipDiameter,
 })
 
+/** A tapered ball end mill (tapered-ball-nose.md): large end DC, ball Ø, angle per side, LCF. */
+export const taperedBall = (
+  diameter: number,
+  tipDiameter: number,
+  taperAngle: number,
+  fluteLength = 22,
+): ToolpathTool => ({
+  id: `tb${tipDiameter}`,
+  type: 'taperedBallEndMill',
+  diameter,
+  cornerRadius: tipDiameter / 2,
+  fluteLength,
+  tipDiameter,
+  taperAngle,
+})
+
 export const cutting = (tool: ToolpathTool, over: Partial<CuttingParams> = {}): CuttingParams => ({
   spindleSpeed: 18000,
   feedRate: 1200,

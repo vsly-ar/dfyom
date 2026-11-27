@@ -25,6 +25,10 @@ const AT_TOP = 1e-9
  * test oracle `Heightmap`, so the field and the simulated cut agree about tool shapes.
  */
 export function toolSurface(tool: ToolpathTool, rho: number): number {
+  if (tool.type === 'taperedBallEndMill') {
+    const p = taperedBallProfile(tool)
+    return rho > p.radius + 1e-12 ? Infinity : p.surface(rho)
+  }
   const R = tool.diameter / 2
   if (rho > R + 1e-12) return Infinity
   if (tool.type === 'chamferMill') {
@@ -41,6 +45,34 @@ export function toolSurface(tool: ToolpathTool, rho: number): number {
   if (rho <= flat) return 0
   const d = Math.min(re, rho - flat)
   return re - Math.sqrt(re * re - d * d)
+}
+
+/**
+ * A tapered ball end mill's lower surface (docs/modes/tapered-ball-nose.md#the-tool): a ball of
+ * radius r under a cone of θ per side, tangent to it, up to min(h_D, LCF); `radius` is the cutting
+ * radius there (DC/2, or the cone's radius at the flute length when the flutes end first).
+ */
+export function taperedBallProfile(tool: ToolpathTool): {
+  readonly radius: number
+  readonly surface: (rho: number) => number
+} {
+  const R = tool.diameter / 2
+  const r = Math.min((tool.tipDiameter ?? 0) / 2, R)
+  const theta = ((tool.taperAngle ?? 0) * Math.PI) / 180
+  const tan = Math.tan(theta)
+  const rc = r * Math.cos(theta)
+  const ht = r * (1 - Math.sin(theta))
+  const lcf = tool.fluteLength
+  // the cutting radius at the flute length, capped at DC/2
+  const atFlutes =
+    lcf >= ht ? rc + (lcf - ht) * tan : Math.sqrt(Math.max(0, r * r - (r - Math.max(0, lcf)) ** 2))
+  return {
+    radius: Math.min(R, atFlutes),
+    surface: (rho) =>
+      rho <= rc || tan <= 0
+        ? r - Math.sqrt(Math.max(0, r * r - Math.min(rho, r) ** 2))
+        : ht + (rho - rc) / tan,
+  }
 }
 
 /** One straight XY piece of a feed move, stamped at its highest Z. */

@@ -38,6 +38,7 @@ const TYPE_WORD: Readonly<Record<ProgramTool['type'], string>> = {
   ballEndMill: 'ball',
   drill: 'drill',
   chamferMill: 'chamfer',
+  taperedBallEndMill: 'tapered ball',
 }
 
 const MM_PER_INCH = 25.4
@@ -360,7 +361,7 @@ class Writer {
     if (pauses && zRef !== undefined) this.touchOff(number, zRef)
     // Before the marker: the marker line must be followed directly by M0 (sender rule).
     if (!first && manual) this.comment('Stop the spindle')
-    const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}`
+    const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}${this.taper(tool)}`
     this.lines.push(toolChangeMarker(number, tool.name, spec))
     if (!pauses) return
     const head = `M0 ;`
@@ -582,6 +583,16 @@ class Writer {
   }
 
   /** A length (mm) in text units. */
+  /**
+   * A tapered ball end mill's tip and angle after its type word (docs/modes/tapered-ball-nose.md#g-code):
+   * ` R0.25 3.6 deg` (the ball's radius in program units; `°` is not ASCII). Empty for other types.
+   */
+  private taper(tool: ProgramTool): string {
+    if (tool.type !== 'taperedBallEndMill' || tool.tipDiameter === undefined) return ''
+    const angle = tool.taperAngle === undefined ? '' : ` ${formatNumber(tool.taperAngle, 2)} deg`
+    return ` R${this.coord(tool.tipDiameter / 2)}${angle}`
+  }
+
   private coord(mm: number): string {
     return formatNumber(mm * this.units.perMm, this.units.decimals)
   }

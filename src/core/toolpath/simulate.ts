@@ -16,6 +16,7 @@ import { localStock, type Direction, type StockSize } from '../geometry/face'
 import { noSteps, type Steps } from '../workers/steps'
 import type { Move, Toolpath, ToolpathTool, Vec2, Vec3 } from './model'
 import { arcSweep, expandDrill } from './stats'
+import { taperedBallProfile } from './stock-heights'
 import { fromWcs, setupWcs, type WcsRotation } from './wcs'
 
 /** Default cell (mm): deviation.md § The command. */
@@ -78,6 +79,7 @@ export interface ToolProfile {
 
 /** `toolSurface` with the tool's constants taken once (no `Math.tan` per cell). */
 export function toolProfile(tool: ToolpathTool): ToolProfile {
+  if (tool.type === 'taperedBallEndMill') return { ...taperedBallProfile(tool), flat: false }
   const R = tool.diameter / 2
   if (tool.type === 'chamferMill') {
     const tip = (tool.tipDiameter ?? 0) / 2

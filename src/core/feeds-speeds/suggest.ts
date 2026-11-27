@@ -219,6 +219,12 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   const none = (reason: string, params: Record<string, number | string>): Lookup => ({
     noData: noData(reason, params),
   })
+  // its taper engagement comes with Lines (docs/modes/tapered-ball-nose.md#feeds-and-speeds, T2):
+  // never as a flat end mill of the large end Ø, whose chip load would break the tip
+  if (tool.type === 'taperedBallEndMill')
+    return none('no calculator data for a tapered ball end mill yet: enter the values', {
+      toolType: tool.type,
+    })
   const isChamfer = tool.type === 'chamferMill'
   if (isDrill !== (engagement.kind === 'drill') || isChamfer !== (engagement.kind === 'chamfer'))
     return none(`a ${engagement.kind} cut does not fit a ${TOOL_TYPE_LABEL[tool.type]}`, {

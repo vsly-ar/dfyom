@@ -5,7 +5,7 @@
  */
 import { z } from 'zod'
 import { ItemIdSchema, NAME_MAX, quantityDto } from '../library/item'
-import { TOOL_TYPES } from '../library/tool.dto'
+import { GENERALIZED_TOOL_TYPES } from '../library/tool.dto'
 import { FeatureDtoSchema, FeatureIdSchema, FeatureRoleSchema } from './feature.dto'
 import { ShapeDtoSchema, ShapeIdSchema, StoredShapeIdSchema } from './shape.dto'
 
@@ -98,7 +98,7 @@ export type GeneralToleranceDTO = z.output<typeof GeneralToleranceDtoSchema>
 export const DesignToolDtoSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('generalized'),
-    type: z.enum(TOOL_TYPES),
+    type: z.enum(GENERALIZED_TOOL_TYPES),
     diameter: length(),
     cornerRadius: length().optional().describe('Bull nose only'),
     angle: quantityDto('angle').optional().describe('Chamfer mill only: included angle'),

@@ -86,7 +86,10 @@ const SPLIT_GAIN = 0.05
 const holeBand = (m: MaterialBand | undefined): { material?: MaterialBand } =>
   m?.top === undefined ? {} : { material: { top: m.top } }
 
-/** The plan's tool copy in canonical mm/degrees; corner radius 0 flat, RE bull nose, D/2 ball. */
+/**
+ * The plan's tool copy in canonical mm/degrees; corner radius 0 flat, RE bull nose, D/2 ball, the
+ * ball's radius of a tapered ball end mill.
+ */
 export function toolpathTool(tool: Tool, id: string): ToolpathTool {
   const D = tool.diameter.canonical
   const cornerRadius =
@@ -94,7 +97,9 @@ export function toolpathTool(tool: Tool, id: string): ToolpathTool {
       ? D / 2
       : tool.type === 'bullNoseEndMill'
         ? tool.cornerRadius.mapOr(0, (q) => q.canonical)
-        : 0
+        : tool.type === 'taperedBallEndMill'
+          ? tool.tipDiameterMm / 2
+          : 0
   return {
     id,
     type: tool.type,
@@ -106,6 +111,9 @@ export function toolpathTool(tool: Tool, id: string): ToolpathTool {
       : {}),
     ...(tool.type === 'chamferMill' && tool.angle.isSome()
       ? { angle: tool.angle.unwrap().canonical, tipDiameter: tool.tipDiameterMm }
+      : {}),
+    ...(tool.type === 'taperedBallEndMill' && tool.taperAngle.isSome()
+      ? { tipDiameter: tool.tipDiameterMm, taperAngle: tool.taperAngle.unwrap().canonical }
       : {}),
   }
 }

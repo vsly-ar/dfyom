@@ -135,7 +135,7 @@ G0 Z20
 M0 ;Install T3 Wexme 1/4" 1F, 6.22 mm flat, then zero Z
 ```
 
-- **Tool description:** the tool copy's name, its diameter in program units (as the header's `Tool n:` line) and a type word (`flat`, `bull nose`, `ball`, `drill`, `chamfer`): `ProgramTool.type`. A name too long for a 70-byte line is cut so the diameter, type and `then zero Z` survive.
+- **Tool description:** the tool copy's name, its diameter in program units (as the header's `Tool n:` line) and a type word (`flat`, `bull nose`, `ball`, `drill`, `chamfer`, `tapered ball`): `ProgramTool.type`; a tapered ball end mill adds its ball radius in program units and its angle per side, `3.175 mm tapered ball R0.25 3.6 deg` ([tapered-ball-nose.md § G-code](../modes/tapered-ball-nose.md#g-code), DF124 T1). A name too long for a 70-byte line is cut so the diameter, type and `then zero Z` survive.
 - **Words:** `Install Tn …, then zero Z` (`T` + the program's tool number; no `T` word in code). "Zero Z" covers a touch plate, a probe or a paper touch-off; DFYOM's own sender guides it with `G10 L20 P1 Z0`. A manual spindle starts the message with `Stop spindle, install …`.
 - **Before `M5`:** the comment `(Tool change to Tn: spindle off, retract)` labels the stop and retract, so a reader stepping through the file sees why the spindle stops.
 - **Other pauses:** manual spindle `M0 ;Set spindle to N rpm` and the footer's `M0 ;Stop the spindle`. The first tool (already loaded, no `M0`) gets only the marker with the description.

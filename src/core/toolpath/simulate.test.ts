@@ -20,7 +20,7 @@ import {
   readGcode,
   type ProgramToolpath,
 } from './testing/gcode'
-import { bullNose, chamferMill, drill, endMill } from './testing/fixtures'
+import { bullNose, chamferMill, drill, endMill, taperedBall } from './testing/fixtures'
 import { Heightmap, toolSurface } from './testing/oracles'
 import { turnToolpath } from './wcs'
 
@@ -95,12 +95,34 @@ function segDist(x: number, y: number, a: Vec3, b: Vec3): number {
 describe('tool profiles', () => {
   it('equal toolSurface for every tool type', () => {
     const tools = [endMill(6), bullNose(6, 1), ball(6), drill(5), drill(5, 180), chamferMill(6)]
-    tools.push(chamferMill(10, 60, 1))
+    tools.push(chamferMill(10, 60, 1), taperedBall(3.175, 0.5, 3.6))
     for (const tool of tools) {
       const p = toolProfile(tool)
       for (let rho = 0; rho <= tool.diameter / 2; rho += 0.01)
         expect(p.surface(rho)).toBeCloseTo(toolSurface(tool, rho), 12)
     }
+  })
+
+  it('a tapered ball end mill: ball, then the tangent cone; cutting radius capped by the flutes (DF124 T1)', () => {
+    const t = taperedBall(3.175, 0.5, 3.6)
+    expect(toolProfile(t).radius).toBeCloseTo(3.175 / 2, 12) // the cone reaches DC at 21.5 < 22 mm
+    expect(toolSurface(t, 0)).toBe(0)
+    expect(toolSurface(t, 0.1)).toBeCloseTo(0.25 - Math.sqrt(0.25 ** 2 - 0.1 ** 2), 12)
+    // tapered-ball-nose.md § The tool: 0.60 mm wide at 1 mm, 0.85 at 3 mm, 1.85 at 11 mm
+    const half = (d: number) =>
+      (0.5 / Math.cos((3.6 * Math.PI) / 180) + 2 * (d - 0.25) * Math.tan((3.6 * Math.PI) / 180)) / 2
+    for (const [d, w] of [
+      [1, 0.6],
+      [3, 0.85],
+      [11, 1.85],
+    ] as const) {
+      expect(toolSurface(t, half(d))).toBeCloseTo(d, 9)
+      expect(2 * half(d)).toBeCloseTo(w, 2)
+    }
+    // 10 mm flutes end before the cone reaches DC: the profile ends at the cone's radius there
+    const short = taperedBall(3.175, 0.5, 3.6, 10)
+    expect(toolProfile(short).radius).toBeCloseTo(half(10), 9)
+    expect(toolSurface(short, half(10) + 0.01)).toBe(Infinity)
   })
 })
 
