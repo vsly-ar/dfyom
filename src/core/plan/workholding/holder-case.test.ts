@@ -247,3 +247,70 @@ describe('the minimum stickout with the clamp under the ER11 nut (DF132 H3)', ()
     ])
   })
 })
+
+// DF132 H4: the holder floor in the links (tool-holder.md#travel-links-at-clearance). Two small
+// pockets of one tool run, far from the clamp, linked along X18: the Ø6 tool passes 7 mm from the
+// clamp's pad (X−18–10), the ER11 nut (Ø19, 20 mm out) would pass over its 25 mm top.
+describe('a link beside the clamp under the ER11 nut (DF132 H4)', () => {
+  async function linkCase(holder: object | undefined) {
+    const s = await planSetup({ part: false, stock: STOCK, services: services() })
+    for (const y of ['6', '94'])
+      await s.run('design.pocket.add', {
+        partId: s.partId,
+        shape: { kind: 'rectangle', center: ['18', y], length: '8', width: '8', cornerRadius: '3' },
+        depth: '3',
+        floorRadius: '0',
+      })
+    await s.run('project.apply', {})
+    const { kind: _, ...m } = machineValues()
+    const machineId =
+      holder === undefined
+        ? s.machineId
+        : (
+            (await s.run('library.machine.add', {
+              values: { ...libraryInput({ ...m, name: 'Shapeoko ER11' }), holder },
+            })) as { id: string }
+          ).id
+    const planId = await s.create({ machineLibraryItemId: machineId })
+    const setup = s.plan(planId).setups[0]!
+    for (const op of setup.operations) {
+      await s.run('plan.tool.assign', {
+        planId,
+        planOperationId: op.id,
+        toolLibraryItemId: s.tools.flat6,
+      })
+      await s.run('plan.operation.update', { planId, planOperationId: op.id, stickout: '20' })
+    }
+    await s.run('plan.workholding.set', { planId, setupId: setup.id, items: [CLAMP] })
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+    const warnings = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] })
+      .warnings
+    const text = withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
+    return { warnings, text }
+  }
+  const nut = [
+    { radius: 3, above: 0 },
+    { radius: 9.5, above: 20 },
+    { radius: 26, above: 32 },
+  ]
+  it('without a holder the low link carries the nut over the clamp; with an ER11 the floor lifts it', async () => {
+    const today = await linkCase(undefined)
+    // the tool alone clears the clamp; the nut 20 mm above it would not
+    expect(gcodeClearance(today.text, ORACLE_BOX, 3)).toBeGreaterThanOrEqual(2 - 0.011)
+    expect(gcodeClearance(today.text, ORACLE_BOX, nut)).toBeLessThan(2)
+    // the link crosses at the pockets' retract plane (Z2): the nut's bottom at Z22, under the
+    // clamp's top + margin (27)
+    expect(today.text).toContain('X18\nY5.5\nG0 Z2\nY94\n(Pocket 2)\n')
+    const er11 = await linkCase({ preset: 'er11' })
+    // the nut's bottom at the clamp's top + 5 mm: the link at 25 + 5 − 20
+    expect(er11.text).toContain('X18\nY5.5\nG0 Z2\nZ10\nY94\n(Pocket 2)\n')
+    // the H2 check agrees: no holder finding, no clamp shortStickout, the export passes
+    expect(er11.warnings.map((w) => w.code)).not.toContain('plan.workholding.collision')
+    expect(er11.warnings.filter((w) => w.rule === 'shortStickout')).toEqual([])
+    // the link keeps the nut the read-out's 5 mm above the clamp: the number stays the stickout
+    expect(er11.text).toContain('min stickout 20 mm')
+    expect(gcodeClearance(er11.text, ORACLE_BOX, nut)).toBeGreaterThanOrEqual(2 - 0.011)
+  })
+})
