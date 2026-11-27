@@ -197,6 +197,17 @@ The user's cut (TG #242) had files named `enclosure-hardwood-250x100x40_setup1-u
 
 Examples: "enclosure-hardwood-250x100x40-two-setups" (one plan, two setups) → `enclosure-hardwood-s1`, `enclosure-hardwood-s2`; "Bracket" (one plan, one setup) → `bracket`. Unique per setup within a project; two projects with the same name prefix can share names (the folder tells them apart).
 
+### Resumed programs (hardening DF129)
+
+`run.job.start { fromLine }` streams a generated **lead-in** and then a plan's or a file's program from that line on ([run-recovery.md § The lead-in](../modes/run-recovery.md#the-lead-in), [§ Implementation (RC2)](../modes/run-recovery.md#implementation-rc2)). The lead-in is not post output (`src/core/run/recovery.ts` writes it from the parsed modal state at the line) and keeps to the dialect above, with these differences:
+
+- `(Resume at line n: lead-in)`, then `G90 G94 G17 G21|G20` and `G54` in the **units at the line** (a `G20` file's lead-in is in inches, 4 decimals; mm with 3), `M5`, `M9`.
+- `G53 G0 Z<top>`: straight up to the machine top (MPos Z −`$27`, `machineTopZ`) in machine coordinates, before the tool wait and again after it.
+- The tool wait is always there (Q167): the marker of the tool in effect at the line (a file without one: `Tool <T word or 1>`) and `M0 ;Check Tn <name>, then zero Z`, so the sender's tool-change rule stops at it.
+- Coolant `M7`/`M8` and the spindle as at the line: `M3` or **`M4`** (a file may run CCW) `S<rpm>`, then `G4 P<s>` (the post's 3 s for plans, 5 s for files, Q172), or for a hand-switched spindle `(Set spindle to N rpm)` + `M0 ;Set spindle to N rpm`.
+- `G0 X Y` above the start point, `G0 Z<approach>`, `G1 Z<start> F<plunge>`, then `[G91] F<feed>`: the distance mode and feed at the line.
+- The program's first motion line after the lead-in that relies on a modal motion word gets it (`X10 Y5` under `G2` → `G2 X10 Y5`): GRBL cannot set `G2`/`G3` without axis words. All other program lines go out unchanged.
+
 ## Virtual machine (task 3.8)
 
 A GRBL 1.1 emulator: a pure, deterministic state machine in `src/core` fed bytes and a clock, producing bytes. It answers **exactly like GRBL** for the subset below so the same sender works against it and a real controller. Banner after reset: `Grbl 1.1h ['$' for help]`.

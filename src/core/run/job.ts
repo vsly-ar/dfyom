@@ -5,8 +5,10 @@
  * result names the next setup, which the setup-change prompt runs after re-fixturing (task E2).
  * `from` resumes at an operation's start (hardening M5); the job tells the machine port its plan and setup for the status (M7).
  * `file` runs an external gCode file instead of a plan (DF93): read, prepared and checked here.
+ * `fromLine` starts a plan's or a file's program at a line after a generated lead-in (DF129 RC2).
  * Doc: docs/modes/run-v0.1.md#run-job, docs/modes/plan-v0.2.md#implementation-task-e2,
- * docs/modes/run-machine.md#section-resume-m5, docs/modes/run.md#run-an-external-g-code-file-df93
+ * docs/modes/run-machine.md#section-resume-m5, docs/modes/run.md#run-an-external-g-code-file-df93,
+ * docs/modes/run-recovery.md#start-from-a-line
  */
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
@@ -28,10 +30,20 @@ import type { GrblExport } from '../post/export'
 import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
+import { DEFAULT_SPIN_UP_SECONDS } from '../post/grbl/post'
+import { machineTopZ } from './goto'
+import {
+  FILE_SPIN_UP_SECONDS,
+  programHash,
+  resumePoints,
+  resumeProgram,
+  scanProgram,
+  type ResumedProgram,
+} from './recovery'
 import { alignmentGate } from './alignment'
 import { runPlanHash } from './plan-hash'
 import type { JobAbout, JobListener, MachineService, RunningJob, RunPlan } from './service'
-import { envelopeOf } from './grbl/envelope'
+import { envelopeOf, type Envelope } from './grbl/envelope'
 import {
   fileNameOf,
   fileSoftLimits,
@@ -49,6 +61,125 @@ const FileArg = z
   .describe(`Absolute path of a gCode file (${GCODE_RUN_EXTENSIONS.join(' ')}) instead of a plan`)
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
+
+/**
+ * `fromLine` of `run.job.start` / `run.job.check` (docs/modes/run-recovery.md#start-from-a-line).
+ * No `minimum` (the tools/list budget): `resumeProgram` refuses a line outside the program.
+ */
+const FromLineArg = z.number().int().optional()
+
+/** A start at a line: the line and the hash of the program it refers to (start only). */
+interface StartAt {
+  readonly fromLine?: number | undefined
+  readonly programHash?: string | undefined
+}
+
+const ResumeFindingSchema = z.discriminatedUnion('rule', [
+  z.object({ rule: z.literal('inMaterial'), z: z.number() }),
+  z.object({ rule: z.literal('ramp'), helix: z.boolean(), from: z.number().int() }),
+  z.object({ rule: z.literal('toolChange'), n: z.number().int(), name: z.string() }),
+  z.object({ rule: z.literal('incremental') }),
+])
+
+/** `run.job.check { fromLine }`'s preview (docs/modes/run-recovery.md#start-from-a-line). */
+const ResumePreviewSchema = z.object({
+  fromLine: z.number().int().describe('The line the program resumes at'),
+  programHash: z.string().describe('SHA-256 of the program; pass it to run.job.start'),
+  leadIn: z.array(z.string()).describe('The generated lead-in lines'),
+  findings: z.array(ResumeFindingSchema),
+  before: z.number().int().optional().describe('The nearest resume point at or before the line'),
+  after: z.number().int().optional().describe('The nearest resume point after the line'),
+})
+type ResumePreview = z.output<typeof ResumePreviewSchema>
+
+/**
+ * The program resumed at `at.fromLine` (DF129 RC2): refused (`input.malformed`, rule
+ * `programChanged`) when `at.programHash` names another program than this one, or a line the
+ * program cannot start at; the lead-in with the machine top of `envelope`.
+ */
+async function resumeAt(
+  program: SenderProgram,
+  at: StartAt & { readonly fromLine: number },
+  o: {
+    readonly kind: 'plan' | 'file'
+    readonly envelope: Envelope
+    readonly spindleControl: 'gcode' | 'manual'
+    readonly operationStarts?: readonly number[] | undefined
+  },
+  where: string,
+): AsyncAppResult<{ resumed: ResumedProgram; preview: ResumePreview }> {
+  const hash = await programHash(program.lines)
+  if (at.programHash !== undefined && at.programHash !== hash) {
+    const message =
+      o.kind === 'plan'
+        ? 'the plan changed since the run: resume from an operation instead'
+        : 'the file changed since the run'
+    return fail('input.malformed', message, {
+      where,
+      data: { fromLine: at.fromLine },
+      issues: [{ path: ['programHash'], rule: 'programChanged', message }],
+    })
+  }
+  const scan = scanProgram(program.lines)
+  const resumed = resumeProgram(
+    program,
+    at.fromLine,
+    {
+      topZ: machineTopZ(o.envelope),
+      spinUpSeconds: o.kind === 'plan' ? DEFAULT_SPIN_UP_SECONDS : FILE_SPIN_UP_SECONDS,
+      spindleControl: o.spindleControl,
+    },
+    scan,
+  )
+  if (resumed.isErr()) return Err(resumed.unwrapErr())
+  const r = resumed.unwrap()
+  const points = resumePoints(
+    scan,
+    o.operationStarts === undefined ? {} : { operationStarts: o.operationStarts },
+  )
+  const before = points.filter((p) => p.line <= r.fromLine).at(-1)?.line
+  const after = points.find((p) => p.line > r.fromLine)?.line
+  return Ok({
+    resumed: r,
+    preview: {
+      fromLine: r.fromLine,
+      programHash: hash,
+      leadIn: [...r.leadIn],
+      findings: r.findings.map((f) => ({ ...f })),
+      ...(before === undefined ? {} : { before }),
+      ...(after === undefined ? {} : { after }),
+    },
+  })
+}
+
+/** The controller's envelope, needed for the lead-in's machine top and the soft-limit check. */
+function envelopeFor(m: MachineService, where: string): AppResult<Envelope> {
+  const envelope = envelopeOf(m.controllerSettings ?? {})
+  if (envelope === undefined)
+    return fail('run.state', "the machine's travel is not known ($130–$132)", {
+      where,
+      data: { state: m.status().state },
+    })
+  return Ok(envelope)
+}
+
+/** The plan's spindle control (its machine copy); `gcode` when unknown. */
+function planSpindleControl(plan: PlanDTO): 'gcode' | 'manual' {
+  const snap = plan.machine === undefined ? undefined : snapshotById(plan, plan.machine)
+  return (snap?.values as MachineValuesDTO | undefined)?.spindle.control ?? 'gcode'
+}
+
+/** Refuses `from` (an operation) together with `fromLine` (one of the two, docs/modes/run-recovery.md). */
+function oneStart(
+  args: { from?: string | undefined; fromLine?: number | undefined },
+  where: string,
+): AppResult<void> {
+  if (args.from === undefined || args.fromLine === undefined) return Ok(undefined)
+  return fail('input.malformed', 'give from or fromLine, not both', {
+    where,
+    issues: [{ path: ['fromLine'], rule: 'oneOf', message: 'give from or fromLine' }],
+  })
+}
 
 /**
  * Progress labels from the program: the operation comments (`pocket1`) and the tool of each
@@ -385,12 +516,13 @@ async function runJob(
   planId: string,
   setupId: string | undefined,
   from: string | undefined,
+  at: StartAt,
   ctx: JobContext,
 ): AsyncAppResult<RunJobResult> {
   const pause = new RunPause(() => ctx.services.machine, ctx)
   const unregister = pause.register()
   try {
-    return await runJobSteps(doc, planId, setupId, from, ctx, pause)
+    return await runJobSteps(doc, planId, setupId, from, at, ctx, pause)
   } finally {
     pause.over()
     unregister()
@@ -402,6 +534,7 @@ async function runJobSteps(
   planId: string,
   setupId: string | undefined,
   from: string | undefined,
+  at: StartAt,
   ctx: JobContext,
   pause: RunPause,
 ): AsyncAppResult<RunJobResult> {
@@ -428,7 +561,7 @@ async function runJobSteps(
   }
   const started = await checkAndStart(
     doc,
-    { planId, setupId: setup.id, from, runPlan },
+    { planId, setupId: setup.id, from, at, runPlan, spindleControl: planSpindleControl(p) },
     ctx,
     m,
     workZero,
@@ -466,7 +599,14 @@ async function runJobSteps(
 /** Steps 2–4 while the connection is reserved for the job. */
 async function checkAndStart(
   doc: ProjectDoc,
-  run: { planId: string; setupId: string; from: string | undefined; runPlan: RunPlan },
+  run: {
+    planId: string
+    setupId: string
+    from: string | undefined
+    at: StartAt
+    runPlan: RunPlan
+    spindleControl: 'gcode' | 'manual'
+  },
   ctx: JobContext,
   m: MachineService,
   workZero: readonly [number, number, number],
@@ -486,8 +626,36 @@ async function checkAndStart(
   })
   if (exported.isErr()) return exported
   const e = exported.unwrap()
+  let program: SenderProgram = { lines: e.lines, sections: programSections(e) }
+  let operations = e.operationLines
+  let soft = e.warnings.filter((w) => w.rule === 'softLimit')
+  // a start at a line (DF129 RC2): the lead-in and the program from the line on, checked as a file
+  const fromLine = run.at.fromLine
+  if (fromLine !== undefined) {
+    const envelope = envelopeFor(m, where)
+    if (envelope.isErr()) return envelope
+    const r = await resumeAt(
+      program,
+      { ...run.at, fromLine },
+      {
+        kind: 'plan',
+        envelope: envelope.unwrap(),
+        spindleControl: run.spindleControl,
+        operationStarts: e.operationLines.map((o) => o.fromLine),
+      },
+      where,
+    )
+    if (r.isErr()) return Err(r.unwrapErr().withContext(where, { planId }))
+    const { resumed } = r.unwrap()
+    program = resumed.program
+    operations = shiftOperations(e.operationLines, resumed)
+    soft = fileSoftLimits(program.lines, {
+      workZero,
+      mpos: m.status().mpos,
+      travel: envelope.unwrap().travel,
+    })
+  }
   // 3. soft limits refuse the start (decision 8)
-  const soft = e.warnings.filter((w) => w.rule === 'softLimit')
   if (soft.length > 0)
     return fail('run.softLimit', `${soft.length} soft-limit finding(s) at the current work zero`, {
       where,
@@ -506,12 +674,12 @@ async function checkAndStart(
   const prefix = counted > 0 ? `${counted} machine warning(s) · ` : ''
   // before the stream starts: the host's progress ticks may arrive before startJob resolves,
   // and this tick must not overwrite them (done never goes back)
-  ctx.progress({ done: 0, total: e.lines.length, label: `${prefix}started` })
+  ctx.progress({ done: 0, total: program.lines.length, label: `${prefix}started` })
   // the host refuses if the G54, the machine copy or the target changed since the check
   const plan = doc.plans[planId]
   const about: JobAbout = {
     plan: run.runPlan,
-    operations: e.operationLines,
+    operations,
     ...(plan === undefined
       ? {}
       : {
@@ -521,7 +689,7 @@ async function checkAndStart(
   }
   const started = await m.startJob(
     ctx.jobId,
-    { lines: e.lines, sections: programSections(e) },
+    program,
     {
       progress: (p) => ctx.progress({ done: p.done, total: p.total, label: `${prefix}${p.label}` }),
       phase: (p) => pause.phase(p),
@@ -532,6 +700,22 @@ async function checkAndStart(
   pause.started(started.isOk())
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { planId }))
   return Ok({ running: started.unwrap(), warnings })
+}
+
+/** The operations' first lines in a resumed program: the one holding the line starts after the lead-in. */
+function shiftOperations(
+  ops: readonly { readonly planOperationId: string; readonly fromLine: number }[],
+  r: ResumedProgram,
+): { planOperationId: string; fromLine: number }[] {
+  const holding = ops.filter((o) => o.fromLine <= r.fromLine).at(-1)
+  return [
+    ...(holding === undefined
+      ? []
+      : [{ planOperationId: holding.planOperationId, fromLine: r.leadIn.length + 1 }]),
+    ...ops
+      .filter((o) => o.fromLine > r.fromLine)
+      .map((o) => ({ planOperationId: o.planOperationId, fromLine: o.fromLine + r.offset })),
+  ]
 }
 
 export const runJobStart = defineCommand({
@@ -553,15 +737,21 @@ export const runJobStart = defineCommand({
     from: PlanRecordIdSchema.optional().describe(
       "Resume at this operation's start (after a stop): waits at its tool first",
     ),
+    fromLine: FromLineArg.describe('Or start at this line, after a lead-in'),
+    // undescribed (tools/list budget): run.job.check's result says what it is
+    programHash: z.string().optional(),
     file: FileArg,
   }),
   result: RunJobResult,
   run: (doc, args, ctx) => {
     const one = oneOfPlanOrFile(args, 'run.job.start')
     if (one.isErr()) return Promise.resolve(Err(one.unwrapErr()))
+    const start = oneStart(args, 'run.job.start')
+    if (start.isErr()) return Promise.resolve(Err(start.unwrapErr()))
+    const at: StartAt = { fromLine: args.fromLine, programHash: args.programHash }
     return args.file !== undefined
-      ? runFileJob(args.file, ctx)
-      : runJob(doc, args.planId ?? '', args.setupId, args.from, ctx)
+      ? runFileJob(args.file, at, ctx)
+      : runJob(doc, args.planId ?? '', args.setupId, args.from, at, ctx)
   },
 })
 
@@ -581,31 +771,59 @@ export const runJobCheck = defineCommand({
   args: z.object({
     planId: PlanIdSchema.optional(),
     setupId: PlanRecordIdSchema.optional().describe('Required when the plan has several setups'),
+    fromLine: FromLineArg,
     file: FileArg,
   }),
   result: z.object({
     setupId: z.string().optional(),
     findings: z.array(PlanWarningSchema).describe('softLimit findings; empty = inside the travel'),
+    resume: ResumePreviewSchema.optional().describe('With fromLine: the lead-in and findings'),
   }),
   async run(doc, args, ctx) {
     const where = 'run.job.check'
     const one = oneOfPlanOrFile(args, where)
     if (one.isErr()) return one
     if (args.file !== undefined) {
-      const file = await fileChecks(args.file, ctx.services, where)
-      return file.map((f) => ({ findings: f.findings }))
+      const file = await fileChecks(args.file, ctx.services, where, { fromLine: args.fromLine })
+      return file.map((f) => ({
+        findings: f.findings,
+        ...(f.resume === undefined ? {} : { resume: f.resume.preview }),
+      }))
     }
     const planId = args.planId ?? ''
     const checked = startChecks(doc, planId, args.setupId, ctx.services, where)
     if (checked.isErr()) return checked
-    const { setup, workZero } = checked.unwrap()
+    const { setup, workZero, m, plan } = checked.unwrap()
     const exported = await exportPlan(doc, planId, ctx.services, {
       setupId: setup.id,
       workZero,
     })
     if (exported.isErr()) return Err(exported.unwrapErr().withContext(where, { planId }))
-    const findings = exported.unwrap().warnings.filter((w) => w.rule === 'softLimit')
-    return Ok({ setupId: setup.id, findings: [...findings] })
+    const e = exported.unwrap()
+    if (args.fromLine === undefined) {
+      const findings = e.warnings.filter((w) => w.rule === 'softLimit')
+      return Ok({ setupId: setup.id, findings: [...findings] })
+    }
+    const envelope = envelopeFor(m, where)
+    if (envelope.isErr()) return envelope
+    const r = await resumeAt(
+      { lines: e.lines, sections: programSections(e) },
+      { fromLine: args.fromLine },
+      {
+        kind: 'plan',
+        envelope: envelope.unwrap(),
+        spindleControl: planSpindleControl(plan),
+        operationStarts: e.operationLines.map((o) => o.fromLine),
+      },
+      where,
+    )
+    if (r.isErr()) return Err(r.unwrapErr().withContext(where, { planId }))
+    const findings = fileSoftLimits(r.unwrap().resumed.program.lines, {
+      workZero,
+      mpos: m.status().mpos,
+      travel: envelope.unwrap().travel,
+    })
+    return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview })
   },
 })
 
@@ -632,11 +850,14 @@ async function fileChecks(
   path: string,
   services: Services,
   where: string,
+  at: StartAt = {},
 ): AsyncAppResult<{
   m: MachineService
   file: PreparedGcodeFile
   workZero: readonly [number, number, number]
   findings: PlanWarning[]
+  /** With `fromLine` (DF129 RC2): the resumed program, whose soft limits `findings` are. */
+  resume?: { resumed: ResumedProgram; preview: ResumePreview }
 }> {
   const data = { file: path }
   if (!isRunnableGcodeFileName(path))
@@ -688,18 +909,31 @@ async function fileChecks(
         params: { line: r.line },
       })),
     })
-  const envelope = envelopeOf(m.controllerSettings ?? {})
-  if (envelope === undefined)
-    return fail('run.state', "the machine's travel is not known ($130–$132)", {
-      where,
-      data: { state: status.state },
+  const env = envelopeFor(m, where)
+  if (env.isErr()) return env
+  const envelope = env.unwrap()
+  if (at.fromLine === undefined) {
+    const findings = fileSoftLimits(file.lines, {
+      workZero: status.workZero,
+      mpos: status.mpos,
+      travel: envelope.travel,
     })
-  const findings = fileSoftLimits(file.lines, {
+    return Ok({ m, file, workZero: status.workZero, findings })
+  }
+  // a start at a line (Q170): the lead-in and the rest, checked as one program
+  const r = await resumeAt(
+    { lines: file.lines, sections: file.sections },
+    { ...at, fromLine: at.fromLine },
+    { kind: 'file', envelope, spindleControl: m.connectedMachine?.spindle.control ?? 'gcode' },
+    where,
+  )
+  if (r.isErr()) return Err(r.unwrapErr().withContext(where, data))
+  const findings = fileSoftLimits(r.unwrap().resumed.program.lines, {
     workZero: status.workZero,
     mpos: status.mpos,
     travel: envelope.travel,
   })
-  return Ok({ m, file, workZero: status.workZero, findings })
+  return Ok({ m, file, workZero: status.workZero, findings, resume: r.unwrap() })
 }
 
 /** A real connection: the controller's `$$` against the connection's machine, homing on. */
@@ -724,11 +958,15 @@ function fileSettingsCheck(m: MachineService, state: string, where: string): App
 }
 
 /** `run.job.start { file }`: the plan run's steps with the file in place of the export (DF93). */
-async function runFileJob(path: string, ctx: JobContext): AsyncAppResult<RunJobResult> {
+async function runFileJob(
+  path: string,
+  at: StartAt,
+  ctx: JobContext,
+): AsyncAppResult<RunJobResult> {
   const pause = new RunPause(() => ctx.services.machine, ctx)
   const unregister = pause.register()
   try {
-    return await runFileSteps(path, ctx, pause)
+    return await runFileSteps(path, at, ctx, pause)
   } finally {
     pause.over()
     unregister()
@@ -737,14 +975,19 @@ async function runFileJob(path: string, ctx: JobContext): AsyncAppResult<RunJobR
 
 async function runFileSteps(
   path: string,
+  at: StartAt,
   ctx: JobContext,
   pause: RunPause,
 ): AsyncAppResult<RunJobResult> {
   const where = 'run.job.start'
   const data = { file: path }
-  const checked = await fileChecks(path, ctx.services, where)
+  const checked = await fileChecks(path, ctx.services, where, at)
   if (checked.isErr()) return checked
-  const { m, file, workZero, findings } = checked.unwrap()
+  const { m, file, workZero, findings, resume } = checked.unwrap()
+  const program: SenderProgram = resume?.resumed.program ?? {
+    lines: file.lines,
+    sections: file.sections,
+  }
   if (findings.length > 0)
     return fail(
       'run.softLimit',
@@ -754,7 +997,7 @@ async function runFileSteps(
   // held for the job from here to the stream (no jog or work-zero change in between)
   const reserved = m.reserve(ctx.jobId)
   if (reserved.isErr()) return reserved
-  const started = await startFile(path, file, ctx, m, workZero, pause)
+  const started = await startFile(path, program, ctx, m, workZero, pause)
   m.release(ctx.jobId)
   if (started.isErr()) return started
   const unbind = bindJobAbort(m, ctx)
@@ -767,7 +1010,7 @@ async function runFileSteps(
 
 async function startFile(
   path: string,
-  file: PreparedGcodeFile,
+  program: SenderProgram,
   ctx: JobContext,
   m: MachineService,
   workZero: readonly [number, number, number],
@@ -780,11 +1023,11 @@ async function startFile(
     pause.started(false)
     return fail('op.aborted', 'the run was aborted before it started', { where })
   }
-  ctx.progress({ done: 0, total: file.lines.length, label: 'started' })
+  ctx.progress({ done: 0, total: program.lines.length, label: 'started' })
   // the host refuses if the G54, the machine copy or the target changed since the check
   const started = await m.startJob(
     ctx.jobId,
-    { lines: file.lines, sections: file.sections },
+    program,
     {
       progress: (p) => ctx.progress({ done: p.done, total: p.total, label: p.label }),
       phase: (p) => pause.phase(p),
