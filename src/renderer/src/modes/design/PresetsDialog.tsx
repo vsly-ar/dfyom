@@ -101,6 +101,30 @@ export function PresetsDialog<P extends { readonly id: string }>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, current])
 
+  // H4: keyboard flow through a step: its `data-step-focus` element (else its first control)
+  // takes the focus when it opens, and the card it came from takes it back on Back or Escape
+  // (the grid remounts; the focus would fall to the dialog)
+  const stepRef = useRef<HTMLDivElement | null>(null)
+  const inStep = step !== undefined
+  const wasInStep = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      wasInStep.current = false
+      return
+    }
+    if (inStep === wasInStep.current) return
+    wasInStep.current = inStep
+    const id = requestAnimationFrame(() => {
+      if (inStep)
+        stepRef.current
+          ?.querySelector<HTMLElement>('[data-step-focus], input, button, [tabindex]')
+          ?.focus()
+      else cards.current[active]?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, inStep])
+
   const move = (to: number) => {
     const i = Math.min(Math.max(to, 0), presets.length - 1)
     setActive(i)
@@ -145,7 +169,7 @@ export function PresetsDialog<P extends { readonly id: string }>({
     >
       {header}
       {step !== undefined ? (
-        step.content
+        <div ref={stepRef}>{step.content}</div>
       ) : (
         <div
           role="radiogroup"
@@ -191,7 +215,17 @@ export function PresetsDialog<P extends { readonly id: string }>({
                     ) : null}
                   </span>
                   <span className={styles['presetDescription']}>{describe(preset)}</span>
-                  <span className={styles['presetNumbers']}>{numbers(preset)}</span>
+                  <span className={styles['presetNumbers']}>
+                    {/* H4: a line breaks only between two numbers, never inside one */}
+                    {numbers(preset)
+                      .split(' · ')
+                      .map((n, k) => (
+                        <Fragment key={k}>
+                          {k > 0 ? ' · ' : null}
+                          <span>{n}</span>
+                        </Fragment>
+                      ))}
+                  </span>
                 </button>
               </Fragment>
             )

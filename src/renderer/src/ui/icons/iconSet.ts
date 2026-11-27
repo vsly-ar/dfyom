@@ -199,16 +199,17 @@ export const ICON_SET = {
       { d: 'M7 14.5V2.5h2v12', a: true },
     ],
   },
-  // The Straight fins preset (top view): four slots running out of a frame's top and bottom, one
-  // the accent.
+  // The Straight fins preset (top view): three slots running out of a frame's top and bottom, the
+  // middle one the accent (H4: four were the densest icon of the group; three keep the pins'
+  // rhythm).
   'fins-straight': {
     label: 'Straight fins',
     group: 'feature',
     src: 'b22',
     parts: [
       { rect: [1.5, 3, 13, 10, 1] },
-      { d: 'M4 1.5v13M6.65 1.5v13M12 1.5v13' },
-      { d: 'M9.35 1.5v13', a: true },
+      { d: 'M4.5 1.5v13M11.5 1.5v13' },
+      { d: 'M8 1.5v13', a: true },
     ],
   },
   // H3 (pattern-presets.md § UI): the Radial fins preset, a hub with eight slots running out from

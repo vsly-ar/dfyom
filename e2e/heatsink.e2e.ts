@@ -8,7 +8,8 @@
 // "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"). H3: radial fins on a Ø 60 round part (an
 // 80 × 80 × 12 plate with its Ø 60 outline profile): the step centres on the profile and counts
 // 21 slots, "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at
-// the rim". Windows stay hidden (app.fixture.ts).
+// the rim". H4 (design review): the read-outs are key/value rows ("Slots 11 × 2 mm · Fins 12 ×
+// 1.5 mm · …"), the step opens with its heading focused. Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/pattern-presets.md#implementation-h1, docs/modes/pattern-presets.md#implementation-h2,
 // docs/modes/pattern-presets.md#implementation-h3,
 // docs/conventions/ui.md
@@ -25,6 +26,13 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
   await field.fill(value)
   await field.press('Enter')
   await field.blur()
+}
+
+/** H4: a heatsink read-out's key/value rows as "Key value · Key value". */
+async function rows(list: Locator): Promise<string> {
+  const keys = await list.locator('dt').allTextContents()
+  const values = await list.locator('dd').allTextContents()
+  return keys.map((k, i) => `${k} ${values[i]}`).join(' · ')
 }
 
 /** `name`-light.png and -dark.png of the window (only with DFYOM_H1_DIR). */
@@ -108,9 +116,11 @@ test('heatsink: straight fins through the Presets dialog', async ({ dfyom }) => 
   await presets.getByRole('radio', { name: 'Straight fins' }).click()
   const step = presets.locator('[data-heatsink-step]')
   await expect(step).toBeVisible()
-  await expect(presets.locator('[data-heatsink-readout]')).toHaveText(
-    '11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm · walls 1.5 mm',
-  )
+  await expect
+    .poll(() => rows(presets.locator('[data-heatsink-readout]')))
+    .toBe('Slots 11 × 2 mm · Fins 12 × 1.5 mm · Height 10 mm (1:6.7) · Base 4 mm · Walls 1.5 mm')
+  // H4: the step opens with its heading focused (no adjust popover over the fields)
+  await expect(presets.getByRole('heading', { name: 'Straight fins' })).toBeFocused()
   await expect(presets.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 2 x 12/)
   await expect(step).toContainText('Slot = tool: one pass per level.')
   await shoot(page, 'h1-step')
@@ -122,7 +132,9 @@ test('heatsink: straight fins through the Presets dialog', async ({ dfyom }) => 
   await expect(presets).toBeHidden()
 
   // ── the pattern reads as the heatsink; the pocket's tool is the Ø 2 ───────────────────────
-  await expect(readout).toHaveText('11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm')
+  await expect
+    .poll(() => rows(readout))
+    .toBe('Slots 11 × 2 mm · Fins 12 × 1.5 mm · Height 10 mm (1:6.7) · Base 4 mm')
   await expect(inspector.locator('[data-feature-field="margin.0"] input')).toHaveValue(/1\.5/)
   await expect(inspector.locator('[data-feature-field="margin.1"] input')).toHaveValue(/^0/)
   await expect(inspector.getByText('Flat 2 x 12').first()).toBeVisible()
@@ -191,9 +203,9 @@ test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom
   await presets.getByRole('radio', { name: 'Square pin fins' }).click()
   const step = presets.locator('[data-heatsink-step="squarePins"]')
   await expect(step).toBeVisible()
-  await expect(presets.locator('[data-heatsink-readout]')).toHaveText(
-    '49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm · channels 2.5 mm · border 2 mm',
-  )
+  await expect
+    .poll(() => rows(presets.locator('[data-heatsink-readout]')))
+    .toBe('Pins 49 × 3 mm · Channels 2.5 mm · Height 8 mm (1:2.7) · Base 6 mm · Border 2 mm')
   await expect(presets.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 2 x 12/)
   await expect(step).toContainText('Finishing pass round every pin.')
   await shoot(page, 'h2-step')
@@ -201,7 +213,9 @@ test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom
   await expect(presets).toBeHidden()
 
   // ── the pattern reads as pins; the pocket's tool is the Ø 2; no finding ────────────────────
-  await expect(readout).toHaveText('49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm')
+  await expect
+    .poll(() => rows(readout))
+    .toBe('Pins 49 × 3 mm · Channels 2.5 mm · Height 8 mm (1:2.7) · Base 6 mm')
   await expect(inspector.getByText('Flat 2 x 12').first()).toBeVisible()
   await expect(page.getByText('0 warnings')).toBeVisible()
   await shoot(page, 'h2-part')
@@ -217,6 +231,10 @@ test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom
   await page.keyboard.press('ControlOrMeta+z')
   await expect(readout).toHaveText(/^\d+ cells/)
 })
+
+/** The radial worked example's read-out (H4 rows). */
+const RADIAL =
+  'Slots 21 × 2 mm · Fins at hub 1.59 mm · Fins at rim 6.98 mm · Height 8 mm (1:5) · Base 4 mm'
 
 test('heatsink: radial fins on a round part through the Presets dialog (H3)', async ({ dfyom }) => {
   test.setTimeout(150_000)
@@ -284,9 +302,7 @@ test('heatsink: radial fins on a round part through the Presets dialog (H3)', as
   await presets.getByRole('radio', { name: 'Radial fins' }).click()
   const step = presets.locator('[data-heatsink-step="radialFins"]')
   await expect(step).toBeVisible()
-  await expect(presets.locator('[data-heatsink-readout]')).toHaveText(
-    '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
-  )
+  await expect.poll(() => rows(presets.locator('[data-heatsink-readout]'))).toBe(RADIAL)
   await expect(step).toContainText('Centred on Outline (40 mm, 40 mm)')
   await expect(step).toContainText('21 keep the fin at the hub.')
   await expect(presets.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 2 x 12/)
@@ -295,9 +311,7 @@ test('heatsink: radial fins on a round part through the Presets dialog (H3)', as
   await expect(presets).toBeHidden()
 
   // ── the pattern reads as radial fins; the pocket's tool is the Ø 2 ─────────────────────────
-  await expect(readout).toHaveText(
-    '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
-  )
+  await expect.poll(() => rows(readout)).toBe(RADIAL)
   await expect(inspector.locator('[data-feature-field="count"] input')).toHaveValue('21')
   await expect(inspector.getByText('Flat 2 x 12').first()).toBeVisible()
   await shoot(page, 'h3-part')

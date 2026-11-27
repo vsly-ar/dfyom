@@ -6,6 +6,9 @@ import type { Direction } from '../../../core/geometry/face'
 import type { MaterialClass } from '../../../core/library/item'
 
 /** "A", "A and B", "A, B and C". */
+/** H4 (pattern-presets.md): one key/value row of a heatsink read-out. */
+export type ReadoutRow = readonly [key: string, value: string]
+
 const nameList = (items: readonly string[]): string =>
   items.length <= 1
     ? (items[0] ?? '')
@@ -261,22 +264,29 @@ export const designMessages = {
       noFit: 'No slot fits: make the face wider, or the fins, slots or wall smaller.',
       apply: 'Apply',
       back: 'Back',
-      /** "11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm" (the heatsink read-out). */
-      finsReadout: (
+      /**
+       * H4: the heatsink read-out as key/value rows (the step's Result panel and the inspector):
+       * Slots 11 × 2 mm · Fins 12 × 1.5 mm · Height 10 mm (1:6.7) · Base 4 mm.
+       */
+      finsRows: (
         slots: number,
+        slot: string,
         fins: number,
         fin: string,
         height: string,
         ratio: number,
         base: string | undefined,
-      ) =>
-        [
-          slots === 1 ? '1 slot' : `${slots} slots`,
-          `${fins} fins ${fin}`,
-          `${height} high (1:${ratio})`,
-          ...(base === undefined ? [] : [`base ${base}`]),
-        ].join(' · '),
-      finsWalls: (wall: string) => `walls ${wall}`,
+      ): ReadoutRow[] => [
+        ['Slots', `${slots} × ${slot}`],
+        ['Fins', `${fins} × ${fin}`],
+        ['Height', `${height} (1:${ratio})`],
+        ...(base === undefined ? [] : [['Base', base] as ReadoutRow]),
+      ],
+      finsWalls: (wall: string): ReadoutRow => ['Walls', wall],
+      /** The step's Result panel's title (H4). */
+      result: 'Result',
+      /** The inspector's heatsink read-out list (H4). */
+      heatsinkReadout: 'Heatsink',
       tallFins: (ratio: number) =>
         `Fins taller than 8 × their thickness (1:${ratio}) chatter and bend.`,
       /** H2: the pin-fin cards and steps. */
@@ -301,25 +311,27 @@ export const designMessages = {
           : `${depth} high, ${flute} of flute.`,
       pinChipsNote: 'Blow the chips out of the channels (air blast or mist); 1–2 flutes.',
       noPinFit: 'No pin fits: make the face larger, or the pins or channels smaller.',
-      /** "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm" (the pin read-out). */
-      pinsReadout: (
+      /** H4: Pins 49 × 3 mm · Channels 2.5 mm · Height 8 mm (1:2.7) · Base 6 mm (round: Ø 3 mm). */
+      pinsRows: (
         pins: number,
         pin: string,
         round: boolean,
+        channel: string,
         height: string,
         ratio: number,
         base: string | undefined,
-      ) =>
-        [
-          `${pins === 1 ? '1 pin' : `${pins} pins`} ${round ? 'Ø ' : ''}${pin}`,
-          `${height} high (1:${ratio})`,
-          ...(base === undefined ? [] : [`base ${base}`]),
-        ].join(' · '),
-      pinsChannels: (channel: string, border: string) => `channels ${channel} · border ${border}`,
+      ): ReadoutRow[] => [
+        ['Pins', `${pins} × ${round ? 'Ø ' : ''}${pin}`],
+        ['Channels', channel],
+        ['Height', `${height} (1:${ratio})`],
+        ...(base === undefined ? [] : [['Base', base] as ReadoutRow]),
+      ],
+      pinsBorder: (border: string): ReadoutRow => ['Border', border],
       tallPins: (ratio: number) => `Pins taller than 8 × their size (1:${ratio}) chatter and bend.`,
       /** H3: the radial-fins card and step. */
-      radialNumbers: (slots: number, hub: string, height: string) =>
-        `${slots} slots · hub ${hub} · ${height} high`,
+      /** H4: in the step's field order, as the other cards (fin, slot, height). */
+      radialNumbers: (fin: string, slot: string, height: string) =>
+        `hub fins ${fin} · slots ${slot} · ${height} high`,
       hubFin: 'Fin at the hub',
       hub: 'Hub diameter',
       outer: 'Part diameter',
@@ -331,22 +343,22 @@ export const designMessages = {
       centreNote: (u: string, v: string, circle: string | undefined) =>
         `Centred on ${circle ?? 'the face'} (${u}, ${v}); the slots run one slot past the rim: the part's outline profile opens them.`,
       noRadialFit: 'No slots fit: make the hub larger, or the fins or slots smaller.',
-      /** "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm". */
-      radialReadout: (
+      /** H4: Slots 21 × 2 mm · Fins at hub 1.59 mm · Fins at rim 6.98 mm · Height 8 mm (1:5) · Base 4 mm. */
+      radialRows: (
         slots: number,
         slot: string,
-        fin: string,
+        hubFin: string,
+        rimFin: string,
         height: string,
         ratio: number,
         base: string | undefined,
-      ) =>
-        [
-          `${slots === 1 ? '1 slot' : `${slots} slots`} ${slot}`,
-          `fins ${fin} at the hub`,
-          `${height} high (1:${ratio})`,
-          ...(base === undefined ? [] : [`base ${base}`]),
-        ].join(' · '),
-      radialRim: (rim: string) => `${rim} at the rim`,
+      ): ReadoutRow[] => [
+        ['Slots', `${slots} × ${slot}`],
+        ['Fins at hub', hubFin],
+        ['Fins at rim', rimFin],
+        ['Height', `${height} (1:${ratio})`],
+        ...(base === undefined ? [] : [['Base', base] as ReadoutRow]),
+      ],
       tallHub: (ratio: number) =>
         `Fins taller than 8 × their thickness at the hub (1:${ratio}) chatter and bend.`,
     },

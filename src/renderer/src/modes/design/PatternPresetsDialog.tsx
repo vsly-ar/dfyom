@@ -40,7 +40,7 @@ import { PATTERN_PRESETS, type PatternPreset } from '../../../../core/design/pat
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { UnitSystem } from '../../../../core/project/document'
-import { designMessages } from '../../messages/design'
+import { designMessages, type ReadoutRow } from '../../messages/design'
 import { lengthSource } from '../../messages/dfm'
 import { useLibraryVersion, useShell } from '../../shell/ShellContext'
 import {
@@ -309,7 +309,7 @@ export function PatternPresetsDialog({
         describe={(c) => p.heatsinkDescriptions[c.id] ?? ''}
         numbers={(c) =>
           c.id === 'radialFins'
-            ? p.radialNumbers(21, 'Ø 24 mm', '8 mm')
+            ? p.radialNumbers('1.5 mm', '2 mm', '8 mm')
             : PIN_KIND[c.id] === undefined
               ? p.heatsinkNumbers('1.5 mm', '2 mm', '10 mm')
               : p.pinNumbers(PIN_KIND[c.id] === 'square' ? '3 mm' : 'Ø 3 mm', '2.5 mm', '8 mm')
@@ -463,7 +463,31 @@ function StepField({
   )
 }
 
-/** A step's body: its card's icon and name, the fields, the live read-out. */
+/**
+ * A heatsink read-out as a key/value list (H4): the step's Result panel and the inspector, so
+ * the numbers scan as a column instead of wrapping as one sentence.
+ */
+export function ReadoutList({
+  rows,
+  label,
+  ...data
+}: {
+  rows: readonly ReadoutRow[]
+  label: string
+} & Record<`data-${string}`, string | boolean>): React.JSX.Element {
+  return (
+    <dl className={styles['readoutList']} aria-label={label} {...data}>
+      {rows.map(([key, value]) => (
+        <div key={key} className={styles['readoutRow']} data-readout-row={key}>
+          <dt>{key}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/** A step's body: its card's icon and name, the fields, and beside them the live Result (H4). */
 function StepBody({
   card,
   name,
@@ -473,18 +497,28 @@ function StepBody({
   card: HeatsinkCard
   name: string
   fields: React.ReactNode
-  readout: string
+  /** The read-out's rows, or the no-fit message. */
+  readout: readonly ReadoutRow[] | string
 }): React.JSX.Element {
   return (
     <div className={styles['heatsinkStep']} data-heatsink-step={card.id}>
-      <div className={styles['heatsinkStepHead']}>
+      {/* H4: the step's heading takes the focus when it opens (PresetsDialog's `data-step-focus`):
+          Tab then walks the fields, and no field's adjust popover opens by itself */}
+      <h3 className={styles['heatsinkStepHead']} tabIndex={-1} data-step-focus>
         <Icon name={card.icon} />
         <span className={styles['presetName']}>{name}</span>
-      </div>
+      </h3>
       <div className={styles['heatsinkFields']}>{fields}</div>
-      <p className={styles['heatsinkReadout']} data-heatsink-readout>
-        {readout}
-      </p>
+      <section className={styles['heatsinkResult']} aria-label={p.result}>
+        <h3 className={styles['heatsinkResultTitle']}>{p.result}</h3>
+        {typeof readout === 'string' ? (
+          <p className={styles['heatsinkNoFit']} data-heatsink-readout>
+            {readout}
+          </p>
+        ) : (
+          <ReadoutList rows={readout} label={p.result} data-heatsink-readout />
+        )}
+      </section>
     </div>
   )
 }
@@ -594,8 +628,9 @@ function useStraightFinsStep(
     layout === undefined || sizes === undefined
       ? p.noFit
       : [
-          p.finsReadout(
+          ...p.finsRows(
             layout.slots,
+            len(sizes.slot),
             layout.fins,
             len(sizes.fin),
             len(sizes.height),
@@ -603,7 +638,7 @@ function useStraightFinsStep(
             layout.base === undefined ? undefined : len(layout.base),
           ),
           p.finsWalls(len(layout.wall)),
-        ].join(' · ')
+        ]
 
   const step = (apply: ApplyFn): StepResult => ({
     content: (
@@ -746,16 +781,17 @@ function usePinFinsStep(
       layout === undefined || sizes === undefined
         ? p.noPinFit
         : [
-            p.pinsReadout(
+            ...p.pinsRows(
               layout.pins,
               len(sizes.pin),
               kind !== 'square',
+              len(sizes.channel),
               len(sizes.height),
               layout.ratio,
               layout.base === undefined ? undefined : len(layout.base),
             ),
-            p.pinsChannels(len(sizes.channel), len(layout.border)),
-          ].join(' · ')
+            p.pinsBorder(len(layout.border)),
+          ]
     return {
       content: (
         <StepBody
@@ -916,17 +952,15 @@ function useRadialFinsStep(
     const readout =
       layout === undefined || sizes === undefined
         ? p.noRadialFit
-        : [
-            p.radialReadout(
-              layout.count,
-              len(sizes.slot),
-              len(layout.hubFin),
-              len(sizes.height),
-              layout.ratio,
-              layout.base === undefined ? undefined : len(layout.base),
-            ),
-            p.radialRim(len(layout.rimFin)),
-          ].join(' · ')
+        : p.radialRows(
+            layout.count,
+            len(sizes.slot),
+            len(layout.hubFin),
+            len(layout.rimFin),
+            len(sizes.height),
+            layout.ratio,
+            layout.base === undefined ? undefined : len(layout.base),
+          )
     return {
       content: (
         <StepBody
@@ -1022,8 +1056,8 @@ function RadialPreview(): React.JSX.Element {
       preserveAspectRatio="xMidYMid meet"
       aria-hidden="true"
     >
-      <path className={styles['miniFill']} d={slots} />
-      <path className={styles['miniEdge']} d={slots} />
+      {/* H4: 21 outlined slots ran together at card size; the slots are solid cuts instead */}
+      <path className={styles['miniCut']} d={slots} />
       <circle className={styles['miniEdge']} cx={cx} cy={cy} r={r((st.outer / 2) * s)} />
       <circle className={styles['presetRing']} cx={cx} cy={cy} r={r(ri * s)} />
     </svg>

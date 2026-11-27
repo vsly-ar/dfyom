@@ -2,7 +2,7 @@
 // preset marked and focused, arrows and Home/End move, Enter or a click applies once and closes,
 // Escape or the footer's Close (P10) closes without applying; the polar preview's ring guides (P10).
 // Doc: docs/modes/patterns.md#presets-dialog-and-more-presets-df107
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import { PATTERN_PRESETS } from '../../../../core/design/pattern/presets'
@@ -37,6 +37,12 @@ const honeycomb = {
   lattice: 'hex',
   spacing: { gap: mm(2) },
 } as unknown as FeatureDTO
+
+/** H4: the step's Result rows as "Key value · Key value". */
+const readout = (root: Element) =>
+  [...root.querySelectorAll('[data-heatsink-readout] [data-readout-row]')]
+    .map((r) => `${r.querySelector('dt')?.textContent} ${r.querySelector('dd')?.textContent}`)
+    .join(' · ')
 
 describe('PatternPresetsDialog (DF107)', () => {
   it('shows every preset as a card with a preview, name, description and key numbers', async () => {
@@ -162,16 +168,24 @@ describe('PatternPresetsDialog (DF107)', () => {
       expect(card).toHaveTextContent('fins 1.5 mm · slots 2 mm · 10 mm high')
       await user.click(card)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        '11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm · walls 1.5 mm',
+      expect(readout(dialog)).toBe(
+        'Slots 11 × 2 mm · Fins 12 × 1.5 mm · Height 10 mm (1:6.7) · Base 4 mm · Walls 1.5 mm',
       )
       expect(dialog).toHaveTextContent('Slot = tool: one pass per level.')
       expect(within(dialog).getByRole('combobox', { name: 'Tool' })).toHaveTextContent(
         'Flat 2 x 12',
       )
       await expectNoAxeViolations(dialog)
+      // H4: the step's heading takes the focus, Tab goes on to the first field; Back gives the
+      // focus to the card it came from
+      await waitFor(() =>
+        expect(within(dialog).getByRole('heading', { name: 'Straight fins' })).toHaveFocus(),
+      )
+      await user.tab()
+      expect(within(dialog).getByRole('combobox', { name: 'Fin thickness' })).toHaveFocus()
       await user.keyboard('{Escape}')
-      expect(screen.getByRole('radio', { name: 'Straight fins' })).toBeInTheDocument()
+      const back = screen.getByRole('radio', { name: 'Straight fins' })
+      await waitFor(() => expect(back).toHaveFocus())
       await user.keyboard('{Escape}')
       expect(screen.queryByRole('dialog')).toBeNull()
     })
@@ -207,9 +221,7 @@ describe('PatternPresetsDialog (DF107)', () => {
       expect(card).toHaveAttribute('aria-checked', 'true')
       await user.click(card)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        /^9 slots · 10 fins 2 mm · 9 mm high \(1:4\.5\)/,
-      )
+      expect(readout(dialog)).toMatch(/^Slots 9 × 2 mm · Fins 10 × 2 mm · Height 9 mm \(1:4\.5\)/)
     })
 
     it('H2: four heatsink cards; a pin card opens its step with the worked example', async () => {
@@ -231,8 +243,8 @@ describe('PatternPresetsDialog (DF107)', () => {
       await user.click(square)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
       expect(dialog.querySelector('[data-heatsink-step="squarePins"]')).not.toBeNull()
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        '49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm · channels 2.5 mm · border 2 mm',
+      expect(readout(dialog)).toBe(
+        'Pins 49 × 3 mm · Channels 2.5 mm · Height 8 mm (1:2.7) · Base 6 mm · Border 2 mm',
       )
       expect(dialog).toHaveTextContent('Finishing pass round every pin.')
       expect(within(dialog).getByRole('combobox', { name: 'Tool' })).toHaveTextContent(
@@ -242,9 +254,7 @@ describe('PatternPresetsDialog (DF107)', () => {
       // Back, then the staggered card: 46 round pins
       await user.keyboard('{Escape}')
       await user.click(screen.getByRole('radio', { name: 'Staggered pin fins' }))
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        /^46 pins Ø 3 mm · 8 mm high/,
-      )
+      expect(readout(dialog)).toMatch(/^Pins 46 × Ø 3 mm · Channels 2.5 mm · Height 8 mm/)
       expect(within(dialog).getByRole('combobox', { name: 'Pin diameter' })).toBeInTheDocument()
     })
 
@@ -289,8 +299,8 @@ describe('PatternPresetsDialog (DF107)', () => {
       await user.click(card)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
       // 40 mm: 6 pins of 4 with 3 between (39 mm), the origin half a pitch off, border 0.5
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        '36 pins 4 mm · 6 mm high (1:1.5) · base 8 mm · channels 3 mm · border 0.5 mm',
+      expect(readout(dialog)).toBe(
+        'Pins 36 × 4 mm · Channels 3 mm · Height 6 mm (1:1.5) · Base 8 mm · Border 0.5 mm',
       )
     })
 
@@ -306,13 +316,13 @@ describe('PatternPresetsDialog (DF107)', () => {
       const { user } = setup({ lastGroup: 'heatsink', face: plate })
       await user.click(screen.getByRole('button', { name: 'Presets…' }))
       const card = screen.getByRole('radio', { name: 'Radial fins' })
-      expect(card).toHaveTextContent('21 slots · hub Ø 24 mm · 8 mm high')
+      expect(card).toHaveTextContent('hub fins 1.5 mm · slots 2 mm · 8 mm high')
       expect(card.querySelectorAll('svg[class*=presetPreview] circle')).toHaveLength(2)
       await user.click(card)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
       expect(dialog.querySelector('[data-heatsink-step="radialFins"]')).not.toBeNull()
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        '21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm · 6.98 mm at the rim',
+      expect(readout(dialog)).toBe(
+        'Slots 21 × 2 mm · Fins at hub 1.59 mm · Fins at rim 6.98 mm · Height 8 mm (1:5) · Base 4 mm',
       )
       expect(within(dialog).getByRole('combobox', { name: 'Part diameter' })).toHaveValue('60 mm')
       expect(dialog).toHaveTextContent('Centred on Circle 1 (40 mm, 40 mm)')
@@ -328,9 +338,9 @@ describe('PatternPresetsDialog (DF107)', () => {
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
       const count = within(dialog).getByRole('combobox', { name: 'Count' })
       await user.type(count, '24{Enter}')
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(/^24 slots 2 mm/)
+      expect(readout(dialog)).toMatch(/^Slots 24 × 2 mm/)
       await user.click(within(dialog).getByRole('button', { name: 'Use 21' }))
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(/^21 slots/)
+      expect(readout(dialog)).toMatch(/^Slots 21 /)
       await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
       expect(apply).toHaveBeenCalledTimes(1)
       const [args, tool] = apply.mock.calls[0]!
@@ -361,8 +371,8 @@ describe('PatternPresetsDialog (DF107)', () => {
       expect(card).toHaveAttribute('aria-checked', 'true')
       await user.click(card)
       const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
-      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
-        /^18 slots 2 mm · fins 2.19 mm at the hub · 6 mm high/,
+      expect(readout(dialog)).toMatch(
+        /^Slots 18 × 2 mm · Fins at hub 2.19 mm · Fins at rim [\d.]+ mm · Height 6 mm/,
       )
       expect(dialog).toHaveTextContent('Centred on the face (35 mm, 25 mm)')
     })
