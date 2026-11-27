@@ -41,6 +41,13 @@ import { sidePanelsOf, useModePanels } from './useModePanels'
 
 /** Below this width the inspector overlays the viewport (ui.md#app-shell). */
 export const WIDE_QUERY = '(min-width: 1280px)'
+/**
+ * The side panels' minimum widths (hardening DF140, measured in the app, ui.md#app-shell): the
+ * navigator holds Run's jog pad (172 px) inside its padding; the inspector holds Run's Position
+ * table with three-digit coordinates in both columns, "=0" and "→0" (248 px, plus 8 px slack).
+ * Design's and Plan's panels lay out narrower than both.
+ */
+export const SIDE_MIN = { navigator: '12rem', inspector: '16rem' } as const
 /** Saved layouts wait this long after the last resize. */
 const LAYOUT_SAVE_MS = 400
 
@@ -253,7 +260,7 @@ export function AppShell(): React.JSX.Element {
             <Panel
               id="navigator"
               defaultSize="16rem"
-              minSize="12rem"
+              minSize={SIDE_MIN.navigator}
               maxSize="40%"
               collapsible
               fixedOnResize
@@ -282,7 +289,7 @@ export function AppShell(): React.JSX.Element {
                 <Panel
                   id="inspector"
                   defaultSize="20rem"
-                  minSize="15rem"
+                  minSize={SIDE_MIN.inspector}
                   maxSize="45%"
                   collapsible
                   fixedOnResize

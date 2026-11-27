@@ -8,6 +8,7 @@ import {
   goToSafeZ,
   goToSeconds,
   goToTarget,
+  goToZeroTarget,
   machineTopZ,
   type GoToInput,
 } from './goto'
@@ -165,5 +166,29 @@ describe('safe height, top, lengths and time', () => {
     expect(lengths[2]).toBeCloseTo(7)
     // 70.71 mm at 2000 mm/min = 2.12 s, 17 mm at 500 mm/min = 2.04 s
     expect(goToSeconds(from, steps, { xy: 2000, z: 500 })).toBe(5)
+  })
+})
+
+describe('goToZeroTarget: the DRO →0 (DF140)', () => {
+  // the tool 2 mm inside the stock at work (12, 7, −2); the safe height is work Z 5
+  const wpos = [12, 7, -2] as const
+  const from = [-388, -293, -82] as const
+  it('X: X 0, Y kept, Z up to the safe height; up, then across, never back down', () => {
+    const target = goToZeroTarget({ wpos, wco, axis: 'x', safeZ: -75 })
+    expect(target).toEqual([0, 7, 5])
+    expect(plan({ from, target }).map((s) => s.to)).toEqual([
+      [-388, -293, -75],
+      [-400, -293, -75],
+    ])
+  })
+  it('Y above the safe height keeps its Z', () => {
+    expect(goToZeroTarget({ wpos: [12, 7, 20], wco, axis: 'y', safeZ: -75 })).toEqual([12, 0, 20])
+  })
+  it('Z: Z alone to the work zero, one step', () => {
+    const target = goToZeroTarget({ wpos: [12, 7, 20], wco, axis: 'z', safeZ: -75 })
+    expect(target).toEqual([12, 7, 0])
+    expect(plan({ from: [-388, -293, -60], target })).toEqual([
+      { to: [-388, -293, -80], axis: 'z' },
+    ])
   })
 })

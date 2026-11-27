@@ -6,6 +6,7 @@ import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import type { JogKeyStyle } from '../../../../shared/settings'
 import { cssRule } from '../../test/css'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { UiProvider } from '../../ui'
 import { HOLD_DELAY_MS } from './jog-press'
 import { JogPad, type JogControls } from './JogPad'
 import { hiddenEdges, keepInView } from './JogStepPicker'
@@ -100,7 +101,11 @@ describe('JogPad', () => {
     act(() => {
       vi.advanceTimersByTime(HOLD_DELAY_MS)
     })
-    rerender(<JogPad controls={c} disabledReason="Home the machine first." reasonId="why" />)
+    rerender(
+      <UiProvider>
+        <JogPad controls={c} disabledReason="Home the machine first." reasonId="why" />
+      </UiProvider>,
+    )
     expect(c.log).toEqual(['step y1', 'hold y1', 'end', 'hold y1', 'end'])
   })
 
@@ -139,11 +144,13 @@ describe('JogPad', () => {
     expect(screen.getByRole('textbox', { name: 'Custom jog step (mm)' })).toHaveValue('2.5')
     expect(screen.queryByRole('radio', { checked: true })).toBeNull()
     rerender(
-      <JogPad
-        controls={controls({ units: 'inch', step: 2.54 })}
-        disabledReason={null}
-        reasonId="why"
-      />,
+      <UiProvider>
+        <JogPad
+          controls={controls({ units: 'inch', step: 2.54 })}
+          disabledReason={null}
+          reasonId="why"
+        />
+      </UiProvider>,
     )
     expect(screen.getByRole('radio', { name: '0.1 in' })).toBeChecked()
     expect(screen.getByRole('radio', { name: '0.001 in' })).toBeInTheDocument()
@@ -384,5 +391,109 @@ describe('jog hotkeys', () => {
         'game',
       ),
     ).toBe(false)
+  })
+})
+
+// Hardening DF140: the key layout, the key caps and tooltips, and a clicked pad button never
+// keeping the jog keys. Doc: docs/conventions/ui.md#jog-pad-df140
+describe('JogPad: the jog keys on the pad (DF140)', () => {
+  const grid = () => screen.getByRole('button', { name: 'Jog Z+' }).parentElement!
+
+  it('lays the pad out in two rows like the keys for videogame and arrow keys only', () => {
+    for (const [keys, layout] of [
+      ['game', 'keys'],
+      ['arrows', 'keys'],
+      ['gsender', null],
+      ['off', null],
+      [undefined, null],
+    ] as const) {
+      const r = renderUi(
+        <JogPad
+          controls={controls(keys === undefined ? {} : { keys })}
+          disabledReason={null}
+          reasonId="why"
+        />,
+      )
+      expect(grid().getAttribute('data-layout')).toBe(layout)
+      r.unmount()
+    }
+    const css = 'src/renderer/src/modes/run/Run.module.css'
+    const keys = ".jogPad[data-layout='keys']:not([data-z-only])"
+    expect(cssRule(css, keys)).toMatchObject({
+      'grid-template-rows': 'repeat(2, var(--control-lg))',
+    })
+    // Z on the left; Y+ over Y−, between X− and X+
+    expect(cssRule(css, `${keys} .zPlus`)).toMatchObject({ 'grid-area': '1 / 1' })
+    expect(cssRule(css, `${keys} .zMinus`)).toMatchObject({ 'grid-area': '2 / 1' })
+    expect(cssRule(css, `${keys} .yPlus`)).toMatchObject({ 'grid-area': '1 / 4' })
+    expect(cssRule(css, `${keys} .xMinus`)).toMatchObject({ 'grid-area': '2 / 3' })
+    expect(cssRule(css, `${keys} .yMinus`)).toMatchObject({ 'grid-area': '2 / 4' })
+    expect(cssRule(css, `${keys} .xPlus`)).toMatchObject({ 'grid-area': '2 / 5' })
+  })
+
+  it('shows a single key as a key cap and every key in the tooltip, without axe violations', async () => {
+    const r = renderUi(
+      <JogPad controls={controls({ keys: 'game' })} disabledReason={null} reasonId="why" />,
+    )
+    const cap = (name: string) =>
+      screen.getByRole('button', { name }).querySelector('[data-jog-key]')?.textContent
+    expect(cap('Jog Y+')).toBe('W')
+    expect(cap('Jog X−')).toBe('A')
+    expect(cap('Jog Z+')).toBe('␣')
+    expect(cap('Jog Z−')).toBe('⇧')
+    expect(screen.getByRole('button', { name: 'Jog Z+' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Space',
+    )
+    act(() => screen.getByRole('button', { name: 'Jog X+' }).focus())
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Jog X+D')
+    await expectNoAxeViolations()
+    r.unmount()
+
+    // gSender's keys are combinations: no key cap, the keys in the tooltip
+    renderUi(
+      <JogPad controls={controls({ keys: 'gsender' })} disabledReason={null} reasonId="why" />,
+    )
+    const x = screen.getByRole('button', { name: 'Jog X+' })
+    expect(x.querySelector('[data-jog-key]')).toBeNull()
+    expect(x).toHaveAttribute('aria-keyshortcuts', 'Shift+ArrowRight')
+    act(() => x.focus())
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Shift+→')
+  })
+
+  it('a clicked step or Stop jog keeps no focus, so Space jogs Z+; a Tab-focused one keeps Space', async () => {
+    const c = controls({ keys: 'game' })
+    const { user } = renderUi(
+      <>
+        <JogPad controls={c} disabledReason={null} reasonId="why" />
+        <Hotkeys style="game" c={c} />
+      </>,
+    )
+    const one = screen.getByRole('radio', { name: '1 mm' })
+    await user.click(one)
+    expect(one).not.toHaveFocus()
+    down(document.body, { key: ' ', code: 'Space' })
+    up(document.body, { key: ' ', code: 'Space' })
+    const stop = screen.getByRole('button', { name: 'Stop jog' })
+    await user.click(stop)
+    expect(stop).not.toHaveFocus()
+    down(document.body, { key: ' ', code: 'Space' })
+    up(document.body, { key: ' ', code: 'Space' })
+    expect(c.log).toEqual(['setStep 1', 'step z1', 'cancel', 'step z1'])
+
+    // reached with the keyboard: the button keeps the focus and its own Space and Enter
+    const ten = screen.getByRole('radio', { name: '10 mm' })
+    act(() => ten.focus())
+    const e = new KeyboardEvent('keydown', {
+      key: ' ',
+      code: 'Space',
+      bubbles: true,
+      cancelable: true,
+    })
+    act(() => void ten.dispatchEvent(e))
+    expect(e.defaultPrevented).toBe(false)
+    fireEvent.click(ten, { detail: 0 })
+    expect(ten).toHaveFocus()
+    expect(c.log).toEqual(['setStep 1', 'step z1', 'cancel', 'step z1', 'setStep 10'])
   })
 })

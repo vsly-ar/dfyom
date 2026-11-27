@@ -10,6 +10,8 @@
 // DF133 RW4 (Q187): the steps through the workholding guard on every change; a contact is a finding
 // under the steps, Go disabled, the path red from the contact on, and "Go anyway" (reset when the
 // move changes) or an armed "Jog past once" lets it go. Guard not on: exactly as before.
+// DF140: the DRO's "→0" opens it with the axis's work zero filled (`goToZeroTarget`, exact until
+// a field is edited) and goes at once when Go may; otherwise it stays open with the reason.
 // Doc: docs/modes/run-goto.md, docs/modes/run-workholding.md#go-to-and-the-touch-off-spot
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -20,6 +22,7 @@ import {
   goToSafeZ,
   goToSeconds,
   goToTarget,
+  goToZeroTarget,
   machineTopZ,
   type GoToFrame,
   type GoToMode,
@@ -179,8 +182,20 @@ function GoToOpen({
   const [frame, setFrame] = useState<GoToFrame>(request.frame)
   const [mode, setMode] = useState<GoToMode>('absolute')
   /** The texts the fields were last filled with (Escape in an edited field restores them). */
-  const [filled, setFilled] = useState<Texts>(() =>
-    textsOf(positionIn(status, request.frame), units),
+  // DF140: "→0" fills the axis's work zero; the exact point counts until a field is edited (the
+  // texts are rounded to the display precision, which must not turn "Z only" into an X/Y move)
+  const [zero] = useState<{ target: Vec3; texts: Texts } | undefined>(() => {
+    if (request.zero !== true) return undefined
+    const target = goToZeroTarget({
+      wpos: positionIn(status, 'work'),
+      wco,
+      axis: request.axis,
+      safeZ,
+    })
+    return { target, texts: textsOf(target, units) }
+  })
+  const [filled, setFilled] = useState<Texts>(
+    () => zero?.texts ?? textsOf(positionIn(status, request.frame), units),
   )
   const [texts, setTexts] = useState<Texts>(filled)
   const [phase, setPhase] = useState<Phase>({ kind: 'editing' })
@@ -205,7 +220,12 @@ function GoToOpen({
   }
   const values = texts.map((t) => parseGoToField(t, units))
   const valid = values.every((v) => v !== undefined)
-  const target = (valid ? values : [0, 0, 0]) as unknown as Vec3
+  const exact =
+    zero !== undefined &&
+    frame === 'work' &&
+    mode === 'absolute' &&
+    texts.every((t, i) => t === zero.texts[i])
+  const target = exact ? zero.target : ((valid ? values : [0, 0, 0]) as unknown as Vec3)
   const plannedFrom: Vec3 = [status.mpos[0], status.mpos[1], status.mpos[2]]
   const planned = valid
     ? goToMoves({ from: plannedFrom, wco, target, frame, mode, safeZ, liftToTop, envelope })
@@ -302,6 +322,15 @@ function GoToOpen({
       setPhase({ kind: 'stopped', at: [now.mpos[0], now.mpos[1], now.mpos[2]] })
     }
   }
+
+  // DF140: "→0" goes at once when Go may (once, on opening); else the dialog shows why
+  const autoGo = useRef(request.zero === true)
+  useEffect(() => {
+    if (!autoGo.current) return
+    autoGo.current = false
+    // after the effect (the Go button's own path, not a state change inside the effect)
+    if (canGo) queueMicrotask(() => void go())
+  })
 
   /** Escape (Radix) or Cancel: stops a move under way (jog cancel), then closes. */
   const close = () => {

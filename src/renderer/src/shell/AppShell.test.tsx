@@ -234,6 +234,7 @@ describe('AppShell', () => {
         skipHomeConfirm: [],
         autoReconnect: true,
         jogFeed: {},
+        jogStep: {},
         inspectorGroups: {},
         inspectorTabs: {},
       }),

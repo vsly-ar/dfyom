@@ -21,6 +21,9 @@ export type ThemeSetting = (typeof THEMES)[number]
 export const JOG_KEY_STYLES = ['game', 'gsender', 'arrows', 'off'] as const
 export type JogKeyStyle = (typeof JOG_KEY_STYLES)[number]
 
+/** DF140: the `jogFeed` / `jogStep` key while no library machine is known. */
+export const NO_MACHINE_KEY = '*'
+
 /** Panel layout of one panel group: panel id → size in % of the group (react-resizable-panels). */
 export const PanelLayoutSchema = z.record(z.string(), z.number().min(0).max(100))
 export type PanelLayout = z.output<typeof PanelLayoutSchema>
@@ -79,8 +82,22 @@ const fields = {
    * only, never moves; docs/modes/run-recovery.md#auto-reconnect); default on.
    */
   autoReconnect: z.boolean(),
-  /** Jog feed (mm/min) per library machine id: the jog feed slider's last value (DF88). */
+  /**
+   * Jog feed (mm/min) per library machine id: the jog feed slider's last value (DF88); since
+   * DF140 the key `*` (`NO_MACHINE_KEY`) holds it while no library machine is known.
+   */
   jogFeed: z.record(z.string().min(1), z.number().positive().finite()),
+  /**
+   * Jog step per library machine id (`*` without one), as `jogFeed` (hardening DF140,
+   * docs/conventions/ui.md#jog-pad-df140): the chosen step and the step picker's custom value (mm).
+   */
+  jogStep: z.record(
+    z.string().min(1),
+    z.object({
+      step: z.number().positive().finite(),
+      custom: z.number().positive().finite().optional(),
+    }),
+  ),
   /**
    * Open state of inspector accordions and More rows per inspector kind and group id
    * (`pocket.corners`: true = open), written when the user toggles one (DF110,
@@ -107,6 +124,7 @@ export const AppSettingsSchema = z.object({
   skipHomeConfirm: fields.skipHomeConfirm.default([]),
   autoReconnect: fields.autoReconnect.default(true),
   jogFeed: fields.jogFeed.default({}),
+  jogStep: fields.jogStep.default({}),
   inspectorGroups: fields.inspectorGroups.default({}),
   inspectorTabs: fields.inspectorTabs.default({}),
 })
@@ -120,7 +138,7 @@ export type AppSettingsPatch = Readonly<z.input<typeof AppSettingsPatchSchema>>
 export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 
 /**
- * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
+ * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`, `jogStep`,
  * `inspectorGroups` and `inspectorTabs` merge by key.
  */
 export function mergeSettings(
@@ -142,6 +160,7 @@ export function mergeSettings(
     skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
     autoReconnect: patch.autoReconnect ?? current.autoReconnect,
     jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
+    jogStep: { ...current.jogStep, ...(patch.jogStep ?? {}) },
     inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
     inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },
   }

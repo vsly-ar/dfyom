@@ -73,6 +73,60 @@ export const JOG_KEY_LABELS: Readonly<
   ],
 }
 
+/**
+ * DF140: a jog button's key in a style (docs/conventions/ui.md#jog-pad-df140): `text` for the
+ * tooltip (as the shortcut list), `aria` for `aria-keyshortcuts`, `badge` (the gray key cap on the
+ * button) only for a single key.
+ */
+export interface JogKeyHint {
+  readonly text: string
+  readonly aria: string
+  readonly badge?: string
+}
+
+type Dir = `${Axis}${'+' | '−'}`
+const hint = (text: string, aria: string, badge?: string): JogKeyHint =>
+  badge === undefined ? { text, aria } : { text, aria, badge }
+
+const KEY_HINTS: Readonly<Record<Exclude<JogKeyStyle, 'off'>, Readonly<Record<Dir, JogKeyHint>>>> =
+  {
+    game: {
+      'y+': hint('W', 'W', 'W'),
+      'x−': hint('A', 'A', 'A'),
+      'y−': hint('S', 'S', 'S'),
+      'x+': hint('D', 'D', 'D'),
+      'z−': hint('Shift', 'Shift', '⇧'),
+      'z+': hint('Space', 'Space', '␣'),
+    },
+    gsender: {
+      'x+': hint('Shift+→', 'Shift+ArrowRight'),
+      'x−': hint('Shift+←', 'Shift+ArrowLeft'),
+      'y+': hint('Shift+↑', 'Shift+ArrowUp'),
+      'y−': hint('Shift+↓', 'Shift+ArrowDown'),
+      'z+': hint('Shift+Page Up', 'Shift+PageUp'),
+      'z−': hint('Shift+Page Down', 'Shift+PageDown'),
+    },
+    arrows: {
+      'x+': hint('→', 'ArrowRight', '→'),
+      'x−': hint('←', 'ArrowLeft', '←'),
+      'y+': hint('↑', 'ArrowUp', '↑'),
+      'y−': hint('↓', 'ArrowDown', '↓'),
+      'z−': hint('/', '/', '/'),
+      'z+': hint("'", "'", "'"),
+    },
+  }
+
+/** DF140: the key of the jog button `axis`/`sign` in `style`; none with the jog keys off. */
+export function jogKeyHint(style: JogKeyStyle, axis: Axis, sign: 1 | -1): JogKeyHint | undefined {
+  if (style === 'off') return undefined
+  return KEY_HINTS[style][`${axis}${sign > 0 ? '+' : '−'}`]
+}
+
+/** DF140: styles whose keys sit like the pad's 2-row key layout (W over A S D, ↑ over ← ↓ →). */
+export function keyLayout(style: JogKeyStyle | undefined): boolean {
+  return style === 'game' || style === 'arrows'
+}
+
 const SHIFT = new Set(['ShiftLeft', 'ShiftRight'])
 
 /** The jog of a `keydown` in `style`, if it is one (modifiers other than the style's: none). */
@@ -115,7 +169,8 @@ export function jogTargetAllowed(target: EventTarget | null, code: string): bool
   const dialog = target.closest('[role="dialog"], [role="alertdialog"]')
   if (dialog !== null && dialog.querySelector('[data-jog-pad]') === null) return false
   if (ARROW_CODES.has(code) && target.closest(ARROW_WIDGETS) !== null) return false
-  // a focused jog pad button presses itself with Space (JogPad's own click/hold)
+  // a focused jog pad button presses itself with Space (JogPad's own click/hold); a button is
+  // focused only when reached with the keyboard: a pointer press leaves no focus (DF140)
   if (code === 'Space' && target.closest('[data-jog-pad] button') !== null) return false
   return true
 }

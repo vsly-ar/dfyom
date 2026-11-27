@@ -118,6 +118,12 @@ export interface GoToRequest {
    * section's menu button: the menu item is gone by then).
    */
   readonly opener?: HTMLElement | null | undefined
+  /**
+   * Hardening DF140: the DRO's "→0": the fields filled with the work zero of `axis`
+   * (`goToZeroTarget`, work frame) and the move started at once when nothing stops it
+   * (docs/modes/run-goto.md#go-to-work-zero-per-axis-df140).
+   */
+  readonly zero?: true
 }
 
 /**
