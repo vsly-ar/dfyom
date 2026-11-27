@@ -286,6 +286,79 @@ export const runMessages = {
     line: (n: number, total: number) =>
       `Line ${n.toLocaleString('en-GB')} / ${total.toLocaleString('en-GB')}`,
     lines: (total: number) => `${total.toLocaleString('en-GB')} lines`,
+    /** DF129 RC3: the pre-flight's start line, the skipped lines and the lead-in. */
+    startLegend:
+      'Muted lines are skipped. The highlighted line is where the run starts, after its lead-in.',
+    startLine: (n: number) => `Starts at line ${n.toLocaleString('en-GB')}`,
+    startFromHere: 'Start from here…',
+    rowMenu: (n: number) => `Line ${n.toLocaleString('en-GB')}`,
+  },
+
+  /**
+   * DF129 RC3: the pre-flight's "Start at" (docs/modes/run-recovery.md#start-from-a-line): where
+   * the program starts, the lead-in that brings the tool there, and the findings of a chosen line.
+   */
+  startAt: {
+    label: 'Start at',
+    beginning: 'Beginning',
+    chooseLine: 'Choose a line…',
+    lineField: 'Line',
+    lineHint: (total: number) =>
+      `1 to ${total.toLocaleString('en-GB')}. Press Enter to check the line.`,
+    loading: 'Reading the program…',
+    noPoints: 'No resume points found in this program: choose a line.',
+    /** An option of the select: an operation's first pass, or a later pass. */
+    operationStart: (line: number) => `Operation start · line ${line.toLocaleString('en-GB')}`,
+    pass: (k: number, line: number) => `Pass ${k} · line ${line.toLocaleString('en-GB')}`,
+    beforeOperations: 'Before the first operation',
+    skipped: (from: number) =>
+      from <= 2
+        ? 'Line 1 is skipped.'
+        : `Lines 1–${(from - 1).toLocaleString('en-GB')} are skipped: the machine runs from line ${from.toLocaleString('en-GB')} on.`,
+    snapped: (asked: number, at: number) =>
+      `Line ${asked.toLocaleString('en-GB')} is not a resume point: the run starts at the pass start on line ${at.toLocaleString('en-GB')} before it.`,
+    useAnyway: (n: number) => `Start at line ${n.toLocaleString('en-GB')} anyway`,
+    notAPoint: (n: number) =>
+      `Line ${n.toLocaleString('en-GB')} is not an operation or pass start. Read what the lead-in does there.`,
+    usePoint: (n: number, where: 'before' | 'after') =>
+      `Use line ${n.toLocaleString('en-GB')} (resume point ${where})`,
+    checking: 'Checking the start…',
+    failed: 'The run cannot start at this line:',
+    leadIn: 'Lead-in',
+    leadInIntro: 'Before the program, the machine runs these steps:',
+    leadInCode: 'Show the lead-in gCode',
+    /** Q167: every lead-in waits at the tool. */
+    toolWaitTitle: (n: number, name: string) => `The run first waits at tool ${n}: ${name}`,
+    toolWaitText:
+      'Nothing cuts before you continue: check or change the bit, set Z zero (Probe Z or Set Z zero here), then Continue.',
+    steps: {
+      retract: 'Spindle and coolant off, then straight up to the machine top.',
+      toolWait: (n: number) => `Waits at tool ${n} (the tool-change dialog).`,
+      coolant: (flood: boolean) => (flood ? 'Coolant on (flood).' : 'Coolant on (mist).'),
+      spindle: (rpm: string, ccw: boolean, dwell: string | undefined) =>
+        `Spindle on at ${rpm} rpm${ccw ? ' (counter-clockwise)' : ''}${dwell === undefined ? '.' : `, then waits ${dwell} s for it to spin up.`}`,
+      spindleManual: (rpm: string) => `Pauses: start the spindle by hand at ${rpm} rpm.`,
+      moveXY: (x: string, y: string, unit: string) => `Rapid to X ${x} Y ${y} ${unit} at the top.`,
+      approach: (z: string, unit: string) => `Rapid down to Z ${z} ${unit}.`,
+      plunge: (z: string, unit: string, feed: string | undefined) =>
+        feed === undefined
+          ? `Down to Z ${z} ${unit}.`
+          : `Plunges to Z ${z} ${unit} at ${feed} ${unit}/min.`,
+      program: (line: number) => `Runs the program from line ${line.toLocaleString('en-GB')}.`,
+    },
+    findings: {
+      inMaterial: (z: string, unit: string) =>
+        `The line starts in the material at Z ${z} ${unit}: the bit plunges straight into the cut. Fine for an end mill that cuts at its centre; a V-bit or a drill-style plunge may not be.`,
+      ramp: (helix: boolean, from: number) =>
+        `This line is part of ${helix ? 'a helical entry' : 'a ramp'}; starting here plunges straight down. Start at its first line (line ${from.toLocaleString('en-GB')}) instead.`,
+      rampAction: (from: number) => `Start at line ${from.toLocaleString('en-GB')}`,
+      incremental: 'This part of the program moves incrementally (G91).',
+    },
+    startAtLine: (n: number) => `Start at line ${n.toLocaleString('en-GB')}`,
+    startMachineAtLine: (n: number) => `Start on the machine at line ${n.toLocaleString('en-GB')}`,
+    /** The tool-change dialog of a lead-in. */
+    waitNote:
+      'This is the start’s tool wait: check the bit is intact and tight, set Z zero, then continue. The spindle starts and the machine moves to the start line after it.',
   },
 
   /** Feed, spindle and rapid overrides (docs/modes/run-machine.md#overrides-m6). */

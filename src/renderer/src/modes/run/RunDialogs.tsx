@@ -22,6 +22,7 @@ import { TouchOffButton } from './TouchOffButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
+import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import styles from './Run.module.css'
 
@@ -89,20 +90,18 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const machineGate = runGates(status, { planChosen: plan !== undefined }).start ?? realGate
   const units = doc.unitSystem
   const a = store.getState()
-  // the soft-limit result (DF46): checked on open and again when the work zero changes
-  const check = useRun((s) => s.preflightCheck)
+  // the soft-limit result (DF46): checked on open and again when the work zero changes; with a
+  // start line (DF129 RC3) over the lead-in and the rest, with the lead-in's preview
   const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${status.workZero.join(',')}`
   const setupToCheck = info?.setup.id
   const canCheck = open && plan !== undefined && machineGate === null
-  useEffect(() => {
-    if (canCheck) void store.getState().checkRun(setupToCheck, checkKey)
-  }, [canCheck, checkKey, setupToCheck, store])
-  const current = check.state !== 'idle' && check.key === checkKey ? check : undefined
+  const start = usePreflightStart(checkKey, setupToCheck, canCheck)
+  const { current } = start
   const passed = current?.state === 'done' && current.findings.length === 0
   const gate =
     machineGate ??
     (current?.state === 'done' && current.findings.length > 0 ? m.softLimitsFix : null)
-  const startable = gate === null && passed
+  const startable = gate === null && passed && start.ready
   // "Start run" takes the focus once the check passes, unless the user moved it (ui.md)
   const startRef = useRef<HTMLButtonElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -135,10 +134,24 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
                 ? {}
                 : { 'aria-describedby': whyId })}
             onClick={() =>
-              void a.startRun(info?.setup.id, resume ? from?.planOperationId : undefined)
+              void a.startRun(
+                info?.setup.id,
+                resume ? from?.planOperationId : undefined,
+                resume ? undefined : start.at,
+              )
             }
           >
-            {resume ? (serial ? m.resumeMachine : m.resume) : serial ? m.startMachine : m.start}
+            {resume
+              ? serial
+                ? m.resumeMachine
+                : m.resume
+              : start.at !== undefined
+                ? serial
+                  ? runMessages.startAt.startMachineAtLine(start.at.fromLine)
+                  : runMessages.startAt.startAtLine(start.at.fromLine)
+                : serial
+                  ? m.startMachine
+                  : m.start}
           </Button>
         </RunDialogFooter>
       }
@@ -182,6 +195,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           </div>
         </>
       ) : null}
+      {resume ? null : <StartAtSection current={current} units={units} />}
       {serial && !resume ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
@@ -296,6 +310,8 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
   const jog = useJogControls(doc)
   const pending = useRun((s) => s.pending)
   const progress = useRun((s) => s.progress)
+  // DF129 RC3: this window's run started at a line: its lead-in's tool wait
+  const leadIn = useRun((s) => s.startedLeadIn)
   const ids = { jog: useId(), zero: useId() }
   const key = waitKey(status)
   const job = activeJob(status)
@@ -331,6 +347,15 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
           </RunDialogFooter>
         }
       >
+        {/* DF129 RC3 (Q167): the tool wait of a start at a line's lead-in */}
+        {leadIn?.jobId === job.jobId && job.line <= leadIn.lines ? (
+          <div className={styles['notice']} role="note">
+            <Icon name="info" />
+            <div>
+              <p className={styles['why']}>{runMessages.startAt.waitNote}</p>
+            </div>
+          </div>
+        ) : null}
         <ol className={styles['steps']}>
           {m.steps(tc.name, tc.surface, tc.spot).map((s) => (
             <li key={s}>{s}</li>

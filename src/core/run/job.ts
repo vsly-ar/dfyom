@@ -93,6 +93,44 @@ const ResumePreviewSchema = z.object({
 type ResumePreview = z.output<typeof ResumePreviewSchema>
 
 /**
+ * `run.job.check { program: true }`'s program (DF129 RC3): the lines it checked, their sections and
+ * resume points, for the pre-flight's "Start at" and the gCode panel before a plan run
+ * (docs/modes/run-recovery.md#implementation-rc3). Output only: tools/list has no output schemas.
+ */
+const CheckedProgramSchema = z.object({
+  lines: z.array(z.string()),
+  sections: z.array(z.object({ fromLine: z.number().int(), label: z.string() })),
+  points: z.array(
+    z.object({
+      line: z.number().int(),
+      kind: z.enum(['operation', 'pass']),
+      label: z.string().optional(),
+    }),
+  ),
+})
+type CheckedProgram = z.output<typeof CheckedProgramSchema>
+
+/** The checked program with its resume points (`operationStarts`: a plan's operation lines). */
+function checkedProgram(
+  program: SenderProgram,
+  operationStarts?: readonly number[],
+): CheckedProgram {
+  const points = resumePoints(
+    scanProgram(program.lines),
+    operationStarts === undefined ? {} : { operationStarts },
+  )
+  return {
+    lines: [...program.lines],
+    sections: program.sections.map((s) => ({ ...s })),
+    points: points.map((p) => ({
+      line: p.line,
+      kind: p.kind,
+      ...(p.label === undefined ? {} : { label: p.label }),
+    })),
+  }
+}
+
+/**
  * The program resumed at `at.fromLine` (DF129 RC2): refused (`input.malformed`, rule
  * `programChanged`) when `at.programHash` names another program than this one, or a line the
  * program cannot start at; the lead-in with the machine top of `envelope`.
@@ -772,12 +810,17 @@ export const runJobCheck = defineCommand({
     planId: PlanIdSchema.optional(),
     setupId: PlanRecordIdSchema.optional().describe('Required when the plan has several setups'),
     fromLine: FromLineArg,
+    // undescribed (tools/list budget): the pre-flight's "Start at" reads the program (DF129 RC3)
+    program: z.boolean().optional(),
     file: FileArg,
   }),
   result: z.object({
     setupId: z.string().optional(),
     findings: z.array(PlanWarningSchema).describe('softLimit findings; empty = inside the travel'),
     resume: ResumePreviewSchema.optional().describe('With fromLine: the lead-in and findings'),
+    program: CheckedProgramSchema.optional().describe(
+      'With program: the lines checked, their sections and resume points',
+    ),
   }),
   async run(doc, args, ctx) {
     const where = 'run.job.check'
@@ -788,6 +831,9 @@ export const runJobCheck = defineCommand({
       return file.map((f) => ({
         findings: f.findings,
         ...(f.resume === undefined ? {} : { resume: f.resume.preview }),
+        ...(args.program === true
+          ? { program: checkedProgram({ lines: f.file.lines, sections: f.file.sections }) }
+          : {}),
       }))
     }
     const planId = args.planId ?? ''
@@ -800,9 +846,19 @@ export const runJobCheck = defineCommand({
     })
     if (exported.isErr()) return Err(exported.unwrapErr().withContext(where, { planId }))
     const e = exported.unwrap()
+    const operationStarts = e.operationLines.map((o) => o.fromLine)
+    const program =
+      args.program === true
+        ? {
+            program: checkedProgram(
+              { lines: e.lines, sections: programSections(e) },
+              operationStarts,
+            ),
+          }
+        : {}
     if (args.fromLine === undefined) {
       const findings = e.warnings.filter((w) => w.rule === 'softLimit')
-      return Ok({ setupId: setup.id, findings: [...findings] })
+      return Ok({ setupId: setup.id, findings: [...findings], ...program })
     }
     const envelope = envelopeFor(m, where)
     if (envelope.isErr()) return envelope
@@ -813,7 +869,7 @@ export const runJobCheck = defineCommand({
         kind: 'plan',
         envelope: envelope.unwrap(),
         spindleControl: planSpindleControl(plan),
-        operationStarts: e.operationLines.map((o) => o.fromLine),
+        operationStarts,
       },
       where,
     )
@@ -823,7 +879,7 @@ export const runJobCheck = defineCommand({
       mpos: m.status().mpos,
       travel: envelope.unwrap().travel,
     })
-    return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview })
+    return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview, ...program })
   },
 })
 

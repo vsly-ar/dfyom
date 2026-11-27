@@ -1303,3 +1303,127 @@
 .goTo > .why {
   min-height: var(--lh-sm);
 }
+
+/* DF129 RC3: the pre-flight's "Start at" and its preview (docs/modes/run-recovery.md#implementation-rc3) */
+.startAt,
+.startPreview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.startAt {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.lineField {
+  max-width: 10rem;
+}
+
+/* Q167: every lead-in waits at the tool; the wait reads first, in the info tone (not a warning) */
+.toolWait {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--info);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--info-subtle);
+}
+
+.toolWait > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--info);
+}
+
+.toolWait > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.toolWaitTitle {
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+
+.leadIn {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.leadInTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.leadInSteps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-sm);
+}
+
+.leadInSteps > li[data-kind='toolWait'] {
+  font-weight: var(--weight-medium);
+}
+
+.leadInSteps > li[data-kind='program'] {
+  color: var(--text-muted);
+}
+
+.leadInCode {
+  font-size: var(--text-sm);
+}
+
+.leadInCode > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.leadInCode > pre {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-chrome);
+  overflow-x: auto;
+  font-size: var(--text-xs);
+}
+
+/* the gCode panel before a start at a line: skipped lines faint, the start line marked */
+.gcodeRow[data-state='skipped'] {
+  color: var(--text-faint);
+}
+
+.gcodeRow[data-state='start'] {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
+
+.gcodeRow[data-state='start'] .gcodeNumber {
+  color: var(--text);
+}
+
+/* a resumed run's lead-in section, muted while it waits to run */
+.gcodeRow[data-lead-in][data-state='pending'] {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* "Start at" and "Line" share their label column */
+.startAtFields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.startAtHint {
+  grid-column: 2;
+  margin-top: calc(-1 * var(--space-1));
+}

@@ -9,6 +9,7 @@ import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { TimeScale } from '../../../../core/run/clock'
+import type { ResumeFinding, ResumePoint } from '../../../../core/run/recovery'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
 import type { SettingsCheck } from '../../../../core/run/settings-check'
@@ -73,8 +74,49 @@ export interface SoftLimitFinding {
 export type PreflightCheck =
   | { readonly state: 'idle' }
   | { readonly state: 'checking'; readonly key: string }
-  | { readonly state: 'done'; readonly key: string; readonly findings: readonly SoftLimitFinding[] }
+  | {
+      readonly state: 'done'
+      readonly key: string
+      readonly findings: readonly SoftLimitFinding[]
+      /** DF129 RC3: with a start line, `run.job.check`'s lead-in preview. */
+      readonly resume?: ResumePreviewView | undefined
+    }
   | { readonly state: 'failed'; readonly key: string; readonly error: AppErrorData }
+
+/** `run.job.check { fromLine }`'s `resume` (docs/modes/run-recovery.md#start-from-a-line). */
+export interface ResumePreviewView {
+  /** The line the run starts at (a tool-change marker passed over). */
+  readonly fromLine: number
+  readonly programHash: string
+  readonly leadIn: readonly string[]
+  readonly findings: readonly ResumeFinding[]
+  readonly before?: number | undefined
+  readonly after?: number | undefined
+}
+
+/**
+ * DF129 RC3: the pre-flight's "Start at" (docs/modes/run-recovery.md#implementation-rc3): the
+ * beginning, a resume point, or a line chosen behind "Choose a line…" (`line` undefined until
+ * typed); `snappedFrom`: the line "Start from here…" asked for, snapped back to this point.
+ */
+export type StartAt =
+  | { readonly kind: 'beginning' }
+  | { readonly kind: 'point'; readonly line: number; readonly snappedFrom?: number | undefined }
+  | { readonly kind: 'line'; readonly line: number | undefined }
+
+/** The line a `StartAt` asks for; undefined = the beginning (or no line typed yet). */
+export function startLineOf(at: StartAt): number | undefined {
+  return at.kind === 'beginning' ? undefined : at.line
+}
+
+/** DF129 RC3: a plan's program as `run.job.check { program: true }` returned it. */
+export interface CheckedProgramView {
+  /** `planId|setupId` it was exported for. */
+  readonly key: string
+  readonly lines: readonly string[]
+  readonly sections: readonly { readonly fromLine: number; readonly label: string }[]
+  readonly points: readonly ResumePoint[]
+}
 
 /** The gCode panel's window state (DF84): open, height (rem) and whether it follows the run. */
 export interface GcodePanelState {
@@ -169,7 +211,16 @@ export interface RunState {
   readonly resumeFrom: string | undefined
   /** The run job this window started (M7: a followed run it did not start was started elsewhere). */
   readonly startedHere: string | undefined
+  /**
+   * DF129 RC3: the run this window started at a line, and its lead-in's line count: the tool
+   * wait within it says it is the start's (docs/modes/run-recovery.md#implementation-rc3).
+   */
+  readonly startedLeadIn: { readonly jobId: string; readonly lines: number } | undefined
   readonly preflightCheck: PreflightCheck
+  /** DF129 RC3: the pre-flight's "Start at" (reset when it opens or closes). */
+  readonly startAt: StartAt
+  /** DF129 RC3: the plan program the pre-flight read for "Start at" (cleared when it closes). */
+  readonly startProgram: CheckedProgramView | undefined
   /** Actions in flight, by name (their buttons show busy). */
   readonly pending: readonly string[]
   /**
@@ -222,6 +273,13 @@ export interface RunState {
   /** Opens the pre-flight in resume mode at the operation the last run stopped in (M5). */
   openResume(): void
   setResumeFrom(planOperationId: string): void
+  /** DF129 RC3: the pre-flight's start line. */
+  setStartAt(at: StartAt): void
+  /**
+   * DF129 RC3: "Start from here…" in the gCode panel: the pre-flight at that line, snapped to the
+   * resume point at or before it (`points` of the program shown).
+   */
+  startFromHere(line: number, points: readonly ResumePoint[]): void
   dismissWait(key: string | undefined): void
   closeFailure(): void
   clearActionError(): void
@@ -266,9 +324,17 @@ export interface RunState {
    * `setupId`: the setup to run (default: the chosen one; the server needs it for several);
    * `from`: resume at that plan operation (M5).
    */
-  startRun(setupId?: string, from?: string): Promise<void>
-  /** Runs `run.job.check` for the pre-flight dialog unless `key` is checked or being checked. */
-  checkRun(setupId: string | undefined, key: string): Promise<void>
+  startRun(
+    setupId?: string,
+    from?: string,
+    at?: { readonly fromLine: number; readonly programHash: string; readonly leadIn: number },
+  ): Promise<void>
+  /**
+   * Runs `run.job.check` for the pre-flight dialog unless `key` is checked or being checked;
+   * `fromLine`: the start line's preview (DF129 RC3). A plan's first check of an open pre-flight
+   * also reads the program (`program: true`) for "Start at".
+   */
+  checkRun(setupId: string | undefined, key: string, fromLine?: number): Promise<void>
   hold(): Promise<void>
   /** `job.resume` of the held run job, else of this window's held Probe Z job (DF82). */
   resume(): Promise<void>
@@ -392,7 +458,10 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       preflightOpen: false,
       resumeFrom: undefined,
       startedHere: undefined,
+      startedLeadIn: undefined,
       preflightCheck: { state: 'idle' },
+      startAt: { kind: 'beginning' },
+      startProgram: undefined,
       pending: [],
       probeJobId: undefined,
       gcode: { open: false, height: GCODE_HEIGHT_REM, follow: true },
@@ -469,12 +538,38 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setPreflightOpen: (preflightOpen) =>
         set(
           preflightOpen
-            ? { preflightOpen, resumeFrom: undefined }
-            : { preflightOpen, preflightCheck: { state: 'idle' } },
+            ? { preflightOpen, resumeFrom: undefined, startAt: { kind: 'beginning' } }
+            : {
+                preflightOpen,
+                preflightCheck: { state: 'idle' },
+                startAt: { kind: 'beginning' },
+                startProgram: undefined,
+              },
         ),
+      // the gCode panel opens on the start line (behind the dialog, as a loaded file's does)
+      setStartAt: (startAt) =>
+        set((s) =>
+          startLineOf(startAt) === undefined
+            ? { startAt }
+            : { startAt, gcode: { ...s.gcode, open: true } },
+        ),
+      startFromHere(line, points) {
+        const point = points.filter((p) => p.line <= line).at(-1)
+        set({
+          preflightOpen: true,
+          resumeFrom: undefined,
+          startAt:
+            point === undefined
+              ? { kind: 'line', line }
+              : point.line === line
+                ? { kind: 'point', line }
+                : { kind: 'point', line: point.line, snappedFrom: line },
+        })
+      },
       openResume: () =>
         set({
           preflightOpen: true,
+          startAt: { kind: 'beginning' },
           resumeFrom: get().status.lastRun?.planOperationId ?? '',
         }),
       setResumeFrom: (resumeFrom) => set({ resumeFrom }),
@@ -560,16 +655,26 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
-      async startRun(chosen, from) {
+      async startRun(chosen, from, at) {
         const file = get().file
+        const startAt =
+          at === undefined ? {} : { fromLine: at.fromLine, programHash: at.programHash }
+        const closed = {
+          preflightOpen: false,
+          setupChangeOpen: false,
+          resumeFrom: undefined,
+          startAt: { kind: 'beginning' } as const,
+          startProgram: undefined,
+        }
         if (file?.state === 'ready') {
-          set({ preflightOpen: false, setupChangeOpen: false, resumeFrom: undefined })
-          const r = await call('run.job.start', { file: file.path })
+          set(closed)
+          const r = await call('run.job.start', { file: file.path, ...startAt })
           if (!r.ok) return
           const { jobId } = r.value as { jobId: string }
           set({
             jobId,
             startedHere: jobId,
+            startedLeadIn: at === undefined ? undefined : { jobId, lines: at.leadIn },
             progress: undefined,
             ended: undefined,
             failureOpen: false,
@@ -579,18 +684,20 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         }
         const planId = get().planId
         const setupId = chosen ?? get().setupId
-        set({ preflightOpen: false, setupChangeOpen: false, resumeFrom: undefined })
+        set(closed)
         if (planId === undefined || planId === NO_PLAN) return
         const r = await call('run.job.start', {
           planId,
           ...(setupId === undefined ? {} : { setupId }),
           ...(from === undefined || from === '' ? {} : { from }),
+          ...startAt,
         })
         if (!r.ok) return
         const { jobId } = r.value as { jobId: string }
         set({
           jobId,
           startedHere: jobId,
+          startedLeadIn: at === undefined ? undefined : { jobId, lines: at.leadIn },
           progress: undefined,
           ended: undefined,
           failureOpen: false,
@@ -598,7 +705,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         })
         follow(jobId)
       },
-      async checkRun(setupId, key) {
+      async checkRun(setupId, key, fromLine) {
         const planId = get().planId
         const now = get().preflightCheck
         const file = get().file
@@ -606,21 +713,38 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (!ofFile && (planId === undefined || planId === NO_PLAN)) return
         if (now.state !== 'idle' && now.key === key) return
         set({ preflightCheck: { state: 'checking', key } })
+        // DF129 RC3: a plan's program for "Start at", once per open pre-flight and setup
+        const programKey = `${planId ?? ''}|${setupId ?? ''}`
+        const readProgram = !ofFile && get().startProgram?.key !== programKey
+        const at = fromLine === undefined ? {} : { fromLine }
         // not through `call`: a failed check shows in the dialog, not in the action banner
         const r = await bridge.call(
           'run.job.check',
-          ofFile ? { file: file.path } : { planId, ...(setupId === undefined ? {} : { setupId }) },
+          ofFile
+            ? { file: file.path, ...at }
+            : {
+                planId,
+                ...(setupId === undefined ? {} : { setupId }),
+                ...at,
+                ...(readProgram ? { program: true } : {}),
+              },
         )
         const cur = get().preflightCheck
         if (cur.state !== 'checking' || cur.key !== key) return // closed or superseded
+        if (!r.ok) {
+          set({ preflightCheck: { state: 'failed', key, error: r.error } })
+          return
+        }
+        const value = r.value as {
+          findings: SoftLimitFinding[]
+          resume?: ResumePreviewView
+          program?: Omit<CheckedProgramView, 'key'>
+        }
         set({
-          preflightCheck: r.ok
-            ? {
-                state: 'done',
-                key,
-                findings: (r.value as { findings: SoftLimitFinding[] }).findings,
-              }
-            : { state: 'failed', key, error: r.error },
+          preflightCheck: { state: 'done', key, findings: value.findings, resume: value.resume },
+          ...(value.program === undefined
+            ? {}
+            : { startProgram: { key: programKey, ...value.program } }),
         })
       },
       hold: jobControl('job.pause'),

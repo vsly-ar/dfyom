@@ -6,10 +6,11 @@
 // (`window.dfyom.run.program`, renderer only, no agent tool).
 // Doc: docs/modes/run.md#gcode-panel-df84, docs/conventions/ui.md#run-mode-safety-ui
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { resumePoints, scanProgram } from '../../../../core/run/recovery'
 import type { RunProgram, RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
 import { useShell } from '../../shell/ShellContext'
-import { Icon } from '../../ui'
+import { ContextMenu, Icon, isContextMenuKey, openContextMenu } from '../../ui'
 import {
   lineState,
   ProgramRows,
@@ -18,7 +19,8 @@ import {
   visibleRows,
   type RunIndices,
 } from './gcode-rows'
-import { GCODE_HEIGHT_REM, useRun, type GcodePanelState } from './run-store'
+import { GCODE_HEIGHT_REM, useRun, useRunStore, type GcodePanelState } from './run-store'
+import { useStartPreview } from './StartAt'
 import styles from './Run.module.css'
 
 const m = runMessages.gcode
@@ -79,14 +81,39 @@ export function GcodePanel({ insetRight = 0 }: { insetRight?: number }): React.J
           },
     [filePrepared],
   )
-  const shown = status.job === undefined && fileProgram !== undefined ? fileProgram : program
+  // DF129 RC3: the pre-flight's start line: the program it starts (a plan's from the check)
+  const start = useStartPreview()
+  const startLines = start?.lines
+  const startSections = start?.sections
+  const startProgram = useMemo(
+    (): ProgramLoad | undefined =>
+      startLines === undefined || startSections === undefined
+        ? undefined
+        : {
+            state: 'ready',
+            value: { jobId: '', lines: startLines, sections: startSections, operations: [] },
+          },
+    [startLines, startSections],
+  )
+  const store = useRunStore()
+  const preflightOpen = useRun((s) => s.preflightOpen)
+  const shown =
+    startProgram ?? (status.job === undefined && fileProgram !== undefined ? fileProgram : program)
+  // "Start from here…" on a loaded file's lines while no run streams (plans: the pre-flight)
+  const startFromHere =
+    filePrepared !== undefined && status.job === undefined && !preflightOpen
+      ? (line: number) =>
+          store.getState().startFromHere(line, resumePoints(scanProgram(filePrepared.lines)))
+      : undefined
   return (
     <GcodePanelView
       program={shown}
-      run={runIndices(status, program.value?.jobId)}
+      run={startProgram === undefined ? runIndices(status, program.value?.jobId) : undefined}
       state={gcode}
       onChange={setGcode}
       insetRight={insetRight}
+      {...(start === undefined ? {} : { start: start.start })}
+      {...(startFromHere === undefined ? {} : { onStartFromHere: startFromHere })}
     />
   )
 }
@@ -133,6 +160,10 @@ export interface GcodePanelViewProps {
   state: GcodePanelState
   onChange(patch: Partial<GcodePanelState>): void
   insetRight?: number
+  /** DF129 RC3: the line a run starts at (before it): earlier lines skipped, this one marked. */
+  start?: number
+  /** DF129 RC3: "Start from here…" in a row's context menu; absent = not offered. */
+  onStartFromHere?: (line: number) => void
 }
 
 export function GcodePanelView({
@@ -141,6 +172,8 @@ export function GcodePanelView({
   state,
   onChange,
   insetRight = 0,
+  start,
+  onStartFromHere,
 }: GcodePanelViewProps): React.JSX.Element {
   const bodyId = useId()
   const legendId = useId()
@@ -152,15 +185,17 @@ export function GcodePanelView({
   )
   const total = p?.lines.length ?? 0
   const current =
-    run === undefined
-      ? undefined
-      : run.finished === true
-        ? total
-        : run.executing !== undefined && run.executing > 0
-          ? run.executing
-          : run.acknowledged > 0
-            ? run.acknowledged
-            : undefined
+    start !== undefined
+      ? start
+      : run === undefined
+        ? undefined
+        : run.finished === true
+          ? total
+          : run.executing !== undefined && run.executing > 0
+            ? run.executing
+            : run.acknowledged > 0
+              ? run.acknowledged
+              : undefined
   const section = rows !== undefined && current !== undefined ? rows.sectionOf(current) : undefined
   const heightRem = gcodePanelRem(state)
   // the 3D view ends above the panel (AppShell's `.viewportCanvas` reads the inset)
@@ -213,9 +248,11 @@ export function GcodePanelView({
         <span className={styles['gcodeSection']}>{section ?? ''}</span>
         {p !== undefined ? (
           <span className={styles['gcodeCount']}>
-            {current !== undefined && run !== undefined && run.finished !== true
-              ? m.line(current, total)
-              : m.lines(total)}
+            {start !== undefined
+              ? m.startLine(start)
+              : current !== undefined && run !== undefined && run.finished !== true
+                ? m.line(current, total)
+                : m.lines(total)}
           </span>
         ) : null}
         {state.open ? (
@@ -235,15 +272,17 @@ export function GcodePanelView({
           {p !== undefined && rows !== undefined ? (
             <>
               <p id={legendId} className={styles['gcodeLegend']}>
-                {m.legend}
+                {start === undefined ? m.legend : m.startLegend}
               </p>
               <ProgramList
                 program={p}
                 rows={rows}
                 run={run}
+                start={start}
                 follow={state.follow}
                 legendId={legendId}
                 onUserScroll={() => state.follow && onChange({ follow: false })}
+                onStartFromHere={onStartFromHere}
               />
             </>
           ) : (
@@ -319,17 +358,23 @@ function ProgramList({
   program,
   rows,
   run,
+  start,
   follow,
   legendId,
   onUserScroll,
+  onStartFromHere,
 }: {
   program: RunProgram
   rows: ProgramRows
   run: RunIndices | undefined
+  start: number | undefined
   follow: boolean
   legendId: string
   onUserScroll(): void
+  onStartFromHere: ((line: number) => void) | undefined
 }): React.JSX.Element {
+  // the row a context menu was opened on (DF129 RC3)
+  const [menuLine, setMenuLine] = useState<number | undefined>(undefined)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewPx, setViewPx] = useState(0)
@@ -354,7 +399,13 @@ function ProgramList({
     GCODE_OVERSCAN,
   )
   const executing = run?.finished === true ? undefined : run?.executing
-  const target = executing ?? (run !== undefined && run.acknowledged > 0 ? run.acknowledged : 0)
+  const target =
+    start ?? executing ?? (run !== undefined && run.acknowledged > 0 ? run.acknowledged : 0)
+  // a resumed run's lead-in (DF129 RC2: its own first section), muted until it runs
+  const leadInEnd =
+    program.sections[0]?.label === 'Lead-in' && program.sections[0].fromLine === 1
+      ? (program.sections[1]?.fromLine ?? program.lines.length + 1)
+      : 0
   const scrollTo = useCallback(
     (line: number) => {
       const el = scrollerRef.current
@@ -390,15 +441,24 @@ function ProgramList({
       )
       continue
     }
-    const state = lineState(row.line, run)
+    const state =
+      start !== undefined
+        ? row.line < start
+          ? 'skipped'
+          : row.line === start
+            ? 'start'
+            : 'pending'
+        : lineState(row.line, run)
     items.push(
       <div
         key={`l${row.line}`}
         role="listitem"
         aria-posinset={r + 1}
         aria-setsize={rows.count}
-        aria-current={state === 'executing' ? 'step' : undefined}
+        aria-current={state === 'executing' ? 'step' : state === 'start' ? 'location' : undefined}
         data-state={state}
+        data-line={row.line}
+        data-lead-in={row.line < leadInEnd ? '' : undefined}
         className={styles['gcodeRow']}
         style={{ top }}
       >
@@ -410,12 +470,13 @@ function ProgramList({
       </div>,
     )
   }
-  return (
+  const list = (
     <div
       ref={scrollerRef}
       role="list"
       aria-label={m.list}
       aria-describedby={legendId}
+      {...(onStartFromHere === undefined ? {} : { 'aria-keyshortcuts': 'Shift+F10' })}
       tabIndex={0}
       className={styles['gcodeList']}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
@@ -425,13 +486,45 @@ function ProgramList({
         // the scroll bar belongs to the list element itself; rows are its descendants
         if (e.target === e.currentTarget) onUserScroll()
       }}
+      onContextMenu={(e) => {
+        const row = (e.target as Element).closest?.('[data-line]')
+        setMenuLine(
+          row === null || row === undefined ? undefined : Number(row.getAttribute('data-line')),
+        )
+      }}
       onKeyDown={(e) => {
         if (SCROLL_KEYS.has(e.key)) onUserScroll()
+        // Shift+F10 / the Menu key: the menu for the first line in view (DF129 RC3)
+        if (onStartFromHere !== undefined && isContextMenuKey(e)) {
+          e.preventDefault()
+          const first = rows.row(Math.min(rows.count - 1, Math.ceil(offset / GCODE_ROW_PX)))
+          const el = e.currentTarget.querySelector(
+            first.kind === 'line' ? `[data-line="${first.line}"]` : '[data-line]',
+          )
+          if (el !== null) openContextMenu(el)
+        }
       }}
     >
       <div className={styles['gcodeSpacer']} style={{ height: spacer }}>
         {items}
       </div>
     </div>
+  )
+  if (onStartFromHere === undefined) return list
+  return (
+    <ContextMenu
+      label={menuLine === undefined ? m.list : m.rowMenu(menuLine)}
+      items={[
+        {
+          label: m.startFromHere,
+          disabled: menuLine === undefined,
+          onSelect: () => {
+            if (menuLine !== undefined) onStartFromHere(menuLine)
+          },
+        },
+      ]}
+    >
+      {list}
+    </ContextMenu>
   )
 }

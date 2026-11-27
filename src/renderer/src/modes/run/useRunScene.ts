@@ -33,6 +33,8 @@ import type { LoweredLinkView, SetupLinksView, ZRefRunView } from '../plan/plan-
 import { activeJob, isConnected } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
+import { skippedSegments } from './start-at'
+import { useStartPreview } from './StartAt'
 
 export function useRunScene(mode: AppMode): RunScene | null {
   const { bridge } = useShell()
@@ -125,9 +127,22 @@ export function useRunScene(mode: AppMode): RunScene | null {
       wpos === null ? null : [wpos[0], wpos[1], wpos[2] + level],
     [wpos === null, wpos?.[0], wpos?.[1], wpos?.[2], level],
   )
+  // DF129 RC3: before a start at a line, the toolpath the run skips is dimmed like the done part
+  const start = useStartPreview()
+  const startLines = start?.lines
+  const startLine = start?.start
+  const skipped = useMemo(
+    () =>
+      lines === null || startLines === undefined || startLine === undefined
+        ? 0
+        : skippedSegments(lines, startLines, startLine, level),
+    [lines, startLines, startLine, level],
+  )
   let done = 0
   if (lines !== null) {
-    if (job !== undefined && tool !== null) {
+    if (job === undefined && start !== undefined) {
+      done = skipped
+    } else if (job !== undefined && tool !== null) {
       if (cursor.current.jobId !== job.jobId) cursor.current = { jobId: job.jobId, done: 0 }
       cursor.current.done = advancePlayback(lines, cursor.current.done, tool)
       done = cursor.current.done

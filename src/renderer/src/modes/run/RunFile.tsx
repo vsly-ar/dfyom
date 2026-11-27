@@ -11,6 +11,7 @@ import { formatLength, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, type RunFileView } from './run-store'
 import { SoftLimitResult } from './RunDialogs'
 import { RunDialogFooter } from './RunStop'
+import { StartAtSection, usePreflightStart } from './StartAt'
 import styles from './Run.module.css'
 
 const m = runMessages.file
@@ -197,18 +198,16 @@ export function FilePreflightDialog({
     serial && settingsCheck !== undefined && !settingsCheck.matches ? p.fileSettingsMismatch : null
   const refused = file.prepared.refusalCount > 0 ? m.refusals(file.prepared.refusalCount) : null
   const machineGate = runGates(status, { planChosen: true }).start ?? realGate ?? refused
-  const check = useRun((s) => s.preflightCheck)
   const checkKey = `file|${file.path}|${status.workZero.join(',')}`
   const canCheck = open && machineGate === null
-  useEffect(() => {
-    if (canCheck) void store.getState().checkRun(undefined, checkKey)
-  }, [canCheck, checkKey, store])
-  const current = check.state !== 'idle' && check.key === checkKey ? check : undefined
+  // DF129 RC3 (Q170): a file may start at a line too
+  const start = usePreflightStart(checkKey, undefined, canCheck)
+  const { current } = start
   const passed = current?.state === 'done' && current.findings.length === 0
   const gate =
     machineGate ??
     (current?.state === 'done' && current.findings.length > 0 ? p.softLimitsFix : null)
-  const startable = gate === null && passed
+  const startable = gate === null && passed && start.ready
   const startRef = useRef<HTMLButtonElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -241,13 +240,20 @@ export function FilePreflightDialog({
               : gate === null
                 ? {}
                 : { 'aria-describedby': whyId })}
-            onClick={() => void a.startRun()}
+            onClick={() => void a.startRun(undefined, undefined, start.at)}
           >
-            {serial ? p.startMachine : p.start}
+            {start.at !== undefined
+              ? serial
+                ? runMessages.startAt.startMachineAtLine(start.at.fromLine)
+                : runMessages.startAt.startAtLine(start.at.fromLine)
+              : serial
+                ? p.startMachine
+                : p.start}
           </Button>
         </RunDialogFooter>
       }
     >
+      <StartAtSection current={current} units={units} />
       {serial ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
