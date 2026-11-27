@@ -540,6 +540,17 @@
   white-space: nowrap;
 }
 
+/* a mirror row's instance (DF126 M2): the mirror icon after its name */
+.instanceName {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.instanceName > svg {
+  color: var(--text-muted);
+}
+
 .instanceActions {
   position: absolute;
   top: 50%;
@@ -1614,6 +1625,8 @@
 
 .cloneRows {
   display: grid;
+  /* a long row summary ellipsizes instead of widening the inspector (DF126 M2) */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   justify-items: start;
 }
@@ -1622,6 +1635,7 @@
   --reorder-gap: var(--space-1);
 
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   width: 100%;
   margin: 0;
@@ -1630,6 +1644,7 @@
 }
 
 .cloneRow {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   transition: border-color var(--motion-fast) var(--ease-standard);

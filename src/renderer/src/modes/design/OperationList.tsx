@@ -22,7 +22,7 @@ import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
-import { useUi } from '../../shell/ShellContext'
+import { useRegion2d, useUi } from '../../shell/ShellContext'
 import {
   Button,
   ContextMenu,
@@ -161,6 +161,7 @@ export function OperationList({
   const rowActions = useRowActions(part)
   const expanded = useUi((s) => s.expandedFeatures)
   const setExpanded = useUi((s) => s.setFeatureExpanded)
+  const port = useRegion2d()
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const units = operationUnits(part)
   const partId = part.dto.id
@@ -195,7 +196,7 @@ export function OperationList({
   }, [openFor, setExpanded])
 
   const visible = units.flatMap((u) =>
-    visibleRows(u, expanded, (id) => cloneInstances(part, id).map((x) => x.n)),
+    visibleRows(u, expanded, (id) => cloneInstances(part, id, port).map((x) => x.n)),
   )
   const focusRow = (id: string) => rows.current.get(id)?.focus()
 
@@ -623,7 +624,8 @@ function FeatureRow({
   const { part, selected } = ctx
   const feature = unit.feature
   const clones = feature.kind === 'clones'
-  const instances = clones ? cloneInstances(part, feature.id) : []
+  const port = useRegion2d()
+  const instances = clones ? cloneInstances(part, feature.id, port) : []
   const readout = featureReadout(
     feature,
     clones ? 1 + instances.filter((x) => x.kind === 'clone').length : undefined,
@@ -874,6 +876,7 @@ function ClonesChildren({
                 key={x.n}
                 className={styles['instance']}
                 data-muted={x.kind !== 'clone' || undefined}
+                data-mirrored={x.mirrored || undefined}
                 data-selected={selected ? '' : undefined}
               >
                 <button
@@ -881,20 +884,25 @@ function ClonesChildren({
                   ref={ctx.rowRef(id)}
                   className={styles['instanceSelect']}
                   aria-pressed={selected}
-                  aria-label={c.instanceRow(x.n, x.kind)}
+                  aria-label={c.instanceRow(x.n, x.kind, x.mirrored)}
                   onClick={() => ctx.select(id)}
                   onKeyDown={(e) => ctx.key(e, id)}
                 >
-                  <span>{f.instance(x.n)}</span>
+                  <span className={styles['instanceName']}>
+                    {f.instance(x.n)}
+                    {x.mirrored ? <Icon name="row-mirror" size="sm" /> : null}
+                  </span>
                   <span className={styles['featureReadout']}>
                     {x.kind === 'clone'
                       ? position(x.at, ctx.part.units, axes)
                       : x.kind === 'skipped'
                         ? f.skipped
-                        : f.duplicate}
+                        : x.kind === 'onLine'
+                          ? f.onLine
+                          : f.duplicate}
                   </span>
                 </button>
-                {x.kind !== 'duplicate' && !ctx.readOnly ? (
+                {x.kind !== 'duplicate' && x.kind !== 'onLine' && !ctx.readOnly ? (
                   <span className={styles['instanceActions']}>
                     <Button
                       size="sm"

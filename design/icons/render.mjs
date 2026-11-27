@@ -155,7 +155,7 @@ const BEFORE = {
 }
 const L1 = [
   ['hole-simple', 'hole-counterbore', 'hole-countersink', 'chamfer', 'chamfer-mill', 'clones'],
-  ['row-grid', 'row-offset', 'row-polar', 'row-arc', 'row-point', 'row-along'],
+  ['row-grid', 'row-offset', 'row-polar', 'row-arc', 'row-point', 'row-along', 'row-mirror'],
   ['groove', 'pick', 'drilling', 'disconnect', 'connect'],
 ]
 function l1Sheet(

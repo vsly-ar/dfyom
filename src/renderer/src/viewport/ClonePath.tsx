@@ -6,8 +6,10 @@
 // on hover; the source "1" with a ring. While the Clones feature is selected a click (or Space on
 // the focused marker; Tab walks them in number order) toggles a clone's skip; the source is not
 // a target. The path draws in from the source when it appears (`--motion-slow`, cut under
-// reduced motion). Everything comes from props (`clonePathOverlay`).
-// Doc: docs/conventions/ui.md#clone-path-in-the-viewport
+// reduced motion). A mirror row's line (DF126 M2) is dashed across the face (amber while its row
+// is focused) with its label chip ("Mirror · stock centre") at the far end. Everything comes from
+// props (`clonePathOverlay`).
+// Doc: docs/conventions/ui.md#clone-path-in-the-viewport, docs/modes/clones-mirror.md#ui
 import { Html, Line } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -167,6 +169,28 @@ export function ClonePathLayer({
               renderOrder={4}
               raycast={noRaycast}
             />
+          ) : null}
+        </group>
+      ))}
+      {overlay.mirrors.map((m, i) => (
+        <group key={`mirror${i}`}>
+          <Line
+            points={m.line.map(p3)}
+            color={m.focused ? accent : edge}
+            lineWidth={m.focused ? 2 : 1.25}
+            dashed
+            dashSize={2}
+            gapSize={1.5}
+            depthTest={false}
+            renderOrder={4}
+            raycast={noRaycast}
+          />
+          {m.label !== '' ? (
+            <Html position={p3(m.labelAt)} center zIndexRange={[11, 2]}>
+              <span className={styles['mirrorLabel']} data-mirror-line={i}>
+                {m.label}
+              </span>
+            </Html>
           ) : null}
         </group>
       ))}

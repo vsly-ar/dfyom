@@ -6,8 +6,12 @@
 // the last position. Shared by the draft (local rows) and the Clones inspector (each change one
 // `design.clones.update`); the caller decides what a change does. The selected row's segment of
 // the clone path is amber (ui store `clonesRow`). Each field names the face axis (X/Y on the top
-// face, u/v elsewhere), has its own field illustration and a one-line hint (DF47).
-// Doc: docs/conventions/ui.md#clones, #reordering-lists-d45
+// face, u/v elsewhere), has its own field illustration and a one-line hint (DF47). DF126 M2: Add
+// row → Mirror appends a mirror row (a new path row goes above the mirror rows; a move that puts a
+// path row below one is refused, "Mirror rows come last"); its card: Mirror in (the face axis
+// with the part axis it runs along, DF127 "u (+X)"), About (Stock centre, Feature centre with a
+// select and a viewport pick, Coordinate) and its read-out "Mirrors 6 · 2 on the line".
+// Doc: docs/conventions/ui.md#clones, #reordering-lists-d45; docs/modes/clones-mirror.md#ui
 import { useState, type KeyboardEvent } from 'react'
 import type { CloneRowKind } from '../../../../core/design/clones/clones'
 import { fieldContext } from '../../../../core/design/operation'
@@ -19,6 +23,7 @@ import type { Quantity } from '../../../../core/quantity/quantity'
 import { fail, None, Ok, type AppResult } from '../../../../shared/result'
 import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
+import type { PickRequestState } from '../../state/ui-store'
 import {
   Button,
   DragGrip,
@@ -41,7 +46,15 @@ import styles from './Design.module.css'
 import {
   alongShapes,
   countField,
+  insertIndex,
+  lengthText,
+  mirrorAbout,
+  mirrorReadout,
+  mirrorRefText,
+  mirrorsLast,
   newRow,
+  type MirrorAbout,
+  type MirrorRef,
   ROW_FIELD_ORDER,
   ROW_ICON,
   ROW_KINDS,
@@ -53,7 +66,21 @@ import {
 import type { FieldError } from './OperationFields'
 
 const c = designMessages.features.clones
+const mm = c.mirror
 const r = designMessages.reorder
+
+/** What a mirror row's card needs from the Clones' face and part (DF126 M2). */
+export interface MirrorContext {
+  /** The face axes with the part axis each runs along (DF127): "u (+X)", "v (−Z)". */
+  readonly labels: { readonly u: string; readonly v: string }
+  /** The operations and features the row may mirror about (`mirrorRefs`). */
+  readonly refs: readonly MirrorRef[]
+  /** The viewport pick of a reference: its eligible surfaces and the item a surface picks. */
+  readonly pick?: {
+    eligible(): ReadonlySet<string>
+    refOf(surface: string): string | undefined
+  }
+}
 
 /** Names of the face's axes in labels and hints (`axisNames`: X/Y on the top face, else u/v). */
 export interface AxisNames {
@@ -144,9 +171,17 @@ export function rowSummary(
   row: RowArg,
   positions: number | undefined,
   shapes: readonly ShapeDTO[],
+  mirror?: MirrorContext,
 ): string {
   const kind = c.kinds[row.kind] ?? row.kind
   const parts = [kind]
+  if (row.kind === 'mirror' && mirror !== undefined)
+    parts.push(
+      mm.summary(
+        row['flip'] === 'v' ? mirror.labels.v : mirror.labels.u,
+        mirrorRefText(row, mirror.refs, { stock: mm.stock, at: mm.atText, unknown: mm.unknown }),
+      ),
+    )
   if (row.kind === 'grid') parts.push(`${String(row['cols'])} × ${String(row['rows'])}`)
   if (row.kind === 'arc') parts.push(`R ${String(row['radius'])}`)
   if (row.kind === 'point') parts.push(`${String(row['u'])}, ${String(row['v'])}`)
@@ -171,6 +206,7 @@ export function CloneRowList({
   onChange,
   onCancelGesture,
   onRestore,
+  mirror,
 }: {
   /** Whose rows these are (the ui store's row focus): a feature id, or `draft`. */
   owner: string
@@ -195,7 +231,11 @@ export function CloneRowList({
   onCancelGesture(gesture: string): Promise<boolean>
   /** Restore a skipped position by its instance number. */
   onRestore(n: number): void
+  /** The mirror row's axis labels, references and pick (DF126 M2). */
+  mirror: MirrorContext
 }): React.JSX.Element {
+  const pick = useUi((s) => s.pick)
+  const setPick = useUi((s) => s.setPick)
   const focus = useUi((s) => s.clonesRow)
   const setFocus = useUi((s) => s.setClonesRow)
   const selected = focus?.owner === owner ? Math.min(focus.row, rows.length - 1) : 0
@@ -211,9 +251,20 @@ export function CloneRowList({
       gesture,
     )
   const [announcement, setAnnouncement] = useState('')
+  const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  /** Why moving row `i` to `to` is refused: a path row below a mirror row (DF126). */
+  const moveRefusal = (i: number, to: number): string | undefined =>
+    mirrorsLast(moveItem(rows, i, to)) ? undefined : mm.last
   /** Row `i` to index `to`: one change; the moved row is selected. */
   const moveTo = (i: number, to: number) => {
     if (to < 0 || to >= rows.length || to === i) return false
+    const why = moveRefusal(i, to)
+    if (why !== undefined) {
+      setRefusal(why)
+      setAnnouncement(why)
+      return false
+    }
+    setRefusal(undefined)
     change(moveItem(rows, i, to), 'rows')
     select(to)
     setAnnouncement(r.moved(c.rowNamed(i), to + 1, rows.length))
@@ -222,13 +273,19 @@ export function CloneRowList({
   const reorder = useReorder({
     count: rows.length,
     order: JSON.stringify(rows),
+    refusal: moveRefusal,
     onMove: moveTo,
+    onRefused: (why) => {
+      setRefusal(why)
+      setAnnouncement(why)
+    },
   })
   const { attachList } = reorder
   const move = (i: number, by: -1 | 1) => {
     const to = i + by
     if (to < 0 || to >= rows.length) return
-    reorder.glide(i, to)
+    if (moveRefusal(i, to) !== undefined) reorder.shake(i)
+    else reorder.glide(i, to)
     moveTo(i, to)
   }
   const remove = (i: number) => {
@@ -239,11 +296,13 @@ export function CloneRowList({
     )
     select(Math.max(0, Math.min(i, rows.length - 2)))
   }
+  /** A new row: a mirror row at the end, a path row above the mirror rows (they come last). */
   const add = (kind: CloneRowKind) => {
     const row = newRow(kind, step, units, lastAt, shapes)
     if (row === undefined) return
-    change([...rows, row], 'rows')
-    select(rows.length)
+    const at = insertIndex(rows, kind)
+    change([...rows.slice(0, at), row, ...rows.slice(at)], 'rows')
+    select(at)
   }
   const onKey = (e: KeyboardEvent, i: number) => {
     if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
@@ -277,8 +336,142 @@ export function CloneRowList({
     return q.isOk() ? q.unwrap() : undefined
   }
 
+  /** Row `i` replaced by `next` (one change). */
+  const replaceRow = (i: number, next: RowArg, path: string) =>
+    change(
+      rows.map((x, k) => (k === i ? next : x)),
+      path,
+    )
+  const mirrorFields = (row: RowArg, i: number): React.JSX.Element[] => {
+    const about = mirrorAbout(row)
+    const flip = row['flip'] === 'v' ? 'v' : 'u'
+    const { about: _a, at: _t, ...plain } = row
+    const line = data?.rows[i]?.mirror?.c
+    const pickOwner = `clones:${owner}:${String(i)}:about`
+    const picking = pick?.owner === pickOwner
+    const out: React.JSX.Element[] = [
+      <Field
+        key="flip"
+        label={mm.flip}
+        info={mm.flipInfo}
+        illustration={<FieldIcon name="cloneDirection" />}
+        messages={messagesAt(`rows.${i}.flip`)}
+      >
+        <SegmentedControl
+          label={mm.flip}
+          size="sm"
+          options={[
+            { value: 'u', label: mirror.labels.u },
+            { value: 'v', label: mirror.labels.v },
+          ]}
+          value={flip}
+          onValueChange={(v) => {
+            if (v !== flip) setField(i, 'flip', v)
+          }}
+        />
+      </Field>,
+      <Field
+        key="about"
+        label={mm.about}
+        info={mm.aboutInfo}
+        illustration={<FieldIcon name="clonePath" />}
+        messages={messagesAt(`rows.${i}`)}
+      >
+        <Select<MirrorAbout>
+          options={(['stock', 'feature', 'at'] as const).map((v) => ({
+            value: v,
+            label: mm.aboutOptions[v],
+            ...(v === 'feature' && mirror.refs.length === 0 ? { disabled: true } : {}),
+          }))}
+          value={about}
+          onValueChange={(v) => {
+            if (v === about) return
+            if (v === 'stock') replaceRow(i, plain as RowArg, `rows.${i}`)
+            else if (v === 'feature') {
+              const first = mirror.refs[0]
+              if (first !== undefined)
+                replaceRow(i, { ...plain, about: first.value } as RowArg, `rows.${i}.about`)
+            } else {
+              const here = line ?? (flip === 'u' ? lastAt.u : lastAt.v)
+              replaceRow(i, { ...plain, at: lengthText(here, units) } as RowArg, `rows.${i}.at`)
+            }
+          }}
+        />
+      </Field>,
+    ]
+    if (about === 'feature') {
+      const choose = (id: string) => {
+        if (id !== row['about']) setField(i, 'about', id)
+      }
+      const p = mirror.pick
+      out.push(
+        <div key="ref" className={styles['onRow']}>
+          <Field
+            label={mm.reference}
+            info={mm.referenceInfo}
+            messages={messagesAt(`rows.${i}.about`)}
+          >
+            <Select
+              options={mirror.refs.map((x) => ({ value: x.value, label: x.label }))}
+              value={String(row['about'])}
+              onValueChange={choose}
+            />
+          </Field>
+          {p !== undefined ? (
+            <IconButton
+              label={mm.pick}
+              icon={<Icon name="pick" />}
+              pressed={picking}
+              className={styles['pickButton']}
+              onClick={() => {
+                if (picking) return setPick(null)
+                const request: PickRequestState = {
+                  owner: pickOwner,
+                  field: mm.pickField,
+                  eligible: p.eligible(),
+                  onPick: (surface) => {
+                    const id = p.refOf(surface)
+                    if (id !== undefined) choose(id)
+                  },
+                }
+                setPick(request)
+              }}
+            />
+          ) : null}
+        </div>,
+      )
+    } else if (about === 'at') {
+      const axis = flip === 'u' ? axes.u : axes.v
+      out.push(
+        <QuantityInput
+          key="at"
+          label={mm.at(axis)}
+          illustration={<FieldIcon name={flip === 'u' ? 'positionX' : 'positionY'} />}
+          kind="length"
+          defaultUnit={fieldContext('length', units).defaultUnit}
+          value={quantity(row['at'], 'length')}
+          stepKind="xy"
+          info={mm.atInfo(axis)}
+          onCommit={(q, gesture) => setField(i, 'at', q.source, gesture)}
+          onCancelGesture={onCancelGesture}
+          messages={messagesAt(`rows.${i}.at`)}
+          {...(resolver ? { resolver } : {})}
+        />,
+      )
+    }
+    const ro = mirrorReadout(data, i)
+    if (ro !== undefined)
+      out.push(
+        <p key="readout" className={styles['muted']} data-testid="mirror-readout">
+          {mm.readout(ro.mirrors, ro.onLine)}
+        </p>,
+      )
+    return out
+  }
+
   const fields = (row: RowArg, i: number) => {
     const out: React.JSX.Element[] = []
+    if (row.kind === 'mirror') return mirrorFields(row, i)
     if (row.kind === 'along') {
       const by: 'spacing' | 'count' = row['count'] !== undefined ? 'count' : 'spacing'
       const shapeText = rowFieldText('along', 'shape', axes)
@@ -439,7 +632,12 @@ export function CloneRowList({
           const open = i === selected
           const kind = c.kinds[row.kind] ?? row.kind
           const skipped = skippedNumbers(data, i)
-          const rowErrors = errors.some((e) => e.path.startsWith(`rows.${i}.`)) || over?.row === i
+          const rowErrors =
+            errors.some((e) => e.path === `rows.${i}` || e.path.startsWith(`rows.${i}.`)) ||
+            over?.row === i
+          // a refusal at the row itself (`clonesMirrorLast` at its kind), shown under its head
+          const rowLevel = errors.filter((e) => e.path === `rows.${i}.kind`)
+          const summary = rowSummary(row, rowPositions(data, i), shapes, mirror)
           return (
             <li
               key={i}
@@ -453,15 +651,13 @@ export function CloneRowList({
                   type="button"
                   className={styles['cloneRowSelect']}
                   aria-expanded={open}
-                  aria-label={`${c.rowName(i, kind)}, ${rowSummary(row, rowPositions(data, i), shapes)}`}
+                  aria-label={`${c.rowName(i, kind)}, ${summary}`}
                   aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                   onClick={() => select(i)}
                   onKeyDown={(e) => onKey(e, i)}
                 >
                   <Icon name={ROW_ICON[row.kind]} />
-                  <span className={styles['cloneRowText']}>
-                    {rowSummary(row, rowPositions(data, i), shapes)}
-                  </span>
+                  <span className={styles['cloneRowText']}>{summary}</span>
                 </button>
                 <span className={styles['cloneRowActions']}>
                   {rows.length > 1 ? <DragGrip title={r.grip} {...reorder.gripProps(i)} /> : null}
@@ -473,6 +669,11 @@ export function CloneRowList({
                   />
                 </span>
               </div>
+              {rowLevel.map((e, k) => (
+                <p key={k} className={styles['fieldError']} role="alert">
+                  {e.text}
+                </p>
+              ))}
               {open ? (
                 <div className={styles['cloneRowFields']}>
                   {fields(row, i)}
@@ -501,7 +702,7 @@ export function CloneRowList({
           )
         })}
       </ol>
-      <ReorderStatus refusal={undefined} announcement={announcement} />
+      <ReorderStatus refusal={reorder.refusal ?? refusal} announcement={announcement} />
       <Menu
         label={c.addRow}
         items={ROW_KINDS.map((k) => ({
