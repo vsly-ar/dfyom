@@ -2,8 +2,10 @@
 // args: quantities as entered, whole numbers as numbers), new rows and the draft's first row, the
 // row summaries, the read-out with the 100-instance limit and the row that crosses it, skip
 // toggling by instance number, the draft's source options, and the clone path in one shape for
-// the stored feature (core `featurePath`) and a draft (`design.clones.preview`).
-// Doc: docs/conventions/ui.md#clones, #clone-path-in-the-viewport;
+// the stored feature (core `featurePath`) and a draft (`design.clones.preview`). DF126 M2: mirror
+// rows (always last: a new path row goes above them, a move below one is refused), the mirror
+// references a row may name, the read-outs' "on the line" counts and the refusals' texts by name.
+// Doc: docs/conventions/ui.md#clones, #clone-path-in-the-viewport; docs/modes/clones-mirror.md#ui;
 // docs/modes/design-v0.4.md#implementation-f5, #implementation-f6
 import {
   alongChain,
@@ -17,7 +19,10 @@ import {
   type Clones,
   type ClonesSource,
 } from '../../../../core/design/clones/clones'
+import { stockFaceOf } from '../../../../core/design/clones/mirror'
 import type { ClonePath } from '../../../../core/design/clones/path'
+import type { Region2dPort } from '../../../../core/geometry/2d/port'
+import type { Issue } from '../../../../shared/errors/app-error'
 import { designToolFromDTO } from '../../../../core/design/tool'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
@@ -46,6 +51,7 @@ export const ROW_KINDS: readonly CloneRowKind[] = [
   'arc',
   'point',
   'along',
+  'mirror',
 ]
 
 /** Row-kind icons (L1 `row-*`; L2 decides whether they read at 16 px). */
@@ -56,8 +62,7 @@ export const ROW_ICON: Readonly<Record<CloneRowKind, IconName>> = {
   arc: 'row-arc',
   point: 'row-point',
   along: 'row-along',
-  // DF126 M2 draws its own icon; the menu does not offer mirror rows yet (M1: agent only)
-  mirror: 'row-point',
+  mirror: 'row-mirror',
 }
 
 /** The fields of each row kind in the order the inspector shows them (ui.md § Clones table). */
@@ -92,8 +97,8 @@ export const ROW_FIELD_ORDER: Readonly<
   ],
   // shape, Spacing / Count and start are laid out by the row editor itself
   along: [{ key: 'start', kind: 'length' }],
-  // flip and about are laid out by the M2 mirror card (clones-mirror.md § UI)
-  mirror: [{ key: 'at', kind: 'length' }],
+  // flip, About and its reference or coordinate are laid out by the mirror card (DF126 M2)
+  mirror: [],
 }
 
 /** The field of a row that carries the 100-instance error when the row crosses the limit. */
@@ -285,24 +290,139 @@ export function pathDataOf(path: ClonePath): ClonePathData {
     rows: path.rows.map((r) => ({
       path: (r.curve ?? r.line).map(uv),
       ...(r.arc === undefined ? {} : { centre: uv(r.arc.centre) }),
+      ...(r.mirror === undefined ? {} : { mirror: r.mirror }),
       points: r.points.map((p) => ({
         at: uv(p.at),
         kind: p.kind,
         ...(p.number === undefined ? {} : { n: p.number }),
+        ...(p.flip === undefined ? {} : { mirrored: p.flip }),
       })),
     })),
   }
+}
+
+/**
+ * A stored Clones feature's core path, mirror lines resolved (the stock, `about` against every
+ * operation, `port` for named shapes' centres), or undefined when the part does not load.
+ */
+export function storedClonePath(
+  part: Pick<DesignPart, 'loaded' | 'dto'>,
+  featureId: string,
+  port?: Region2dPort,
+): ClonePath | undefined {
+  const l = part.loaded
+  const lf = l?.features.find((x) => x.feature.id === featureId)
+  if (l === undefined || lf === undefined || lf.feature.kind !== 'clones') return undefined
+  return featurePath(lf.feature as Clones, l.part.operations, part.dto.shapes ?? [], {
+    stock: l.stock,
+    port,
+  })
 }
 
 /** A stored Clones feature's path (core `featurePath`), or undefined when the part does not load. */
 export function featurePathData(
   part: Pick<DesignPart, 'loaded' | 'dto'>,
   featureId: string,
+  port?: Region2dPort,
 ): ClonePathData | undefined {
-  const l = part.loaded
-  const lf = l?.features.find((x) => x.feature.id === featureId)
-  if (l === undefined || lf === undefined || lf.feature.kind !== 'clones') return undefined
-  return pathDataOf(featurePath(lf.feature as Clones, l.part.operations, part.dto.shapes ?? []))
+  const path = storedClonePath(part, featureId, port)
+  return path === undefined ? undefined : pathDataOf(path)
+}
+
+// ── mirror rows (DF126 M2) ───────────────────────────────────────────────────────────────
+
+/** A path row (not a mirror row). */
+export const isPathRow = (r: Pick<RowArg, 'kind'>): boolean => r.kind !== 'mirror'
+
+/** Where a new row of `kind` goes: a mirror row at the end, a path row above the mirror rows. */
+export function insertIndex(rows: readonly RowArg[], kind: CloneRowKind): number {
+  if (kind === 'mirror') return rows.length
+  const first = rows.findIndex((r) => !isPathRow(r))
+  return first < 0 ? rows.length : first
+}
+
+/** Whether the rows keep mirror rows last (core `clonesMirrorLast`). */
+export function mirrorsLast(rows: readonly Pick<RowArg, 'kind'>[]): boolean {
+  let mirror = false
+  for (const r of rows) {
+    if (!isPathRow(r)) mirror = true
+    else if (mirror) return false
+  }
+  return true
+}
+
+/** Which reference a mirror row uses: the stock face's centre, a feature's centre, a coordinate. */
+export type MirrorAbout = 'stock' | 'feature' | 'at'
+
+export function mirrorAbout(row: RowArg): MirrorAbout {
+  return typeof row['about'] === 'string'
+    ? 'feature'
+    : typeof row['at'] === 'string'
+      ? 'at'
+      : 'stock'
+}
+
+/** One reference a mirror row may name: an operation or feature by name. */
+export interface MirrorRef {
+  readonly value: string
+  readonly label: string
+}
+
+/**
+ * The operations and features a mirror row of a Clones on face `on` may mirror about
+ * (clones-mirror.md § Reference, core `mirrorRefIssues`): every top-level operation or feature on
+ * the same stock face that cuts an area (not a facing), not the Clones `self` itself; for a stored
+ * Clones its own source items instead of its unit. `owners` maps each operation id to the item
+ * it picks (a hole's drilling → the hole; a Clones' instance → that Clones).
+ */
+export function mirrorRefs(
+  part: Pick<DesignPart, 'dto' | 'loaded'>,
+  on: string,
+  self: string | undefined,
+): { refs: MirrorRef[]; owners: ReadonlyMap<string, string> } {
+  const ops = part.loaded?.part.operations ?? []
+  const face = stockFaceOf(on, ops)
+  const units = operationUnits(part).flatMap((u) =>
+    u.kind === 'feature' && u.id === self ? u.nested : [u],
+  )
+  const refs: MirrorRef[] = []
+  const owners = new Map<string, string>()
+  for (const u of units) {
+    const members = unitOperations(u)
+    if (members.length === 0 || members.every((o) => o.kind === 'facing')) continue
+    if (members.some((o) => stockFaceOf(o.on ?? 'stock.top', ops) !== face)) continue
+    refs.push({ value: u.id, label: u.kind === 'operation' ? u.op.name : u.feature.name })
+    for (const o of members) owners.set(o.id, u.id)
+  }
+  return { refs, owners }
+}
+
+/** A mirror row's summary part: "stock centre", the reference's name, or "at 50 mm". */
+export function mirrorRefText(
+  row: RowArg,
+  refs: readonly MirrorRef[],
+  text: { stock: string; at: (length: string) => string; unknown: string },
+): string {
+  const about = row['about']
+  if (typeof about === 'string') return refs.find((r) => r.value === about)?.label ?? text.unknown
+  const at = row['at']
+  return typeof at === 'string' ? text.at(at) : text.stock
+}
+
+/**
+ * Issue texts by name (ui.md: never ids): the mirror rules' core messages name ids, so a refusal
+ * at a mirror row reads `messages(rule, row)` instead.
+ */
+export function mirrorIssues(
+  issues: readonly Issue[],
+  text: (rule: string, row: number, message: string) => string | undefined,
+): Issue[] {
+  return issues.map((i) => {
+    const row = i.path[0] === 'rows' && typeof i.path[1] === 'number' ? i.path[1] : undefined
+    if (row === undefined) return i
+    const t = text(i.rule, row, i.message)
+    return t === undefined ? i : { ...i, message: t }
+  })
 }
 
 /** The source of a stored Clones feature's record. */
@@ -320,6 +440,10 @@ export interface Readout {
   readonly instances: number
   readonly clones: number
   readonly skipped: number
+  /** Mirror positions dropped because they equal their original (DF126, Q165). */
+  readonly onLine: number
+  /** The path has a mirror row: the read-out says how many are on the line. */
+  readonly mirrored: boolean
   /** Over the limit (D36): how many, how many to remove, the first row that crossed it. */
   readonly over?: { readonly actual: number; readonly excess: number; readonly row: number }
 }
@@ -330,7 +454,12 @@ export function readoutOf(data: ClonePathData): Readout {
     (n, r) => n + r.points.filter((p) => p.kind === 'skipped').length,
     0,
   )
-  const base = { instances, clones: instances - 1, skipped }
+  const onLine = data.rows.reduce(
+    (n, r) => n + r.points.filter((p) => p.kind === 'onLine').length,
+    0,
+  )
+  const mirrored = data.rows.some((r) => r.mirror !== undefined)
+  const base = { instances, clones: instances - 1, skipped, onLine, mirrored }
   if (instances <= CLONES_MAX) return base
   let total = 1
   let row = data.rows.length - 1
@@ -342,6 +471,19 @@ export function readoutOf(data: ClonePathData): Readout {
     }
   }
   return { ...base, over: { actual: instances, excess: instances - CLONES_MAX, row } }
+}
+
+/** A mirror row's card read-out: how many copies it places, how many sit on the line. */
+export function mirrorReadout(
+  data: ClonePathData | undefined,
+  i: number,
+): { readonly mirrors: number; readonly onLine: number } | undefined {
+  const r = data?.rows[i]
+  if (r === undefined) return undefined
+  return {
+    mirrors: r.points.filter((p) => p.kind === 'clone').length,
+    onLine: r.points.filter((p) => p.kind === 'onLine').length,
+  }
 }
 
 /** How many numbered positions each row has (its summary's "5 positions"). */

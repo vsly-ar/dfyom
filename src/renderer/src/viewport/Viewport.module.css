@@ -217,6 +217,20 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   opacity: 0.6;
 }
 
+/* DF126 M2: a mirror line's label at its far end (clones-mirror.md § UI) */
+.mirrorLabel {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .cloneChip,
 .cloneHint {
   position: absolute;

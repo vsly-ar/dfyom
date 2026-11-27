@@ -101,6 +101,53 @@ describe('clonePathOverlay', () => {
   })
 })
 
+describe('clonePathOverlay: mirror rows (DF126 M2)', () => {
+  // the source at (0, 0) and its mirror across u = 50 (face 100 × 60)
+  const mirrored: ClonePathData = {
+    instances: [
+      { n: 1, at: [0, 0] },
+      { n: 2, at: [100, 0] },
+    ],
+    rows: [
+      {
+        path: [[0, 0]],
+        mirror: { flip: 'u', c: 50 },
+        points: [{ at: [100, 0], kind: 'clone', n: 2, mirrored: { u: true } }],
+      },
+    ],
+  }
+  it('draws the line across the whole face with its label, focused amber', () => {
+    const o = clonePathOverlay(
+      mirrored,
+      face,
+      options({ faceSize: [100, 60], focusedRow: 0, mirrorLabel: () => 'Mirror · stock centre' }),
+    )
+    expect(o.mirrors).toEqual([
+      {
+        line: [
+          [50, -4, 10],
+          [50, 64, 10],
+        ],
+        label: 'Mirror · stock centre',
+        labelAt: [50, 64, 10],
+        focused: true,
+      },
+    ])
+    expect(o.markers.map((m) => m.n)).toEqual([1, 2])
+    // without the face's size no line (a caller that cannot place it)
+    expect(clonePathOverlay(mirrored, face, options()).mirrors).toEqual([])
+  })
+  it('a mirrored ghost is the footprint reflected, not only moved', () => {
+    const o = clonePathOverlay(mirrored, face, options({ draft: true, interactive: false }))
+    // the footprint (−1,−1) (1,−1) (1,1) about the source, flipped in u, at u = 100
+    expect(o.ghosts[0]!.loops[0]).toEqual([
+      [101, -1, 10],
+      [99, -1, 10],
+      [99, 1, 10],
+    ])
+  })
+})
+
 describe('chipsShown', () => {
   it('hides numbers of markers closer than 24 px and those off screen', () => {
     expect(chipsShown([[0, 0], [10, 0], [100, 0], null, [200, 0], [224, 0]])).toEqual([

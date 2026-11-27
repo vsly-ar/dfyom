@@ -48,7 +48,7 @@ Drawn to the rules above for [ui.md § Icons (v0.4)](../../docs/conventions/ui.m
 - Hole types are front sections (plate top and bottom faces either side of the bore), told apart by the amber part: the bore walls, the counterbore step, the countersink cone. Chamfer is an edge section with its bevel amber and no bore.
 - `chamfer-mill` is the former `v-bit` drawing, renamed to the name in ui.md (the `chamferMill` tool type's icon since C1).
 - Clones: the source square, two dashed copies and the dotted path between them (amber).
-- Row kinds (`row-grid`, `row-offset`, `row-polar`, `row-arc`, `row-point`, `row-along`): grid, arc, point and along read at 16 px; offset (three dots on a diagonal) and polar (the same with a ray from a small origin) are close at 16 px, so for L2: keep them or show the Add row menu's labels alone.
+- Row kinds (`row-grid`, `row-offset`, `row-polar`, `row-arc`, `row-point`, `row-along`, `row-mirror` from DF126 M2: two flags across a dashed line): grid, arc, point and along read at 16 px; offset (three dots on a diagonal) and polar (the same with a ray from a small origin) are close at 16 px, so for L2: keep them or show the Add row menu's labels alone.
 
 ### v0.4-llm-first L1: workholding, offset, deviation
 

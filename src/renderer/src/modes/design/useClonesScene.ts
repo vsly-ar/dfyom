@@ -3,8 +3,11 @@
 // or the Make Clones… draft is open (the last preview's positions, every clone a solid ghost), the
 // focused row's segment amber; a Clones selection also draws its source selected; a selected
 // instance draws the source's outline thin and dashed. The viewport summary names the state.
-// Doc: docs/conventions/ui.md#clone-path-in-the-viewport, #feature-selection-in-the-viewport
+// DF126 M2: each mirror row's line dashed across the whole face, labelled "Mirror · stock centre".
+// Doc: docs/conventions/ui.md#clone-path-in-the-viewport, #feature-selection-in-the-viewport;
+// docs/modes/clones-mirror.md#ui
 import { useMemo } from 'react'
+import { faceSizeOf } from '../../../../core/design/clones/mirror'
 import { toPartFrame } from '../../../../core/geometry/face'
 import { designMessages } from '../../messages/design'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
@@ -18,8 +21,11 @@ import {
   clonesSourceOf,
   draftSource,
   featurePathData,
+  mirrorRefs,
+  mirrorRefText,
   parseInstanceId,
   readoutOf,
+  rowArgsOf,
   sourceModels,
 } from './clones-view'
 import { positionText, useSkipToggle } from './ClonesInspector'
@@ -79,7 +85,7 @@ export function useClonesScene(
       })
 
     if (instance !== undefined && !live) {
-      const data = featurePathData(part, instance.feature.id)
+      const data = featurePathData(part, instance.feature.id, port)
       const r = data === undefined ? undefined : readoutOf(data)
       return {
         clonePath: null,
@@ -101,8 +107,12 @@ export function useClonesScene(
 
     const data: ClonePathData | undefined = live
       ? (draft.preview ?? undefined)
-      : featurePathData(part, feature!.id)
+      : featurePathData(part, feature!.id, port)
     if (data === undefined) return NONE
+    const rowArgs = live ? draft.rows : rowArgsOf(feature!)
+    const refs = data.rows.some((r) => r.mirror !== undefined)
+      ? mirrorRefs(part, first.on, live ? undefined : feature!.id).refs
+      : []
     const face = operationFace(first, l.stock, table)
     const placement = {
       at: (u: number, v: number) => toPartFrame(face.frame, [u, v, face.w]),
@@ -128,6 +138,19 @@ export function useClonesScene(
       label: (n, at, skipped) => c.markerLabel(n, where(at), skipped),
       hint: (n, skipped) => (skipped ? c.hintRestore : c.hintSkip(n)),
       sourceHint: c.sourceHint,
+      faceSize: faceSizeOf(l.stock, first.on, ops),
+      mirrorLabel: (i) => {
+        const row = rowArgs[i]
+        return c.mirror.viewport(
+          row === undefined
+            ? c.mirror.stock
+            : mirrorRefText(row, refs, {
+                stock: c.mirror.stock,
+                at: c.mirror.atText,
+                unknown: c.mirror.unknown,
+              }),
+        )
+      },
       onToggle: (n) => {
         if (feature !== undefined) toggle(feature, n)
       },

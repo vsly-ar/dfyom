@@ -239,6 +239,7 @@ export const designMessages = {
     instance: (n: number) => `Clone ${n}`,
     skipped: 'Skipped',
     duplicate: 'Same spot as an earlier clone',
+    onLine: 'On the mirror line',
     ownedName: (opName: string, featureName: string) => `${opName}, edited through ${featureName}`,
     expand: (name: string) => `Expand ${name}`,
     collapse: (name: string) => `Collapse ${name}`,
@@ -269,11 +270,11 @@ export const designMessages = {
       actions: 'Clones draft actions',
       source: 'Source',
       rows: 'Rows',
-      /** "1 + 5 clones = 6 instances · 0 skipped" */
-      readout: (clones: number, instances: number, skipped: number) =>
+      /** "1 + 5 clones = 6 instances · 0 skipped"; with a mirror row "· 2 on the line" before it. */
+      readout: (clones: number, instances: number, skipped: number, onLine?: number) =>
         `1 + ${clones === 1 ? '1 clone' : `${clones} clones`} = ${
           instances === 1 ? '1 instance' : `${instances} instances`
-        } · ${skipped} skipped`,
+        }${onLine === undefined ? '' : ` · ${onLine} on the line`} · ${skipped} skipped`,
       overLimit: (actual: number, max: number, excess: number) =>
         `${actual} instances: Clones are limited to ${max}. Remove or skip ${excess}.`,
       addRow: 'Add row',
@@ -284,7 +285,43 @@ export const designMessages = {
         arc: 'Arc',
         point: 'Point',
         along: 'Along',
+        mirror: 'Mirror',
       } as Record<string, string>,
+      /** DF126 M2: the mirror row's card (clones-mirror.md § UI). */
+      mirror: {
+        flip: 'Mirror in',
+        flipInfo:
+          'Adds a mirror image of every instance above, across the line. The chosen axis is the coordinate that changes side.',
+        flipOption: (axis: string) => `Flip ${axis}`,
+        about: 'About',
+        aboutInfo:
+          'Where the mirror line is: the stock face’s centre, the centre of an operation or feature (it follows when that one changes), or a coordinate.',
+        aboutOptions: { stock: 'Stock centre', feature: 'Feature centre', at: 'Coordinate' },
+        reference: 'Mirror about',
+        referenceInfo: 'The line runs through the centre of this item’s footprint.',
+        noReference: 'No operation or feature on this face to mirror about.',
+        pick: 'Pick the item to mirror about in the viewport',
+        pickField: 'Mirror about',
+        at: (axis: string) => `Line at (${axis})`,
+        atInfo: (axis: string) => `The mirror line’s ${axis} coordinate, from the face’s origin.`,
+        readout: (mirrors: number, onLine: number) =>
+          `Mirrors ${mirrors}${onLine > 0 ? ` · ${onLine} on the line` : ''}`,
+        stock: 'stock centre',
+        atText: (length: string) => `at ${length}`,
+        unknown: 'unknown item',
+        summary: (axis: string, about: string) => `${axis} · ${about}`,
+        viewport: (about: string) => `Mirror · ${about}`,
+        last: 'Mirror rows come last: move the path rows above them.',
+        refNotHere: (name: string) => `${name} is not on this face.`,
+        refOwn: 'That is one of this Clones’ own clones: mirror about its source instead.',
+        refSelf: 'A Clones cannot mirror about itself.',
+        refFacing: 'A facing has no centre: pick a pocket, hole or other feature.',
+        refGone: 'That item is no longer in the part: choose another reference.',
+        oneOf: 'Give a feature or a coordinate, not both.',
+        mirrored: 'Mirrored',
+        mirroredIn: (axes: string) => `In ${axes}`,
+        halfTurn: (u: string, v: string) => `In ${u} and ${v} (a half turn)`,
+      },
       alongNoShape: 'Add a path shape first: Along places clones along it.',
       positions: (n: number) => (n === 1 ? '1 position' : `${n} positions`),
       rowName: (i: number, kind: string) => `Row ${i + 1}: ${kind}`,
@@ -367,12 +404,19 @@ export const designMessages = {
       instanceRoughing: (summary: string) => `Roughing: ${summary}`,
       instanceGroup: (op: string, n: number) => `${op} · ${n}`,
       readOnly: (clones: string) => `Part of ${clones}: change it in the source or the Clones.`,
-      instanceRow: (n: number, state: 'clone' | 'skipped' | 'duplicate') =>
+      instanceRow: (
+        n: number,
+        state: 'clone' | 'skipped' | 'duplicate' | 'onLine',
+        mirrored = false,
+      ) =>
         state === 'clone'
-          ? `Clone ${n}`
+          ? `Clone ${n}${mirrored ? ', mirrored' : ''}`
           : state === 'skipped'
             ? `Clone ${n}, skipped`
-            : `Clone ${n}, same spot as an earlier clone`,
+            : state === 'onLine'
+              ? `Clone ${n}, on the mirror line`
+              : `Clone ${n}, same spot as an earlier clone`,
+      onLineNote: 'This mirror image is its own original, on the mirror line: nothing more is cut.',
       skipLabel: 'Skip',
       restoreLabel: 'Restore',
       skipN: (n: number) => `Skip clone ${n}`,

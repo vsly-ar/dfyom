@@ -3,8 +3,10 @@
 // reference chain per row (the focused row's segment amber), an arc's centre cross and dashed
 // construction circle, a marker per numbered position (the source "1" with a ring), the source's
 // footprint as ghosts at draft positions (solid) and skipped ones (dashed) – and which instance
-// numbers show, hiding those whose markers sit closer than 24 px on screen.
-// Doc: docs/conventions/ui.md#clone-path-in-the-viewport
+// numbers show, hiding those whose markers sit closer than 24 px on screen. A mirror row (DF126
+// M2) draws its line dashed across the whole face with a label; a mirrored ghost is the source's
+// footprint reflected, not only moved.
+// Doc: docs/conventions/ui.md#clone-path-in-the-viewport, docs/modes/clones-mirror.md#ui
 import type { Vec3 } from './mesh'
 
 type UV = readonly [number, number]
@@ -16,10 +18,14 @@ export interface ClonePathData {
     /** What to draw: straight through the positions, along the arc or the shape. */
     readonly path: readonly UV[]
     readonly centre?: UV
+    /** A mirror row's line: u = c (`flip: 'u'`) or v = c, absolute in the face frame (mm). */
+    readonly mirror?: { readonly flip: 'u' | 'v'; readonly c: number }
     readonly points: readonly {
       readonly at: UV
       readonly kind: 'clone' | 'skipped' | 'closes' | 'duplicate' | 'onLine'
       readonly n?: number
+      /** The face axes this position is mirrored in (a mirror row's; both: a half turn). */
+      readonly mirrored?: { readonly u?: true; readonly v?: true }
     }[]
   }[]
 }
@@ -54,6 +60,13 @@ export interface ClonePathOverlay {
     readonly loops: readonly (readonly Vec3[])[]
     readonly dashed: boolean
   }[]
+  /** Mirror rows' lines across the whole face (dashed) with their label at the far end. */
+  readonly mirrors: readonly {
+    readonly line: readonly [Vec3, Vec3]
+    readonly label: string
+    readonly labelAt: Vec3
+    readonly focused: boolean
+  }[]
   /** Click (and Space) on a marker toggles its skip: the Clones feature is selected. */
   readonly interactive: boolean
   /** Tooltip of the source marker while interactive ("The source can't be skipped."). */
@@ -80,8 +93,15 @@ export interface OverlayOptions {
   label(n: number, at: UV, skipped: boolean): string
   hint?(n: number, skipped: boolean): string | undefined
   readonly sourceHint?: string
+  /** The face's size `[u, v]` (mm; the frame's origin is its lower-left corner): mirror lines. */
+  readonly faceSize?: readonly [number, number]
+  /** A mirror row's label in the viewport ("Mirror · stock centre"). */
+  mirrorLabel?(row: number): string
   onToggle(n: number): void
 }
+
+/** How far a mirror line runs past the face's edges (mm). */
+export const MIRROR_OVERHANG = 4
 
 /** Samples of an arc's construction circle. */
 const CIRCLE_SAMPLES = 72
@@ -121,10 +141,33 @@ export function clonePathOverlay(
       label: o.label(1, origin, false),
     },
   ]
-  const ghost = (p: UV, dashed: boolean) => {
+  const U = face.shift(1, 0)
+  const V = face.shift(0, 1)
+  const o3 = at(origin)
+  const dot = (q: Vec3, a: Vec3) =>
+    (q[0] - o3[0]) * a[0] + (q[1] - o3[1]) * a[1] + (q[2] - o3[2]) * a[2]
+  /** `q` reflected about the source's reference point along the flipped face axes. */
+  const reflect = (q: Vec3, f: { u?: true; v?: true } | undefined): Vec3 => {
+    let r: Vec3 = q
+    for (const [on, a] of [
+      [f?.u, U],
+      [f?.v, V],
+    ] as const) {
+      if (on !== true) continue
+      const k = 2 * dot(r, a)
+      r = [r[0] - k * a[0], r[1] - k * a[1], r[2] - k * a[2]]
+    }
+    return r
+  }
+  const ghost = (p: UV, dashed: boolean, flip?: { u?: true; v?: true }) => {
     const d = face.shift(p[0] - origin[0], p[1] - origin[1])
     return {
-      loops: o.footprint.map((l) => l.map((q): Vec3 => [q[0] + d[0], q[1] + d[1], q[2] + d[2]])),
+      loops: o.footprint.map((l) =>
+        l.map((q0): Vec3 => {
+          const q = reflect(q0, flip)
+          return [q[0] + d[0], q[1] + d[1], q[2] + d[2]]
+        }),
+      ),
       dashed,
     }
   }
@@ -143,15 +186,35 @@ export function clonePathOverlay(
         label: o.label(p.n, p.at, skipped),
         ...(hint === undefined ? {} : { hint }),
       })
-      if (skipped) ghosts.push(ghost(p.at, true))
-      else if (o.draft && p.kind === 'clone') ghosts.push(ghost(p.at, false))
+      if (skipped) ghosts.push(ghost(p.at, true, p.mirrored))
+      else if (o.draft && p.kind === 'clone') ghosts.push(ghost(p.at, false, p.mirrored))
     }
   markers.sort((a, b) => a.n - b.n)
+  const size = o.faceSize
+  const mirrors =
+    size === undefined
+      ? []
+      : data.rows.flatMap((r, i) => {
+          const m = r.mirror
+          if (m === undefined) return []
+          const lo = -MIRROR_OVERHANG
+          const hi = (m.flip === 'u' ? size[1] : size[0]) + MIRROR_OVERHANG
+          const p = (t: number) => (m.flip === 'u' ? face.at(m.c, t) : face.at(t, m.c))
+          return [
+            {
+              line: [p(lo), p(hi)] as const,
+              label: o.mirrorLabel?.(i) ?? '',
+              labelAt: p(hi),
+              focused: o.focusedRow === i,
+            },
+          ]
+        })
   return {
     rows,
     markers,
-    axes: { u: face.shift(1, 0), v: face.shift(0, 1) },
+    axes: { u: U, v: V },
     ghosts,
+    mirrors,
     interactive: o.interactive,
     ...(o.sourceHint === undefined ? {} : { sourceHint: o.sourceHint }),
     onToggle: o.onToggle,

@@ -9,6 +9,7 @@ import { featureKind, featureSpan, ownerOf } from '../../../../core/design/featu
 import { featurePath, type Clones } from '../../../../core/design/clones/clones'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
+import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { checkReferences, surfaceOfReference } from '../../../../core/design/surfaces'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
@@ -172,30 +173,37 @@ export function unitOperations(u: OperationUnit): OperationDTO[] {
 /** The instance rows of a Clones feature (ui.md § Clones in the navigator), from its path. */
 export interface CloneInstanceRow {
   readonly n: number
-  readonly kind: 'clone' | 'skipped' | 'duplicate'
+  /** `onLine`: a mirror image equal to its original, dropped (DF126, Q165). */
+  readonly kind: 'clone' | 'skipped' | 'duplicate' | 'onLine'
   /** The reference point `[u, v]` in mm. */
   readonly at: { readonly u: number; readonly v: number }
+  /** A mirror row's position (DF126 M2): the navigator says "mirrored". */
+  readonly mirrored: boolean
 }
 
 /**
  * Every numbered position of a Clones feature from 2 (the source is 1) in number order, with its
  * state: a clone, skipped, or a duplicate of an earlier spot (core `featurePath`, stable numbers
- * D30); empty when the part does not load.
+ * D30), mirror lines resolved (`port`: named shapes' centres); empty when the part does not load.
  */
 export function cloneInstances(
   part: Pick<DesignPart, 'loaded' | 'dto'>,
   featureId: string,
+  port?: Region2dPort,
 ): CloneInstanceRow[] {
   const l = part.loaded
   const lf = l?.features.find((x) => x.feature.id === featureId)
   if (l === undefined || lf === undefined || lf.feature.kind !== 'clones') return []
-  const path = featurePath(lf.feature as Clones, l.part.operations, part.dto.shapes ?? [])
+  const path = featurePath(lf.feature as Clones, l.part.operations, part.dto.shapes ?? [], {
+    stock: l.stock,
+    port,
+  })
   return path.rows
     .flatMap((r) => r.points)
-    .flatMap((p) =>
+    .flatMap((p): CloneInstanceRow[] =>
       p.number === undefined || p.kind === 'closes'
         ? []
-        : [{ n: p.number, kind: p.kind, at: p.at } as CloneInstanceRow],
+        : [{ n: p.number, kind: p.kind, at: p.at, mirrored: p.flip !== undefined }],
     )
     .toSorted((x, y) => x.n - y.n)
 }

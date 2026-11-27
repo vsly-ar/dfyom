@@ -257,6 +257,17 @@ export const ICON_SET = {
     src: 'b22',
     parts: [{ d: 'M1.5 12C5 3 10 14 14.5 4' }, dot(3, 9), dot(8, 8.5), dot(12.8, 7)],
   },
+  // DF126 M2: two flag shapes facing across the dashed mirror line (the accent)
+  'row-mirror': {
+    label: 'Mirror',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M5.5 13V3.5H2l1.5 2.25L2 8h3.5' },
+      { d: 'M10.5 13V3.5H14l-1.5 2.25L14 8h-3.5' },
+      { d: 'M8 1.5v13', a: true, dash: '1.5 1.5' },
+    ],
+  },
   // ── tool types (side views; the cutting end is the accent; always beside the tool's name) ──
   'flat-end-mill': {
     label: 'Flat end mill',

@@ -11,7 +11,13 @@ import {
   featurePathData,
   firstRow,
   firstRowGap,
+  insertIndex,
   instanceOfOperation,
+  mirrorAbout,
+  mirrorReadout,
+  mirrorRefs,
+  mirrorRefText,
+  mirrorsLast,
   newRow,
   parseInstanceId,
   readoutOf,
@@ -149,7 +155,13 @@ describe('clones view', () => {
     })
     const feature = p.dto.features![0]!
     const data = featurePathData(p, feature.id)!
-    expect(readoutOf(data)).toEqual({ instances: 3, clones: 2, skipped: 1 })
+    expect(readoutOf(data)).toEqual({
+      instances: 3,
+      clones: 2,
+      skipped: 1,
+      onLine: 0,
+      mirrored: false,
+    })
     expect(skippedNumbers(data, 0)).toEqual([3])
     const rows = rowArgsOf(feature)
     expect(toggleSkip(rows, data, 3)[0]).not.toHaveProperty('skip')
@@ -167,5 +179,49 @@ describe('clones view', () => {
       ],
     }
     expect(readoutOf(big).over).toEqual({ actual: 104, excess: 4, row: 1 })
+  })
+
+  it('DF126 M2: mirror rows last, references by name, the read-outs count the line', async () => {
+    const offset = { kind: 'offset', count: 1, du: '30 mm', dv: '0 mm' } as const
+    const mirror = { kind: 'mirror', flip: 'u' } as const
+    expect(insertIndex([offset, mirror], 'grid')).toBe(1)
+    expect(insertIndex([offset, mirror], 'mirror')).toBe(2)
+    expect(insertIndex([offset], 'point')).toBe(1)
+    expect(mirrorsLast([offset, mirror, mirror])).toBe(true)
+    expect(mirrorsLast([mirror, offset])).toBe(false)
+    expect(mirrorAbout(mirror)).toBe('stock')
+    expect(mirrorAbout({ ...mirror, about: 'pocket2' })).toBe('feature')
+    expect(mirrorAbout({ ...mirror, at: '40 mm' })).toBe('at')
+    const p = await part(async (d, partId) => {
+      await ok(d, 'design.pocket.add', pocket(partId, ['20', '30']))
+      await ok(d, 'design.pocket.add', pocket(partId, ['70', '30']))
+      await ok(d, 'design.facing.add', { partId, depth: '0.5' })
+      await ok(d, 'design.pocket.add', { ...pocket(partId, ['50', '30']), on: 'stock.bottom' })
+      await ok(d, 'design.clones.add', {
+        partId,
+        source: { operationIds: ['pocket1'] },
+        rows: [offset, mirror],
+      })
+    })
+    const clones = p.dto.features![0]!
+    // not the facing, not the pocket on the bottom; the Clones' own source instead of its unit
+    const { refs, owners } = mirrorRefs(p, clones.on!, clones.id)
+    expect(refs.map((r) => r.label)).toEqual(['Pocket 1', 'Pocket 2'])
+    expect(owners.get('pocket2')).toBe('pocket2')
+    expect(mirrorRefs(p, 'stock.top', undefined).refs.map((r) => r.value)).toContain(clones.id)
+    const text = { stock: 'stock centre', at: (l: string) => `at ${l}`, unknown: '?' }
+    expect(mirrorRefText(mirror, refs, text)).toBe('stock centre')
+    expect(mirrorRefText({ ...mirror, about: 'pocket2' }, refs, text)).toBe('Pocket 2')
+    expect(mirrorRefText({ ...mirror, at: '40 mm' }, refs, text)).toBe('at 40 mm')
+    // the source at u 20 and its clone at u 50 mirrored about the stock centre (u 50): the clone's
+    // mirror is on its own original (a circle, on the line), the source's lands at u 80
+    const data = featurePathData(p, clones.id)!
+    expect(data.rows[1]!.mirror).toEqual({ flip: 'u', c: 50 })
+    expect(data.rows[1]!.points.map((x) => [x.at[0], x.kind, x.mirrored])).toEqual([
+      [80, 'clone', { u: true }],
+      [50, 'onLine', { u: true }],
+    ])
+    expect(readoutOf(data)).toMatchObject({ instances: 3, onLine: 1, mirrored: true })
+    expect(mirrorReadout(data, 1)).toEqual({ mirrors: 1, onLine: 1 })
   })
 })

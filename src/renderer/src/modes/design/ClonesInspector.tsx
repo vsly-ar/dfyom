@@ -7,8 +7,11 @@
 // instances) and the instance inspector (`CloneInstanceInspector`: "Clone 3 of Clones 1", its
 // position read-only, Skip this clone / Restore, one collapsed read-only group per source
 // operation). `useSkipToggle` is the one skip command (viewport markers, instance rows, the
-// inspector) and announces it politely.
-// Doc: docs/conventions/ui.md#clones, #owned-operations-and-clone-instances
+// inspector) and announces it politely. DF126 M2: the mirror card's context (`useMirrorContext`:
+// axis labels per DF127, the references, the viewport pick), the refusals of mirror rows by name,
+// the read-out's "on the line" and the instance's "Mirrored" fact.
+// Doc: docs/conventions/ui.md#clones, #owned-operations-and-clone-instances;
+// docs/modes/clones-mirror.md#ui
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { CLONES_MAX } from '../../../../core/design/clones/clones'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
@@ -17,7 +20,8 @@ import type { UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { useCancelGesture } from '../../shell/hooks'
-import { useShell, useUi, useReplica } from '../../shell/ShellContext'
+import { useRegion2d, useShell, useUi, useReplica } from '../../shell/ShellContext'
+import { frameAxisLabel } from '../../viewport/frame-axis-label'
 import type { ClonesDraftState } from '../../state/ui-store'
 import {
   Button,
@@ -32,7 +36,7 @@ import {
   InspectorGroup,
 } from '../../ui'
 import type { ClonePathData } from '../../viewport/clone-path'
-import { CloneRowList, type AxisNames } from './CloneRowList'
+import { CloneRowList, type AxisNames, type MirrorContext } from './CloneRowList'
 import {
   addableFeatures,
   clonesSourceOf,
@@ -40,6 +44,8 @@ import {
   featurePathData,
   instanceId,
   isSkipped,
+  mirrorIssues,
+  mirrorRefs,
   pointOf,
   readoutOf,
   rowArgsOf,
@@ -56,12 +62,19 @@ import { operationUnits, unitOperations } from './feature-view'
 import { roughingOperationOf, roughingSummary } from './roughing-view'
 import { NameField } from './NameField'
 import { OperationFields, placeErrors, refusalText, type FieldError } from './OperationFields'
-import { axisNames, surfaceDirection, type DesignPart } from './model'
-import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
+import { axisNames, itemName, surfaceDirection, type DesignPart } from './model'
+import { surfaceFace } from './outline'
+import {
+  useCommand,
+  useDesignEvaluation,
+  useDesignSelection,
+  type DesignWarnings,
+} from './useDesign'
 
 const m = designMessages
 const f = m.features
 const c = f.clones
+const mm = c.mirror
 
 /** "9.00 mm" / `0.354"`: a position in the inspector and the viewport's marker names. */
 export function positionText(mm: number, units: UnitSystem): string {
@@ -74,10 +87,11 @@ export function useSkipToggle(
 ): (feature: FeatureDTO, n: number) => void {
   const call = useCommand()
   const announce = useUi((s) => s.announce)
+  const port = useRegion2d()
   return useCallback(
     (feature, n) => {
       if (part === undefined) return
-      const data = featurePathData(part, feature.id)
+      const data = featurePathData(part, feature.id, port)
       if (data === undefined || pointOf(data, n) === undefined) return
       const skipped = !isSkipped(data, n)
       void call('design.clones.update', {
@@ -88,8 +102,63 @@ export function useSkipToggle(
         if (r.ok) announce(c.announceSkip(n, skipped))
       })
     },
-    [part, call, announce],
+    [part, call, announce, port],
   )
+}
+
+/**
+ * A refusal with the mirror rules' texts by name (the core's name ids, ui.md § Selection and
+ * picking): mirror rows last, a bad reference, `about` with `at`.
+ */
+export function mirrorRefusal(error: AppErrorData, part: DesignPart): AppErrorData {
+  const named = (id: unknown) => (typeof id === 'string' ? itemName(part.dto, id) : mm.unknown)
+  return {
+    ...error,
+    issues: mirrorIssues(error.issues, (rule, _row, message) => {
+      if (rule === 'clonesMirrorLast') return mm.last
+      if (rule === 'oneOf') return mm.oneOf
+      if (rule !== 'clonesMirrorRef') return undefined
+      if (message.includes('about itself')) return mm.refSelf
+      if (message.includes('not in the part')) return mm.refGone
+      if (message.includes('own clones')) return mm.refOwn
+      if (message.includes('facing')) return mm.refFacing
+      const issue = error.issues.find((i) => i.rule === rule)
+      return mm.refNotHere(named(issue?.params?.['about']))
+    }),
+  }
+}
+
+/**
+ * The mirror card's context for a Clones on face `on` (DF126 M2): the face axes named with the
+ * part axis they run along (DF127 `frameAxisLabel`: "u (+X)"), the references (`mirrorRefs`, not
+ * the Clones `self`), and the viewport pick (their surfaces; a picked surface's item).
+ */
+export function useMirrorContext(
+  part: DesignPart,
+  on: string,
+  self: string | undefined,
+): MirrorContext {
+  const evaluation = useDesignEvaluation(part)
+  const l = part.loaded
+  const frame =
+    l === undefined || part.table === undefined
+      ? undefined
+      : surfaceFace(on, l.stock, part.table).frame
+  const labels =
+    frame === undefined
+      ? { u: 'u', v: 'v' }
+      : { u: frameAxisLabel('u', frame.u), v: frameAxisLabel('v', frame.v) }
+  const { refs, owners } = mirrorRefs(part, on, self)
+  const ownerOf = (surface: string) => surface.slice(0, surface.indexOf('.'))
+  return {
+    labels,
+    refs,
+    pick: {
+      eligible: () =>
+        new Set((evaluation?.mesh?.surfaces ?? []).filter((x) => owners.has(ownerOf(x)))),
+      refOf: (surface) => owners.get(ownerOf(surface)),
+    },
+  }
 }
 
 /** The read-out at the top of the rows group: counts, or the 100-instance error (D36). */
@@ -99,7 +168,12 @@ function ReadoutLine({ readout }: { readout: Readout | undefined }): React.JSX.E
       ? ''
       : readout.over !== undefined
         ? c.overLimit(readout.over.actual, CLONES_MAX, readout.over.excess)
-        : c.readout(readout.clones, readout.instances, readout.skipped)
+        : c.readout(
+            readout.clones,
+            readout.instances,
+            readout.skipped,
+            readout.mirrored ? readout.onLine : undefined,
+          )
   return (
     <p
       className={styles['clonesReadout']}
@@ -174,11 +248,16 @@ function useThrottledPreview(
 
 /** The axis names of the face an item sits on (X/Y on the top face, else u/v; DF47). */
 function faceAxes(part: DesignPart, id: string): AxisNames {
-  const on =
+  return axisNames(surfaceDirection(part.table, faceOn(part, id)))
+}
+
+/** The face target an item sits on (`stock.top` when unknown). */
+function faceOn(part: DesignPart, id: string): string {
+  return (
     part.dto.features?.find((f) => f.id === id)?.on ??
     part.dto.operations.find((o) => o.id === id)?.on ??
     'stock.top'
-  return axisNames(surfaceDirection(part.table, on))
+  )
 }
 
 export function ClonesDraft({
@@ -198,6 +277,7 @@ export function ClonesDraft({
   const source = draftSource(draft.options, draft.unchecked, draft.feature)
   const data = draft.preview ?? undefined
   const readout = data === undefined ? undefined : readoutOf(data)
+  const mirror = useMirrorContext(part, faceOn(part, draft.openedFor), undefined)
 
   const patch = (p: Partial<ClonesDraftState>) => {
     const now = ui.getState().clonesDraft
@@ -209,7 +289,7 @@ export function ClonesDraft({
       setErrors([])
       setSummary(undefined)
     } else if (error !== undefined) {
-      const placed = placeErrors(error, 'rows')
+      const placed = placeErrors(mirrorRefusal(error, part), 'rows')
       setErrors(placed.errors)
       setSummary(placed.summary)
     }
@@ -225,7 +305,7 @@ export function ClonesDraft({
     const r = await call('design.clones.add', { partId: part.dto.id, source, rows: draft.rows })
     setBusy(false)
     if (!r.ok) {
-      const placed = placeErrors(r.error, 'rows')
+      const placed = placeErrors(mirrorRefusal(r.error, part), 'rows')
       setErrors(placed.errors)
       setSummary(placed.summary)
       return
@@ -299,6 +379,7 @@ export function ClonesDraft({
             onRestore={(n) =>
               data !== undefined && patch({ rows: toggleSkip(draft.rows, data, n) })
             }
+            mirror={mirror}
           />
         </InspectorGroup>
       </div>
@@ -354,12 +435,14 @@ export function ClonesInspector({
   const [, select] = useDesignSelection()
   const cancelGesture = useCancelGesture()
   const toggle = useSkipToggle(part)
+  const port = useRegion2d()
+  const mirror = useMirrorContext(part, feature.on, feature.id)
   const [errors, setErrors] = useState<FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   // a refused change over the limit: its rows' path, so the read-out says how far over
   const [attempt, setAttempt] = useState<ClonePathData | undefined>(undefined)
   const rows = rowArgsOf(feature)
-  const data = featurePathData(part, feature.id)
+  const data = featurePathData(part, feature.id, port)
   const shown = attempt ?? data
   const readout = shown === undefined ? undefined : readoutOf(shown)
   const source = clonesSourceOf(feature)
@@ -399,7 +482,7 @@ export function ClonesInspector({
       }
     }
     setAttempt(undefined)
-    const placed = placeErrors(r.error, path)
+    const placed = placeErrors(mirrorRefusal(r.error, part), path)
     setErrors(placed.errors)
     setSummary(placed.summary)
   }
@@ -513,6 +596,7 @@ export function ClonesInspector({
             onChange={(next, path, gesture) => void update({ rows: next }, path, gesture)}
             onCancelGesture={cancelGesture}
             onRestore={(n) => toggle(feature, n)}
+            mirror={mirror}
           />
         </InspectorGroup>
         {findings.length > 0 ? (
@@ -543,11 +627,16 @@ export function CloneInstanceInspector({
   const toggle = useSkipToggle(part)
   const cancelGesture = useCancelGesture()
   const reasonId = useId()
-  const data = featurePathData(part, feature.id)
+  const port = useRegion2d()
+  const mirror = useMirrorContext(part, feature.on, feature.id)
+  const data = featurePathData(part, feature.id, port)
   const at = data === undefined ? undefined : pointOf(data, n)
   const point = at === undefined ? undefined : data!.rows[at.row]!.points[at.point]!
   const skipped = point?.kind === 'skipped'
-  const duplicate = point?.kind === 'duplicate'
+  // an on-line mirror image is not cut either (DF126, Q165): read like a duplicate
+  const onLine = point?.kind === 'onLine'
+  const duplicate = point?.kind === 'duplicate' || onLine
+  const flips = point?.mirrored
   const unit = operationUnits(part).find((u) => u.id === feature.id)
   const nested = unit?.kind === 'feature' ? unit.nested : []
   // the source operations in design order (a feature source: its owned operations); a roughing
@@ -592,9 +681,23 @@ export function CloneInstanceInspector({
                 : c.at(positionText(point.at[0], units), positionText(point.at[1], units))}
             </dd>
           </div>
+          {flips !== undefined ? (
+            <div className={styles['featureFact']}>
+              <dt>{mm.mirrored}</dt>
+              <dd>
+                {flips.u === true && flips.v === true
+                  ? mm.halfTurn(mirror.labels.u, mirror.labels.v)
+                  : mm.mirroredIn(flips.u === true ? mirror.labels.u : mirror.labels.v)}
+              </dd>
+            </div>
+          ) : null}
         </dl>
         {skipped ? <p className={styles['muted']}>{c.skippedNote}</p> : null}
-        {duplicate ? <p className={styles['muted']}>{c.duplicateNote}</p> : null}
+        {onLine ? (
+          <p className={styles['muted']}>{c.onLineNote}</p>
+        ) : duplicate ? (
+          <p className={styles['muted']}>{c.duplicateNote}</p>
+        ) : null}
         {point !== undefined && !duplicate ? (
           <div className={styles['draftActions']}>
             <Button size="sm" onClick={() => toggle(feature, n)}>
