@@ -25,6 +25,7 @@ import {
 
 import { AlignmentStepSchema, type AlignmentStep } from './alignment'
 import { RECONNECT_PHASES } from './host/reconnect'
+import { InterruptionSchema, type RunOrigin } from './interruption'
 import type { MachineValuesDTO } from '../library/machine.dto'
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
@@ -48,11 +49,17 @@ export type RunPlan = z.output<typeof RunPlanSchema>
 export const RunFileSchema = z.object({ name: z.string(), path: z.string() })
 export type RunFile = z.output<typeof RunFileSchema>
 
-/** How the last run job ended (hardening M5, docs/modes/run-machine.md#section-resume-m5). */
+/**
+ * How the last run job ended (hardening M5, docs/modes/run-machine.md#section-resume-m5): a plan
+ * run's always; a file run's only when interrupted (DF129 RC5, `file` instead of the plan).
+ */
 export const LastRunSchema = z.object({
   jobId: z.string(),
-  planId: z.string(),
-  setupId: z.string(),
+  /** A plan run's plan and setup. */
+  planId: z.string().exactOptional(),
+  setupId: z.string().exactOptional(),
+  /** DF129 RC5: an interrupted file run's file. */
+  file: RunFileSchema.exactOptional(),
   outcome: z.enum(['done', 'stopped', 'failed']),
   /** The earliest operation GRBL may still have been executing when the run ended. */
   planOperationId: z.string().exactOptional(),
@@ -63,6 +70,12 @@ export const LastRunSchema = z.object({
    */
   planHash: z.string().exactOptional(),
   operations: z.array(z.string()).readonly().exactOptional(),
+  /**
+   * DF129 RC5: the run ended without DFYOM wanting it to (a lost connection, a controller reset,
+   * the machine's power): where it was and the suggested resume point, until the next run starts
+   * or the record is dismissed (docs/modes/run-recovery.md#agent-api).
+   */
+  interruption: InterruptionSchema.exactOptional(),
 })
 export type LastRun = z.output<typeof LastRunSchema>
 
@@ -181,11 +194,15 @@ export interface JobAbout {
   /** DF85: `runPlanHash` of the plan and setup exported, and the setup's operations in order. */
   readonly planHash?: string
   readonly order?: readonly string[]
+  /** DF129 RC5: what the run's lines refer to (the original program of a start at a line). */
+  readonly origin?: RunOrigin
 }
 
 /** DF93: what `run.job.start { file }` tells the machine port about a file run. */
 export interface FileJobAbout {
   readonly file: RunFile
+  /** DF129 RC5: what the run's lines refer to (the original program of a start at a line). */
+  readonly origin?: RunOrigin
 }
 
 export interface RunningJob {

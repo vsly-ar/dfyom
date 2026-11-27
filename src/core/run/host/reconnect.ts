@@ -114,6 +114,11 @@ export class Reconnector {
     if (this.deps.serial !== undefined) this.scanLater()
   }
 
+  /** DF129 RC5: "Reconnect now": the next attempt at once while waiting for it. */
+  now(): void {
+    if (!this.stopped && this.phase === 'waiting') void this.tryOnce()
+  }
+
   /** Stops trying (the user's "Stop trying", a connect or disconnect of their own). */
   cancel(): void {
     this.stop()

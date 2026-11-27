@@ -43,6 +43,7 @@ import {
 import { PLANNER_BLOCKS } from '../grbl/emulator/planner'
 import { reconcileStep, type AlignmentStep } from '../alignment'
 import { RunRecorder, type RunJournal, type RunJournalPort, type UsbIdentity } from '../journal'
+import { interruptionOf, type InterruptionReason } from '../interruption'
 import { Reconnector, type ReconnectProgress } from './reconnect'
 import {
   ControllerInfoSchema,
@@ -257,6 +258,8 @@ export class MachineClient implements MachineService {
    * `journaled`: written to the run journal (a real connection).
    */
   private record: { recorder: RunRecorder; jobId: string; journaled: boolean } | undefined
+  /** DF129 RC5: what the last job was started with (its plan or file and the original program). */
+  private lastAbout: JobAbout | FileJobAbout | undefined
   /** DF84: the last run's program, kept until the next run starts (renderer only). */
   private lastProgram: RunProgram | undefined
   /** DF84: planner blocks when empty: the largest `Bf` free count seen on this connection. */
@@ -364,9 +367,9 @@ export class MachineClient implements MachineService {
    * USB serial number, backoff for 2 minutes; only a plain connect (handshake and reads), never a
    * move, homing, unlock or resume (docs/modes/run-recovery.md#auto-reconnect).
    */
-  private startReconnect(): void {
+  private startReconnect(asked = false): void {
     const reopen = this.reopen
-    if (reopen === undefined || this.opts.reconnect?.enabled?.() === false) return
+    if (reopen === undefined || (!asked && this.opts.reconnect?.enabled?.() === false)) return
     this.reconnecting?.r.cancel()
     const target = reopen.target
     const r: Reconnector = new Reconnector({
@@ -486,11 +489,26 @@ export class MachineClient implements MachineService {
     return { plan: { ...about.plan }, ...(op === undefined ? {} : { planOperationId: op }) }
   }
 
-  /** Records how a job ended (M5). */
+  /** Records how a job ended (M5); an interrupted run with its interruption (DF129 RC5). */
   private ended(job: Job, r: AppResult<RunSummary>): void {
     const about = job.about
-    // a file run is not resumed (docs/modes/run.md#run-an-external-g-code-file-df93)
-    if (about === undefined || 'file' in about) return
+    const rec = this.recorder(job.jobId)?.snapshot()
+    const interruption =
+      rec?.state === 'interrupted' && rec.reason !== undefined
+        ? this.interruptionOf(rec, rec.reason, job.atToolChange)
+        : undefined
+    if (about === undefined) return
+    // a file run keeps a record only when interrupted (DF93's runs end with the file loaded)
+    if ('file' in about) {
+      if (interruption !== undefined)
+        this.lastRun = {
+          jobId: job.jobId,
+          file: { ...about.file },
+          outcome: 'failed',
+          interruption,
+        }
+      return
+    }
     const op = r.isOk() ? undefined : stoppedOperation(about, job.done, job.atToolChange)
     this.lastRun = {
       jobId: job.jobId,
@@ -500,7 +518,87 @@ export class MachineClient implements MachineService {
       ...(op === undefined ? {} : { planOperationId: op }),
       ...(about.planHash === undefined ? {} : { planHash: about.planHash }),
       ...(about.order === undefined ? {} : { operations: [...about.order] }),
+      ...(interruption === undefined ? {} : { interruption }),
     }
+  }
+
+  /** DF129 RC5: the interruption of the last job's record, its lines in the original program. */
+  private interruptionOf(rec: RunJournal, reason: InterruptionReason, waiting: boolean) {
+    const about = this.lastAbout
+    return interruptionOf(rec, reason, {
+      program: this.lastProgram?.lines ?? [],
+      operationStarts:
+        about !== undefined && 'operations' in about
+          ? about.operations.map((o) => o.fromLine)
+          : undefined,
+      origin: about?.origin,
+      waiting,
+    })
+  }
+
+  /**
+   * DF129 RC5 (Q171): "The machine lost power" after a run ended (stopped, failed, interrupted):
+   * the record becomes `interrupted` / `machinePowerLost` with the operation start suggested, and
+   * the open connection forgets that it is homed (GRBL on USB power cannot know). Renderer only.
+   * Doc: docs/modes/run-recovery.md#implementation-rc5
+   */
+  async markMachinePowerLost(): AsyncAppResult<void> {
+    const where = `${WHERE}.markMachinePowerLost`
+    const rec = this.record
+    if (this.job !== undefined)
+      return fail('run.state', 'not while a run is going', { where, data: { state: 'run' } })
+    if (rec === undefined || !rec.recorder.markPowerLost(this.now()))
+      return fail('run.state', 'no ended run to recover', { where, data: { state: 'none' } })
+    if (rec.journaled) this.opts.journal?.save(rec.recorder.snapshot())
+    const interruption = this.interruptionOf(rec.recorder.snapshot(), 'machinePowerLost', false)
+    const about = this.lastAbout
+    const last = this.lastRun?.jobId === rec.jobId ? this.lastRun : undefined
+    if (last !== undefined) this.lastRun = { ...last, interruption }
+    else if (about !== undefined && 'file' in about)
+      this.lastRun = { jobId: rec.jobId, file: { ...about.file }, outcome: 'stopped', interruption }
+    if (this.conn?.state === 'open') {
+      const r = await this.request({
+        type: 'machine',
+        requestId: '',
+        action: { kind: 'forgetHoming' },
+      })
+      if (r.isErr()) this.log.warn({ code: r.unwrapErr().code }, 'could not mark the position lost')
+    }
+    this.notify()
+    return Ok(undefined)
+  }
+
+  /**
+   * DF129 RC5: "Dismiss" in the recovery panel: the interruption is forgotten (the record of a
+   * file run with it) and the run journal removed. Renderer only.
+   */
+  dismissInterruption(): void {
+    const last = this.lastRun
+    if (last?.interruption === undefined) return
+    if (last.file !== undefined) this.lastRun = undefined
+    else {
+      const { interruption: _gone, ...rest } = last
+      this.lastRun = rest
+    }
+    this.opts.journal?.discard?.()
+    this.notify()
+  }
+
+  /**
+   * DF129 RC5: "Reconnect now" while auto-reconnect waits (the next attempt at once), and "Try
+   * again" after it gave up, was stopped or is off: a new episode on the connection last opened.
+   */
+  reconnectNow(): AppResult<void> {
+    if (this.conn !== undefined) return Ok(undefined)
+    const r = this.reconnecting?.r
+    if (r?.active === true) {
+      r.now()
+      return Ok(undefined)
+    }
+    if (this.reopen === undefined)
+      return fail('run.state', 'no connection to reopen', { where: `${WHERE}.reconnectNow` })
+    this.startReconnect(true)
+    return Ok(undefined)
   }
 
   /**
@@ -731,8 +829,9 @@ export class MachineClient implements MachineService {
       listener,
       startedAt: new Date(this.now()).toISOString(),
       end: (r) => {
-        this.ended(job, r)
+        // the record's final state first: an interrupted run's lastRun carries it (RC5)
         this.recordEnd(jobId, r)
+        this.ended(job, r)
         resolveEnd(r)
       },
       about,
@@ -747,8 +846,10 @@ export class MachineClient implements MachineService {
     this.job = job
     // a new run: "Reconnected" has done its job (DF129 RC4)
     if (this.reconnecting?.r.active === false) this.reconnecting = undefined
-    // a new run replaces the record of the last one
+    // a new run replaces the record of the last one (back if the host refuses the start)
+    const before = { lastRun: this.lastRun, lastAbout: this.lastAbout }
     if (about !== undefined) this.lastRun = undefined
+    this.lastAbout = about
     this.lastProgram = {
       jobId,
       lines: program.lines,
@@ -774,6 +875,7 @@ export class MachineClient implements MachineService {
         },
         workZero: expect.workZero,
         programHash: this.opts.hashProgram?.(program.lines.join('\n')),
+        origin: about?.origin,
         arcTolerance: this.conn.settings?.['12'],
         now: this.now(),
       }),
@@ -793,7 +895,11 @@ export class MachineClient implements MachineService {
     if (r.isErr()) {
       if (this.job === job) this.job = undefined
       // a refused start ran nothing: the last run's record stays
-      if (this.record?.jobId === jobId) this.record = previous
+      if (this.record?.jobId === jobId) {
+        this.record = previous
+        this.lastRun = before.lastRun
+        this.lastAbout = before.lastAbout
+      }
       return Err(r.unwrapErr())
     }
     // DF129: a real run is journaled from its start (replacing the last journal) and keeps the

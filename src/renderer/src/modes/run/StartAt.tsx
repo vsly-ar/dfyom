@@ -66,10 +66,13 @@ export function usePreflightStart(
   readonly at:
     { readonly fromLine: number; readonly programHash: string; readonly leadIn: number } | undefined
   readonly ready: boolean
+  /** DF129 RC5: the preview is of another program than the interrupted run's (`startHash`). */
+  readonly changed: boolean
 } {
   const store = useRunStore()
   const check = useRun((s) => s.preflightCheck)
   const startAt = useRun((s) => s.startAt)
+  const expected = useRun((s) => s.startHash)
   const line = startLineOf(startAt)
   const key = `${baseKey}|${line ?? ''}`
   useEffect(() => {
@@ -77,8 +80,14 @@ export function usePreflightStart(
   }, [canCheck, key, setupId, line, store])
   const current = check.state !== 'idle' && check.key === key ? check : undefined
   const preview = current?.state === 'done' ? current.resume : undefined
+  // a start from the recovery panel refers to the interrupted run's program (DF129 RC5)
+  const changed =
+    line !== undefined &&
+    preview !== undefined &&
+    expected !== undefined &&
+    preview.programHash !== expected
   const at =
-    line !== undefined && preview !== undefined
+    line !== undefined && preview !== undefined && !changed
       ? {
           fromLine: preview.fromLine,
           programHash: preview.programHash,
@@ -86,7 +95,7 @@ export function usePreflightStart(
         }
       : undefined
   const ready = startAt.kind === 'beginning' || at !== undefined
-  return { current, startAt, line, preview, at, ready }
+  return { current, startAt, line, preview, at, ready, changed }
 }
 
 /** "Start at" and, for a start line, its preview (inside the pre-flight dialog). */
@@ -99,6 +108,8 @@ export function StartAtSection({
 }): React.JSX.Element | null {
   const store = useRunStore()
   const startAt = useRun((s) => s.startAt)
+  const expected = useRun((s) => s.startHash)
+  const file = useRun((s) => (s.file?.state === 'ready' ? s.file : undefined))
   const program = useStartProgram()
   const selectId = useId()
   const lineId = useId()
@@ -109,12 +120,13 @@ export function StartAtSection({
   if (program === undefined)
     return current?.state === 'checking' ? <p className={styles['hint']}>{m.loading}</p> : null
   const total = program.lines.length
+  // a point the program does not list (the recovery panel's start of a run that itself started
+  // at a line, DF129 RC5) shows as a chosen line
+  const asLine =
+    startAt.kind === 'line' ||
+    (startAt.kind === 'point' && !points.some((p) => p.line === startAt.line))
   const value: StartAtValue =
-    startAt.kind === 'beginning'
-      ? 'beginning'
-      : startAt.kind === 'line'
-        ? 'line'
-        : `p:${startAt.line}`
+    startAt.kind === 'beginning' ? 'beginning' : asLine ? 'line' : `p:${startAt.line}`
   const choose = (v: StartAtValue) => {
     if (v === 'beginning') a.setStartAt({ kind: 'beginning' })
     else if (v === 'line') a.setStartAt({ kind: 'line', line: startLineOf(startAt) })
@@ -132,14 +144,14 @@ export function StartAtSection({
           {m.label}
         </label>
         <Select id={`${selectId}-select`} options={options} value={value} onValueChange={choose} />
-        {startAt.kind === 'line' ? (
+        {asLine ? (
           <LineField
             // a line set from a button shows in the field
-            key={startAt.line ?? ''}
+            key={startLineOf(startAt) ?? ''}
             id={lineId}
             hintId={hintId}
             total={total}
-            line={startAt.line}
+            line={startLineOf(startAt)}
             onLine={(n) => a.setStartAt({ kind: 'line', line: n })}
           />
         ) : null}
@@ -160,6 +172,23 @@ export function StartAtSection({
                 {m.useAnyway(startAt.snappedFrom)}
               </Button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {/* DF129 RC5: the recovery panel's start refers to the interrupted run's program */}
+      {expected !== undefined &&
+      startLineOf(startAt) !== undefined &&
+      current?.state === 'done' &&
+      current.resume !== undefined &&
+      current.resume.programHash !== expected ? (
+        <div className={styles['notice']} data-tone="warning" role="note">
+          <Icon name="warning" />
+          <div>
+            <p className={styles['why']}>
+              {file === undefined
+                ? runMessages.recovery.choose.changed
+                : runMessages.recovery.choose.fileChanged}
+            </p>
           </div>
         </div>
       ) : null}

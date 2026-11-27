@@ -37,11 +37,19 @@ export function registerRunProgramIpc(
 
 /**
  * DF129 RC4: answers a DFYOM window's `run.reconnect(action)` ("Stop trying", "Simulate a lost
- * connection") and `run.record()` (the run record). Renderer only: no command, no agent tool
+ * connection") and `run.record()` (the run record); RC5: `run.recovery(action)` (the recovery panel). Renderer only: no command, no agent tool
  * (docs/modes/run-recovery.md#implementation-rc4).
  */
 export function registerRunRecoveryIpc(
-  machine: Pick<MachineClient, 'cancelReconnect' | 'simulateConnectionLoss' | 'runRecord'>,
+  machine: Pick<
+    MachineClient,
+    | 'cancelReconnect'
+    | 'simulateConnectionLoss'
+    | 'runRecord'
+    | 'reconnectNow'
+    | 'dismissInterruption'
+    | 'markMachinePowerLost'
+  >,
   isWindow: (webContentsId: number) => boolean,
 ): void {
   ipcMain.handle(IPC.runReconnect, async (event, action: unknown): Promise<AppErrorData | null> => {
@@ -57,6 +65,21 @@ export function registerRunRecoveryIpc(
   ipcMain.handle(IPC.runRecord, (event): RunJournal | null =>
     isWindow(event.sender.id) ? (machine.runRecord() ?? null) : null,
   )
+  // DF129 RC5: the recovery panel (docs/modes/run-recovery.md#implementation-rc5)
+  ipcMain.handle(IPC.runRecovery, async (event, action: unknown): Promise<AppErrorData | null> => {
+    if (!isWindow(event.sender.id)) return null
+    if (action === 'dismiss') {
+      machine.dismissInterruption()
+      return null
+    }
+    const r =
+      action === 'reconnectNow'
+        ? machine.reconnectNow()
+        : action === 'powerLost'
+          ? await machine.markMachinePowerLost()
+          : undefined
+    return r === undefined || r.isOk() ? null : r.unwrapErr().toWireData()
+  })
 }
 
 /**

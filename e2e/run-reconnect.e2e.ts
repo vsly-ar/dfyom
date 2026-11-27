@@ -90,10 +90,10 @@ test('a lost connection mid-run reconnects by itself: reconnecting → reconnect
   })
   // practise: the virtual cable is pulled mid-run
   await navigator.getByRole('button', { name: 'Simulate a lost connection' }).click()
-  // the run failed with the lost connection (RC5 replaces this dialog with the recovery panel)
-  const failure = page.getByRole('dialog', { name: 'The run stopped with an error' })
-  await expect(failure).toBeVisible()
-  await failure.getByRole('button', { name: 'Close' }).click()
+  // the run was interrupted: RC5's short sheet points to the recovery panel
+  const sheet = page.getByRole('dialog', { name: 'The run was interrupted' })
+  await expect(sheet).toBeVisible()
+  await sheet.getByRole('button', { name: 'Later' }).click()
   const reconnect = navigator.getByRole('status', { name: 'Reconnecting' })
   await expect(
     reconnect.getByText(/^Reconnecting… attempt \d+$|^Reconnected — machine needs homing$/),

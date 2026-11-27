@@ -353,7 +353,7 @@ export function resumeFindings(scan: readonly ScannedLine[], line: number): Resu
  * the lower bound of where the run stopped – the executing line at the last report, else the
  * acknowledged lines minus a full planner (erring early); `waitingAt` (the run waited at a tool
  * change or pause on that line) suggests the first point after the wait. `safest` is the operation
- * start the suggestion belongs to. Undefined without resume points.
+ * start the suggestion belongs to (the first point when the program has none). Undefined without resume points.
  */
 export function suggestResume(
   points: readonly ResumePoint[],
@@ -373,7 +373,9 @@ export function suggestResume(
   }
   if (suggestion === undefined) return undefined
   const line = suggestion.line
-  const safest = points.filter((p) => p.kind === 'operation' && p.line <= line).at(-1) ?? suggestion
+  // a program without operation starts is one operation: its first point (DF129 RC5)
+  const safest =
+    points.filter((p) => p.kind === 'operation' && p.line <= line).at(-1) ?? points[0] ?? suggestion
   return { suggestion, safest }
 }
 

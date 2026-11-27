@@ -738,5 +738,172 @@ export const runMessages = {
     close: 'Close',
   },
 
+  /**
+   * DF129 RC5: the recovery panel after an interrupted run, calm and step by step
+   * (docs/modes/run-recovery.md#the-recovery-panel, #implementation-rc5).
+   */
+  recovery: {
+    region: 'Interrupted run',
+    title: 'The run was interrupted',
+    subtitle: 'DFYOM kept where the job was. Follow the steps to continue.',
+    /** The short sheet that replaces the failure dialog. */
+    sheetDescription:
+      'DFYOM kept where the job was. The Run inspector takes you through continuing.',
+    showSteps: 'Show the steps',
+    later: 'Later',
+    happened: {
+      connectionLost: (time: string, into: string) =>
+        `The USB connection dropped at ${time}, ${into} into the run.`,
+      hostExit: (time: string, into: string) =>
+        `DFYOM’s machine connection stopped at ${time}, ${into} into the run.`,
+      controllerReset: (time: string, into: string) =>
+        `The controller restarted by itself at ${time}, ${into} into the run.`,
+      machinePowerLost: (time: string) =>
+        `You said the machine lost power (marked at ${time}). DFYOM cannot tell when it went, so it counts the position as lost.`,
+      appCrashed: (time: string) =>
+        `DFYOM was closed unexpectedly while the run was streaming (last saved ${time}).`,
+    },
+    practice: 'A practice run on the virtual machine.',
+    factsLabel: 'Where the job was',
+    operation: 'Operation',
+    operationOf: (label: string, n: number, of: number) => `${label} (operation ${n} of ${of})`,
+    tool: 'Tool',
+    toolName: (n: number, name: string) => `Tool ${n}: ${name}`,
+    lastSeen: 'Last seen',
+    work: 'work',
+    machine: 'machine',
+    seenBefore: (seconds: string) => `${seconds} s before the run ended`,
+    feedSpindle: 'Feed, spindle',
+    spindleOff: 'spindle off',
+    spindleRpm: (rpm: string) => `spindle ${rpm} rpm`,
+    lines: 'Lines',
+    range: (from: number, to: number) =>
+      from === to
+        ? `It was cutting around line ${from}`
+        : `It was cutting around lines ${from}–${to}`,
+    mayHaveContinued: (sent: number) => `; the controller may have continued up to line ${sent}.`,
+    percent: (p: number) => `About ${p} % into the program.`,
+    from: {
+      reported: 'The controller reported the line.',
+      estimate: 'Estimated from the last status report.',
+      planner: 'Counted back from the lines the controller confirmed.',
+    },
+    notYet: 'No line had started yet.',
+    steps: 'Steps',
+    done: 'Done',
+    stepState: { done: 'done', current: 'next step', upcoming: 'later' },
+    safe: {
+      title: 'Make it safe',
+      moving:
+        'The machine may still be moving, and the spindle may still be on. If it is, press the emergency stop.',
+      stopped: 'The machine is stopped',
+      reconnected:
+        'Reconnected. The controller restarted, so it stopped moving and switched the spindle output off. A spindle switched by hand is still on: switch it off.',
+      confirmed: 'You confirmed the machine is stopped.',
+      reset: 'The controller restarted, so it stopped moving and switched the spindle output off.',
+    },
+    reconnect: {
+      waiting: (attempt: number, seconds: number) =>
+        attempt === 0
+          ? `Reconnecting… next attempt in ${seconds} s`
+          : `Reconnecting… attempt ${attempt} failed, next in ${seconds} s`,
+      connecting: (attempt: number) => `Connecting… attempt ${Math.max(1, attempt)}`,
+      gaveUp: 'DFYOM stopped trying after 2 minutes.',
+      gaveUpHint: 'Check the cable, switch the controller off and on, then try again.',
+      closed: 'Not connected.',
+      now: 'Reconnect now',
+      again: 'Try again',
+      connect: 'Connect',
+      stop: 'Stop trying',
+    },
+    check: {
+      title: 'Check the machine',
+      intro: 'Have a look before anything moves. Nothing here is enforced.',
+      items: {
+        bit: 'The bit is intact and tight in the collet.',
+        stock: 'The stock has not moved (clamps, screws, tape).',
+        chips: 'Chips are cleared and nothing is in the way.',
+      },
+      gantry: 'Moving the gantry by hand does not matter now: homing finds the position again.',
+      done: 'Checked',
+      summary: (n: number, of: number) =>
+        n === of ? 'Everything checked.' : `${n} of ${of} checked.`,
+    },
+    home: {
+      title: 'Connect and home',
+      why: 'The controller restarted, so it no longer knows where the spindle is. Homing finds it again.',
+      whyPower: 'The machine lost power, so its position is lost. Homing finds it again.',
+      button: 'Home the machine',
+      homed: 'The machine is homed.',
+      alarmFirst: 'Clear the alarm first: see the steps in the navigator.',
+    },
+    zero: {
+      title: 'Check the work zero',
+      same: (xyz: string) =>
+        `The controller kept the work zero: ${xyz} (G54), the same as during the run.`,
+      differs: (now: string, then: string) =>
+        `The work zero differs from the run’s: ${now} now, ${then} during the run.`,
+      restore: 'Restore the run’s work zero',
+      restoreTitle: 'Restore the run’s work zero?',
+      restoreDescription: (xyz: string) =>
+        `G54 is set back to ${xyz} (machine), as it was during the run.`,
+      unknown: 'Home the machine to compare the work zero with the run’s.',
+      goLast: 'Go to the last position',
+      goLastHint: 'Above the stock: the bit should hang right over the cut it was making.',
+      goZero: 'Go to the work zero',
+      goZeroHint: 'Above the zero corner, to see that it lines up.',
+      moved:
+        'You did not tick “the stock has not moved”: jog to the stock’s zero corner and set X and Y zero. Resuming after the stock moved may leave a visible step.',
+      zNote: 'If the bit was changed or slipped, Z zero is set again at the resume’s tool wait.',
+      next: 'The work zero is right',
+    },
+    goTo: {
+      title: (what: string) => `${what}?`,
+      description: (xy: string, z: string) =>
+        `The bit moves up to Z ${z} first, above the stock, then across to ${xy} (work coordinates).`,
+      up: (z: string) => `Up to Z ${z}`,
+      across: (xy: string) => `Across to ${xy}`,
+      down: (z: string) => `Down to Z ${z}`,
+      seconds: (s: number) => `About ${s} s.`,
+      already: 'The bit is already there.',
+      move: 'Move',
+    },
+    choose: {
+      title: 'Choose how to continue',
+      recommended: 'Recommended',
+      near: 'Resume near where it stopped',
+      nearText: (line: number, label: string | undefined, from: number) =>
+        `From ${label === undefined ? 'the pass start' : label} at line ${line}, just before the interrupted lines. Lines ${line}–${from} are cut again, mostly in air.`,
+      nearStart: (line: number) =>
+        `From line ${line}, where the cut it had reached starts. Whatever it already cut there is cut again, mostly in air.`,
+      operation: 'Resume from the operation’s start',
+      operationText: (line: number, label: string | undefined) =>
+        `From the start of ${label ?? 'the operation'} (line ${line}): the safest choice if you are unsure the stock stayed put.`,
+      line: 'Choose a line…',
+      lineText: 'Pick another start line in the pre-flight.',
+      again: 'Start again from the beginning',
+      againText: 'Everything already cut is cut again in air.',
+      after: 'The pre-flight shows the lead-in and checks the travel before anything moves.',
+      noProgram: 'Open the project or the file the run was from to resume it.',
+      changed: 'The plan changed since the run: resume from an operation instead.',
+      fileChanged: 'The file changed since the run.',
+    },
+    dismiss: 'Dismiss…',
+    dismissAsk: 'Forget where the job stopped? The suggested resume point is gone after this.',
+    dismissConfirm: 'Forget it',
+    keep: 'Keep',
+    why: 'Why does this happen?',
+    causes: [
+      'The computer went to sleep (DFYOM keeps it awake during real runs).',
+      'The USB cable runs next to the spindle or VFD wires; a shielded cable with a ferrite helps.',
+      'An unpowered USB hub, or a loose connector.',
+      'Electrical noise from the spindle through a shared ground.',
+    ],
+    /** Q171: after a Stop, in the run section. */
+    powerLost: 'The machine lost power',
+    powerLostHint:
+      'If the machine’s power went while the controller stayed on USB: DFYOM marks the position lost and helps you resume.',
+  },
+
   noPlan: 'Choose a plan in the navigator.',
 }

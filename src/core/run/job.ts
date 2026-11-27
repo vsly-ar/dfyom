@@ -42,6 +42,7 @@ import {
 } from './recovery'
 import { alignmentGate } from './alignment'
 import { runPlanHash } from './plan-hash'
+import type { RunOrigin } from './interruption'
 import type { JobAbout, JobListener, MachineService, RunningJob, RunPlan } from './service'
 import { envelopeOf, type Envelope } from './grbl/envelope'
 import {
@@ -667,6 +668,8 @@ async function checkAndStart(
   let program: SenderProgram = { lines: e.lines, sections: programSections(e) }
   let operations = e.operationLines
   let soft = e.warnings.filter((w) => w.rule === 'softLimit')
+  // DF129 RC5: what the run's lines refer to, so an interruption maps them back to this program
+  let origin: RunOrigin = { programHash: await programHash(e.lines) }
   // a start at a line (DF129 RC2): the lead-in and the program from the line on, checked as a file
   const fromLine = run.at.fromLine
   if (fromLine !== undefined) {
@@ -687,6 +690,15 @@ async function checkAndStart(
     const { resumed } = r.unwrap()
     program = resumed.program
     operations = shiftOperations(e.operationLines, resumed)
+    origin = {
+      ...origin,
+      resumed: {
+        fromLine: resumed.fromLine,
+        leadIn: resumed.leadIn.length,
+        lines: e.lines,
+        operationStarts: e.operationLines.map((o) => o.fromLine),
+      },
+    }
     soft = fileSoftLimits(program.lines, {
       workZero,
       mpos: m.status().mpos,
@@ -724,6 +736,7 @@ async function checkAndStart(
           planHash: runPlanHash(plan, setupId),
           order: (plan.setups.find((s) => s.id === setupId)?.operations ?? []).map((o) => o.id),
         }),
+    origin,
   }
   const started = await m.startJob(
     ctx.jobId,
@@ -1044,6 +1057,19 @@ async function runFileSteps(
     lines: file.lines,
     sections: file.sections,
   }
+  // DF129 RC5: what the run's lines refer to (the file as read), for an interruption
+  const origin: RunOrigin = {
+    programHash: resume?.preview.programHash ?? (await programHash(file.lines)),
+    ...(resume === undefined
+      ? {}
+      : {
+          resumed: {
+            fromLine: resume.resumed.fromLine,
+            leadIn: resume.resumed.leadIn.length,
+            lines: file.lines,
+          },
+        }),
+  }
   if (findings.length > 0)
     return fail(
       'run.softLimit',
@@ -1053,7 +1079,7 @@ async function runFileSteps(
   // held for the job from here to the stream (no jog or work-zero change in between)
   const reserved = m.reserve(ctx.jobId)
   if (reserved.isErr()) return reserved
-  const started = await startFile(path, program, ctx, m, workZero, pause)
+  const started = await startFile(path, program, ctx, m, workZero, pause, origin)
   m.release(ctx.jobId)
   if (started.isErr()) return started
   const unbind = bindJobAbort(m, ctx)
@@ -1071,6 +1097,7 @@ async function startFile(
   m: MachineService,
   workZero: readonly [number, number, number],
   pause: RunPause,
+  origin: RunOrigin,
 ): AsyncAppResult<RunningJob> {
   const where = 'run.job.start'
   // a pause before the stream parks the job here, before anything moves (DF82)
@@ -1089,7 +1116,7 @@ async function startFile(
       phase: (p) => pause.phase(p),
     },
     { workZero, machineKey: m.machineKey ?? '' },
-    { file: { name: fileNameOf(path), path } },
+    { file: { name: fileNameOf(path), path }, origin },
   )
   pause.started(started.isOk())
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { file: path }))

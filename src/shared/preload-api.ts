@@ -26,6 +26,9 @@ export const RUN_STATUS_IPC_CHANNEL = 'dfyom:run.status'
  * Project and agent IPC (docs/architecture/llm-api.md#processes-and-hosting): every window is a
  * session of the app host (source `ui:win-<id>`), like an MCP session.
  */
+/** DF129 RC5: the recovery panel's actions (renderer only, docs/modes/run-recovery.md#implementation-rc5). */
+export type RunRecoveryAction = 'reconnectNow' | 'dismiss' | 'powerLost'
+
 export const IPC = {
   /** Renderer → main (invoke): one command, query or session tool. */
   call: 'dfyom:call',
@@ -83,6 +86,11 @@ export const IPC = {
    * null. Renderer only (RC5's recovery panel; agents read `run.status.get`).
    */
   runRecord: 'dfyom:run.record',
+  /**
+   * Renderer → main (invoke): DF129 RC5 the recovery panel's actions (`RunRecoveryAction`): null
+   * when done, else the refusal (`AppErrorData`). Renderer only.
+   */
+  runRecovery: 'dfyom:run.recovery',
   /**
    * Renderer → main (invoke): run an external gCode file (DF93): the dialog unless a path is
    * given, then the window without a project that shows it (`RunFileOpened`, or null if cancelled).
@@ -479,6 +487,12 @@ export interface PreloadApi {
     reconnect(action: 'cancel' | 'simulate'): Promise<AppErrorData | null>
     /** DF129: the record of the current or last run, or null (docs/modes/run-recovery.md#what-dfyom-keeps). */
     record(): Promise<RunJournal | null>
+    /**
+     * DF129 RC5: the recovery panel's "Reconnect now" / "Try again" (`reconnectNow`), "Dismiss"
+     * (`dismiss`: the interruption and the journal) and "The machine lost power" (`powerLost`,
+     * Q171); null when done, else the refusal (docs/modes/run-recovery.md#implementation-rc5).
+     */
+    recovery(action: RunRecoveryAction): Promise<AppErrorData | null>
   }
   /**
    * One command, query or session tool by registry name, through this window's session (the same

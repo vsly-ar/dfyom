@@ -104,6 +104,8 @@ const api: PreloadApi = {
     reconnect: (action) =>
       ipcRenderer.invoke(IPC.runReconnect, action) as Promise<AppErrorData | null>,
     record: () => ipcRenderer.invoke(IPC.runRecord) as Promise<RunJournal | null>,
+    recovery: (action) =>
+      ipcRenderer.invoke(IPC.runRecovery, action) as Promise<AppErrorData | null>,
   },
   call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {
