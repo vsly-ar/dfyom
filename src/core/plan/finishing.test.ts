@@ -1,5 +1,6 @@
 // Spec: the first real hardwood cut (docs/research/2026-11-24-hardwood-tearout.md § 1) against
 // docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75,
+// docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130,
 // docs/modes/plan-v0.1.md#finishing-defaults-hardening-df75-df76 and
 // docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74, with the user's Setup 2
 // numbers: "Finishing 1/4″ 3F" (Ø6.33, 20 mm flutes, stickout 31.7) on a 30.54 mm cavity,
@@ -120,29 +121,38 @@ const strategyOf = (c: Case, op: string) =>
     }
   ).operations.find((o) => o.id === op)!.strategy
 
-describe('the first hardwood cut (DF73–DF76)', () => {
-  it('DF73: 62 mm stickout for a 31.5 mm cut warns with the deflection factor; 31.7 mm does not', async () => {
+describe('the first hardwood cut (DF73–DF76, DF130)', () => {
+  it('DF130: no excess stickout warning; the minimum stickout per operation; a short one warns', async () => {
     const c = await setup2()
-    const excess = findings(c, c.outline).filter((w) => w.rule === 'excessStickout')
-    expect(excess).toHaveLength(1)
-    const w = excess[0]!
-    expect(w).toMatchObject({ code: 'plan.check', severity: 'warning', field: 'stickout' })
-    // through 31 mm + 0.5 mm breakthrough; needed 36.5 mm; (62 / 36.5)³ ≈ 4.9
-    expect(Number(w.params['depth'])).toBeCloseTo(31.5, 6)
-    expect(Number(w.params['needed'])).toBeCloseTo(36.5, 6)
-    expect(Number(w.params['factor'])).toBeCloseTo((62 / 36.5) ** 3, 6)
-    expect(w.params['suggested']).toBe(37)
-    expect(w.message).toContain('4.9×')
-    expect(w.message).toContain('chuck the tool deeper, about 37 mm')
-    expect(w.message).toContain('the collet then grips the flutes')
-    expect(findings(c, c.cavity).map((f) => f.rule)).not.toContain('excessStickout')
-    // chucked at 37 mm: quiet
+    const all = () => [...findings(c, c.outline), ...findings(c, c.cavity)]
+    expect(all().map((f) => f.rule)).not.toContain('excessStickout')
+    const needed = (op: string) =>
+      (
+        c.s.query('plan.operation.list', { planId: c.planId }) as {
+          operations: { id: string; stickoutNeeded: number | null }[]
+        }
+      ).operations.find((o) => o.id === op)!.stickoutNeeded
+    // through 31 mm + 0.5 mm breakthrough + 5 mm collet nut; the cavity 30.54 + 5
+    expect(needed(c.outline)).toBeCloseTo(36.5, 6)
+    expect(needed(c.cavity)).toBeCloseTo(35.54, 6)
+    // 62 mm over 36.5 needed: the operator's choice, quiet
+    expect(findings(c, c.outline).map((f) => f.rule)).not.toContain('shortStickout')
+    // 31.7 mm reaches the 30.54 mm cavity but leaves the collet nut 1.16 mm over the stock
+    const short = findings(c, c.cavity).filter((w) => w.rule === 'shortStickout')
+    expect(short).toHaveLength(1)
+    expect(short[0]).toMatchObject({ code: 'plan.check', severity: 'warning', field: 'stickout' })
+    expect(short[0]!.params).toEqual({ stickout: 31.7, depth: 30.54, needed: 35.54 })
+    expect(short[0]!.message).toContain(
+      'stickout 31.7 mm is shorter than the 35.6 mm the deepest cut (30.54 mm) needs',
+    )
+    expect(short[0]!.message).toContain('chuck the tool with at least 35.6 mm out')
+    // chucked at 36 mm: quiet
     await c.s.run('plan.operation.update', {
       planId: c.planId,
-      planOperationId: c.outline,
-      stickout: '37',
+      planOperationId: c.cavity,
+      stickout: '36',
     })
-    expect(findings(c, c.outline).map((f) => f.rule)).not.toContain('excessStickout')
+    expect(findings(c, c.cavity).map((f) => f.rule)).not.toContain('shortStickout')
   })
 
   it('DF75: the 30.54 mm cavity is deeper than the 20 mm flutes (warning); finishing stays within them', async () => {

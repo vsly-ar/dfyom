@@ -369,13 +369,9 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
 /**
  * Room above the stock top the stickout needs beyond the deepest cut (mm): the collet nut
  * (research 2026-11-24 § 3: 31 mm cut + ~5 mm). Doc:
- * docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
+ * docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
  */
 export const STICKOUT_CLEARANCE = 5
-/** Deflection factor (stickout / needed)³ from which excess stickout warns. */
-export const DEFLECTION_FACTOR_WARN = 2
-/** Excess stickout warns only for slender tools: stickout > this × D. */
-export const SLENDER_STICKOUT = 4
 
 /** A through pocket's breakthrough (patterns P4; its floor is the opposite face); else 0. */
 const pocketBreakthrough = (op: Operation, i: ToolCheckInput): number =>
@@ -430,9 +426,22 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
 }
 
 /**
- * The reach and rigidity warnings (hardening DF73, DF75): excess stickout (deflection factor
- * (stickout / needed)³ ≥ 2 on a slender tool, drills exempt) and a pocket deeper than the flutes
- * (the shank rubs the wall). Warnings: they never disqualify a tool.
+ * The minimum stickout of a plan operation (hardening DF130, mm): its deepest cut below the stock
+ * top (as the `reach` check measures it) + `STICKOUT_CLEARANCE` for the collet nut; 0 without
+ * operations. Not rounded. Doc: docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+ */
+export function neededStickout(i: Omit<ToolCheckInput, 'stepdown'>): number {
+  if (i.ops.length === 0) return 0
+  const table = SurfaceTable.of(i.part.operations, i.stock)
+  return Math.max(...i.ops.map((op) => reachDepth(op, i, table))) + STICKOUT_CLEARANCE
+}
+
+/**
+ * The reach and rigidity warnings (hardening DF75, DF130): a pocket deeper than the flutes (the
+ * shank rubs the wall) and a stickout that reaches the deepest cut but leaves the collet nut less
+ * than `STICKOUT_CLEARANCE` above the stock top (`shortStickout`; shorter than the cut is the
+ * `reach` error). Warnings: they never disqualify a tool. DF73's excess stickout warning is gone
+ * (DF130: the minimum stickout is a read-out instead).
  * Doc: docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
  */
 export function rigidityFindings(i: Omit<ToolCheckInput, 'stepdown'>): Finding[] {
@@ -456,30 +465,17 @@ export function rigidityFindings(i: Omit<ToolCheckInput, 'stepdown'>): Finding[]
           params: { depth, fluteLength: flute },
         })
     }
-  // DF73: excess stickout
-  if (tool.type === 'drill' || i.ops.length === 0) return out
-  const depth = Math.max(...i.ops.map((op) => reachDepth(op, i, table)))
-  const needed = depth + STICKOUT_CLEARANCE
-  const factor = (i.stickout / needed) ** 3
-  // the shortest stickout that keeps the collet on the shank
-  const shank = Math.max(needed, flute)
-  const shankFactor = (i.stickout / shank) ** 3
-  if (
-    factor >= DEFLECTION_FACTOR_WARN &&
-    i.stickout > SLENDER_STICKOUT * D + EPS &&
-    // already chucked at the flutes: only a shorter-fluted tool helps, so no warning
-    (shankFactor >= DEFLECTION_FACTOR_WARN || i.stickout > flute + EPS)
-  ) {
-    const onShank = shankFactor >= DEFLECTION_FACTOR_WARN
-    const suggested = Math.ceil((onShank ? shank : needed) - EPS)
-    const flutes = onShank
-      ? ''
-      : ' (the collet then grips the flutes; a tool with shorter flutes is stiffer)'
+  // DF130: the collet nut passes within the clearance of the stock top
+  if (i.ops.length === 0) return out
+  const needed = neededStickout(i)
+  const depth = needed - STICKOUT_CLEARANCE
+  if (i.stickout < needed - EPS && i.stickout >= depth - EPS) {
+    const at = Math.ceil(needed * 10 - 1e-6) / 10
     out.push({
       field: 'stickout',
-      rule: 'excessStickout',
-      message: `stickout ${r2(i.stickout)} mm makes the tool ${Math.round(factor * 10) / 10}× as flexible as the ${r2(needed)} mm the deepest cut (${r2(depth)} mm) needs: chuck the tool deeper, about ${suggested} mm${flutes}`,
-      params: { stickout: i.stickout, depth, needed, factor, suggested },
+      rule: 'shortStickout',
+      message: `stickout ${r2(i.stickout)} mm is shorter than the ${at} mm the deepest cut (${r2(depth)} mm) needs: the collet nut passes within ${STICKOUT_CLEARANCE} mm of the stock top; chuck the tool with at least ${at} mm out`,
+      params: { stickout: i.stickout, depth, needed },
     })
   }
   return out

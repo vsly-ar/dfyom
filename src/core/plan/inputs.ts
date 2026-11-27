@@ -63,6 +63,8 @@ export interface PlanOperationInput {
   readonly tool: Tool
   readonly toolSnapshotId: string
   readonly stickout: number
+  /** Minimum stickout (mm, DF130, `OperationEvaluation.stickoutNeeded`); not in the hash. */
+  readonly stickoutNeeded?: number
   /** Every applicable field resolved (unresolved ones fail with `plan.check` first). */
   readonly feeds: ResolvedFeeds
   readonly strategy: ResolvedStrategy
@@ -286,6 +288,9 @@ export function planOperationInputs(
       tool: e.tool.unwrap(),
       toolSnapshotId,
       stickout: e.stickout.unwrap(),
+      ...e.stickoutNeeded.mapOr<{ stickoutNeeded?: number }>({}, (stickoutNeeded) => ({
+        stickoutNeeded,
+      })),
       feeds: e.feeds.unwrap(),
       strategy,
       machine: plan.machine,

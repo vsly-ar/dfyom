@@ -216,7 +216,7 @@ describe('export (docs/modes/z-reference.md#exported-gcode)', () => {
     const { s, planId } = await faced()
     const text = await exported(s, planId)
     expect(text).toContain('(Z0 on the top face for tool 1, later tools: see each tool change)')
-    expect(text).toContain('(Tool 2: Flat 4, dia 4 mm, Z0 on Facing 1 floor)')
+    expect(text).toContain('(Tool 2: Flat 4, dia 4 mm, Z0 on Facing 1 floor, min stickout 8.5 mm)')
     const lines = text.split('\n')
     const marker = lines.findIndex((l) => l.startsWith('(DFYOM TOOL CHANGE 2'))
     // the fixture machine has a manual spindle: the stop comment stays next to the marker

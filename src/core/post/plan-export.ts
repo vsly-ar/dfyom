@@ -17,6 +17,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { SetupHeader } from './program'
 import { aidName, planOpLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
+import { runStickoutNeeded, toolRuns } from '../plan/tool-runs'
 import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import { setupZReferences, zRefText } from '../plan/z-reference'
@@ -270,7 +271,13 @@ export async function exportPlan(
         params: { z: c.to[2], needed: c.needed },
       })),
     })
+  // DF130: each tool run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130)
+  const runNeeded = toolRuns(all.map((x) => ({ tool: x.toolSnapshotId, needed: x.stickoutNeeded })))
+  const neededAt = runNeeded.flatMap((r) =>
+    r.operations.map(() => runStickoutNeeded(r.operations.map((o) => o.needed))),
+  )
   const operations: ExportOperation[] = all.map((input, i) => {
+    const stickoutNeeded = neededAt[i]
     const { ids, label } = generated[i]!
     const toolpath = (i < from ? undefined : links?.toolpaths[i - from]) ?? generated[i]!.toolpath
     const positions: Record<string, string> = {}
@@ -298,6 +305,7 @@ export async function exportPlan(
             taperAngle: input.tool.taperAngle.unwrap().canonical,
           }),
         }),
+        ...(stickoutNeeded === undefined ? {} : { stickoutNeeded }),
       },
       stickout: input.stickout,
       label,

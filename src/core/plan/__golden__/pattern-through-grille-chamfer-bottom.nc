@@ -9,13 +9,13 @@
 (Tool stays within the stock outline)
 (Keep clamps below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: V-bit 90 deg, dia 6 mm)
+(Tool 1: V-bit 90 deg, dia 6 mm, min stickout 5.5 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Grille - bottomChamfer)
-(DFYOM TOOL CHANGE 1: V-bit 90 deg, 6 mm chamfer)
+(DFYOM TOOL CHANGE 1: V-bit 90 deg, 6 mm chamfer, min stickout 5.5 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm

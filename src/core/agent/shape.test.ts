@@ -370,6 +370,7 @@ describe('plan.get', () => {
         {
           id: 'op1',
           kind: 'pocket',
+          stickoutNeeded: 12.34,
           feeds: {
             spindleSpeed: { value: 18000, unit: 'rpm' },
             stepover: { value: 2.4000000000000004 },
@@ -449,8 +450,9 @@ describe('plan.get', () => {
             // DF66: an operation without a tool is a run of its own
             toolChanges: 2,
             toolRuns: [
-              { tool: '6 mm end mill', operations: ['op1'], seconds: 30 },
-              { tool: null, operations: ['op2'], seconds: null },
+              // DF130: rounded up to 0.1 mm
+              { tool: '6 mm end mill', operations: ['op1'], seconds: 30, stickoutNeeded: 12.4 },
+              { tool: null, operations: ['op2'], seconds: null, stickoutNeeded: null },
             ],
           },
         ],
@@ -517,8 +519,8 @@ describe('plan.get', () => {
     const r = shaper.shape(call('plan.get', { plan: two }), { planId: 'plan-1' }, SUMMARY)
     const setups = (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups
     expect(setups.map((x) => [x['toolChanges'], x['toolRuns']])).toEqual([
-      [1, [{ tool: '6 mm end mill', operations: ['op1'], seconds: 30 }]],
-      [0, [{ tool: '6 mm end mill', operations: ['op2'], seconds: null }]],
+      [1, [{ tool: '6 mm end mill', operations: ['op1'], seconds: 30, stickoutNeeded: 12.4 }]],
+      [0, [{ tool: '6 mm end mill', operations: ['op2'], seconds: null, stickoutNeeded: null }]],
     ])
   })
 
@@ -614,7 +616,7 @@ describe('plan.get', () => {
     expect(setup['links']).toEqual(summary)
     expect(setup['seconds']).toBe(36)
     expect(setup['toolRuns']).toEqual([
-      { tool: '6 mm end mill', operations: ['op1', 'op2'], seconds: 36 },
+      { tool: '6 mm end mill', operations: ['op1', 'op2'], seconds: 36, stickoutNeeded: 12.4 },
     ])
     const full = shaper.shape(
       call('plan.warning.list', { warnings: [], links: [{ setupId: 's1', links }] }),

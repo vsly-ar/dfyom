@@ -9,13 +9,13 @@
 (Tool reaches past stock: left 13, right 13, front 8, back 8 mm)
 (Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 12, dia 12 mm)
+(Tool 1: Flat 12, dia 12 mm, min stickout 45.5 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat, min stickout 45.5 mm)
 M3 S12000
 (Set spindle to 12000 rpm)
 M0 ;Set spindle to 12000 rpm
