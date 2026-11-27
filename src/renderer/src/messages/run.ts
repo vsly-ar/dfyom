@@ -450,6 +450,23 @@ export const runMessages = {
     workZeroHint: 'Set the work zero (G54) per axis at the current tool position with its 0.',
   },
 
+  /**
+   * DF133: the setup's workholding in the Run scene and its status line under the Position table
+   * (docs/modes/run-workholding.md#trust-what-the-guard-knows). RW1 draws; the jog guard (RW3)
+   * replaces "are not checked" with the doc's guard wording.
+   */
+  guard: {
+    noItems: 'No workholding in this setup.',
+    notHomed: 'Clamps outlined: home the machine to place them at the work zero.',
+    zeroUnset: 'Clamps hidden: set the work zero to place them.',
+    trusted: 'Clamps drawn as placed in Plan, at the work zero. Jogs are not checked against them.',
+    /** The holder ghost's chip: the tool the scene assumes in the spindle (Q189). */
+    tool: (n: number, diameter: string, stickout: string, holder: string) =>
+      `T${n} Ø${diameter} · stickout ${stickout} · ${holder}`,
+    /** A measured holder has no name. */
+    nut: (diameter: string) => `nut Ø${diameter}`,
+  },
+
   /** DF128: the Go to dialog (docs/modes/run-goto.md). */
   goTo: {
     title: 'Go to',

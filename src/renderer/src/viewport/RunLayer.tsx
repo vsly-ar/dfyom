@@ -4,7 +4,8 @@
 // and the work zero marker at the WCS origin, all in the setup's WCS, placed on the part by the
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
 // reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
-// (WorkholdingLayer.tsx, workholding.md); an operation's rest after its roughing (DF122,
+// (WorkholdingLayer.tsx, workholding.md; in the run scene too, outlined until the place is
+// known, DF133 RW1); an operation's rest after its roughing (DF122,
 // RestLayer.tsx); the shown operation's holder ghost (DF132 H5, HolderGhost.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx); an interrupted
 // run's last seen tool position as a translucent ghost tool (DF129 RC6). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
@@ -67,7 +68,8 @@ export interface RunScene {
   readonly aids?: AidOverlay | undefined
   /**
    * The setup's workholding items, the open item's keep-out zone and collision hits (plan scene,
-   * workholding.md#ui-summary), in work coordinates; absent: none.
+   * workholding.md#ui-summary; the run scene's read-only and maybe outlined, DF133 RW1), in work
+   * coordinates; absent: none.
    */
   readonly workholding?: WorkholdingOverlay | undefined
   /**
@@ -77,7 +79,8 @@ export interface RunScene {
   readonly rest?: RestOverlay | undefined
   /**
    * The shown operation's tool, collet nut and spindle body at the move that decides its minimum
-   * stickout (plan scene, DF132 H5), in work coordinates; absent: none
+   * stickout (plan scene, DF132 H5), or the spindle's tool at the tool marker (run scene, DF133
+   * RW1), in work coordinates; absent: none
    * (docs/modes/tool-holder.md#implementation-h5).
    */
   readonly holder?: HolderGhostOverlay | undefined
@@ -235,7 +238,11 @@ export function RunLayer({
         </group>
       ) : null}
       {run.workholding ? (
-        <WorkholdingLayer workholding={run.workholding} palette={palette} />
+        <WorkholdingLayer
+          workholding={run.workholding}
+          palette={palette}
+          reducedMotion={reducedMotion}
+        />
       ) : null}
       {run.rest ? <RestLayer rest={run.rest} palette={palette} /> : null}
       {run.holder ? <HolderGhost ghost={run.holder} palette={palette} /> : null}
