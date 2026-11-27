@@ -258,12 +258,14 @@ A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is i
 - **Reconnect = reset:** opening the port resets most Arduino-based GRBL boards (DTR); otherwise the handshake sends `0x18` when no banner comes. Either way buffered motion ends and GRBL starts locked (`$22=1`): the new connection is **not homed** and must home before a run.
 - **Disconnect = reset:** closing a real connection on purpose (`run.connection.close`, app quit) sends `0x18` before closing the port, also when Idle, so no queued jog or line runs on after DFYOM let go. A running job is stopped first (hold, then reset), as on the virtual machine. **M1.**
 - App quit during a run asks first, then stops the run (existing, [run-v0.1.md](run-v0.1.md#implementation-task-312-run-mode-ui)).
+- **Proposed (draft, DF129):** automatic reconnect after a lost connection during a run, which only resets and reads the controller, and a guided recovery ([run-recovery.md § Safety amendments](run-recovery.md#safety-amendments)).
 
 ### 7. What DFYOM never does on a real machine
 
 - Write GRBL settings (`$x=`), send raw gCode or `$` lines (no MDI console, Q52), restart a program at an arbitrary line, or reconnect on its own.
 - Stream a program it did not export, in the same job, from a finalized plan at the live work zero; except an external G-code file the user starts from the app after its own checks ([DF93](#run-an-external-g-code-file-df93)), streamed as the file says (only `M6` becomes the tool-change marker).
 - Change a plan's machine copy to match the controller silently ([library.md](../architecture/library.md#grbl--import)).
+- **Proposed (draft, DF129):** starting at a line with a generated lead-in instead of never at an arbitrary line ([run-recovery.md § Start from a line](run-recovery.md#start-from-a-line)).
 
 ### Testing the rules
 
