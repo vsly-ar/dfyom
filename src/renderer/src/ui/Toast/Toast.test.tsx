@@ -4,10 +4,17 @@ import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/ren
 import { useState } from 'react'
 import { ConfirmDialog } from '../ConfirmDialog/ConfirmDialog'
 import { Dialog } from '../Dialog/Dialog'
+import { ContextMenu, isContextMenuKey, openContextMenu } from '../Menu/Menu'
 import { Toast, ToastAnchor, ToastRegion } from './Toast'
 
 /** A dialog with a button that shows a toast while the dialog stays open (U1). */
-function DialogWithToast({ confirm = false }: { confirm?: boolean }): React.JSX.Element {
+function DialogWithToast({
+  confirm = false,
+  menu = false,
+}: {
+  confirm?: boolean
+  menu?: boolean
+}): React.JSX.Element {
   const [open, setOpen] = useState(true)
   const [toast, setToast] = useState(false)
   return (
@@ -26,6 +33,21 @@ function DialogWithToast({ confirm = false }: { confirm?: boolean }): React.JSX.
           <button type="button" onClick={() => setToast(true)}>
             Remove shape
           </button>
+          {menu ? (
+            <ContextMenu
+              label="Actions for Shape 2"
+              items={[{ label: 'Remove', onSelect: () => {} }]}
+            >
+              <button
+                type="button"
+                onKeyDown={(e) => {
+                  if (isContextMenuKey(e)) openContextMenu(e.currentTarget)
+                }}
+              >
+                Shape 2
+              </button>
+            </ContextMenu>
+          ) : null}
         </Dialog>
       )}
       <Toast open={toast} onOpenChange={setToast} duration={Infinity} message="Removed Shape 1" />
@@ -57,6 +79,24 @@ describe('Toast', () => {
     const { user } = renderUi(<DialogWithToast />)
     await user.click(screen.getByRole('button', { name: 'Remove shape' }))
     await screen.findByText('Removed Shape 1')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Shapes' })).toBeNull())
+    expect(screen.getByText('Removed Shape 1')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByText('Removed Shape 1')).toBeNull())
+  })
+
+  it('Escape closes the topmost layer first: a row menu, then the dialog, then the toast', async () => {
+    const { user } = renderUi(<DialogWithToast menu />)
+    await user.click(screen.getByRole('button', { name: 'Remove shape' }))
+    await screen.findByText('Removed Shape 1')
+    screen.getByRole('button', { name: 'Shape 2' }).focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    await screen.findByRole('menu', { name: 'Actions for Shape 2' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'Shapes' })).toBeInTheDocument()
+    expect(screen.getByText('Removed Shape 1')).toBeInTheDocument()
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Shapes' })).toBeNull())
     expect(screen.getByText('Removed Shape 1')).toBeInTheDocument()
