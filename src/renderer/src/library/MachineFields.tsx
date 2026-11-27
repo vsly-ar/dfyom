@@ -1,6 +1,7 @@
 // The machine form, shared by the Library window's editor (`full`: adds acceleration, motion
 // planning `$11`/`$12`, steps per mm and notes, in three tabs Machine / Motion / Spindle, DF110)
 // and the quick "New machine…" dialog (`quick`: the v0.1 fields and the Z height of DF68, no tabs).
+// The Spindle tab ends with the holder (collet nut and body, DF132 H1), in the full form only.
 // GRBL controller and manual tool change are fixed values (library.md#machine).
 // Docs: docs/conventions/ui-library-window.md#layout, L4;
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
@@ -21,6 +22,7 @@ import {
 } from '../ui'
 import { AXES, type Axis, type MachineDraft, type QDto } from './form'
 import { FixedField, NameField, NotesGroup, QuantityField, type FormProps } from './fields'
+import { HolderGroup } from './HolderGroup'
 import styles from './LibraryForm.module.css'
 
 const m = libraryMessages.machine
@@ -51,6 +53,12 @@ export const MACHINE_FIELDS: readonly string[] = [
   'spoilboardThickness',
   'probePlateSize',
   'probePlateThickness',
+  'holder',
+  'holder.preset',
+  'holder.nutDiameter',
+  'holder.nutLength',
+  'holder.bodyDiameter',
+  'holder.maxShank',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -65,7 +73,8 @@ type MachineTab = 'machine' | 'motion' | 'spindle'
 /** The full form's tab of a field key (its first path segment): a problem marks the tab. */
 function tabOf(field: string): MachineTab {
   const head = field.split('.')[0]
-  if (head === 'spindle') return 'spindle'
+  // the collet nut belongs to the spindle (tool-holder.md § Implementation (H1))
+  if (head === 'spindle' || head === 'holder') return 'spindle'
   if (
     head === 'maxFeedRate' ||
     head === 'acceleration' ||
@@ -443,7 +452,18 @@ export function MachineFields({
           {
             value: 'spindle',
             label: tabs.spindle,
-            content: <div className={styles['tabBody']}>{spindleGroup}</div>,
+            content: (
+              <div className={styles['tabBody']}>
+                {spindleGroup}
+                {/* DF132 H1: the collet nut and spindle body, for the clamp checks */}
+                <HolderGroup
+                  value={values.holder}
+                  units={units}
+                  messages={messages}
+                  onChange={(holder) => set({ holder })}
+                />
+              </div>
+            ),
             severity: tabSeverity('spindle', messages),
           },
         ]}

@@ -1,6 +1,6 @@
 # Tool holder: collet nut and spindle in the collision checks
 
-Status: accepted (2026-11-27; Q174–Q183 take their recommendations, accepted by delegation D82; internal backlog idea 1, hardening [DF132](../plans/hardening.md#intake-user-feedback-goes-here); carries over the backlog row "Holder and collet collision" of [v0.4-llm-first](../plans/v0.4-llm-first.md) and WH-F's "holder model later" ([Q40](../plans/v0.4-llm-first.md#questions-for-the-user)); questions [Q174–Q183](#open-questions-for-the-user) open) · Base: [workholding.md § Collision check](workholding.md#collision-check), [plan-v0.1.md § Minimum stickout](plan-v0.1.md#minimum-stickout-hardening-df130), [safe-links.md § Clamps](safe-links.md#clamps) · Machine fields: [library.md § Machine](../architecture/library.md#machine) · Terms: [glossary.md](../glossary.md)
+Status: accepted (2026-11-27; Q174–Q183 take their recommendations, accepted by delegation D82; internal backlog idea 1, hardening [DF132](../plans/hardening.md#intake-user-feedback-goes-here); carries over the backlog row "Holder and collet collision" of [v0.4-llm-first](../plans/v0.4-llm-first.md) and WH-F's "holder model later" ([Q40](../plans/v0.4-llm-first.md#questions-for-the-user)); questions [Q174–Q183](#open-questions-for-the-user) answered; H1 implemented, [§ Implementation (H1)](#implementation-h1)) · Base: [workholding.md § Collision check](workholding.md#collision-check), [plan-v0.1.md § Minimum stickout](plan-v0.1.md#minimum-stickout-hardening-df130), [safe-links.md § Clamps](safe-links.md#clamps) · Machine fields: [library.md § Machine](../architecture/library.md#machine) · Terms: [glossary.md](../glossary.md)
 
 DFYOM checks the tool as a cylinder of max(cutting Ø, shank Ø) from the tip up ([WH-F](workholding.md#decisions)), and DF130's minimum stickout adds a fixed 5 mm "for the collet nut" above the deepest cut. Neither knows how wide the nut is. A Ø19 ER11 nut, or a Ø65 spindle body above it, can pass over a 25 mm toe clamp while the Ø6 tool cuts the stock 10 mm beside it. Today no check catches that, and the stickout read-out at the tool change does not account for it. This doc adds a **holder model** to the machine: the collet nut and the spindle body, each a diameter and a length. With it the tool becomes a stepped **collision envelope**, and the checks and the minimum stickout use that envelope.
 
@@ -27,18 +27,20 @@ A machine gains an optional `holder` (the [library.md § Machine](../architectur
 
 ### Presets
 
-Presets are built-in constants that fill the fields. They are not library items ([Q176](#open-questions-for-the-user)). The values are typical sizes to be checked against the vendor drawings (ISO 15488 / DIN 6499 nuts) in H1. The machine form says "measure yours with a caliper" and shows a picture of which dimension is which.
+Presets are built-in constants that fill the fields. They are not library items ([Q176](#open-questions-for-the-user)). The machine form says "measure yours with a caliper" and shows a picture of which dimension is which. Checked in H1 against the ISO 15488 / DIN 6499 nut sizes as ER makers (Rego-Fix and others) publish them, from the agent's knowledge of those drawings, not a vendor PDF opened in the session; the last column says how firm each value is.
 
-| Id             | Label                        | Nut Ø × length | Body Ø | Max shank |
-| -------------- | ---------------------------- | -------------- | ------ | --------- |
-| `er11`         | ER11 nut (300–500 W spindle) | ≈ 19 × 12 mm   | 52 mm  | 7 mm      |
-| `er11Mini`     | ER11 mini nut                | ≈ 16 × 11 mm   | 52 mm  | 7 mm      |
-| `er16`         | ER16 nut                     | ≈ 32 × 18 mm   | 65 mm  | 10 mm     |
-| `er16Mini`     | ER16 mini nut                | ≈ 22 × 17 mm   | 65 mm  | 10 mm     |
-| `er20`         | ER20 nut (1.5–2.2 kW)        | ≈ 35 × 20 mm   | 80 mm  | 13 mm     |
-| `er20Mini`     | ER20 mini nut                | ≈ 28 × 19 mm   | 80 mm  | 13 mm     |
-| `trimRouter`   | Trim router, 1/4″ collet     | ≈ 24 × 20 mm   | 65 mm  | 6.35 mm   |
-| `plungeRouter` | Full-size router, 1/2″       | ≈ 30 × 25 mm   | 80 mm  | 12.7 mm   |
+| Id             | Label                         | Nut Ø × length | Body Ø | Max shank | Checked                                                                                        |
+| -------------- | ----------------------------- | -------------- | ------ | --------- | ---------------------------------------------------------------------------------------------- |
+| `er11`         | ER11 nut (300–500 W spindle)  | 19 × 12 mm     | 52 mm  | 7 mm      | Nut Ø and capacity: ER11 standard nut drawings; length ≈ (11.3–12 by maker); body: Ø52 spindle |
+| `er11Mini`     | ER11 mini nut                 | 16 × 11 mm     | 52 mm  | 7 mm      | Nut Ø: ER11 mini (M/UM) nut; length ≈                                                          |
+| `er16`         | ER16 nut                      | 32 × 18 mm     | 65 mm  | 10 mm     | Nut Ø and capacity: ER16 "A" nut; length ≈ (17.5); body: Ø65 spindle ≈                         |
+| `er16Mini`     | ER16 mini nut                 | 22 × 17 mm     | 65 mm  | 10 mm     | Nut Ø: ER16 mini nut ≈; length ≈                                                               |
+| `er20`         | ER20 nut (1.5–2.2 kW)         | 35 × 20 mm     | 80 mm  | 13 mm     | Nut Ø and capacity: ER20 "A" nut; length ≈ (19.5–20); body: Ø80 2.2 kW spindle                 |
+| `er20Mini`     | ER20 mini nut                 | 28 × 19 mm     | 80 mm  | 13 mm     | Nut Ø: ER20 mini nut ≈; length ≈                                                               |
+| `trimRouter`   | Trim router, 1/4″ collet      | ≈ 24 × 20 mm   | 65 mm  | 1/4″      | Approximate: no common drawing (nuts differ by brand); Ø65 is the usual trim router clamp      |
+| `plungeRouter` | Full-size router, 1/2″ collet | ≈ 30 × 25 mm   | 80 mm  | 1/2″      | Approximate: no common drawing; body differs widely (≈ 75–90 mm)                               |
+
+"≈" marks a typical value that varies by maker; the form shows every preset's sizes, and the user measures theirs. A later check against a vendor PDF may refine the lengths; it changes no stored machine (presets only fill fields).
 
 ## Collision envelope
 
@@ -142,7 +144,7 @@ Budget: `tools/list` ≤ 120,000 characters, now ≈ 117.5 K ([llm-api.md](../ar
 | Slice | Content                                                                                                                                                                                        | Done when                                                                                                 |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | H0    | This doc → accepted (Q174–Q183)                                                                                                                                                                | User answers recorded; library.md, glossary rows                                                          |
-| H1    | Model: machine `holder`, presets (values checked against vendor drawings), invariants; Library window machine editor "Holder" group with preset select and picture; `library.machine.*` schema | Round-trip and invariant tests; form test; `tools/list` measured and logged ≤ 120 K                       |
+| H1 ✓  | Model: machine `holder`, presets (values checked against vendor drawings), invariants; Library window machine editor "Holder" group with preset select and picture; `library.machine.*` schema | Round-trip and invariant tests; form test; `tools/list` measured and logged ≤ 120 K                       |
 | H2    | Envelope in `checkWorkholding` (kind `holder`), `plan.holder.unknown`, `plan.holder.shankTooLarge`; export guard; oracle with the envelope                                                     | Unit and user-shaped tests above; oracle agrees on the fixtures; programs without a holder byte-identical |
 | H3    | Clamp term in the minimum stickout, `stickoutReason`, `shortStickout` message; inspector rows, header holder line, Run tool-change reason line                                                 | Analytic tests; DF130 values unchanged without holder or items; Run dialog test shows the reason line     |
 | H4    | Holder floor in `planLinks` and in the export guard                                                                                                                                            | Replay and mutation tests pass on the fixtures with clamps; links without a holder unchanged              |
@@ -150,6 +152,19 @@ Budget: `tools/list` ≤ 120,000 characters, now ≈ 117.5 K ([llm-api.md](../ar
 | H6    | Per-tool `holder` override (`library.tool.*`, tool editor Details)                                                                                                                             | Override wins over the machine's in envelope, read-out and ghost; budget re-measured                      |
 
 H1–H3 carry the safety value; H4 matters once low links run near clamps; H5 and H6 can wait.
+
+## Implementation (H1)
+
+Done 2026-11-27. Code: [`holder.dto.ts`](../../src/core/library/holder.dto.ts) (the shape, preset ids), [`holder.ts`](../../src/core/library/holder.ts) (the model, the presets as sources, `checkHolder`, `holderFromDTO`, `holderEdited`), [`machine.ts`](../../src/core/library/machine.ts) (`holder: Option<Holder>`), the Library window's [`HolderGroup.tsx`](../../src/renderer/src/library/HolderGroup.tsx) and [`HolderDrawing.tsx`](../../src/renderer/src/library/HolderDrawing.tsx). Tests: `machine.test.ts` (round trip, preset fill, `required`, `positive`, `atLeastNutDiameter`, every preset valid), the storage contract (memory and filesystem keep and drop the holder), `commands.test.ts` (`{ preset }` alone over the command input, an inch edit keeps the preset's other sizes, issues under `values.holder`), `LibraryWindow.test.tsx` (preset fills, "edited", the core's issue at the field, Save, None removes it, axe), `e2e/library.e2e.ts` (an ER11 holder with an edited length is kept after closing and reopening the Library window; renders `df132-holder-{light,dark}.png` with `DFYOM_RENDERS=1`).
+
+Decisions where the doc left room:
+
+- **Sizes optional in the shape, required in the model.** The DTO's sizes are optional so `{ preset: 'er11' }` alone works for agents ([§ Agent API](#agent-api)); `holderFromDTO` fills missing sizes from the preset, and without a preset a missing nut or body size is `model.invariant` `required` at `holder.<size>`. The model always holds all three sizes and `toDTO` writes them, so a stored holder never depends on the preset table (a later preset correction changes no machine). Given sizes win over the preset; the preset id stays as display ("ER11 nut, edited"), decided by `holderEdited` (exact values against the preset's).
+- **Invariants:** nut Ø, nut length and body Ø > 0; `maxShank` > 0 when set; `bodyDiameter` ≥ `nutDiameter` (`atLeastNutDiameter`; equal is allowed, a straight extension); the preset must be one of the ids (a shape error for unknown ids, `input.malformed`). No rule ties `maxShank` to the nut (the presets satisfy shank < nut, tested).
+- **Preset values** are stored as entered in mm ("19", default unit mm, as a user types them in a mm library); the router collets as `1/4"` and `1/2"` (exact 6.35 / 12.7 mm).
+- **Form:** a "Holder" group at the end of the machine editor's **Spindle** tab (the nut belongs to the spindle; a holder problem marks that tab), Library window only (the quick "New machine…" dialog stays short: no holder is today's behaviour). "Collet nut" is a `Select`: "None (not checked)", the eight presets with their sizes as the option description ("Nut Ø19 × 12 · body Ø52 mm · shank ≤ 7 mm"), and "Measured". Choosing a preset fills all four sizes; "Measured" drops the preset and keeps the sizes (from None it starts from the ER11 sizes, so the form opens valid and the user corrects it). The choice's (i) tip says to measure with a caliper; each size has a note naming the dimension. Beside the sizes the holder drawing (side view: the body broken off at the top, the nut, a tool, the dashed nose line where stickout is measured; short labels ØN, LN, ØB, ØS with a legend), the focused field's dimension amber as in the tool drawing.
+- **Agent API:** `tools/list` 117,485 → **117,954** chars (+469, target ≤ 0.8 K), logged in [llm-api.md](../architecture/llm-api.md). `library.machine.update` is sketched and takes the same `holder`; an update without `holder` removes it (updates replace all values).
+- **`plan.holder.unknown`** is H2 ([§ Slices](#slices)); H1 adds no finding and changes no program.
 
 ## Not yet
 

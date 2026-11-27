@@ -2,7 +2,8 @@
 // Doc: docs/architecture/library.md#storage
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { stockValues, toeClampValues } from './library.fixture'
+import { presetHolderDTO } from './holder'
+import { machineValues, stockValues, toeClampValues } from './library.fixture'
 import type { LibraryStorage } from './storage'
 
 const T = '2026-11-17T10:00:00.000Z'
@@ -45,6 +46,20 @@ export function libraryStorageContract(
       expectOk(await s.remove('workholding', 'a', 2))
       expect(expectOk(await s.list('workholding'))).toEqual([])
       expect(expectOk(await s.list('stock')).map((e) => e.id)).toEqual(['a'])
+    })
+
+    it('keeps the optional holder of a machine as stored (tool-holder.md#model, DF132 H1)', async () => {
+      const s = await make()
+      const holder = { ...presetHolderDTO('er11'), nutDiameter: presetHolderDTO('er16').nutLength }
+      const machine = { id: 'm', revision: 1, updatedAt: T, ...machineValues(), holder }
+      expectOk(await s.put('machine', machine, null))
+      const got = expectOk(await s.get('machine', 'm')).unwrap()
+      expect(expectOk(got.content)).toEqual(machine)
+      // removing the holder is a plain update without the field
+      const { holder: _h, ...without } = machine
+      expectOk(await s.put('machine', { ...without, revision: 2 }, 1))
+      const again = expectOk(await s.get('machine', 'm')).unwrap()
+      expect(expectOk(again.content)).not.toHaveProperty('holder')
     })
 
     it('put checks the stored revision (null = must not exist)', async () => {

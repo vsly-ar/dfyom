@@ -3,6 +3,7 @@
  * Shape only; domain rules live in Machine. Doc: docs/architecture/library.md#machine
  */
 import { z } from 'zod'
+import { HolderDtoSchema } from './holder.dto'
 import { commonValuesShape, quantityDto } from './item'
 
 /**
@@ -83,6 +84,8 @@ export const MachineValuesDtoSchema = z.object({
   probePlateThickness: quantityDto('length')
     .optional()
     .describe('Z touch plate thickness; unset = no plate, Run offers no Probe Z'),
+  // collet nut and spindle body (docs/modes/tool-holder.md#model, hardening DF132 H1)
+  holder: HolderDtoSchema.optional(),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

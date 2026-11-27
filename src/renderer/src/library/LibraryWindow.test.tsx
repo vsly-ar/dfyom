@@ -813,6 +813,65 @@ describe('Library window', () => {
     await expectNoAxeViolations()
   })
 
+  it('DF132 H1: the Spindle tab’s Holder: a preset fills the sizes, an edit says so, saved; None removes it', async () => {
+    const { user, editor, add, get } = await renderLibrary()
+    const id = await add('machine', {
+      name: 'Router',
+      controller: 'grbl',
+      travel: { x: '800', y: '800', z: '100' },
+      maxFeedRate: { x: '5000', y: '5000', z: '1000' },
+      spindle: { control: 'gcode', maxSpeed: '24000' },
+      programUnits: 'mm',
+      toolChanger: 'none',
+    })
+    await user.click(screen.getByRole('tab', { name: 'Machines' }))
+    const grid = await screen.findByRole('grid', { name: 'Machines' })
+    await user.click(await within(grid).findByRole('row', { name: /Router/ }))
+    const ed = editor()
+    await openInspectorTab(user, ed, 'Spindle')
+    const choice = within(ed).getByRole('combobox', { name: 'Collet nut' })
+    expect(choice).toHaveTextContent('None (not checked)')
+    expect(within(ed).queryByLabelText('Nut diameter', { selector: 'input' })).toBeNull()
+    await user.click(choice)
+    const er11 = await screen.findByRole('option', { name: 'ER11 nut (300–500 W spindle)' })
+    expect(er11).toHaveAccessibleDescription('Nut Ø19 × 12 · body Ø52 mm · shank ≤ 7 mm')
+    await user.click(er11)
+    const field = (name: string) => within(ed).getByLabelText(name, { selector: 'input' })
+    await waitFor(() => expect(field('Nut diameter')).toHaveValue('19'))
+    expect(field('Nut length')).toHaveValue('12')
+    expect(field('Body diameter')).toHaveValue('52')
+    expect(field('Max shank')).toHaveValue('7')
+    await user.click(field('Nut length'))
+    expect(
+      within(ed).getByRole('img', { name: 'Holder drawing: Nut length highlighted' }),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+
+    // an edited size keeps the preset; a body narrower than the nut is the core's issue
+    await user.clear(field('Nut diameter'))
+    await user.type(field('Nut diameter'), '20{Enter}')
+    expect(choice).toHaveTextContent('ER11 nut (300–500 W spindle), edited')
+    await user.clear(field('Body diameter'))
+    await user.type(field('Body diameter'), '18{Enter}')
+    expect(field('Body diameter')).toHaveAccessibleDescription(/at least the nut diameter/i)
+    await user.clear(field('Body diameter'))
+    await user.type(field('Body diameter'), '52{Enter}')
+    await user.click(within(ed).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(
+        (get('machine', id) as unknown as { holder?: { preset: string; nutDiameter: object } })
+          .holder,
+      ).toMatchObject({ preset: 'er11', nutDiameter: { exact: { num: '20', den: '1' } } }),
+    )
+
+    // None removes the holder
+    await user.click(choice)
+    await user.click(await screen.findByRole('option', { name: 'None (not checked)' }))
+    expect(within(ed).queryByLabelText('Nut diameter', { selector: 'input' })).toBeNull()
+    await user.click(within(ed).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(get('machine', id)).not.toHaveProperty('holder'))
+  })
+
   it('offers Import $$… only for a saved machine without unsaved changes', async () => {
     const { user, editor } = await renderLibrary()
     await user.click(screen.getByRole('tab', { name: 'Machines' }))

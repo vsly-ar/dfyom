@@ -4,6 +4,8 @@
 // docs/glossary.md. Doc: docs/conventions/ui-library-window.md, docs/conventions/ui.md#plan-mode-task-37,
 // #internationalization
 import type { LibraryTabKind, MaterialClass } from '../../../core/library/item'
+import type { HolderSize } from '../../../core/library/holder'
+import type { HolderPresetId } from '../../../core/library/holder.dto'
 import type { HomingCorner, Rigidity } from '../../../core/library/machine.dto'
 import type { ToolMaterial, ToolType } from '../../../core/library/tool.dto'
 import type { BaseType, SurfaceType, WorkholdingType } from '../../../core/library/workholding.dto'
@@ -435,6 +437,54 @@ export const libraryMessages = {
       'Optional: the largest extent of your Z touch plate. Touch-off spots leave room for it.',
     probePlateThickness: 'Touch plate thickness',
     probePlateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
+    /** The Spindle tab's "Holder" group (tool-holder.md § Implementation (H1), DF132). */
+    holder: {
+      title: 'Holder',
+      summaryNone: 'None',
+      choice: 'Collet nut',
+      choiceNote:
+        'The nut and the spindle body above it, so the plan can check them against clamps. Pick your collet system, then measure yours with a caliper.',
+      none: 'None (not checked)',
+      custom: 'Measured',
+      customDescription: 'Sizes you measured',
+      edited: (label: string) => `${label}, edited`,
+      presets: {
+        er11: 'ER11 nut (300–500 W spindle)',
+        er11Mini: 'ER11 mini nut',
+        er16: 'ER16 nut',
+        er16Mini: 'ER16 mini nut',
+        er20: 'ER20 nut (1.5–2.2 kW)',
+        er20Mini: 'ER20 mini nut',
+        trimRouter: 'Trim router, 1/4″ collet',
+        plungeRouter: 'Full-size router, 1/2″ collet',
+      } satisfies Record<HolderPresetId, string>,
+      /** A preset option's sizes: "Nut Ø19 × 12 · body Ø52 · shank ≤ 7 mm". */
+      presetSizes: (nut: string, length: string, body: string, shank: string) =>
+        `Nut Ø${nut} × ${length} · body Ø${body} · shank ≤ ${shank}`,
+      labels: {
+        nutDiameter: 'Nut diameter',
+        nutLength: 'Nut length',
+        bodyDiameter: 'Body diameter',
+        maxShank: 'Max shank',
+      } satisfies Record<HolderSize, string>,
+      notes: {
+        nutDiameter: 'Across the hex or the round nut, its widest point.',
+        nutLength: 'From the nut face (where stickout is measured) up to the spindle body.',
+        bodyDiameter: 'The spindle or router body above the nut; at least the nut diameter.',
+        maxShank: 'Optional: the largest shank the collet takes.',
+      } satisfies Record<HolderSize, string>,
+      /** The drawing's short labels, named in its legend. */
+      symbols: {
+        nutDiameter: 'ØN',
+        nutLength: 'LN',
+        bodyDiameter: 'ØB',
+        maxShank: 'ØS',
+      } satisfies Record<HolderSize, string>,
+      nose: 'nose',
+      legend: 'Dimensions in the holder drawing',
+      drawing: (focused: string | undefined) =>
+        focused === undefined ? 'Holder drawing' : `Holder drawing: ${focused} highlighted`,
+    },
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',

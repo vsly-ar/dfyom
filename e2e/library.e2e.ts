@@ -303,6 +303,62 @@ test('library window: a new machine in the tabs Machine / Motion / Spindle (DF11
   expect(dfyom.rendererErrors).toEqual([])
 })
 
+test('library window: an ER11 holder on a machine, edited, kept after reopening the window (DF132 H1)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const open = async () => {
+    const opened = dfyom.app.waitForEvent('window')
+    await page.getByRole('button', { name: 'Library', exact: true }).click()
+    const lib = await opened
+    await lib.waitForLoadState('domcontentloaded')
+    if (RENDERS) await lib.setViewportSize({ width: 1100, height: 900 })
+    await lib.getByRole('tab', { name: 'Machines' }).click()
+    return lib
+  }
+  let lib = await open()
+  await lib.getByRole('button', { name: 'New machine' }).click()
+  let editor = lib.getByRole('region', { name: 'Item editor' })
+  await editor.getByRole('textbox', { name: 'Name' }).fill('ER11 router')
+  await openInspectorTab(editor, 'Spindle')
+  const nut = () => editor.getByRole('combobox', { name: 'Collet nut' })
+  await expect(nut()).toHaveText('None (not checked)')
+  await nut().click()
+  await lib.getByRole('option', { name: 'ER11 nut (300–500 W spindle)' }).click()
+  await expect(input(editor, 'Nut diameter')).toHaveValue('19')
+  await expect(input(editor, 'Body diameter')).toHaveValue('52')
+  await setField(editor, 'Nut length', '13')
+  await expect(nut()).toHaveText('ER11 nut (300–500 W spindle), edited')
+  await editor.getByRole('button', { name: 'Save' }).click()
+  await expect(
+    lib.getByRole('grid', { name: 'Machines' }).getByRole('row', { name: /Unsaved/ }),
+  ).toHaveCount(0)
+  await lib.close()
+
+  // reopened: the machine keeps the preset and the edited size
+  lib = await open()
+  editor = lib.getByRole('region', { name: 'Item editor' })
+  await lib
+    .getByRole('grid', { name: 'Machines' })
+    .getByRole('row', { name: /ER11 router/ })
+    .click()
+  await openInspectorTab(editor, 'Spindle')
+  await expect(nut()).toHaveText('ER11 nut (300–500 W spindle), edited')
+  await expect(input(editor, 'Nut diameter')).toHaveValue('19')
+  await expect(input(editor, 'Nut length')).toHaveValue('13')
+  await expect(input(editor, 'Max shank')).toHaveValue('7')
+  await input(editor, 'Nut length').focus()
+  await expect(
+    editor.getByRole('img', { name: 'Holder drawing: Nut length highlighted' }),
+  ).toBeVisible()
+  // the render without the field's adjust popover and tip
+  await editor.getByRole('heading', { name: 'ER11 router' }).click()
+  await render(page, lib, 'df132-holder')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
 test('library window: duplicate the built-in toe clamp, change a size, make it the default (WL3)', async ({
   dfyom,
 }) => {
