@@ -1,11 +1,13 @@
 /**
- * Feeds-and-speeds formulas F1–F10 as pure functions.
+ * Feeds-and-speeds formulas F1–F11 as pure functions (F11, the tapered ball's groove width, is
+ * `taperedGrooveWidth` in library/tool.ts, shared with the Line's read-out).
  * Doc: docs/architecture/feeds-speeds.md#formulas (sources [S1], [S2], [MH], [MD], [K1], [HT1], [AD]).
  *
  * Float64 on purpose: the formulas need π, square roots and trigonometry, which the exact
  * rational quantity layer cannot represent, and the results are suggestions, not entered values.
  * Units are canonical: mm, m/min (vc), rpm, mm/min, mm³/min, W·s/mm³ (u), kW (Pc), W (machine).
  */
+import { taperHeights } from '../library/tool'
 
 /** F3 × F5 never exceeds this factor ([MD]: avoid runaway feeds at tiny engagement). */
 export const CHIP_THINNING_CAP = 3
@@ -56,6 +58,30 @@ export function chamferEffectiveDiameter(
 /** The depth below the tip at which a chamfer mill cuts its full diameter DC. */
 export const chamferFullDepth = (tip: number, angle: number, D: number): number =>
   (D - tip) / 2 / Math.tan(((angle / 2) * Math.PI) / 180)
+
+/**
+ * The tapered ball end mill's suggested stepdown: the largest `ap` with ap ≤ k · De(ap), De the
+ * groove width at ap (`taperedGrooveWidth`) and k = apSlot × apFactor; closed form per piece of
+ * De (the large end Ø, the cone, the ball). `angle` is per side, degrees.
+ * Doc: docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124.
+ */
+export function taperedStepdown(tip: number, angle: number, D: number, k: number): number {
+  if (!(k > 0) || !(tip > 0)) return 0
+  const { tangent, largeEnd } = taperHeights(tip, angle, D)
+  // beyond the cone: De = DC
+  if (k * D >= largeEnd) return k * D
+  // on the cone: De = A + B·ap
+  const r = tip / 2
+  const theta = (angle * Math.PI) / 180
+  const A = (2 * r) / Math.cos(theta) - 2 * r * Math.tan(theta)
+  const B = 2 * Math.tan(theta)
+  if (k * B < 1) {
+    const ap = (k * A) / (1 - k * B)
+    if (ap > tangent) return Math.min(ap, largeEnd)
+  }
+  // on the ball: ap = k · 2√(ap (2r − ap))
+  return Math.min(tangent, (8 * k * k * r) / (1 + 4 * k * k))
+}
 
 /** F5 axial chip-thinning factor `1 / sin κ`, `cos κ = (RE − ap)/RE`; 1 for flat or `ap ≥ RE`. */
 export function actf(RE: number, ap: number): number {

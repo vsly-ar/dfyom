@@ -30,8 +30,8 @@ export const FOLLOWED_FIELDS = ['spindleSpeed', 'feedRate', 'plungeRate', 'stepd
 export type FollowedField = (typeof FOLLOWED_FIELDS)[number]
 
 /**
- * A preset's engagement: drilling for a drill, the full cone (De = DC) for a chamfer mill, else a
- * full-width slot.
+ * A preset's engagement: drilling for a drill, the full cone (De = DC) for a chamfer mill, a 1 mm
+ * deep Line for a tapered ball end mill, else a full-width slot.
  */
 function presetEngagement(tool: Tool): Engagement {
   if (tool.type === 'drill') return { kind: 'drill' }
@@ -42,8 +42,13 @@ function presetEngagement(tool: Tool): Engagement {
       depth: chamferFullDepth(tool.tipDiameterMm, angle, tool.diameter.canonical),
     }
   }
+  // a tapered ball at a typical carving depth, not the full cone (tapered-ball-nose.md § Feeds)
+  if (tool.type === 'taperedBallEndMill') return { kind: 'taper', depth: PRESET_TAPER_DEPTH }
   return { kind: 'slot' }
 }
+
+/** A tapered ball end mill's recommended preset is for a Line this deep (mm). */
+export const PRESET_TAPER_DEPTH = 1
 
 /** The recommendation for `tool` in `materialClass`, or the calculator's reason it has none. */
 export function presetRecommendation(

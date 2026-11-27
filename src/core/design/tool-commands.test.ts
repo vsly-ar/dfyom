@@ -318,8 +318,8 @@ describe('design.operation.tool.set / lock / unlock', () => {
   })
 
   // docs/modes/tapered-ball-nose.md#agent-api (DF124 T1): library.tool.add takes the type, the
-  // tool field only as a library tool, and no operation fits it before T2
-  it('a tapered ball end mill: library.tool.add stores it; never generalized; fits no operation yet', async () => {
+  // tool field only as a library tool; no pocket fits it (Lines do from T2 on)
+  it('a tapered ball end mill: library.tool.add stores it; never generalized; fits no pocket', async () => {
     const s = await setup()
     const taper = { tipDiameter: '0.5', taperAngle: '3.6', shankDiameter: '1/8"' }
     const id = await s.addTool('taperedBallEndMill', '1/8"', taper)

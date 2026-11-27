@@ -44,6 +44,7 @@ import {
   pocketInput,
   profileInput,
   RATES,
+  taperedBall,
 } from '../../toolpath/testing/fixtures'
 import { exportGrbl, type ExportOperation, type GrblExport } from '../export'
 import { exportInput, operation, OPTS, testMachine, testPartExport } from '../post.fixture'
@@ -375,6 +376,33 @@ const lineClosedOps = (): ExportOperation[] => {
   return [operation(generateLine(lineInput(stock, op, tool)).unwrap(), tool)]
 }
 
+/**
+ * A tapered ball end mill (tapered-ball-nose.md, DF124 T2): R0.25 at 3.6° per side on a 1/8″
+ * large end, plunged into the open curve of `lineRampOps`, 0.3 → 1.2 mm in 0.5 mm passes.
+ */
+const lineTaperedBallOps = (): ExportOperation[] => {
+  const tool = taperedBall(3.175, 0.5, 3.6)
+  const op = {
+    kind: 'line',
+    id: 'line1',
+    onZ: 0,
+    paths: [
+      {
+        center: [30, 20],
+        contour: {
+          kind: 'path',
+          path: { elements: [line([-20, -5], [0, -5]), arc([0, -5], [10, 5], [0, 5], true)] },
+        },
+      },
+    ],
+    depth: { start: 0.3, end: 1.2 },
+    cutter: { kind: 'taperedBall', diameter: 3.175, tipDiameter: 0.5, taperAngle: 3.6 },
+  } as const
+  const stock = { length: 60, width: 40, thickness: 10 }
+  const input = lineInput(stock, op, tool, { entry: 'plunge' }, { feedRate: 600, plungeRate: 300 })
+  return [operation(generateLine(input).unwrap(), tool)]
+}
+
 const chamferOps = (inch = false): ExportOperation[] => {
   const d = inch ? 25.4 / 4 : 6
   const stock = { length: 40, width: 30, thickness: 10 }
@@ -652,7 +680,9 @@ function expectDialect(lines: readonly string[], units: 'mm' | 'in'): void {
     const pause = /^M0 ;([^()?!~;]+)$/.exec(full)
     if (full.includes(';')) expect(pause, full).not.toBeNull()
     const l = pause ? 'M0' : full
-    expect(l).not.toMatch(/G8\d|G28|G30|G53|G92|G43|M6|M7|M8|M9|^N|%|;|R/)
+    // a comment may name a tapered ball's radius (`R0.25`, DF124): GRBL strips comments
+    const banned = /G8\d|G28|G30|G53|G92|G43|M6|M7|M8|M9|^N|%|;/
+    expect(l).not.toMatch(l.startsWith('(') ? banned : new RegExp(`${banned.source}|R`))
     if (l.startsWith('(')) {
       expect(l).toMatch(/^\([^()?!~;]*\)$/)
       continue
@@ -707,6 +737,7 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['line-ramp', lineRampOps],
     ['line-vgroove-closed', lineClosedOps],
     ['line-levels', lineLevelsOps],
+    ['line-tapered-ball', lineTaperedBallOps],
     ['engraving-rosette', engravingRosetteOps],
     ['engraving-waves-tiled', engravingWavesOps],
     ['engraving-scales-polar', engravingPolarOps],

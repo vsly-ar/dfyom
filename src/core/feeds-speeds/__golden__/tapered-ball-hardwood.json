@@ -1,0 +1,282 @@
+{
+  "spindleSpeed": {
+    "value": 18000,
+    "unit": "rpm",
+    "derivation": [
+      {
+        "step": "data",
+        "formula": "n = min + rangePos · (max − min)",
+        "inputs": {
+          "field": "n",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "min": 18000,
+          "max": 18000
+        },
+        "result": 18000,
+        "unit": "rpm",
+        "sources": [
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      }
+    ]
+  },
+  "feedRate": {
+    "value": 600.1234721153742,
+    "unit": "mm/min",
+    "derivation": [
+      {
+        "step": "data",
+        "formula": "n = min + rangePos · (max − min)",
+        "inputs": {
+          "field": "n",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "min": 18000,
+          "max": 18000
+        },
+        "result": 18000,
+        "unit": "rpm",
+        "sources": [
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "F11",
+        "formula": "De = 2·√(d·(dt − d)) if d ≤ h_t, else dt/cos θ + 2·(d − dt/2)·tan θ; ≤ DC",
+        "inputs": {
+          "dt": 0.5,
+          "depth": 1,
+          "angle": 3.6,
+          "DC": 3.175
+        },
+        "result": 0.5953605874160457,
+        "unit": "mm"
+      },
+      {
+        "step": "data",
+        "formula": "fz = min + rangePos · (max − min)",
+        "inputs": {
+          "field": "fz",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "min": 0.0762,
+          "max": 0.127
+        },
+        "result": 0.0889,
+        "unit": "mm",
+        "sources": [
+          "LMT Onsrud, Hard Wood Cutting Data Recommendations (catalog p. 115), series 52-200/57-200 row, chip load per tooth at 1/8\", 1/4\", 1/2\", \"DEPTH OF CUT: 1 x D Use recommended chip load\" – https://onsrud.com/images/Hard%20Wood.pdf",
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "fzScale",
+        "formula": "fz = fz(3.175 mm) · De / 3.175",
+        "inputs": {
+          "fz": 0.0889,
+          "De": 0.5953605874160457,
+          "factor": 0.18751514564284905
+        },
+        "result": 0.01667009644764928,
+        "unit": "mm"
+      },
+      {
+        "step": "F3",
+        "formula": "RCTF = 1 / (2·√((ae/D)·(1 − ae/D))) if ae < D/2, else 1",
+        "inputs": {
+          "ae": 0.5953605874160457,
+          "D": 0.5953605874160457,
+          "engagement": "taper"
+        },
+        "result": 1,
+        "unit": "×"
+      },
+      {
+        "step": "F5",
+        "formula": "ACTF = 1 / sin κ, cos κ = (RE − ap)/RE if ap < RE, else 1",
+        "inputs": {
+          "RE": 0,
+          "ap": 0.2505274794626621
+        },
+        "result": 1,
+        "unit": "×"
+      },
+      {
+        "step": "F2",
+        "formula": "vf = n · z · fz · RCTF · ACTF",
+        "inputs": {
+          "n": 18000,
+          "z": 2,
+          "fz": 0.01667009644764928,
+          "factor": 1
+        },
+        "result": 600.1234721153742,
+        "unit": "mm/min"
+      }
+    ]
+  },
+  "plungeRate": {
+    "value": 300.0617360576871,
+    "unit": "mm/min",
+    "derivation": [
+      {
+        "step": "data",
+        "formula": "n = min + rangePos · (max − min)",
+        "inputs": {
+          "field": "n",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "min": 18000,
+          "max": 18000
+        },
+        "result": 18000,
+        "unit": "rpm",
+        "sources": [
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "F11",
+        "formula": "De = 2·√(d·(dt − d)) if d ≤ h_t, else dt/cos θ + 2·(d − dt/2)·tan θ; ≤ DC",
+        "inputs": {
+          "dt": 0.5,
+          "depth": 1,
+          "angle": 3.6,
+          "DC": 3.175
+        },
+        "result": 0.5953605874160457,
+        "unit": "mm"
+      },
+      {
+        "step": "data",
+        "formula": "fz = min + rangePos · (max − min)",
+        "inputs": {
+          "field": "fz",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "min": 0.0762,
+          "max": 0.127
+        },
+        "result": 0.0889,
+        "unit": "mm",
+        "sources": [
+          "LMT Onsrud, Hard Wood Cutting Data Recommendations (catalog p. 115), series 52-200/57-200 row, chip load per tooth at 1/8\", 1/4\", 1/2\", \"DEPTH OF CUT: 1 x D Use recommended chip load\" – https://onsrud.com/images/Hard%20Wood.pdf",
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "fzScale",
+        "formula": "fz = fz(3.175 mm) · De / 3.175",
+        "inputs": {
+          "fz": 0.0889,
+          "De": 0.5953605874160457,
+          "factor": 0.18751514564284905
+        },
+        "result": 0.01667009644764928,
+        "unit": "mm"
+      },
+      {
+        "step": "F3",
+        "formula": "RCTF = 1 / (2·√((ae/D)·(1 − ae/D))) if ae < D/2, else 1",
+        "inputs": {
+          "ae": 0.5953605874160457,
+          "D": 0.5953605874160457,
+          "engagement": "taper"
+        },
+        "result": 1,
+        "unit": "×"
+      },
+      {
+        "step": "F5",
+        "formula": "ACTF = 1 / sin κ, cos κ = (RE − ap)/RE if ap < RE, else 1",
+        "inputs": {
+          "RE": 0,
+          "ap": 0.2505274794626621
+        },
+        "result": 1,
+        "unit": "×"
+      },
+      {
+        "step": "F2",
+        "formula": "vf = n · z · fz · RCTF · ACTF",
+        "inputs": {
+          "n": 18000,
+          "z": 2,
+          "fz": 0.01667009644764928,
+          "factor": 1
+        },
+        "result": 600.1234721153742,
+        "unit": "mm/min"
+      },
+      {
+        "step": "data",
+        "formula": "kPlunge from the material table",
+        "inputs": {
+          "field": "kPlunge",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide",
+          "estimated": "yes"
+        },
+        "result": 0.5,
+        "unit": "×",
+        "sources": [
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "F9",
+        "formula": "plungeRate = kPlunge · vf",
+        "inputs": {
+          "kPlunge": 0.5,
+          "vf": 600.1234721153742
+        },
+        "result": 300.0617360576871,
+        "unit": "mm/min"
+      }
+    ]
+  },
+  "stepdown": {
+    "value": 0.2505274794626621,
+    "unit": "mm",
+    "derivation": [
+      {
+        "step": "data",
+        "formula": "apSlot from the material table",
+        "inputs": {
+          "field": "apSlot",
+          "materialClass": "hardwood",
+          "toolMaterial": "carbide"
+        },
+        "result": 1,
+        "unit": "× D",
+        "sources": [
+          "LMT Onsrud, Hard Wood Cutting Data Recommendations (catalog p. 115), series 52-200/57-200 row, chip load per tooth at 1/8\", 1/4\", 1/2\", \"DEPTH OF CUT: 1 x D Use recommended chip load\" – https://onsrud.com/images/Hard%20Wood.pdf",
+          "Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: \"CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter\", chip load per tooth at 1/16\", 1/8\", 1/4\", 1/2\", \"Ramp Down: Feed Rate IPM / # of flutes\" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf"
+        ]
+      },
+      {
+        "step": "taperAp",
+        "formula": "largest ap with ap ≤ apSlot · apFactor · De(ap)",
+        "inputs": {
+          "apSlot": 1,
+          "apFactor": 0.5,
+          "rigidity": "hobby",
+          "dt": 0.5,
+          "angle": 3.6
+        },
+        "result": 0.2505274794626621,
+        "unit": "mm"
+      }
+    ]
+  },
+  "display": {
+    "dCalc": 0.5953605874160457,
+    "vc": 33.666848057936754,
+    "fz": 0.01667009644764928,
+    "chipThinning": 1,
+    "Q": 89.51092878507848,
+    "Pc": 0.0010181868149302677,
+    "spindleLoad": -1
+  }
+}

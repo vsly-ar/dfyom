@@ -15,8 +15,10 @@ import {
   plungeRate,
   rctf,
   spindleSpeed,
+  taperedStepdown,
   unitPowerFromKp,
 } from './formulas'
+import { taperedGrooveWidth } from '../library/tool'
 
 const IN = 25.4
 
@@ -150,5 +152,23 @@ describe('F10 chamfer mill effective diameter (v0.4 C1)', () => {
     const depth = chamferFullDepth(0.5, 60, 6)
     expect(chamferEffectiveDiameter(0.5, depth, 60, 6)).toBeCloseTo(6, 9)
     expect(chamferFullDepth(0, 90, 12)).toBeCloseTo(6, 9)
+  })
+})
+
+// docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124
+describe('F11 tapered ball end mill: stepdown against the groove width (DF124 T2)', () => {
+  const W = (ap: number) => taperedGrooveWidth(0.5, 3.6, 3.175, ap)
+  it('the largest ap with ap ≤ k · De(ap): on the cone, the ball and beyond the cone', () => {
+    // the doc's example: R0.25, 3.6°, k = 1 → ≈ 0.54 mm (on the cone)
+    const cone = taperedStepdown(0.5, 3.6, 3.175, 1)
+    expect(cone).toBeCloseTo(0.537, 3)
+    expect(cone).toBeCloseTo(W(cone), 9)
+    // small k: on the ball (below h_t = 0.234 mm)
+    const ball = taperedStepdown(0.5, 3.6, 3.175, 0.3)
+    expect(ball).toBeLessThan(0.234)
+    expect(ball).toBeCloseTo(0.3 * W(ball), 9)
+    // huge k: De is DC beyond the cone (h_D = 21.5 mm)
+    expect(taperedStepdown(0.5, 3.6, 3.175, 10)).toBeCloseTo(31.75, 9)
+    expect(taperedStepdown(0.5, 3.6, 3.175, 0)).toBe(0)
   })
 })

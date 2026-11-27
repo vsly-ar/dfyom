@@ -31,8 +31,11 @@ export const EngagementSchema = z
     z.object({ kind: z.literal('helix'), ap: mm().describe('Helix pitch in mm') }),
     z.object({ kind: z.literal('drill') }),
     z.object({ kind: z.literal('chamfer'), depth: mm().describe('Depth below the tip in mm') }),
+    z.object({ kind: z.literal('taper'), depth: mm().describe('Line depth in mm') }),
   ])
-  .describe('Tool engagement: slot (pocket, profile), stepover (facing), helix, drill, chamfer')
+  .describe(
+    'Tool engagement: slot (pocket, profile), stepover (facing), helix, drill, chamfer, taper (tapered ball)',
+  )
 
 export const LockedSchema = z
   .object({

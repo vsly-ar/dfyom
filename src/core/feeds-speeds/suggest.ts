@@ -9,7 +9,7 @@ import { None, Option, Some } from '../../shared/result'
 import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { Machine } from '../library/machine'
 import type { Rigidity } from '../library/machine.dto'
-import type { Tool } from '../library/tool'
+import { taperedGrooveWidth, type Tool } from '../library/tool'
 import { TOOL_TYPE_LABEL } from '../design/tool'
 import {
   bandOf,
@@ -38,6 +38,7 @@ import {
   rctf,
   spindleSpeed,
   surfaceSpeed,
+  taperedStepdown,
 } from './formulas'
 
 /**
@@ -52,6 +53,11 @@ export type Engagement =
   | { readonly kind: 'drill' }
   /** A chamfer mill cutting `depth` mm below its tip (F10: speed and chip load at De). */
   | { readonly kind: 'chamfer'; readonly depth: number }
+  /**
+   * A tapered ball end mill cutting a Line `depth` mm deep (F11: speed and chip load at the groove
+   * width De there; the stepdown is suggested, docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124).
+   */
+  | { readonly kind: 'taper'; readonly depth: number }
 
 /** The engagement's fixed axial depth: the helix pitch or the chamfer depth; else undefined. */
 export const fixedAp = (e: Engagement): number | undefined =>
@@ -117,6 +123,8 @@ export type StepId =
   | 'F8'
   | 'F9'
   | 'F10'
+  | 'F11'
+  | 'taperAp'
   | 'fzScale'
 
 /** One step of an explanation: rendered as a formula/tooltip, returned verbatim to agents. */
@@ -219,14 +227,15 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   const none = (reason: string, params: Record<string, number | string>): Lookup => ({
     noData: noData(reason, params),
   })
-  // its taper engagement comes with Lines (docs/modes/tapered-ball-nose.md#feeds-and-speeds, T2):
-  // never as a flat end mill of the large end Ø, whose chip load would break the tip
-  if (tool.type === 'taperedBallEndMill')
-    return none('no calculator data for a tapered ball end mill yet: enter the values', {
-      toolType: tool.type,
-    })
   const isChamfer = tool.type === 'chamferMill'
-  if (isDrill !== (engagement.kind === 'drill') || isChamfer !== (engagement.kind === 'chamfer'))
+  // a tapered ball only by its taper engagement (F11): never as a flat end mill of the large end
+  // Ø, whose chip load would break the tip
+  const isTaper = tool.type === 'taperedBallEndMill'
+  if (
+    isDrill !== (engagement.kind === 'drill') ||
+    isChamfer !== (engagement.kind === 'chamfer') ||
+    isTaper !== (engagement.kind === 'taper')
+  )
     return none(`a ${engagement.kind} cut does not fit a ${TOOL_TYPE_LABEL[tool.type]}`, {
       engagement: engagement.kind,
       toolType: tool.type,
@@ -250,8 +259,14 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
       `no speed data for ${TOOL_MATERIAL_WORDS[toolMaterial]} in ${MATERIAL_CLASS_WORDS[materialClass]}`,
       { materialClass },
     )
-  // a chamfer mill is treated as a flat end mill of its effective diameter at the depth (F10)
-  const chamfer = engagement.kind === 'chamfer' ? chamferStep(tool, engagement.depth) : undefined
+  // a chamfer mill (F10) or a tapered ball (F11) is treated as a flat end mill of its effective
+  // diameter at the depth
+  const chamfer =
+    engagement.kind === 'chamfer'
+      ? chamferStep(tool, engagement.depth)
+      : engagement.kind === 'taper'
+        ? taperStep(tool, engagement.depth)
+        : undefined
   const D = chamfer?.result ?? tool.diameter.canonical
   if (!isDrill && chamfer === undefined && D > 0 && D < MIN_END_MILL_DIAMETER)
     return none(`end mills under ${MIN_END_MILL_DIAMETER} mm need entered values`, {
@@ -314,6 +329,20 @@ function chamferStep(tool: Tool, depth: number): DerivationStep {
   }
 }
 
+/** F11: the tapered ball end mill's effective diameter, the groove width at `depth`. */
+function taperStep(tool: Tool, depth: number): DerivationStep {
+  const DC = tool.diameter.canonical
+  const dt = tool.tipDiameterMm
+  const angle = tool.taperAngle.mapOr(0, (q) => q.canonical)
+  return {
+    step: 'F11',
+    formula: 'De = 2·√(d·(dt − d)) if d ≤ h_t, else dt/cos θ + 2·(d − dt/2)·tan θ; ≤ DC',
+    inputs: { dt, depth, angle, DC },
+    result: taperedGrooveWidth(dt, angle, DC, depth),
+    unit: 'mm',
+  }
+}
+
 interface Ctx {
   readonly input: CuttingInput
   readonly row: MaterialRow
@@ -326,7 +355,7 @@ interface Ctx {
   /** Tool diameter, or a chamfer mill's effective diameter De (F10). */
   readonly D: number
   readonly locked: LockedInputs
-  /** Chamfer engagement: the F10 step that gave `D`. */
+  /** Chamfer or taper engagement: the F10 or F11 step that gave `D`. */
   readonly chamfer?: DerivationStep
   /**
    * D (a chamfer's De) below the smallest charted diameter: the chart's `fz` range and the factor
@@ -351,17 +380,45 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   if (fixed !== undefined) return millAt(c, ae, fixed, None).suggestion
 
   // Calculator-owned stepdown: apSlot × D × apFactor, ≤ fluteLength; reduced to fit the power.
+  // A tapered ball: the largest ap ≤ apSlot × apFactor × De(ap), its groove width at ap (F11).
   const fluteLength = tool.fluteLength.canonical
-  const raw = c.row.apSlot * c.D * factors.apFactor
+  const raw =
+    e.kind === 'taper'
+      ? taperedStepdown(
+          tool.tipDiameterMm,
+          tool.taperAngle.mapOr(0, (q) => q.canonical),
+          tool.diameter.canonical,
+          c.row.apSlot * factors.apFactor,
+        )
+      : c.row.apSlot * c.D * factors.apFactor
   const apSteps: DerivationStep[] = [
     dataStep(c.row, 'apSlot', c.row.apSlot, '× D'),
-    {
-      step: 'rigidity',
-      formula: 'ap = apSlot · D · apFactor',
-      inputs: { apSlot: c.row.apSlot, D: c.D, apFactor: factors.apFactor, rigidity: c.rigidity },
-      result: raw,
-      unit: 'mm',
-    },
+    e.kind === 'taper'
+      ? {
+          step: 'taperAp',
+          formula: 'largest ap with ap ≤ apSlot · apFactor · De(ap)',
+          inputs: {
+            apSlot: c.row.apSlot,
+            apFactor: factors.apFactor,
+            rigidity: c.rigidity,
+            dt: tool.tipDiameterMm,
+            angle: tool.taperAngle.mapOr(0, (q) => q.canonical),
+          },
+          result: raw,
+          unit: 'mm',
+        }
+      : {
+          step: 'rigidity',
+          formula: 'ap = apSlot · D · apFactor',
+          inputs: {
+            apSlot: c.row.apSlot,
+            D: c.D,
+            apFactor: factors.apFactor,
+            rigidity: c.rigidity,
+          },
+          result: raw,
+          unit: 'mm',
+        },
   ]
   let ap = raw
   if (raw > fluteLength) {
@@ -414,7 +471,8 @@ function millAt(
   const { D, row, locked: L } = c
   const warnings: CuttingWarning[] = []
   const pos = RIGIDITY_FACTORS[c.rigidity].rangePos
-  const RE = tool.effectiveCornerRadius.toNumber()
+  // a tapered ball is a flat end mill of Ø De (F11): its ball is already in De
+  const RE = engagement.kind === 'taper' ? 0 : tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
 
   // Chip load: F3 × F5, capped.
@@ -919,7 +977,7 @@ export interface FinishingFeed {
  * The finishing pass's own feed (docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74):
  * the feed that keeps the chip load of the values used at the radial engagement `allowance`
  * (axial `finishAp`), at most the machine's X/Y feed limit. None without data, without positive
- * `n` and `vf`, for drills and chamfer engagements, or without an allowance.
+ * `n` and `vf`, for drills, chamfer and taper engagements, or without an allowance.
  */
 export function finishingAt(
   input: CuttingInput,
@@ -929,7 +987,8 @@ export function finishingAt(
   data: readonly MaterialRow[] = MATERIAL_DATA,
 ): Option<FinishingFeed> {
   const e = input.engagement
-  if (e.kind === 'drill' || e.kind === 'chamfer' || !(allowance > 0)) return None
+  if (e.kind === 'drill' || e.kind === 'chamfer' || e.kind === 'taper' || !(allowance > 0))
+    return None
   const found = contextOf(input, data)
   if ('noData' in found || !(values.n > 0) || !(values.vf > 0)) return None
   const c = found.ctx

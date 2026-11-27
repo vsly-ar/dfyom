@@ -183,6 +183,29 @@ export function taperHeights(
   }
 }
 
+/**
+ * The width of a straight groove a tapered ball end mill cuts `depth` mm deep in one pass
+ * (docs/modes/tapered-ball-nose.md#the-tool): the ball alone 2 √(d (2r − d)) up to the tangent
+ * height h_t, then 2 r / cos θ + 2 (d − r) tan θ, capped at the large end Ø `diameter`. The same
+ * number is the F11 effective diameter (docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124).
+ */
+export function taperedGrooveWidth(
+  tipDiameter: number,
+  taperAngle: number,
+  diameter: number,
+  depth: number,
+): number {
+  if (!(depth > 0)) return 0
+  const r = tipDiameter / 2
+  const theta = (taperAngle * Math.PI) / 180
+  const { tangent } = taperHeights(tipDiameter, taperAngle, diameter)
+  const w =
+    depth <= tangent
+      ? 2 * Math.sqrt(depth * (2 * r - depth))
+      : (2 * r) / Math.cos(theta) + 2 * (depth - r) * Math.tan(theta)
+  return Math.min(diameter, w)
+}
+
 export class Tool implements ToolProps {
   readonly kind = 'tool'
 

@@ -96,8 +96,8 @@ export const TOOL_TYPES_FOR: Readonly<Record<Operation['kind'], readonly ToolTyp
   drilling: ['drill', 'flatEndMill'],
   profile: ['flatEndMill'],
   chamfer: ['chamferMill'],
-  // engraved-patterns.md § Line operation: a V-bit (default), ball or flat end mill
-  line: ['chamferMill', 'ballEndMill', 'flatEndMill'],
+  // engraved-patterns.md § Line operation: a V-bit (default), tapered ball, ball or flat end mill
+  line: ['chamferMill', 'taperedBallEndMill', 'ballEndMill', 'flatEndMill'],
 }
 
 /** Float slack for comparisons of derived float64 values. */
@@ -158,15 +158,10 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
   const stepped = i.ops.some((o) => o.kind === 'chamfer' && o.stepdown.isSome())
   const types: readonly ToolType[] = stepped ? ['flatEndMill'] : TOOL_TYPES_FOR[kind]
   if (!types.includes(tool.type)) {
-    // a tapered ball end mill cuts Lines from T2 on (docs/modes/tapered-ball-nose.md#which-operations-can-use-it)
-    const later =
-      tool.type === 'taperedBallEndMill' && kind === 'line'
-        ? ' (tapered ball end mills: not yet)'
-        : ''
     add(
       'tool',
       'toolType',
-      `a ${stepped ? 'stepped chamfer' : kind} needs a ${types.join(' or ')}${later}`,
+      `a ${stepped ? 'stepped chamfer' : kind} needs a ${types.join(' or ')}`,
       {
         toolType: tool.type,
       },

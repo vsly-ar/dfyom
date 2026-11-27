@@ -1590,10 +1590,12 @@ const operationFeedsGet = defineQuery({
         fluteCount: Num,
         cornerRadius: Num.describe('Effective corner radius, mm'),
         engagement: z.object({
-          kind: z.enum(['slot', 'stepover', 'helix', 'drill', 'chamfer']),
+          kind: z.enum(['slot', 'stepover', 'helix', 'drill', 'chamfer', 'taper']),
           ae: Num.optional().describe('Stepover, mm'),
           ap: Num.optional().describe('Helix pitch, mm'),
-          depth: Num.optional().describe('Chamfer depth below the tip, mm'),
+          depth: Num.optional().describe(
+            'Chamfer depth below the tip, or the taper Line depth, mm',
+          ),
         }),
         rigidity: z.string().describe('Machine rigidity (default without a machine)'),
         spindlePower: Num.nullable().describe('W; null: power check skipped'),
@@ -1657,7 +1659,7 @@ const operationFeedsGet = defineQuery({
                 ? { kind: g.kind, ae: g.ae }
                 : g.kind === 'helix'
                   ? { kind: g.kind, ap: g.ap }
-                  : g.kind === 'chamfer'
+                  : g.kind === 'chamfer' || g.kind === 'taper'
                     ? { kind: g.kind, depth: g.depth }
                     : { kind: g.kind },
             rigidity: machine.mapOr<string>(DEFAULT_RIGIDITY, (m) => m.rigidity),

@@ -66,7 +66,7 @@ import {
   lineDeepestPoint,
   lineMaxDepth,
   lineMinDepth,
-  vBitEdgeHeight,
+  cutterEdgeHeight,
 } from './line'
 import { LINE_MERGE_WALL, lineMerges } from './line-merge'
 import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
@@ -81,8 +81,10 @@ export interface DfmTool {
   readonly cornerRadius?: number
   /** Chamfer mill only: included angle, degrees. */
   readonly angle?: number
-  /** Chamfer mill only: tip diameter (0 = pointed). */
+  /** Chamfer mill: tip diameter (0 = pointed); tapered ball end mill: the ball Ø. */
   readonly tipDiameter?: number
+  /** Tapered ball end mill only: the angle per side, degrees (docs/modes/tapered-ball-nose.md). */
+  readonly taperAngle?: number
   /** How deep it reaches: its default stickout, else its flute length (`dfm.reach`). */
   readonly reach?: number
   /** Flute length LCF (specific tools only): the wall depth it cuts (fit rule `flutes`, DF89). */
@@ -311,8 +313,8 @@ export const LINE_SHALLOW = 0.05
 
 /**
  * A Line's findings (engraved-patterns.md § DFM): `dfm.lineTooDeep` when its deepest point is
- * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2), at most
- * its flute length when known; an end mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm,
+ * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2) or a tapered
+ * ball's h_D, at most its flute length when known; an end mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm,
  * `dfm.lineMerge` (E4) where two grooves leave a wall under 0.3 mm (markers at up to 10 places).
  */
 function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[] {
@@ -340,16 +342,14 @@ function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[
     )
   }
   const deepest = lineMaxDepth(op)
-  // a V-bit cuts to its cone's height or its flute length, whichever is shorter: a sharp
-  // engraving bit's cone (15°, Ø3.175: 12 mm) is often longer than its flutes (DF123)
+  // a V-bit or tapered ball cuts to its cone's height or its flute length, whichever is shorter:
+  // a sharp engraving bit's cone (15°, Ø3.175: 12 mm) is often longer than its flutes (DF123),
+  // a tapered ball's flutes often end first (docs/modes/tapered-ball-nose.md#line-operation)
   const flutes = own?.tool.fluteLength
-  const edge = vBitEdgeHeight(op.cutter)
+  const edge = cutterEdgeHeight(op.cutter)
+  const shaped = own?.tool.type === 'chamferMill' || own?.tool.type === 'taperedBallEndMill'
   const cuts =
-    edge === undefined
-      ? flutes
-      : flutes === undefined || own?.tool.type !== 'chamferMill'
-        ? edge
-        : Math.min(edge, flutes)
+    edge === undefined ? flutes : flutes === undefined || !shaped ? edge : Math.min(edge, flutes)
   if (cuts !== undefined && deepest > cuts + EPSILON) {
     const at = deepestPoint(op)
     out.push(

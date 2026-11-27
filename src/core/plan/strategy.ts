@@ -52,7 +52,7 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance', 'finishStepdown'],
   // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
   chamfer: ['entry', 'rampAngle'],
-  // Line (engraved-patterns.md § Toolpath): ramp-back (default) or plunge (V-bits)
+  // Line (engraved-patterns.md § Toolpath): ramp-back (default) or plunge (V-bits, tapered balls)
   line: ['entry', 'rampAngle'],
 }
 
@@ -165,7 +165,7 @@ type Direction = (typeof DIRECTIONS)[number]
 export type ResolvedStrategy =
   | {
       readonly kind: 'line'
-      /** Ramp-back entry (default) or a straight plunge (V-bits only). */
+      /** Ramp-back entry (default) or a straight plunge (V-bits and tapered balls only). */
       readonly entry: 'ramp' | 'plunge'
       readonly rampAngle: number
       /** The deepest point of the groove (mm): F10's `depth` for a V-bit's feeds. */
@@ -525,12 +525,14 @@ export function strategyIssues(
     kind === 'line' &&
     s.entry === 'plunge' &&
     tool.isSome() &&
-    tool.unwrap().type !== 'chamferMill'
+    // a tapered ball's small tip is backed by its cone (tapered-ball-nose.md#line-operation)
+    tool.unwrap().type !== 'chamferMill' &&
+    tool.unwrap().type !== 'taperedBallEndMill'
   )
     bad(
       'entry',
       'linePlunge',
-      'only a V-bit plunges into a line; ramp with a ball or flat end mill',
+      'only a V-bit or a tapered ball plunges into a line; ramp with a ball or flat end mill',
     )
   if (kind === 'chamfer' && (s.entry === 'helix' || s.entry === 'ramp'))
     bad('entry', 'notForKind', 'a chamfer is plunged or contoured')

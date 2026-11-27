@@ -22,6 +22,7 @@ import { ClipBoundary, clipLine } from './2d/clip-lines'
 import { arcSegments } from './contour'
 import { localSolids, Table, type LocalSolids } from './local-solids'
 import type { LabelledMesh } from './loft'
+import { taperHeights, taperedGrooveWidth } from '../library/tool'
 import {
   CHORD_TOLERANCE,
   EPSILON,
@@ -526,10 +527,13 @@ export function lineDeepestPoint(op: LineChainsInput): number[] | undefined {
 
 /**
  * The groove's width at the face for a depth (research § Tools): V-bit dt + 2 d tan(α/2) up to its
- * Ø; ball 2 √(d (D − d)) up to D; flat D.
+ * Ø; ball 2 √(d (D − d)) up to D; flat D; tapered ball the ball, then the cone
+ * (`taperedGrooveWidth`, docs/modes/tapered-ball-nose.md#the-tool).
  */
 export function grooveWidth(c: LineCutter, depth: number): number {
   if (c.kind === 'flat') return c.diameter
+  if (c.kind === 'taperedBall')
+    return taperedGrooveWidth(c.tipDiameter, c.taperAngle, c.diameter, depth)
   if (c.kind === 'ball') {
     const R = c.diameter / 2
     return depth >= R ? c.diameter : 2 * Math.sqrt(depth * (c.diameter - depth))
@@ -537,8 +541,13 @@ export function grooveWidth(c: LineCutter, depth: number): number {
   return Math.min(c.diameter, c.tipDiameter + 2 * depth * Math.tan((c.angle * Math.PI) / 360))
 }
 
-/** A V-bit's cutting-edge height (DC − dt) / 2 / tan(α/2) (mm); undefined for end mills. */
-export function vBitEdgeHeight(c: LineCutter): number | undefined {
+/**
+ * A shaped cutter's edge height (mm): a V-bit's (DC − dt) / 2 / tan(α/2), a tapered ball end mill's
+ * h_D (where its cone reaches DC, `taperHeights`); undefined for ball and flat end mills.
+ */
+export function cutterEdgeHeight(c: LineCutter): number | undefined {
+  if (c.kind === 'taperedBall')
+    return taperHeights(c.tipDiameter, c.taperAngle, c.diameter).largeEnd
   if (c.kind !== 'vBit') return undefined
   return (c.diameter - c.tipDiameter) / 2 / Math.tan((c.angle * Math.PI) / 360)
 }
@@ -567,6 +576,29 @@ function cutterRings(c: LineCutter, H: number): { h: number; r: number }[] {
       { h: hc, r: R },
       { h: H, r: R },
     ]
+  }
+  if (c.kind === 'taperedBall') {
+    // the ball up to the tangent height, then the cone to DC, then the large end Ø
+    const r = c.tipDiameter / 2
+    const theta = (c.taperAngle * Math.PI) / 180
+    const { tangent, largeEnd } = taperHeights(c.tipDiameter, c.taperAngle, c.diameter)
+    const top = Math.PI / 2 - theta
+    const m = arcSegments(r, top, CHORD_TOLERANCE / 4)
+    const rings = [{ h: 0, r: 0 }]
+    for (let k = 1; k <= m; k++) {
+      const phi = (k / m) * top
+      const h = r * (1 - Math.cos(phi))
+      if (h >= H) break
+      rings.push({ h, r: r * Math.sin(phi) })
+    }
+    if (H <= tangent) {
+      if (rings.at(-1)!.h < H) rings.push({ h: H, r: Math.sqrt(H * (2 * r - H)) })
+      return rings
+    }
+    const cone = (h: number) => r * Math.cos(theta) + (h - tangent) * Math.tan(theta)
+    if (H <= largeEnd) rings.push({ h: H, r: cone(H) })
+    else rings.push({ h: largeEnd, r: R }, { h: H, r: R })
+    return rings
   }
   // the ball's quarter profile finer than the chord tolerance: its volume within 0.5 %
   const m = arcSegments(R, Math.PI / 2, CHORD_TOLERANCE / 4)
