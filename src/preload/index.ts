@@ -29,6 +29,8 @@ import {
 import type { LibraryChange } from '../core/library/library'
 import type { AppSettings } from '../shared/settings'
 import type { RunProgram, RunStatus } from '../core/run/service'
+import type { RunJournal } from '../core/run/journal'
+import type { AppErrorData } from '../shared/errors/app-error'
 import type { ActionEvent } from '../core/commands/action-log'
 
 /** Subscribes to a main → renderer channel; returns the unsubscribe. */
@@ -99,6 +101,9 @@ const api: PreloadApi = {
     },
     readFile: (path) => ipcRenderer.invoke(IPC.runFileRead, path) as Promise<RunFileReadReply>,
     recentFiles: () => ipcRenderer.invoke(IPC.runFileRecent) as Promise<readonly string[]>,
+    reconnect: (action) =>
+      ipcRenderer.invoke(IPC.runReconnect, action) as Promise<AppErrorData | null>,
+    record: () => ipcRenderer.invoke(IPC.runRecord) as Promise<RunJournal | null>,
   },
   call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {

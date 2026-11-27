@@ -105,6 +105,8 @@ export interface FakeBridge extends PreloadApi {
   setRunFileChoice(choice: string | null): void
   /** `run.openFile` calls (their path, undefined = the dialog), in order. */
   readonly runFileOpens: (string | undefined)[]
+  /** DF129 RC4: `run.reconnect` actions, in order. */
+  readonly reconnects: ('cancel' | 'simulate')[]
   /** Main hands the window a gCode file to show in Run mode (DF93). */
   emitShowRunFile(path: string): void
   setLocalHttp(state: LocalHttpState): void
@@ -229,6 +231,7 @@ export function createFakeBridge(
   let runProgram: RunProgram | undefined
   const runFiles = new Map<string, string | null>()
   const runFileOpens: (string | undefined)[] = []
+  const reconnects: ('cancel' | 'simulate')[] = []
   const runFileShows = channel<string>()
   let runFileChoice: string | null = null
   let recentRunFiles: string[] = []
@@ -326,8 +329,14 @@ export function createFakeBridge(
         return Promise.resolve({ ok: true, text })
       },
       recentFiles: () => Promise.resolve(recentRunFiles),
+      reconnect(action) {
+        reconnects.push(action)
+        return Promise.resolve(null)
+      },
+      record: () => Promise.resolve(null),
     },
     runFileOpens,
+    reconnects,
     setRunFile(path, text) {
       runFiles.set(path, text)
     },

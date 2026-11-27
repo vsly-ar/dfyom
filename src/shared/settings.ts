@@ -74,6 +74,11 @@ const fields = {
    * (DF88, docs/conventions/ui.md#jog-position-and-probing-df88); the settings dialog clears it.
    */
   skipHomeConfirm: z.array(z.string().min(1)).max(1000),
+  /**
+   * DF129 RC4: after a connection lost during a run, reconnect to the same device by itself (reads
+   * only, never moves; docs/modes/run-recovery.md#auto-reconnect); default on.
+   */
+  autoReconnect: z.boolean(),
   /** Jog feed (mm/min) per library machine id: the jog feed slider's last value (DF88). */
   jogFeed: z.record(z.string().min(1), z.number().positive().finite()),
   /**
@@ -100,6 +105,7 @@ export const AppSettingsSchema = z.object({
   lastMachine: fields.lastMachine.default(null),
   jogKeys: fields.jogKeys.default('game'),
   skipHomeConfirm: fields.skipHomeConfirm.default([]),
+  autoReconnect: fields.autoReconnect.default(true),
   jogFeed: fields.jogFeed.default({}),
   inspectorGroups: fields.inspectorGroups.default({}),
   inspectorTabs: fields.inspectorTabs.default({}),
@@ -134,6 +140,7 @@ export function mergeSettings(
     lastMachine: patch.lastMachine === undefined ? current.lastMachine : patch.lastMachine,
     jogKeys: patch.jogKeys ?? current.jogKeys,
     skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
+    autoReconnect: patch.autoReconnect ?? current.autoReconnect,
     jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
     inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
     inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },

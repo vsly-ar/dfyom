@@ -21,6 +21,7 @@ function ascii(text: string): Uint8Array {
 
 export class VirtualGrblTransport implements ControllerTransport {
   private readonly listeners = new Set<(bytes: Uint8Array) => void>()
+  private readonly closeListeners = new Set<(reason: string) => void>()
   private cancelEvent: (() => void) | undefined
   private cancelDelivery: (() => void) | undefined
   private closed = false
@@ -65,8 +66,25 @@ export class VirtualGrblTransport implements ControllerTransport {
     return () => this.listeners.delete(listener)
   }
 
+  onClose(listener: (reason: string) => void): () => void {
+    this.closeListeners.add(listener)
+    return () => this.closeListeners.delete(listener)
+  }
+
+  /**
+   * DF129: the virtual cable is pulled ("Simulate a lost connection"): the transport reports
+   * `close` as a serial port does, then closes; the emulator stays as it was
+   * (docs/modes/run-recovery.md#implementation-rc4).
+   */
+  unplug(reason: string): void {
+    if (this.closed) return
+    for (const l of [...this.closeListeners]) l(reason)
+    void this.close()
+  }
+
   close(): AsyncAppResult<void> {
     this.closed = true
+    this.closeListeners.clear()
     this.cancelEvent?.()
     this.cancelDelivery?.()
     this.cancelEvent = this.cancelDelivery = undefined

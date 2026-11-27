@@ -24,6 +24,7 @@ import {
 } from './host/protocol'
 
 import { AlignmentStepSchema, type AlignmentStep } from './alignment'
+import { RECONNECT_PHASES } from './host/reconnect'
 import type { MachineValuesDTO } from '../library/machine.dto'
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
@@ -74,11 +75,24 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
     port: PortSchema.exactOptional(),
     timeScale: TimeScaleSchema,
     /**
-     * Closed: the last open connection was lost rather than closed by DFYOM (no reset reached the
+     * Closed (or connecting again by itself, DF129 RC4): the last open connection was lost rather than closed by DFYOM (no reset reached the
      * controller); cleared by the next connect (docs/modes/run-machine.md#lost-connection-m2).
      */
     lost: z
       .object({ target: z.enum(TARGET_KINDS), port: PortSchema.exactOptional() })
+      .exactOptional(),
+    /**
+     * DF129 RC4: auto-reconnect after a connection lost during a run: trying (`waiting` for the
+     * next attempt, `connecting`), `reconnected` (kept until the next run, connect or disconnect)
+     * or `gaveUp` after 2 minutes (until the next connect); `nextAt` epoch ms of the next attempt
+     * (docs/modes/run-recovery.md#implementation-rc4).
+     */
+    reconnect: z
+      .object({
+        phase: z.enum(RECONNECT_PHASES),
+        attempt: z.number().int(),
+        nextAt: z.number().exactOptional(),
+      })
       .exactOptional(),
   }),
   job: z

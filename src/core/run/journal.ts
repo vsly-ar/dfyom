@@ -87,6 +87,17 @@ export const RunJournalSchema = z.object({
   machine: z.object({
     target: z.enum(TARGET_KINDS),
     port: PortSchema.exactOptional(),
+    /**
+     * DF129 RC4: the port's USB identity as the OS reported it at connect, for reconnecting to the
+     * same device under another path (docs/modes/run-recovery.md#implementation-rc4).
+     */
+    usb: z
+      .object({
+        serialNumber: z.string().max(200).exactOptional(),
+        vendorId: z.string().max(20).exactOptional(),
+        productId: z.string().max(20).exactOptional(),
+      })
+      .exactOptional(),
     machineKey: z.string().max(200),
     /** From the controller's `$$`: the travel and the homing corner (docs/modes/run.md DF33). */
     envelope: z
@@ -144,6 +155,8 @@ export const RunJournalSchema = z.object({
   }),
 })
 export type RunJournal = z.output<typeof RunJournalSchema>
+/** DF129 RC4: a serial port's USB identity (any of it the OS reported). */
+export type UsbIdentity = NonNullable<RunJournal['machine']['usb']>
 
 /**
  * Main's writer of the run journal (`<appData>/run-journal.json`): saves atomically, the latest
@@ -260,6 +273,7 @@ export interface RecorderStart {
   readonly machine: {
     readonly target: TargetKind
     readonly port?: { readonly path: string; readonly baud: number } | undefined
+    readonly usb?: UsbIdentity | undefined
     readonly machineKey: string
     readonly envelope?: HostStatus['envelope']
   }
@@ -334,6 +348,7 @@ export class RunRecorder {
       machine: {
         target: start.machine.target,
         ...(start.machine.port === undefined ? {} : { port: { ...start.machine.port } }),
+        ...(start.machine.usb === undefined ? {} : { usb: { ...start.machine.usb } }),
         machineKey: start.machine.machineKey,
         ...(start.machine.envelope === undefined
           ? {}

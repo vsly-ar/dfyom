@@ -286,6 +286,11 @@ export interface RunState {
 
   connect(): Promise<void>
   disconnect(): Promise<void>
+  /**
+   * DF129 RC4: "Stop trying" (`cancel`) auto-reconnect, or "Simulate a lost connection"
+   * (`simulate`, the virtual machine during a run); a refusal shows as the action error.
+   */
+  reconnect(action: 'cancel' | 'simulate'): Promise<void>
   home(): Promise<void>
   unlock(): Promise<void>
   jog(axis: Axis, mm: number, feed: number): Promise<void>
@@ -603,6 +608,10 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           set({ settingsCheck: (r.value as { settingsCheck?: SettingsCheck }).settingsCheck })
       },
       disconnect: async () => void (await call('run.connection.close')),
+      async reconnect(action) {
+        const error = await bridge.run.reconnect(action)
+        set({ actionError: error ?? undefined })
+      },
       home: () => job('run.machine.home'),
       unlock: async () => void (await call('run.machine.unlock')),
       async jog(axis, mm, feed) {
