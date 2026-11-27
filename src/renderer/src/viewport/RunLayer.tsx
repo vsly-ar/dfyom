@@ -5,7 +5,7 @@
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
 // reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
 // (WorkholdingLayer.tsx, workholding.md); an operation's rest after its roughing (DF122,
-// RestLayer.tsx). Props only.
+// RestLayer.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -25,6 +25,7 @@ import { AidHandles, type AidOverlay } from './AidHandles'
 import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 import { RestLayer, type RestOverlay } from './RestLayer'
+import { GoToPath, type GoToOverlay } from './GoToPath'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -72,6 +73,11 @@ export interface RunScene {
    * coordinates; absent: none (docs/modes/roughing.md#plan-viewport-rest-shading).
    */
   readonly rest?: RestOverlay | undefined
+  /**
+   * The open Go to dialog's planned steps (run scene, DF128 GT2), in work coordinates: a dashed
+   * path from the tool to a target marker; absent: none (docs/modes/run-goto.md#preview).
+   */
+  readonly goTo?: GoToOverlay | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -230,6 +236,9 @@ export function RunLayer({
       ) : null}
       {run.alignment && run.alignment.length > 0 ? (
         <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />
+      ) : null}
+      {run.goTo ? (
+        <GoToPath goTo={run.goTo} palette={palette} reducedMotion={reducedMotion} />
       ) : null}
       {run.alignmentTargets && run.alignmentTargets.length > 0 ? (
         <AlignmentTargets targets={run.alignmentTargets} palette={palette} />

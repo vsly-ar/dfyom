@@ -8,7 +8,8 @@
 // its touch-off spot (docs/modes/z-reference.md#dfyom-run). DF64 L3: the lowered links between
 // operations (`plan.warning.list`) drawn as the program moves, so playback follows the tool.
 // An external gCode file (DF93) draws its own moves instead (`fileMoves`, work coordinates, no
-// setup frame). `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
+// setup frame). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
+// marker (docs/modes/run-goto.md#preview). `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
 // docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppMode } from '../../../../core/modes'
@@ -20,11 +21,13 @@ import { homedPosition } from '../../../../core/run/grbl/envelope'
 import { fileMoves } from '../../../../core/run/gcode-file'
 import { lengthSource } from '../../messages/dfm'
 import { planMessages } from '../../messages/plan'
+import { runMessages } from '../../messages/run'
 import {
   SEGMENT,
   advancePlayback,
   toolpathLines,
   type RunEnvelope,
+  type GoToOverlay,
   type RunScene,
   type ToolpathLines,
   type ZRefOverlay,
@@ -176,6 +179,25 @@ export function useRunScene(mode: AppMode): RunScene | null {
     level,
   ])
   const zRef = useWaitZRef(planId, setupId, units)
+  // DF128 GT2: the open Go to dialog's steps, machine → work coordinates (as the tool marker)
+  const preview = useRun((s) => s.goToPreview)
+  const wco = isConnected(status)
+    ? [
+        status.mpos[0] - status.wpos[0],
+        status.mpos[1] - status.wpos[1],
+        status.mpos[2] - status.wpos[2],
+      ]
+    : undefined
+  const goTo = useMemo((): GoToOverlay | undefined => {
+    if (preview === undefined || wco === undefined) return undefined
+    const w = (p: readonly [number, number, number]): [number, number, number] => [
+      p[0] - wco[0]!,
+      p[1] - wco[1]!,
+      p[2] - wco[2]! + level,
+    ]
+    return { points: [w(preview.from), ...preview.points.map(w)], label: runMessages.goTo.target }
+    // the offset by value (a new status each report)
+  }, [preview, wco?.[0], wco?.[1], wco?.[2], level])
   return useMemo(
     () =>
       active
@@ -186,9 +208,10 @@ export function useRunScene(mode: AppMode): RunScene | null {
             ...(frame === undefined ? {} : { frame }),
             ...(envelope === undefined ? {} : { envelope }),
             ...(zRef === undefined ? {} : { zRef }),
+            ...(goTo === undefined ? {} : { goTo }),
           }
         : null,
-    [active, lines, done, tool, frame, envelope, zRef],
+    [active, lines, done, tool, frame, envelope, zRef, goTo],
   )
 }
 

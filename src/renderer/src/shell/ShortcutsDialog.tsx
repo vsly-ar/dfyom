@@ -90,7 +90,7 @@ export function jogShortcuts(style: JogKeyStyle): [string, string][] {
     style === 'off'
       ? [['–', m.what.jogOff]]
       : JOG_KEY_LABELS[style].map(([dir, key]) => [key, m.what.jog(dir)])
-  return [...keys, ['Esc', m.what.stopJog]]
+  return [...keys, ['Esc', m.what.stopJog], ['G', m.what.goTo]]
 }
 
 export function ShortcutsDialog(): React.JSX.Element {

@@ -12,17 +12,27 @@
 // docs/modes/run-v0.1.md#commands-and-queries; serial port and real-machine confirmations:
 // docs/modes/run-machine.md#ports-and-the-port-picker, docs/modes/run.md#3-confirmations-before-motion;
 // continuous jog and the alarm panel: docs/modes/run-machine.md#machine-readiness-m3
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
 import { runMessages } from '../../messages/run'
 import { useSettings } from '../../shell/ShellContext'
-import { Icon, Button, Checkbox, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
+import {
+  Icon,
+  IconButton,
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  ErrorMessage,
+  Menu,
+  Select,
+  StatusChip,
+} from '../../ui'
 import { AlarmPanel, LostConnectionWarning, ReconnectStatus } from './AlarmPanel'
 import { JogPad, useJogControls, useMachineJog } from './JogPad'
 import { planLabel } from '../plan/model'
 import { useLibraryItems } from '../plan/usePlan'
-import { actionText, isConnected, needsHoming, runGates } from './machine-state'
+import { actionText, goToOpenGate, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
@@ -35,15 +45,82 @@ const TIME_SCALES: readonly TimeScale[] = [1, 10, 100, 'max']
 const scaleValue = (s: TimeScale) => String(s)
 const parseScale = (v: string): TimeScale => (v === 'max' ? 'max' : Number(v))
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  menu,
+  children,
+}: {
+  title: string
+  /** A menu button at the title's end (DF128 GT2: the jog section's "Go to…"). */
+  menu?: React.ReactNode
+  children: React.ReactNode
+}) {
   const id = useId()
+  const heading = (
+    <h3 id={id} className={styles['sectionTitle']}>
+      {title}
+    </h3>
+  )
   return (
     <section className={styles['section']} aria-labelledby={id}>
-      <h3 id={id} className={styles['sectionTitle']}>
-        {title}
-      </h3>
+      {menu === undefined ? (
+        heading
+      ) : (
+        <div className={styles['sectionHead']}>
+          {heading}
+          {menu}
+        </div>
+      )}
       {children}
     </section>
+  )
+}
+
+/**
+ * DF128 GT2 (Q157): the jog section's menu, "Go to…" (`G`) for keyboard users; disabled with the
+ * DRO buttons' gate. The dialog opens once the menu has closed (instead of the menu focusing its
+ * button, which would take the focus back from the dialog's field); focus returns to the menu
+ * button when the dialog closes.
+ */
+function JogMenu({
+  gate,
+  onGoTo,
+}: {
+  gate: string | null
+  onGoTo: (opener: HTMLElement | null) => void
+}) {
+  const g = runMessages.goTo
+  const trigger = useRef<HTMLButtonElement>(null)
+  const chosen = useRef(false)
+  return (
+    <Menu
+      label={g.menu}
+      align="end"
+      onCloseAutoFocus={(e) => {
+        if (!chosen.current) return
+        chosen.current = false
+        e.preventDefault()
+        onGoTo(trigger.current)
+      }}
+      items={[
+        {
+          label: g.open,
+          shortcut: 'G',
+          description: g.openHint,
+          disabledReason: gate ?? undefined,
+          onSelect: () => {
+            chosen.current = true
+          },
+        },
+      ]}
+    >
+      <IconButton
+        ref={trigger}
+        label={g.menu}
+        icon={<Icon name="more" />}
+        className={styles['sectionMenu']}
+      />
+    </Menu>
   )
 }
 
@@ -374,7 +451,15 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
         />
       </Section>
 
-      <Section title={m.jog}>
+      <Section
+        title={m.jog}
+        menu={
+          <JogMenu
+            gate={goToOpenGate(status)}
+            onGoTo={(opener) => a.openGoTo({ frame: 'work', axis: 'x', opener })}
+          />
+        }
+      >
         <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} reasonShown={false} />
       </Section>
 

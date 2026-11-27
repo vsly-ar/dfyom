@@ -393,3 +393,19 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   user-select: none;
   pointer-events: none;
 }
+
+/* DF128 GT2: the Go to target marker's chip (GoToPath.tsx) */
+.goToChip {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  user-select: none;
+}

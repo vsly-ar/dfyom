@@ -467,7 +467,16 @@ export const runMessages = {
     stepXY: (x: string, y: string) => `To X ${x} Y ${y}`,
     feed: (xy: string, z: string, unit: string) =>
       xy === z ? `at ${xy} ${unit}` : `at ${xy} ${unit} (Z ${z})`,
-    seconds: (s: number) => `about ${s} s`,
+    seconds: (s: number) =>
+      s < 60
+        ? `about ${s} s`
+        : `about ${Math.floor(s / 60)} min${s % 60 === 0 ? '' : ` ${s % 60} s`}`,
+    /** GT2: the target marker's chip in the 3D view. */
+    target: 'Go to target',
+    /** GT2: the jog section's menu (Q157). */
+    menu: 'Jog options',
+    open: 'Go to…',
+    openHint: 'Type coordinates to move to, in work or machine coordinates',
     already: 'Already there.',
     travel: (axis: string, target: string, min: string, max: string, unit: string) =>
       `${axis} would leave the travel: the target is at machine ${target}, the travel is ${min} to ${max} ${unit}.`,
