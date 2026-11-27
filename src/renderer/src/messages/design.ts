@@ -799,6 +799,12 @@ export const designMessages = {
       `Its ${plans === 1 ? 'plan is' : `${plans} plans are`} removed too. Undo brings both back.`,
     confirmAction: 'Remove part',
     count: (n: number) => (n === 1 ? '1 part' : `${n} parts`),
+    /** DF135 Q199 (cut-state.md § A new blank): the part's already-cut marks, all at once. */
+    clearCut: 'Clear cut marks',
+    clearCutDescription:
+      'For a new blank: every operation is cut again. Undo brings the marks back.',
+    noCut: 'Nothing in this part is marked already cut.',
+    cutCleared: (n: number) => (n === 1 ? 'Cleared 1 cut mark' : `Cleared ${n} cut marks`),
   },
 
   /** Split parts 4a (ui.md § Split part): the split editor, its preview and read-only pieces. */

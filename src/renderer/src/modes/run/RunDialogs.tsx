@@ -33,7 +33,7 @@ import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
-import { useRunCutMarks } from './CutMarks'
+import { AllCutOffer, useRunCutMarks } from './CutMarks'
 import styles from './Run.module.css'
 
 export function RunDialogs(): React.JSX.Element {
@@ -99,12 +99,21 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         : settingsCheck !== undefined && !settingsCheck.matches
           ? m.settingsMismatch
           : null
-  const machineGate = runGates(status, { planChosen: plan !== undefined }).start ?? realGate
+  // DF135 Q199: a setup cut in full has no program; the offer to clear the marks shows instead
+  const allCut =
+    !resume &&
+    info !== undefined &&
+    info.operations.length > 0 &&
+    info.cut.size === info.operations.length
+  const machineGate =
+    runGates(status, { planChosen: plan !== undefined }).start ??
+    realGate ??
+    (allCut ? m.allCutGate(info.setup.name) : null)
   const units = doc.unitSystem
   const a = store.getState()
   // the soft-limit result (DF46): checked on open and again when the work zero changes; with a
   // start line (DF129 RC3) over the lead-in and the rest, with the lead-in's preview
-  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${status.workZero.join(',')}`
+  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${info?.cut.size ?? 0}|${status.workZero.join(',')}`
   const setupToCheck = info?.setup.id
   const canCheck = open && plan !== undefined && machineGate === null
   const start = usePreflightStart(checkKey, setupToCheck, canCheck)
@@ -207,7 +216,10 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           </div>
         </>
       ) : null}
-      {resume ? null : <StartAtSection current={current} units={units} />}
+      {allCut && plan !== undefined ? (
+        <AllCutOffer doc={doc} plan={plan} setupName={info.setup.name} />
+      ) : null}
+      {resume || allCut ? null : <StartAtSection current={current} units={units} />}
       {serial && !resume ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
@@ -264,7 +276,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         </dd>
         <dt>{m.softLimits}</dt>
         <dd aria-live="polite">
-          <SoftLimitResult check={current} units={units} />
+          {allCut ? '–' : <SoftLimitResult check={current} units={units} />}
         </dd>
       </dl>
       {gate === null ? null : (

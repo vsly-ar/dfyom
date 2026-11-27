@@ -140,6 +140,34 @@ describe('part menu (split parts S0)', () => {
   })
 })
 
+describe('Clear cut marks (DF135 Q199)', () => {
+  it('clears every already-cut mark of the part in one undo step, from the part menu and the part row', async () => {
+    const t = await renderParts({ lid: false })
+    // nothing marked: listed, disabled with the reason
+    let menu = await t.openMenu()
+    const none = within(menu).getByRole('menuitem', { name: /^Clear cut marks/ })
+    expect(none).toHaveAttribute('aria-disabled', 'true')
+    await t.user.keyboard('{Escape}')
+    const ids = t.s.part().operations.map((o) => o.id)
+    await t.s.run('design.part.update', { partId: t.s.partId, alreadyCut: ids })
+    menu = await t.openMenu()
+    await expectNoAxeViolations()
+    await t.user.click(within(menu).getByRole('menuitem', { name: /^Clear cut marks/ }))
+    await waitFor(() => expect(t.s.part()).not.toHaveProperty('alreadyCut'))
+    expect(t.s.part()).not.toHaveProperty('alreadyCutMarks')
+    expect(t.callsOf('design.part.update').at(-1)).toEqual({ partId: t.s.partId, alreadyCut: [] })
+    // the undo toast brings the marks back
+    await t.user.click(await findToastAction('Undo'))
+    await waitFor(() => expect(t.s.part().alreadyCut).toEqual(ids))
+    // the part row's context menu holds it too
+    const name = within(t.partRow()).getByRole('button', { name: 'Bracket' })
+    await t.user.pointer({ keys: '[MouseRight]', target: name })
+    const row = await screen.findByRole('menu', { name: 'Actions for Bracket' })
+    await t.user.click(within(row).getByRole('menuitem', { name: /^Clear cut marks/ }))
+    await waitFor(() => expect(t.s.part()).not.toHaveProperty('alreadyCut'))
+  })
+})
+
 describe('plans pick their part (split parts S0)', () => {
   it('the Plan start card asks for the part and plans the chosen one', async () => {
     const t = await renderParts({ mode: 'plan' })

@@ -3,6 +3,9 @@
 // is added in Design, and the plan (a draft, following the design) shows the cut pocket muted with
 // a check and exports only the new pocket. With DFYOM_C1_DIR set it captures light and dark
 // renders of the plan with the cut row (df135-cut-{light,dark}.png; review captures, not asserted).
+// Q199 (a new blank): with Pocket 2 marked too, the part menu's Clear cut marks clears both (Undo
+// brings them back); Run's pre-flight on the setup cut in full offers Clear marks, and the draft
+// plan then has a program again.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -161,5 +164,54 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   const program = await exportProgram()
   expect(program).toContain('(Pocket 2)')
   expect(program).not.toContain('(Pocket 1)')
+
+  // ── Q199: everything cut; Clear cut marks in Design (and Undo) ─────────────────────────────
+  await page.keyboard.press('ControlOrMeta+1')
+  const pocket2 = navigator.getByRole('button', { name: /^Pocket 2/ })
+  await pocket2.click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for Pocket 2' })
+    .getByRole('menuitem', { name: 'Mark as already cut' })
+    .click()
+  await expect(pocket2).toContainText('Cut')
+  await navigator.getByRole('button', { name: /^Parts/ }).click()
+  await page.getByRole('menuitem', { name: /^Clear cut marks/ }).click()
+  await expect(pocket1).not.toContainText('Cut')
+  await expect(pocket2).not.toContainText('Cut')
+  await page.getByRole('button', { name: 'Undo', exact: true }).last().click()
+  await expect(pocket1).toContainText('Cut')
+  await expect(pocket2).toContainText('Cut')
+
+  // ── Q199: Run's pre-flight on the setup cut in full offers Clear marks ─────────────────────
+  await page.keyboard.press('ControlOrMeta+3')
+  await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked()
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const machine = page.getByRole('group', { name: 'Machine' })
+  await navigator.getByRole('radio', { name: 'Virtual machine' }).click()
+  await navigator.getByRole('combobox', { name: 'Time scale' }).click()
+  await page.getByRole('option', { name: '10×' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
+  await expect(machine.getByText('Virtual machine · 10×')).toBeVisible()
+  await navigator.getByRole('button', { name: 'Home' }).click()
+  await expect(machine.getByText('Idle')).toBeVisible()
+  await inspector.getByRole('button', { name: 'Start run' }).click()
+  const preflight = page.getByRole('dialog', { name: 'Start run?' })
+  const offer = preflight.getByRole('group', { name: 'Already cut' })
+  await expect(offer).toContainText('is marked already cut. Cutting a new blank?', {
+    timeout: 30_000,
+  })
+  await expect(preflight.getByRole('button', { name: 'Start run' })).toBeDisabled()
+  await offer.getByRole('button', { name: 'Clear marks' }).click()
+  // the draft plan follows: a program again, checked against the travel
+  await expect(offer).toBeHidden({ timeout: 30_000 })
+  await expect(
+    preflight.getByText(/^(Inside the travel|X leaves|Y leaves|Z leaves)/).first(),
+  ).toBeVisible({
+    timeout: 60_000,
+  })
+  await closeDialog(preflight, 'Cancel')
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(pocket1).not.toContainText('Cut')
+  await expect(pocket2).not.toContainText('Cut')
   expect(dfyom.rendererErrors).toEqual([])
 })
