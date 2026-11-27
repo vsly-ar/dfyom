@@ -255,8 +255,16 @@ export const ShapeSourceDtoSchema = z.object({
 
 // ── pattern (owned shape of a pattern feature, patterns P1) ─────────────────────────────────
 
-/** Lattices of a pattern (docs/modes/patterns.md#model; `polar` since P2). */
-export const PATTERN_LATTICES = ['square', 'staggered', 'hex', 'polar'] as const
+/** Lattices of an engraved pattern's tiles (engraved-patterns.md E4): Pattern's first four. */
+export const ENGRAVING_LATTICES = ['square', 'staggered', 'hex', 'polar'] as const
+export type EngravingLattice = (typeof ENGRAVING_LATTICES)[number]
+
+/**
+ * Lattices of a pattern (docs/modes/patterns.md#model; `polar` since P2; `radial` since heatsink
+ * H3: `count` cells on one circle of `radius`, each turned to face out,
+ * docs/modes/pattern-presets.md#model-changes).
+ */
+export const PATTERN_LATTICES = [...ENGRAVING_LATTICES, 'radial'] as const
 export type PatternLattice = (typeof PATTERN_LATTICES)[number]
 
 /** Cell primitives of a pattern: the shape items without a centre (it sits on the node). */
@@ -284,6 +292,12 @@ export interface PatternRecord {
   /** Face frame; absent = the centre of the boundary less the margin. */
   origin?: [number, number] | undefined
   spacing: { gap: number } | { pitch: [number, number] }
+  /**
+   * H3 (`lattice: 'radial'` only; absent on other lattices): the cells on the circle and its
+   * radius about `origin`, the first cell at `angle`. Doc: docs/modes/pattern-presets.md#model-changes
+   */
+  count?: number | undefined
+  radius?: number | undefined
   /** P5: every other cell turned 180° (absent = none). */
   alternate?: 'flip' | undefined
   boundary: { min: [number, number]; max: [number, number] }
@@ -320,6 +334,8 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
   angle: num,
   origin: pair.optional(),
   spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),
+  count: num.optional(),
+  radius: num.optional(),
   alternate: z.literal('flip').optional(),
   boundary: z.object({ min: pair, max: pair }),
   area: z.object({ shapeId: ShapeIdSchema, center: pair, rotation: num }).optional(),
@@ -367,7 +383,7 @@ export interface EngravingRecord {
 
 /** An engraved pattern's lattice (E4): Pattern's fields; a gap may be 0 (tiles touch). */
 export interface EngravingLayoutRecord {
-  lattice: PatternLattice
+  lattice: EngravingLattice
   /** Degrees: the lattice (tiles included) turns about `origin`; polar: the rings' start. */
   angle: number
   /** Face frame; absent = the centre of the boundary less the margin. */
@@ -390,7 +406,7 @@ export const EngravingRecordSchema: z.ZodType<EngravingRecord> = z.object({
   fit: z.enum(['boundary', 'clip']).optional(),
   layout: z
     .object({
-      lattice: z.enum(PATTERN_LATTICES),
+      lattice: z.enum(ENGRAVING_LATTICES),
       angle: num,
       origin: pair.optional(),
       spacing: z.union([z.object({ gap: num }), z.object({ pitch: pair })]),

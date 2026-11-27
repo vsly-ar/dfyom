@@ -58,7 +58,8 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   ).toBeVisible()
 
   // ── Layout: Hex packs more circles than staggered rows at the same gap ─────────────────────
-  await inspector.getByRole('radio', { name: 'Hex' }).click()
+  await inspector.getByRole('combobox', { name: 'Lattice' }).click()
+  await page.getByRole('listbox').getByRole('option', { name: 'Hex', exact: true }).click()
   await expect(navigator.getByRole('button', { name: /^Pattern 1, hex circle/ })).toBeVisible()
   await expect(readout).not.toHaveText(`${staggered} cells`)
   expect(Number((await readout.textContent())?.split(' ')[0])).toBeGreaterThan(staggered)
@@ -130,7 +131,8 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await expect(roughingTool).toBeHidden()
 
   // ── Polar rings, cells clipped at the border, then inverted (islands) ──────────────────────
-  await inspector.getByRole('radio', { name: 'Polar' }).click()
+  await inspector.getByRole('combobox', { name: 'Lattice' }).click()
+  await page.getByRole('listbox').getByRole('option', { name: 'Polar', exact: true }).click()
   await expect(navigator.getByRole('button', { name: /^Pattern 1, polar circle/ })).toBeVisible()
   await revealField(inspector, 'Boundary cells')
   await inspector.getByRole('radio', { name: 'Clip' }).click()

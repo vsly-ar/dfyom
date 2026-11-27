@@ -30,7 +30,7 @@ import type { Region } from '../../geometry/2d/model'
 import { chainOpen, dropCoincident, sliceProfile, type RawLine } from '../../geometry/line'
 import { lineCrossings } from '../../geometry/line-crossings'
 import type { LinePathLevels, Shape as ShapeGeometry, Vec2 } from '../../geometry/model'
-import { polarNodes, rowNodes, type LatticeNode } from '../pattern/layout'
+import { polarNodes, radialTurn, rowNodes, type LatticeNode } from '../pattern/layout'
 import type { Part } from '../operation'
 import type { EngravingRecord, ShapeItem } from '../shape.dto'
 import { definitionOf, requirePort, resolveShape } from '../shape'
@@ -556,10 +556,8 @@ function tiled(
       at[1] - reach > a0.max[1]
     )
       continue
-    const radial =
-      polar && rec.radial === true && Math.hypot(at[0] - origin[0], at[1] - origin[1]) > 1e-9
-        ? (Math.atan2(at[1] - origin[1], at[0] - origin[0]) * 180) / Math.PI - 90
-        : 0
+    // the turn a radial pattern's cells take too (layout.ts, pattern-presets.md H3)
+    const radial = polar && rec.radial === true ? radialTurn(origin, at) : 0
     const turn = rec.rotation + (polar ? radial : layout.angle) + (n.flip ? 180 : 0)
     const place = similarity(mid, turn, k, at)
     const lines = raw.map((l) =>

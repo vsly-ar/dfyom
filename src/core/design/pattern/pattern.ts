@@ -138,6 +138,13 @@ export interface Pattern extends FeatureBase {
   /** `[u, v]` in the face frame; None = the centre of the face less the margin. */
   readonly origin: Option<Point>
   readonly spacing: PatternSpacing
+  /**
+   * H3 (`lattice: 'radial'`): the cells on the circle (an integer ≥ 2) and its radius about
+   * `origin`, the first cell at `angle`; kept, unused, on other lattices (as `spacing` is on
+   * `radial`). Doc: docs/modes/pattern-presets.md#model-changes
+   */
+  readonly count?: Quantity | undefined
+  readonly radius?: Quantity | undefined
   /** P5: `flip` turns every other cell 180° (triangles nest; the pitches are found for the gap). */
   readonly alternate: PatternAlternate
   /** None = the `on` face's rectangle (P2: a named closed shape, keep-outs its subtract items). */
@@ -222,6 +229,8 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
     z.object({ gap: length() }),
     z.object({ pitch: z.tuple([length(), length()]) }),
   ]),
+  count: quantityDto('scalar').optional(),
+  radius: length().optional(),
   alternate: z.literal('flip').optional(),
   boundary: z
     .object({ shapeId: z.string(), center: z.tuple([length(), length()]), rotation: angle() })
@@ -268,6 +277,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
   const originQs =
     d.origin === undefined ? [] : [q(d.origin[0], 'origin', 0), q(d.origin[1], 'origin', 1)]
   const rest = [q(d.angle, 'angle'), q(d.depth, 'depth')]
+  const radialQs = [
+    d.count === undefined ? Ok(undefined) : q(d.count, 'count'),
+    d.radius === undefined ? Ok(undefined) : q(d.radius, 'radius'),
+  ]
   const marginQs = Array.isArray(d.margin)
     ? [q(d.margin[0], 'margin', 0), q(d.margin[1], 'margin', 1)]
     : [q(d.margin, 'margin')]
@@ -291,76 +304,80 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
     collect(boundaryQs),
     collect(chamferQs),
     collect(marginQs),
-  ]).map((all) => {
-    const [cq, s, o, rest3, bq, chq, mq] = all as [
-      Quantity[],
-      Quantity[],
-      Quantity[],
-      Quantity[],
-      Quantity[],
-      Quantity[],
-      Quantity[],
-    ]
-    const [ang, depth] = rest3
-    const margin: PatternMargin = mq.length === 2 ? [mq[0]!, mq[1]!] : mq[0]!
-    const [rot, a, b, r] = cq
-    const cell: PatternCell =
-      c.kind === 'circle'
-        ? { kind: 'circle', rotation: rot!, diameter: a! }
-        : c.kind === 'rectangle'
-          ? {
-              kind: 'rectangle',
-              rotation: rot!,
-              length: a!,
-              width: b!,
-              cornerRadius: r!,
-              ...(c.round === true ? { round: true as const } : {}),
-            }
-          : c.kind === 'obround'
-            ? { kind: 'obround', rotation: rot!, length: a!, width: b! }
-            : c.kind === 'polygon'
-              ? {
-                  kind: 'polygon',
-                  rotation: rot!,
-                  sides: a!,
-                  diameter: b!,
-                  across: c.across,
-                  cornerRadius: r!,
-                }
-              : { kind: 'shape', rotation: rot!, shapeId: c.shapeId }
-    return {
-      kind: 'pattern' as const,
-      id: d.id,
-      name: d.name,
-      on: d.on,
-      cell,
-      lattice: d.lattice,
-      angle: ang!,
-      origin: o.length === 0 ? None : Some([o[0]!, o[1]!] as const),
-      spacing:
-        s.length === 1
-          ? { kind: 'gap' as const, gap: s[0]! }
-          : { kind: 'pitch' as const, pitch: [s[0]!, s[1]!] as const },
-      alternate: d.alternate ?? 'none',
-      boundary:
-        bd === undefined
-          ? None
-          : Some({ shapeId: bd.shapeId, center: [bq[0]!, bq[1]!] as const, rotation: bq[2]! }),
-      margin,
-      fit: d.fit ?? 'whole',
-      invert: d.invert ?? false,
-      depth: depth!,
-      through: d.through ?? false,
-      roughing: d.roughing !== undefined,
-      ...(leave === undefined || isEmptyMargins(leave.unwrap())
-        ? {}
-        : { roughingLeave: leave.unwrap() }),
-      chamfer:
-        chq.length === 0
-          ? None
-          : Some({ width: chq[0]!, angle: chq[1]!, side: d.chamfer?.side ?? 'top' }),
-    }
-  })
+  ])
+    .andThen((all) => collect(radialQs).map((radial) => [all, radial] as const))
+    .map(([all, radial]) => {
+      const [cq, s, o, rest3, bq, chq, mq] = all as [
+        Quantity[],
+        Quantity[],
+        Quantity[],
+        Quantity[],
+        Quantity[],
+        Quantity[],
+        Quantity[],
+      ]
+      const [ang, depth] = rest3
+      const margin: PatternMargin = mq.length === 2 ? [mq[0]!, mq[1]!] : mq[0]!
+      const [rot, a, b, r] = cq
+      const cell: PatternCell =
+        c.kind === 'circle'
+          ? { kind: 'circle', rotation: rot!, diameter: a! }
+          : c.kind === 'rectangle'
+            ? {
+                kind: 'rectangle',
+                rotation: rot!,
+                length: a!,
+                width: b!,
+                cornerRadius: r!,
+                ...(c.round === true ? { round: true as const } : {}),
+              }
+            : c.kind === 'obround'
+              ? { kind: 'obround', rotation: rot!, length: a!, width: b! }
+              : c.kind === 'polygon'
+                ? {
+                    kind: 'polygon',
+                    rotation: rot!,
+                    sides: a!,
+                    diameter: b!,
+                    across: c.across,
+                    cornerRadius: r!,
+                  }
+                : { kind: 'shape', rotation: rot!, shapeId: c.shapeId }
+      return {
+        kind: 'pattern' as const,
+        id: d.id,
+        name: d.name,
+        on: d.on,
+        cell,
+        lattice: d.lattice,
+        angle: ang!,
+        origin: o.length === 0 ? None : Some([o[0]!, o[1]!] as const),
+        spacing:
+          s.length === 1
+            ? { kind: 'gap' as const, gap: s[0]! }
+            : { kind: 'pitch' as const, pitch: [s[0]!, s[1]!] as const },
+        ...(radial[0] === undefined ? {} : { count: radial[0] }),
+        ...(radial[1] === undefined ? {} : { radius: radial[1] }),
+        alternate: d.alternate ?? 'none',
+        boundary:
+          bd === undefined
+            ? None
+            : Some({ shapeId: bd.shapeId, center: [bq[0]!, bq[1]!] as const, rotation: bq[2]! }),
+        margin,
+        fit: d.fit ?? 'whole',
+        invert: d.invert ?? false,
+        depth: depth!,
+        through: d.through ?? false,
+        roughing: d.roughing !== undefined,
+        ...(leave === undefined || isEmptyMargins(leave.unwrap())
+          ? {}
+          : { roughingLeave: leave.unwrap() }),
+        chamfer:
+          chq.length === 0
+            ? None
+            : Some({ width: chq[0]!, angle: chq[1]!, side: d.chamfer?.side ?? 'top' }),
+      }
+    })
 }
 
 function cellToDTO(c: PatternCell): z.input<typeof CellDtoSchema> {
@@ -415,6 +432,8 @@ function patternToDTO(p: Pattern): FeatureDTO {
       p.spacing.kind === 'gap'
         ? { gap: p.spacing.gap.toDTO() }
         : { pitch: [p.spacing.pitch[0].toDTO(), p.spacing.pitch[1].toDTO()] },
+    ...(p.count === undefined ? {} : { count: p.count.toDTO() }),
+    ...(p.radius === undefined ? {} : { radius: p.radius.toDTO() }),
     ...(p.alternate === 'flip' ? { alternate: 'flip' } : {}),
     ...(p.boundary.isSome()
       ? {
@@ -489,6 +508,24 @@ function patternInvariants(p: Pattern): Issue[] {
     p.margin.forEach((m, i) =>
       check(m.exact.compare(ZERO) >= 0, ['margin', i], 'nonNegative', 'must be 0 or more'),
     )
+  // H3: a radial lattice needs its count (a whole number ≥ 2) and radius; flip has nothing to nest
+  if (p.lattice === 'radial') {
+    const n = p.count?.canonical
+    check(
+      n !== undefined && Number.isInteger(n) && n >= 2,
+      ['count'],
+      'radialCount',
+      'a radial lattice needs a count: a whole number of 2 or more',
+    )
+    check(p.radius !== undefined, ['radius'], 'radialRadius', 'a radial lattice needs a radius')
+    if (p.radius !== undefined) positive(p.radius, 'radius')
+    check(
+      p.alternate !== 'flip',
+      ['alternate'],
+      'radialFlip',
+      'a radial lattice turns every cell to face out: flip has nothing to nest',
+    )
+  }
   if (p.spacing.kind === 'gap') positive(p.spacing.gap, 'spacing', 'gap')
   else {
     positive(p.spacing.pitch[0], 'spacing', 'pitch', 0)
@@ -705,6 +742,10 @@ export function patternRecord(
       p.spacing.kind === 'gap'
         ? { gap: p.spacing.gap.canonical }
         : { pitch: [p.spacing.pitch[0].canonical, p.spacing.pitch[1].canonical] },
+    // H3: only on a radial lattice (other records stay byte-equal)
+    ...(p.lattice === 'radial'
+      ? { count: p.count?.canonical ?? 0, radius: p.radius?.canonical ?? 0 }
+      : {}),
     ...(p.alternate === 'flip' ? { alternate: 'flip' as const } : {}),
     boundary: faceRect(p.on, before, stock),
     ...(p.boundary.isSome()

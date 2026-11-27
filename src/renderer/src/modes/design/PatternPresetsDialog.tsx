@@ -13,8 +13,11 @@
 // H2: the Square, Round and Staggered pin-fin cards and their step (pin size, channel with the
 // library's flat end mills ≤ it and the Ø + 0.5 mm suggestion, pin height); the current heatsink
 // card's step starts from the pattern's own sizes.
+// H3: the Radial fins card and step (fin at the hub, slot with its tool, fin height, hub Ø, part Ø
+// and centre from a circle boundary or outline profile, else the face; the count editable).
 // Doc: docs/modes/patterns.md#presets-dialog-and-more-presets-df107, docs/conventions/ui.md#pattern-inspector-p1,
-// docs/modes/pattern-presets.md#ui, docs/modes/pattern-presets.md#implementation-h2
+// docs/modes/pattern-presets.md#ui, docs/modes/pattern-presets.md#implementation-h2,
+// docs/modes/pattern-presets.md#implementation-h3
 import { useEffect, useId, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import {
@@ -22,12 +25,15 @@ import {
   pinCentres,
   pinFins,
   pinFinsArgs,
+  radialFins,
+  radialFinsArgs,
   slotCut,
   straightFins,
   straightFinsArgs,
   suggestedChannel,
   type PinFinsLayout,
   type PinKind,
+  type RadialFinsLayout,
   type StraightFinsLayout,
 } from '../../../../core/design/pattern/heatsink'
 import { PATTERN_PRESETS, type PatternPreset } from '../../../../core/design/pattern/presets'
@@ -68,7 +74,8 @@ export type Group = 'decorative' | 'heatsink'
 export const PRESET_GROUP_KEY = 'pattern.presetGroup'
 
 /** The heatsink cards (H1: Straight fins; H2: the three pin fins; H3 adds radial). */
-export type HeatsinkId = 'straightFins' | 'squarePins' | 'roundPins' | 'staggeredPins'
+export type HeatsinkId =
+  'straightFins' | 'squarePins' | 'roundPins' | 'staggeredPins' | 'radialFins'
 interface HeatsinkCard {
   readonly id: HeatsinkId
   readonly icon: IconName
@@ -78,6 +85,7 @@ const HEATSINK: readonly HeatsinkCard[] = [
   { id: 'squarePins', icon: 'pins-square' },
   { id: 'roundPins', icon: 'pins-round' },
   { id: 'staggeredPins', icon: 'pins-staggered' },
+  { id: 'radialFins', icon: 'fins-radial' },
 ]
 /** The pin kind of a pin card. */
 const PIN_KIND: Readonly<Record<HeatsinkId, PinKind | undefined>> = {
@@ -85,6 +93,7 @@ const PIN_KIND: Readonly<Record<HeatsinkId, PinKind | undefined>> = {
   squarePins: 'square',
   roundPins: 'round',
   staggeredPins: 'staggered',
+  radialFins: undefined,
 }
 /** The card of a pin kind (the inspector's current card). */
 export const PIN_CARD: Readonly<Record<PinKind, HeatsinkId>> = {
@@ -97,6 +106,8 @@ export const PIN_CARD: Readonly<Record<PinKind, HeatsinkId>> = {
 const SAMPLE = { fin: 1.5, slot: 2, height: 10, wall: 1.5, across: 40, along: 40 }
 /** The pin cards' sample numbers (the doc's worked example, mm). */
 const PIN_SAMPLE = { pin: 3, channel: 2.5, height: 8, across: 40, along: 40 }
+/** The radial card's sample numbers (the doc's worked example, mm): 21 slots. */
+const RADIAL_SAMPLE = { fin: 1.5, slot: 2, height: 8, hub: 24, outer: 60 }
 
 /** The pocket's default finishing allowance (plan strategy, mm): the step's slot note. */
 const ALLOWANCE = 0.2
@@ -107,6 +118,17 @@ export interface HeatsinkFace {
   readonly along: number
   /** Material under the face; undefined: no base in the read-out. */
   readonly thickness: number | undefined
+  /**
+   * H3: the round part the radial step centres on (face frame, mm): a circle boundary
+   * or outline profile (`name`), else the face's centre and its smaller side (no name).
+   */
+  readonly round?:
+    | {
+        readonly centre: readonly [number, number]
+        readonly diameter: number
+        readonly name?: string
+      }
+    | undefined
 }
 
 /**
@@ -217,6 +239,12 @@ export function PatternPresetsDialog({
   const pins = usePinFinsStep(heatsink?.face, heatsink?.units ?? 'mm', heatsink?.tools ?? [], () =>
     setStep(undefined),
   )
+  const radial = useRadialFinsStep(
+    heatsink?.face,
+    heatsink?.units ?? 'mm',
+    heatsink?.tools ?? [],
+    () => setStep(undefined),
+  )
   const openChange = (o: boolean) => {
     if (o) {
       setGroup(opening)
@@ -228,6 +256,7 @@ export function PatternPresetsDialog({
           ? values
           : undefined,
       )
+      radial.reset(currentHeatsink?.id === 'radialFins' ? values : undefined)
     }
     setStep(undefined)
     setOpen(o)
@@ -279,13 +308,21 @@ export function PatternPresetsDialog({
         name={(c) => p.heatsinkNames[c.id] ?? c.id}
         describe={(c) => p.heatsinkDescriptions[c.id] ?? ''}
         numbers={(c) =>
-          PIN_KIND[c.id] === undefined
-            ? p.heatsinkNumbers('1.5 mm', '2 mm', '10 mm')
-            : p.pinNumbers(PIN_KIND[c.id] === 'square' ? '3 mm' : 'Ø 3 mm', '2.5 mm', '8 mm')
+          c.id === 'radialFins'
+            ? p.radialNumbers(21, 'Ø 24 mm', '8 mm')
+            : PIN_KIND[c.id] === undefined
+              ? p.heatsinkNumbers('1.5 mm', '2 mm', '10 mm')
+              : p.pinNumbers(PIN_KIND[c.id] === 'square' ? '3 mm' : 'Ø 3 mm', '2.5 mm', '8 mm')
         }
         preview={(c) => {
           const kind = PIN_KIND[c.id]
-          return kind === undefined ? <FinsPreview /> : <PinsPreview kind={kind} />
+          return c.id === 'radialFins' ? (
+            <RadialPreview />
+          ) : kind === undefined ? (
+            <FinsPreview />
+          ) : (
+            <PinsPreview kind={kind} />
+          )
         }}
         icon={(c) => <Icon name={c.icon} />}
         header={header}
@@ -296,9 +333,11 @@ export function PatternPresetsDialog({
         step={
           step === undefined
             ? undefined
-            : stepKind === undefined
-              ? fins.step(applied)
-              : pins.step(stepKind, step, applied)
+            : step.id === 'radialFins'
+              ? radial.step(step, applied)
+              : stepKind === undefined
+                ? fins.step(applied)
+                : pins.step(stepKind, step, applied)
         }
         onApply={() => undefined}
         open={open}
@@ -753,6 +792,242 @@ function usePinFinsStep(
   /** The step starts from the sample sizes (or the pattern's own) each time the dialog opens. */
   const reset = (values?: Readonly<Record<string, number>>) => setV(start(values))
   return { step, reset }
+}
+
+const RADIAL_KEYS = ['fin', 'slot', 'height', 'hub', 'outer'] as const
+type RadialValues = Record<(typeof RADIAL_KEYS)[number], Quantity | undefined> & {
+  /** The count chosen; undefined: the most that keep the fin at the hub. */
+  readonly count: number | undefined
+  /** Library item id; undefined: the largest flat end mill ≤ the slot. */
+  readonly tool: string | undefined
+}
+
+/**
+ * The Radial fins parameter step (H3): fin at the hub, slot with its tool, fin height, hub Ø and
+ * part Ø (prefilled from a circle boundary or outline profile, else the face), the count (empty: the most
+ * that keep the fin at the hub), the live read-out and warnings, Back / Apply. The lattice is
+ * centred on the round part; the slots run one slot width past its rim.
+ */
+function useRadialFinsStep(
+  face: HeatsinkFace | undefined,
+  units: UnitSystem,
+  tools: readonly FlatEndMill[],
+  onBack: () => void,
+) {
+  const round = face?.round
+  const start = (values?: Readonly<Record<string, number>>): RadialValues => {
+    const sample = { ...RADIAL_SAMPLE, ...(round === undefined ? {} : { outer: round.diameter }) }
+    return {
+      ...startFrom(RADIAL_KEYS, sample, values),
+      count: values?.['count'],
+      tool: undefined,
+    }
+  }
+  const [v, setV] = useState<RadialValues>(() => start())
+  const len = (x: number) => lengthSource(x, units)
+
+  const step = (card: HeatsinkCard, apply: ApplyFn): StepResult => {
+    const slot = v.slot?.canonical
+    const fitting = fittingTools(tools, slot)
+    const tool = fitting.find((t) => t.id === v.tool) ?? fitting[0]
+    const centre: readonly [number, number] | undefined =
+      round?.centre ?? (face === undefined ? undefined : [face.across / 2, face.along / 2])
+    const sizes =
+      centre === undefined ||
+      v.fin === undefined ||
+      slot === undefined ||
+      v.height === undefined ||
+      v.hub === undefined ||
+      v.outer === undefined
+        ? undefined
+        : {
+            fin: v.fin.canonical,
+            slot,
+            height: v.height.canonical,
+            hub: v.hub.canonical,
+            outer: v.outer.canonical,
+            centre,
+            count: v.count,
+            thickness: face?.thickness,
+          }
+    const layout: RadialFinsLayout | undefined = sizes === undefined ? undefined : radialFins(sizes)
+    // the most that keep the fin, for the count's placeholder and note (with no count chosen)
+    const most = sizes === undefined ? undefined : radialFins({ ...sizes, count: undefined })?.most
+    const field = (
+      key: (typeof RADIAL_KEYS)[number],
+      label: string,
+      messages: FieldMessage[] = [],
+    ) => (
+      <StepField
+        name={key}
+        label={label}
+        value={v[key]}
+        units={units}
+        depth={key === 'height'}
+        messages={messages}
+        onCommit={(q) => setV((x) => ({ ...x, [key]: q }))}
+      />
+    )
+    const slotNotes: FieldMessage[] =
+      tool === undefined || slot === undefined
+        ? []
+        : [note('cut', p.slotCut[slotCut(slot, tool.diameter, ALLOWANCE)] ?? '')]
+    const height = v.height?.canonical
+    const short =
+      tool?.fluteLength !== undefined && height !== undefined && height > tool.fluteLength + 1e-9
+    const toolNotes: FieldMessage[] =
+      tool === undefined
+        ? [note('none', p.slotToolNone, 'soft')]
+        : [
+            ...(tool.fluteLength !== undefined && height !== undefined
+              ? [
+                  note(
+                    'flute',
+                    p.fluteNote(len(height), len(tool.fluteLength), short),
+                    short ? 'soft' : 'note',
+                  ),
+                ]
+              : []),
+            note('chips', p.chipsNote),
+          ]
+    const tall = layout !== undefined && layout.ratio > 8
+    // a count above the most thins the fin at the hub below the one asked for
+    const over = v.count !== undefined && most !== undefined && v.count > most
+    const countNotes: FieldMessage[] =
+      most === undefined
+        ? []
+        : [
+            {
+              ...note('most', p.countNote(most), over ? 'soft' : 'note'),
+              ...(over && most >= 2
+                ? {
+                    fix: {
+                      label: p.useCount(most),
+                      onApply: () => setV((x) => ({ ...x, count: undefined })),
+                    },
+                  }
+                : {}),
+            },
+          ]
+    const outerNotes: FieldMessage[] =
+      centre === undefined
+        ? []
+        : [note('centre', p.centreNote(len(centre[0]), len(centre[1]), round?.name))]
+    const readout =
+      layout === undefined || sizes === undefined
+        ? p.noRadialFit
+        : [
+            p.radialReadout(
+              layout.count,
+              len(sizes.slot),
+              len(layout.hubFin),
+              len(sizes.height),
+              layout.ratio,
+              layout.base === undefined ? undefined : len(layout.base),
+            ),
+            p.radialRim(len(layout.rimFin)),
+          ].join(' · ')
+    return {
+      content: (
+        <StepBody
+          card={card}
+          name={p.heatsinkNames[card.id] ?? ''}
+          readout={readout}
+          fields={
+            <>
+              {field('fin', p.hubFin, tall ? [note('tall', p.tallHub(layout.ratio), 'soft')] : [])}
+              {field('slot', p.slot, slotNotes)}
+              <ToolSelect
+                fitting={fitting}
+                tool={tool}
+                none={p.slotToolNone}
+                messages={toolNotes}
+                onChange={(id) => setV((x) => ({ ...x, tool: id }))}
+              />
+              {field('height', p.finHeight)}
+              {field('hub', p.hub)}
+              {field('outer', p.outer, outerNotes)}
+              <div data-heatsink-field="count">
+                <QuantityInput
+                  label={p.radialCount}
+                  kind="scalar"
+                  defaultUnit="1"
+                  optional
+                  value={v.count === undefined ? undefined : scalarQ(v.count)}
+                  {...(most === undefined || most < 2 ? {} : { placeholder: String(most) })}
+                  stepKind="count"
+                  stepKey="heatsink.count"
+                  onCommit={(q) => {
+                    const n = q?.canonical
+                    setV((x) => ({
+                      ...x,
+                      count: n !== undefined && Number.isInteger(n) && n >= 2 ? n : undefined,
+                    }))
+                  }}
+                  messages={countNotes}
+                />
+              </div>
+            </>
+          }
+        />
+      ),
+      footer: stepFooter(onBack, layout === undefined || sizes === undefined, () => {
+        if (layout === undefined || sizes === undefined) return
+        apply(radialFinsArgs(sizes, layout), tool?.id)
+      }),
+      onBack,
+    }
+  }
+  /** The step starts from the sample sizes (or the pattern's own) each time the dialog opens. */
+  const reset = (values?: Readonly<Record<string, number>>) => setV(start(values))
+  return { step, reset }
+}
+
+const scalarQ = (n: number): Quantity | undefined => {
+  const q = Quantity.parse(String(n), { kind: 'scalar', defaultUnit: '1' })
+  return q.isOk() ? q.unwrap() : undefined
+}
+
+/**
+ * The Radial fins card's preview (H3): the round part's top view at scale, its slots from the hub
+ * out past the rim, the part outline over them. Drawn from the sample sizes (21 slots).
+ */
+function RadialPreview(): React.JSX.Element {
+  const st = { ...RADIAL_SAMPLE, centre: [0, 0] as const }
+  const l = radialFins(st)!
+  const s = 1.25 // px per mm: Ø 60 is 75 px
+  const cx = PREVIEW.w / 2
+  const cy = PREVIEW.h / 2
+  const r = (v: number) => Math.round(v * 10) / 10
+  const ri = st.hub / 2
+  const ro = st.outer / 2 + st.slot
+  const w = (st.slot / 2) * s
+  // each slot: a stadium from the hub to past the rim, turned to face out
+  const slots = Array.from({ length: l.count }, (_, i) => {
+    const a = Math.PI / 2 + (2 * Math.PI * i) / l.count
+    const [c, sn] = [Math.cos(a), -Math.sin(a)]
+    const p0 = [cx + c * (ri + st.slot / 2) * s, cy + sn * (ri + st.slot / 2) * s]
+    const p1 = [cx + c * (ro - st.slot / 2) * s, cy + sn * (ro - st.slot / 2) * s]
+    const [nx, ny] = [-sn * w, c * w]
+    return (
+      `M${r(p0[0]! + nx)} ${r(p0[1]! + ny)}L${r(p1[0]! + nx)} ${r(p1[1]! + ny)}` +
+      `A${r(w)} ${r(w)} 0 0 0 ${r(p1[0]! - nx)} ${r(p1[1]! - ny)}` +
+      `L${r(p0[0]! - nx)} ${r(p0[1]! - ny)}A${r(w)} ${r(w)} 0 0 0 ${r(p0[0]! + nx)} ${r(p0[1]! + ny)}Z`
+    )
+  }).join('')
+  return (
+    <svg
+      className={styles['presetPreview']}
+      viewBox={`0 0 ${PREVIEW.w} ${PREVIEW.h}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      <path className={styles['miniFill']} d={slots} />
+      <path className={styles['miniEdge']} d={slots} />
+      <circle className={styles['miniEdge']} cx={cx} cy={cy} r={r((st.outer / 2) * s)} />
+      <circle className={styles['presetRing']} cx={cx} cy={cy} r={r(ri * s)} />
+    </svg>
+  )
 }
 
 /**

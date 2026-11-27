@@ -121,4 +121,33 @@ describe('pattern inspector layout (DF110 S4)', () => {
     expect(within(insp()).getByRole('button', { name: /^Chamfer/ })).toHaveTextContent(/°/)
     await expectNoAxeViolations()
   })
+
+  it('H3: Radial shows Count and Radius in place of the spacing; the first gets 8 cells', async () => {
+    const { user, pattern } = await renderPattern()
+    const lattice = within(insp()).getByRole('combobox', { name: 'Lattice' })
+    await user.click(lattice)
+    await user.click(screen.getByRole('option', { name: 'Radial' }))
+    await waitFor(() => expect(pattern()['lattice']).toBe('radial'))
+    expect(within(insp()).queryByRole('radio', { name: 'Gap' })).toBeNull()
+    const count = within(insp()).getByLabelText('Count', { selector: 'input' })
+    expect(count).toHaveValue('8')
+    // 30 % of the 60 mm side
+    expect(within(insp()).getByLabelText('Radius', { selector: 'input' })).toHaveValue('18 mm')
+    expect(insp()).toHaveTextContent('Count cells on one circle about the origin')
+    await waitFor(() =>
+      expect(insp().querySelector('[data-pattern-readout]')).toHaveTextContent(/^8 cells/),
+    )
+    await user.clear(count)
+    await user.type(count, '6{Enter}')
+    await waitFor(() =>
+      expect(insp().querySelector('[data-pattern-readout]')).toHaveTextContent(/^6 cells/),
+    )
+    // back to square: the spacing returns, count and radius kept for the next Radial
+    await user.click(within(insp()).getByRole('combobox', { name: 'Lattice' }))
+    await user.click(screen.getByRole('option', { name: 'Square' }))
+    await waitFor(() => expect(pattern()['lattice']).toBe('square'))
+    expect(within(insp()).getByRole('radio', { name: 'Gap' })).toBeInTheDocument()
+    expect(pattern()['count']).toBeDefined()
+    await expectNoAxeViolations()
+  })
 })

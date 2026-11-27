@@ -16,7 +16,7 @@ import { LineDepthArg, lineDepthOf, PointArg, Src } from '../commands'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import type { Point } from '../operation'
 import type { PatternBoundary } from '../pattern/pattern'
-import { PATTERN_LATTICES, ShapeIdSchema } from '../shape.dto'
+import { ENGRAVING_LATTICES, ShapeIdSchema } from '../shape.dto'
 import {
   defaultFit,
   defaultLayout,
@@ -37,7 +37,7 @@ const LayoutArg = z.union([
   z.literal('single'),
   z
     .object({
-      lattice: z.enum(PATTERN_LATTICES),
+      lattice: z.enum(ENGRAVING_LATTICES),
       spacing: z.union([z.object({ gap: Src }), z.object({ pitch: PointArg })]).optional(),
       angle: Src.optional(),
       origin: PointArg.nullable().optional(),

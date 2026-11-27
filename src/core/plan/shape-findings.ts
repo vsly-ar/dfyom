@@ -94,7 +94,14 @@ export function shapeFindings(plan: LoadedPlan, port: Region2dPort): PlanWarning
       // a pocket on the stock edge is cut as its open region (DF61): its rest inside the stock
       const R = tool.diameter / 2
       const face = localStock(g.direction ?? '+z', geometry.unwrap().stock)
-      const own = pocketRegion(g).region
+      // H3: the slot rule's slots (as wide as the tool) leave nothing: taken out first, as the
+      // DFM's rest check does (shape-measure.ts); a closed one's round ends are the tool's own
+      const own = slotSplit(
+        pocketRegion(g).region,
+        tool.diameter,
+        'finishAllowance' in e.strategy ? e.strategy.finishAllowance : 0,
+        face,
+      ).region
       const inFace = (p: readonly number[]) =>
         p[0]! >= 0 && p[0]! <= face.length && p[1]! >= 0 && p[1]! <= face.width
       const open = opensStock(port, own, face)

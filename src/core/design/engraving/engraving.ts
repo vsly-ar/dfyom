@@ -39,9 +39,9 @@ import {
 } from '../pattern/pattern'
 import { shapeFromDTO, type NamedShape } from '../shape'
 import {
-  PATTERN_LATTICES,
+  ENGRAVING_LATTICES,
   type EngravingRecord,
-  type PatternLattice,
+  type EngravingLattice,
   type ShapeDTO,
 } from '../shape.dto'
 import { ENGRAVING_PRESET_IDS, engravingPreset } from './presets'
@@ -69,7 +69,7 @@ export type EngravingLayout =
   | { readonly kind: 'single' }
   | {
       readonly kind: 'lattice'
-      readonly lattice: PatternLattice
+      readonly lattice: EngravingLattice
       /** A gap ≥ 0 between the tiles' frames (0: they join), or the pitch. */
       readonly spacing: PatternSpacing
       /** Turns the lattice (tiles included) about `origin`; polar: where the rings start. */
@@ -157,7 +157,7 @@ const EngravingDtoSchema = FeatureDtoSchema.extend({
   // E4: absent = single
   layout: z
     .object({
-      lattice: z.enum(PATTERN_LATTICES),
+      lattice: z.enum(ENGRAVING_LATTICES),
       spacing: z.union([
         z.object({ gap: length() }),
         z.object({ pitch: z.tuple([length(), length()]) }),

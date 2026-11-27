@@ -18,15 +18,18 @@
 // and Along (`margin: [u, v]`); straight fins read out as a heatsink; the Presets dialog's
 // heatsink step applies the fields and the slot tool as one gesture. H2: pin fins read out as pins
 // ("49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"); the dialog's current heatsink card starts its
-// step from the pattern's sizes.
+// step from the pattern's sizes. H3: the Radial lattice (Count and Radius in place of the spacing);
+// radial fins read out as "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm".
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import {
   pinsReadout,
+  radialReadout,
   straightFinsReadout,
   type FinsFields,
   type FinsReadout,
   type PinsReadout,
+  type RadialReadout,
 } from '../../../../core/design/pattern/heatsink'
 import type { PatternFacts } from '../../../../core/design/pattern/layout'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
@@ -80,9 +83,9 @@ const t = m.inspector
 const p = m.features.pattern
 
 type CellKind = 'circle' | 'rectangle' | 'obround' | 'polygon' | 'shape'
-type Lattice = 'square' | 'staggered' | 'hex' | 'polar'
+type Lattice = 'square' | 'staggered' | 'hex' | 'polar' | 'radial'
 const CELL_KINDS: readonly CellKind[] = ['circle', 'rectangle', 'obround', 'polygon', 'shape']
-const LATTICES: readonly Lattice[] = ['square', 'staggered', 'hex', 'polar']
+const LATTICES: readonly Lattice[] = ['square', 'staggered', 'hex', 'polar', 'radial']
 /** The Boundary select's value for the whole face. */
 const FACE = 'face'
 /** The size fields of each primitive cell, in order. */
@@ -128,7 +131,11 @@ function finsFields(
   const m = feature['margin'] as QuantityDTO | [QuantityDTO, QuantityDTO] | undefined
   const [mu, mv] = Array.isArray(m) ? m.map(exactOf) : [exactOf(m), exactOf(m)]
   const depth = exactOf(feature['depth'])
-  if (depth === undefined || c['round'] === true) return undefined
+  const radial = feature['lattice'] === 'radial'
+  // a Round cell reads as heatsink only on the radial lattice (H3's round-ended slots)
+  if (depth === undefined || (c['round'] === true && !radial)) return undefined
+  const count = exactOf(feature['count'])
+  const radius = exactOf(feature['radius'])
   const length = exactOf(c['length'])
   const width = exactOf(c['width'])
   const diameter = exactOf(c['diameter'])
@@ -139,7 +146,8 @@ function finsFields(
             kind: 'rectangle',
             length,
             width,
-            cornerRadius: exactOf(c['cornerRadius']) ?? 0,
+            cornerRadius:
+              c['round'] === true ? Math.min(length, width) / 2 : (exactOf(c['cornerRadius']) ?? 0),
             rotation: exactOf(c['rotation']) ?? 0,
           }
         : c.kind === 'circle' && diameter !== undefined
@@ -156,6 +164,7 @@ function finsFields(
     area: { min: [b.min[0], b.min[1]], max: [b.max[0], b.max[1]] },
     margin: [mu ?? 0, mv ?? 0],
     thickness,
+    ...(radial && count !== undefined && radius !== undefined ? { radial: { count, radius } } : {}),
   }
 }
 
@@ -164,7 +173,20 @@ function currentCard(
   f: FinsFields,
   fins: FinsReadout | undefined,
   pins: PinsReadout | undefined,
+  radial: RadialReadout | undefined,
 ): CurrentHeatsink | undefined {
+  if (radial !== undefined)
+    return {
+      id: 'radialFins',
+      values: {
+        fin: radial.hubFin,
+        slot: radial.slot,
+        height: radial.height,
+        hub: radial.hub,
+        outer: radial.outer,
+        count: f.radial?.count ?? radial.slots,
+      },
+    }
   if (fins !== undefined && f.cell.kind === 'rectangle')
     return {
       id: 'straightFins',
@@ -182,6 +204,70 @@ function currentCard(
       values: { pin: pins.pin, channel: pins.channel, height: pins.height },
     }
   return undefined
+}
+
+type RoundPart = { centre: [number, number]; diameter: number; name?: string }
+
+/** A placed circle (face frame): an inline circle, or a named shape that is one circle. */
+function placedCircle(
+  shape: unknown,
+  shapes: readonly { id: string; items: readonly unknown[] }[],
+): { centre: [number, number]; diameter: number } | undefined {
+  const sh = shape as
+    { kind?: string; shapeId?: string; center?: unknown[]; diameter?: unknown } | undefined
+  if (sh === undefined) return undefined
+  const named = sh.kind === 'named' ? shapes.find((x) => x.id === sh.shapeId) : undefined
+  const item = (named?.items.length === 1 ? named.items[0] : undefined) as
+    { kind?: string; op?: string; diameter?: unknown } | undefined
+  const d =
+    sh.kind === 'circle'
+      ? exactOf(sh.diameter)
+      : item?.kind === 'circle' && item.op !== 'subtract'
+        ? exactOf(item.diameter)
+        : undefined
+  const u = exactOf(sh.center?.[0])
+  const v = exactOf(sh.center?.[1])
+  return u === undefined || v === undefined || d === undefined || !(d > 0)
+    ? undefined
+    : { centre: [u, v], diameter: d }
+}
+
+/**
+ * H3: the round part the radial step centres on (face frame): the pattern's boundary when it is a
+ * circle; else the largest outside profile round a circle inside the face (the part's outline,
+ * its name); else a radial pattern's own origin; else the face's centre and smaller side.
+ */
+function roundPart(
+  feature: FeatureDTO,
+  part: DesignPart,
+  face: { min: readonly number[]; max: readonly number[] },
+): RoundPart {
+  const shapes = part.dto.shapes ?? []
+  const [u0, v0] = [face.min[0]!, face.min[1]!]
+  const [u1, v1] = [face.max[0]!, face.max[1]!]
+  const boundary = feature['boundary'] as { shapeId: string; center: unknown[] } | undefined
+  const onBoundary =
+    boundary === undefined ? undefined : placedCircle({ kind: 'named', ...boundary }, shapes)
+  if (onBoundary !== undefined && boundary !== undefined)
+    return { ...onBoundary, name: shapes.find((x) => x.id === boundary.shapeId)?.name ?? '' }
+  let best: RoundPart | undefined
+  for (const op of part.dto.operations) {
+    const o = op as unknown as { kind: string; side?: string; shape?: unknown; name: string }
+    if (o.kind !== 'profile' || (o.side ?? 'outside') !== 'outside') continue
+    const c = placedCircle(o.shape, shapes)
+    if (c === undefined) continue
+    const [u, v] = c.centre
+    const r = c.diameter / 2
+    if (u - r < u0 - 1e-6 || u + r > u1 + 1e-6 || v - r < v0 - 1e-6 || v + r > v1 + 1e-6) continue
+    if (best === undefined || c.diameter > best.diameter) best = { ...c, name: o.name }
+  }
+  if (best !== undefined) return best
+  const origin = feature['origin'] as unknown[] | undefined
+  const [ou, ov] = [exactOf(origin?.[0]), exactOf(origin?.[1])]
+  const side = Math.min(u1 - u0, v1 - v0)
+  if (feature['lattice'] === 'radial' && ou !== undefined && ov !== undefined)
+    return { centre: [ou, ov], diameter: side }
+  return { centre: [(u0 + u1) / 2, (v0 + v1) / 2], diameter: side }
 }
 
 /** The cell as `design.pattern.update` takes it: its sources, `changes` applied. */
@@ -271,6 +357,8 @@ export function PatternInspector({
     'cell',
     'lattice',
     'spacing',
+    'count',
+    'radius',
     'angle',
     'origin',
     'alternate',
@@ -393,6 +481,26 @@ export function PatternInspector({
     </div>
   )
 
+  /**
+   * A lattice change; H3: the first Radial gets 8 cells on a circle of 30 % of the face's smaller
+   * side (count and radius are kept across lattices after that).
+   */
+  const latticeArgs = (l: Lattice): Record<string, unknown> => {
+    if (l !== 'radial' || (feature['count'] !== undefined && feature['radius'] !== undefined))
+      return { lattice: l }
+    const side =
+      own === undefined
+        ? 40
+        : Math.min(
+            own.boundary.max[0] - own.boundary.min[0],
+            own.boundary.max[1] - own.boundary.min[1],
+          )
+    return {
+      lattice: l,
+      count: sourceOf(feature['count']) ?? '8',
+      radius: sourceOf(feature['radius']) ?? lengthSource(Math.round(side * 0.3), units),
+    }
+  }
   const chooseCell = (kind: CellKind) => {
     if (kind === cell.kind) return
     if (kind === 'shape') {
@@ -449,12 +557,15 @@ export function PatternInspector({
           across: own.boundary.max[0] - own.boundary.min[0],
           along: own.boundary.max[1] - own.boundary.min[1],
           thickness,
+          round: roundPart(feature, part, own.boundary),
         }
   const ff = facts === undefined ? undefined : finsFields(feature, facts, thickness)
   const fins = ff === undefined ? undefined : straightFinsReadout(ff)
   // H2: pin fins read out as pins; the dialog's current card starts its step from these sizes
   const pins = ff === undefined || fins !== undefined ? undefined : pinsReadout(ff)
-  const currentHeatsink = ff === undefined ? undefined : currentCard(ff, fins, pins)
+  // H3: radial fins read out as slots with the fin at the hub
+  const radialFins = ff === undefined ? undefined : radialReadout(ff)
+  const currentHeatsink = ff === undefined ? undefined : currentCard(ff, fins, pins, radialFins)
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -469,29 +580,43 @@ export function PatternInspector({
           <p className={styles['muted']} data-pattern-readout>
             {facts === undefined
               ? ''
-              : fins !== undefined
-                ? p.finsReadout(
-                    fins.slots,
-                    fins.fins,
-                    lengthSource(fins.fin, units),
-                    lengthSource(fins.height, units),
-                    fins.ratio,
-                    fins.base === undefined ? undefined : lengthSource(fins.base, units),
-                  )
-                : pins !== undefined
-                  ? p.pinsReadout(
-                      pins.pins,
-                      lengthSource(pins.pin, units),
-                      pins.kind !== 'square',
-                      lengthSource(pins.height, units),
-                      pins.ratio,
-                      pins.base === undefined ? undefined : lengthSource(pins.base, units),
+              : radialFins !== undefined
+                ? [
+                    p.radialReadout(
+                      radialFins.slots,
+                      lengthSource(radialFins.slot, units),
+                      lengthSource(radialFins.hubFin, units),
+                      lengthSource(radialFins.height, units),
+                      radialFins.ratio,
+                      radialFins.base === undefined
+                        ? undefined
+                        : lengthSource(radialFins.base, units),
+                    ),
+                    p.radialRim(lengthSource(radialFins.rimFin, units)),
+                  ].join(' · ')
+                : fins !== undefined
+                  ? p.finsReadout(
+                      fins.slots,
+                      fins.fins,
+                      lengthSource(fins.fin, units),
+                      lengthSource(fins.height, units),
+                      fins.ratio,
+                      fins.base === undefined ? undefined : lengthSource(fins.base, units),
                     )
-                  : p.readoutFull(
-                      facts.cells,
-                      facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
-                      facts.dropped,
-                    )}
+                  : pins !== undefined
+                    ? p.pinsReadout(
+                        pins.pins,
+                        lengthSource(pins.pin, units),
+                        pins.kind !== 'square',
+                        lengthSource(pins.height, units),
+                        pins.ratio,
+                        pins.base === undefined ? undefined : lengthSource(pins.base, units),
+                      )
+                    : p.readoutFull(
+                        facts.cells,
+                        facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
+                        facts.dropped,
+                      )}
           </p>
           <PatternPresetsDialog
             feature={feature}
@@ -604,53 +729,72 @@ export function PatternInspector({
 
         <InspectorGroup title={p.groups.layout}>
           <div data-feature-field="lattice">
-            <Field label={p.lattice} kind="toggle" messages={messagesAt('lattice')}>
-              <SegmentedControl<Lattice>
-                label={p.lattice}
+            {/* H3: five lattices do not fit a segmented control in the inspector (as the joints) */}
+            <Field
+              label={p.lattice}
+              messages={[
+                ...messagesAt('lattice'),
+                ...note('radial', lattice === 'radial' ? p.radialNote : undefined),
+              ]}
+            >
+              <Select
                 options={LATTICES.map((l) => ({ value: l, label: p.lattices[l] ?? l }))}
                 value={lattice}
-                onValueChange={(l) => l !== lattice && void update({ lattice: l }, 'lattice')}
+                onValueChange={(l) =>
+                  l !== lattice && void update(latticeArgs(l as Lattice), 'lattice')
+                }
               />
             </Field>
           </div>
-          <div data-feature-field="spacing">
-            <Field label={p.spacing} kind="toggle" messages={messagesAt('spacing')}>
-              <SegmentedControl<string>
-                label={p.spacing}
-                options={['gap', 'pitch'].map((v) => ({ value: v, label: p.spacings[v] ?? v }))}
-                value={gap ? 'gap' : 'pitch'}
-                onValueChange={(v) => {
-                  if ((v === 'gap') === gap) return
-                  void update(
-                    v === 'gap'
-                      ? { spacing: { gap: '2 mm' } }
-                      : { spacing: { pitch: ['10 mm', '10 mm'] } },
-                    'spacing',
-                  )
-                }}
-              />
-            </Field>
-          </div>
-          {gap
-            ? quantityField('spacing.gap', p.gap, 'length', spacing.gap, (source) => ({
-                spacing: { gap: source },
-              }))
-            : ([0, 1] as const).map((i) =>
-                quantityField(
-                  `spacing.pitch.${i}`,
-                  p.pitch(i, lattice === 'polar'),
-                  'length',
-                  spacing.pitch?.[i],
-                  (s) => {
-                    const pitch = [
-                      sourceOf(spacing.pitch?.[0]) ?? s,
-                      sourceOf(spacing.pitch?.[1]) ?? s,
-                    ]
-                    pitch[i] = s
-                    return { spacing: { pitch } }
-                  },
-                ),
-              )}
+          {lattice === 'radial' ? (
+            <>
+              {quantityField('count', p.count, 'scalar', feature['count'], (count) => ({ count }))}
+              {quantityField('radius', p.radius, 'length', feature['radius'], (radius) => ({
+                radius,
+              }))}
+            </>
+          ) : (
+            <>
+              <div data-feature-field="spacing">
+                <Field label={p.spacing} kind="toggle" messages={messagesAt('spacing')}>
+                  <SegmentedControl<string>
+                    label={p.spacing}
+                    options={['gap', 'pitch'].map((v) => ({ value: v, label: p.spacings[v] ?? v }))}
+                    value={gap ? 'gap' : 'pitch'}
+                    onValueChange={(v) => {
+                      if ((v === 'gap') === gap) return
+                      void update(
+                        v === 'gap'
+                          ? { spacing: { gap: '2 mm' } }
+                          : { spacing: { pitch: ['10 mm', '10 mm'] } },
+                        'spacing',
+                      )
+                    }}
+                  />
+                </Field>
+              </div>
+              {gap
+                ? quantityField('spacing.gap', p.gap, 'length', spacing.gap, (source) => ({
+                    spacing: { gap: source },
+                  }))
+                : ([0, 1] as const).map((i) =>
+                    quantityField(
+                      `spacing.pitch.${i}`,
+                      p.pitch(i, lattice === 'polar'),
+                      'length',
+                      spacing.pitch?.[i],
+                      (s) => {
+                        const pitch = [
+                          sourceOf(spacing.pitch?.[0]) ?? s,
+                          sourceOf(spacing.pitch?.[1]) ?? s,
+                        ]
+                        pitch[i] = s
+                        return { spacing: { pitch } }
+                      },
+                    ),
+                  )}
+            </>
+          )}
           {quantityField('angle', p.angle, 'angle', feature['angle'], (angle) => ({ angle }))}
           {more(
             'layout',
@@ -1022,6 +1166,8 @@ type PatternPath =
   | 'cell.rotation'
   | 'spacing.gap'
   | `spacing.pitch.${0 | 1}`
+  | 'count'
+  | 'radius'
   | 'angle'
   | `boundary.center.${0 | 1}`
   | 'boundary.rotation'
@@ -1042,6 +1188,8 @@ const PATTERN_STEP: Record<PatternPath, StepKind> = {
   'spacing.gap': 'small',
   'spacing.pitch.0': 'xy',
   'spacing.pitch.1': 'xy',
+  count: 'count',
+  radius: 'xy',
   angle: 'rotation',
   'boundary.center.0': 'xy',
   'boundary.center.1': 'xy',

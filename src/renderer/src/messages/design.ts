@@ -78,7 +78,12 @@ export const designMessages = {
         staggered: 'Staggered',
         hex: 'Hex',
         polar: 'Polar',
+        radial: 'Radial',
       } as Record<string, string>,
+      /** H3: the radial lattice's fields. */
+      count: 'Count',
+      radius: 'Radius',
+      radialNote: 'Count cells on one circle about the origin, each turned to face out.',
       spacing: 'Spacing',
       spacings: { gap: 'Gap', pitch: 'Pitch' } as Record<string, string>,
       gap: 'Gap',
@@ -168,10 +173,13 @@ export const designMessages = {
                   ? 'hole'
                   : kind,
         across: (corners: boolean) => (corners ? 'across corners' : 'across flats'),
-        lattice: { square: 'square', staggered: 'staggered', hex: 'hex', polar: 'polar' } as Record<
-          string,
-          string
-        >,
+        lattice: {
+          square: 'square',
+          staggered: 'staggered',
+          hex: 'hex',
+          polar: 'polar',
+          radial: 'radial',
+        } as Record<string, string>,
         gap: 'gap',
         flip: 'flipped',
       },
@@ -221,12 +229,14 @@ export const designMessages = {
         squarePins: 'Square pin fins',
         roundPins: 'Round pin fins',
         staggeredPins: 'Staggered pin fins',
+        radialFins: 'Radial fins',
       } as Record<string, string>,
       heatsinkDescriptions: {
         straightFins: 'Parallel slots across the face, open at both ends.',
         squarePins: 'A grid of square pins left standing, open all round.',
         roundPins: 'A grid of round pins left standing, open all round.',
         staggeredPins: 'Round pins in offset rows, open all round.',
+        radialFins: 'Slots from a hub out past the rim of a round part.',
       } as Record<string, string>,
       heatsinkNumbers: (fin: string, slot: string, height: string) =>
         `fins ${fin} · slots ${slot} · ${height} high`,
@@ -307,6 +317,38 @@ export const designMessages = {
         ].join(' · '),
       pinsChannels: (channel: string, border: string) => `channels ${channel} · border ${border}`,
       tallPins: (ratio: number) => `Pins taller than 8 × their size (1:${ratio}) chatter and bend.`,
+      /** H3: the radial-fins card and step. */
+      radialNumbers: (slots: number, hub: string, height: string) =>
+        `${slots} slots · hub ${hub} · ${height} high`,
+      hubFin: 'Fin at the hub',
+      hub: 'Hub diameter',
+      outer: 'Part diameter',
+      radialCount: 'Count',
+      countNote: (most: number) =>
+        most < 2 ? 'No two slots keep that fin at the hub.' : `${most} keep the fin at the hub.`,
+      useCount: (most: number) => `Use ${most}`,
+      /** Where the radial fins centre: a circle boundary or outline profile (`circle` its name), else the face. */
+      centreNote: (u: string, v: string, circle: string | undefined) =>
+        `Centred on ${circle ?? 'the face'} (${u}, ${v}); the slots run one slot past the rim: the part's outline profile opens them.`,
+      noRadialFit: 'No slots fit: make the hub larger, or the fins or slots smaller.',
+      /** "21 slots 2 mm · fins 1.59 mm at the hub · 8 mm high (1:5) · base 4 mm". */
+      radialReadout: (
+        slots: number,
+        slot: string,
+        fin: string,
+        height: string,
+        ratio: number,
+        base: string | undefined,
+      ) =>
+        [
+          `${slots === 1 ? '1 slot' : `${slots} slots`} ${slot}`,
+          `fins ${fin} at the hub`,
+          `${height} high (1:${ratio})`,
+          ...(base === undefined ? [] : [`base ${base}`]),
+        ].join(' · '),
+      radialRim: (rim: string) => `${rim} at the rim`,
+      tallHub: (ratio: number) =>
+        `Fins taller than 8 × their thickness at the hub (1:${ratio}) chatter and bend.`,
     },
     /** The row menu's actions (dogfood DF16). */
     chamfer: 'Chamfer',

@@ -7,7 +7,8 @@
  * stacked pattern's area is the region of the pattern below it, less the margin.
  * Doc: docs/modes/patterns.md#owned-shape-and-operations, docs/modes/patterns.md#implementation-p1,
  * docs/modes/patterns.md#implementation-p2, docs/modes/patterns.md#implementation-p4,
- * docs/modes/patterns.md#implementation-p5 (flip, ghosts)
+ * docs/modes/patterns.md#implementation-p5 (flip, ghosts). H3: the `radial` lattice (`count` cells
+ * on one circle, each turned to face out), docs/modes/pattern-presets.md#implementation-h3
  *
  * Pure numbers (mm, degrees) and the 2D port; the cell's and the boundary's own resolution is
  * passed in (shape.ts resolves named shapes and primitives), so this module has no shape-layer
@@ -201,6 +202,8 @@ export function resolvePattern(
   const ex = tb.max[0] - tb.min[0]
   const ey = tb.max[1] - tb.min[1]
   const polar = p.lattice === 'polar'
+  // H3: `count` cells on one circle, each turned to face out (its own orientation per node)
+  const radial = p.lattice === 'radial'
   // P5: every other cell turned 180° about its box centre (the same box)
   const flip = p.alternate === 'flip'
   const flippedCentred = flip ? orientRegion(centred, { rotation: 180, mirror: false }) : centred
@@ -217,7 +220,7 @@ export function resolvePattern(
         issue(['spacing', 'gap'], 'positive', 'must be greater than 0', { actual: g }),
       ])
     if (polar) a = b = diameter + g
-    else if (flip) {
+    else if (flip && !radial) {
       // P5: flipped neighbours nest (triangles), so both pitches are bisected to a web of g
       const nested = flipPitches(port, centred, flippedCentred, ex, ey, g, p.lattice !== 'square')
       if (nested.isErr()) return nested
@@ -235,24 +238,43 @@ export function resolvePattern(
         }),
       ])
   }
-  const overlap = polar
-    ? Ok(Math.min(a, b) < diameter + PATTERN_MIN_WEB)
-    : cellsOverlap(port, [centred, flippedCentred], ex, ey, {
-        a,
-        b,
-        shifted: p.lattice !== 'square',
-        angle: 0,
-        flip,
-      })
+  const count = p.count ?? 0
+  const radius = p.radius ?? 0
+  if (radial) {
+    if (!(Number.isInteger(count) && count >= 2))
+      return invalid([
+        issue(['count'], 'radialCount', 'a radial lattice needs a whole number of 2 or more', {
+          actual: count,
+        }),
+      ])
+    if (!(radius > 0))
+      return invalid([issue(['radius'], 'positive', 'must be greater than 0', { actual: radius })])
+    // along the circle (the chord between neighbours) and the radius
+    a = 2 * radius * Math.sin(Math.PI / count)
+    b = radius
+  }
+  const overlap = radial
+    ? radialOverlap(port, centred, count, radius)
+    : polar
+      ? Ok(Math.min(a, b) < diameter + PATTERN_MIN_WEB)
+      : cellsOverlap(port, [centred, flippedCentred], ex, ey, {
+          a,
+          b,
+          shifted: p.lattice !== 'square',
+          angle: 0,
+          flip,
+        })
   if (overlap.isErr()) return overlap
   if (overlap.unwrap())
     return invalid([
       issue(
-        ['spacing'],
+        [radial ? 'count' : 'spacing'],
         'patternOverlap',
-        polar
-          ? `neighbouring cells may overlap (pitch ${round(a)} × ${round(b)} mm for a cell ${round(diameter)} mm across its corners): widen the spacing`
-          : `neighbouring cells overlap or touch (pitch ${round(a)} × ${round(b)} mm for a ${round(ex)} × ${round(ey)} mm cell): widen the spacing`,
+        radial
+          ? `neighbouring cells overlap or touch at the hub (${count} cells on R ${round(radius)} mm): fewer cells, a larger radius or a narrower cell`
+          : polar
+            ? `neighbouring cells may overlap (pitch ${round(a)} × ${round(b)} mm for a cell ${round(diameter)} mm across its corners): widen the spacing`
+            : `neighbouring cells overlap or touch (pitch ${round(a)} × ${round(b)} mm for a ${round(ex)} × ${round(ey)} mm cell): widen the spacing`,
         { pitch: [round(a), round(b)], extent: polar ? [round(diameter)] : [round(ex), round(ey)] },
       ),
     ])
@@ -277,7 +299,9 @@ export function resolvePattern(
   const hi = ab.max
   const origin: Vec2 = p.origin ?? [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]
   const cell =
-    polar || p.angle === 0 ? centred : orientRegion(centred, { rotation: p.angle, mirror: false })
+    polar || radial || p.angle === 0
+      ? centred
+      : orientRegion(centred, { rotation: p.angle, mirror: false })
   const cb = boundsOf(cell)!
   const cellArea = regionArea(cell)
   // P5: the flipped cell (about the node, so its box is the cell's mirrored through the node)
@@ -298,20 +322,27 @@ export function resolvePattern(
   const index = rect ? undefined : new EdgeIndex(regionElements(areaRegion))
   const whole: Vec2[] = []
   const wholeFlips: boolean[] = []
+  // the cell as placed at each whole node (about it; H3: radial cells differ per node)
+  const wholeCells: Region[] = []
   const fragments: RegionPiece[] = []
   const ghosts: RegionPiece[] = []
   let crossing = 0
   let dropped = 0
-  const keep = (n: Vec2, f: boolean) => {
+  /** The cell at a node: flipped or not, or (H3) its own turned copy and box. */
+  type Own = { readonly cell: Region; readonly box: Bounds2 }
+  const shapeAt = (f: boolean, own: Own | undefined) => own?.cell ?? cellAt(f)
+  const keep = (n: Vec2, f: boolean, own: Own | undefined) => {
     whole.push(n)
     wholeFlips.push(f)
+    wholeCells.push(shapeAt(f, own))
   }
-  const ghost = (n: Vec2, f: boolean) => {
-    if (ghosts.length < PATTERN_GHOSTS_MAX) ghosts.push(...translateRegion(cellAt(f), n).pieces)
+  const ghost = (n: Vec2, f: boolean, own: Own | undefined) => {
+    if (ghosts.length < PATTERN_GHOSTS_MAX)
+      ghosts.push(...translateRegion(shapeAt(f, own), n).pieces)
   }
   /** Sorts one node: kept whole, cut (clip), or left out (a ghost when it crosses the area). */
-  const place = (n: Vec2, f: boolean): AppResult<void> => {
-    const c = f ? fb : cb
+  const place = (n: Vec2, f: boolean, own?: Own): AppResult<void> => {
+    const c = own?.box ?? (f ? fb : cb)
     const box: Bounds2 = {
       min: [n[0] + c.min[0], n[1] + c.min[1]],
       max: [n[0] + c.max[0], n[1] + c.max[1]],
@@ -320,33 +351,33 @@ export function resolvePattern(
     let cut: Region | undefined
     if (rect) {
       if (inside(box, lo, hi)) {
-        keep(n, f)
+        keep(n, f, own)
         return Ok(undefined)
       }
       if (!clip) {
-        ghost(n, f)
+        ghost(n, f, own)
         return Ok(undefined)
       }
     } else if (!index!.touches(box)) {
-      if (regionContains(areaRegion, n)) keep(n, f)
+      if (regionContains(areaRegion, n)) keep(n, f, own)
       return Ok(undefined)
     } else {
-      const x = port.intersect(translateRegion(cellAt(f), n), areaRegion)
+      const x = port.intersect(translateRegion(shapeAt(f, own), n), areaRegion)
       if (x.isErr()) return Err(x.unwrapErr())
       const share = regionArea(x.unwrap())
       if (share >= cellArea * (1 - AREA_SHARE)) {
-        keep(n, f)
+        keep(n, f, own)
         return Ok(undefined)
       }
-      if (share > cellArea * AREA_SHARE) ghost(n, f)
+      if (share > cellArea * AREA_SHARE) ghost(n, f, own)
       if (!clip || share <= cellArea * AREA_SHARE) return Ok(undefined)
       cut = x.unwrap()
     }
     if (cut === undefined) {
-      const x = port.intersect(translateRegion(cellAt(f), n), areaRegion)
+      const x = port.intersect(translateRegion(shapeAt(f, own), n), areaRegion)
       if (x.isErr()) return Err(x.unwrapErr())
       cut = x.unwrap()
-      if (cut.pieces.length > 0) ghost(n, f)
+      if (cut.pieces.length > 0) ghost(n, f, own)
     }
     let kept = false
     for (const piece of cut.pieces) {
@@ -364,12 +395,23 @@ export function resolvePattern(
   }
 
   // nodes covering the area
-  const nodes = polar
-    ? polarNodes(origin, lo, hi, a, b, p.angle, flip)
-    : rowNodes(origin, lo, hi, a, b, p, flip)
-  for (const { at: n, flip: f } of nodes) {
-    const done = place(n, f)
+  const nodes = radial
+    ? radialNodes(origin, count, radius, p.angle)
+    : polar
+      ? polarNodes(origin, lo, hi, a, b, p.angle, flip)
+      : rowNodes(origin, lo, hi, a, b, p, flip)
+  // H3: which node of the circle each whole cell is (the web is measured between neighbours)
+  const wholeIndex: number[] = []
+  for (const [k, { at: n, flip: f }] of nodes.entries()) {
+    let own: Own | undefined
+    if (radial) {
+      const turned = orientRegion(cell, { rotation: radialTurn(origin, n), mirror: false })
+      own = { cell: turned, box: boundsOf(turned)! }
+    }
+    const before = whole.length
+    const done = place(n, f, own)
     if (done.isErr()) return done
+    if (whole.length > before) wholeIndex.push(k)
     if (whole.length + crossing > PATTERN_CELLS_MAX) return tooMany()
   }
 
@@ -378,12 +420,12 @@ export function resolvePattern(
     // our own sharp corners (the margin's rectangle, cells meeting the boundary) are rounded
     const [mu, mv] = marginUV(p.margin)
     const round = fragments.length > 0 || (rect && (mu > 0 || mv > 0))
-    const holes = invertCells(port, areaRegion, cellAt, whole, wholeFlips, fragments, round)
+    const holes = invertCells(port, areaRegion, wholeCells, whole, fragments, round)
     if (holes.isErr()) return holes
     pieces = holes.unwrap()
   } else {
     whole.forEach((n, i) =>
-      pieces.push(...translateRegion(cellAt(wholeFlips[i]!), [n[0] + 0, n[1] + 0]).pieces),
+      pieces.push(...translateRegion(wholeCells[i]!, [n[0] + 0, n[1] + 0]).pieces),
     )
     pieces.push(...fragments)
   }
@@ -393,17 +435,19 @@ export function resolvePattern(
     if (c.isErr()) return c
     region = c.unwrap()
   }
-  const webInput: WebInput = {
-    cell,
-    ...(flip ? { flipped, flips: wholeFlips } : {}),
-    diameter,
-    nodes: whole,
-    invert: p.invert === true,
-    lattice: polar
-      ? undefined
-      : { a, b, shifted: p.lattice !== 'square', angle: p.angle, ...(flip ? { flip } : {}) },
-    centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2],
-  }
+  const webInput: WebInput = radial
+    ? radialWebInput(whole, wholeCells, wholeIndex, count, diameter, p.invert === true, lo, hi)
+    : {
+        cell,
+        ...(flip ? { flipped, flips: wholeFlips } : {}),
+        diameter,
+        nodes: whole,
+        invert: p.invert === true,
+        lattice: polar
+          ? undefined
+          : { a, b, shifted: p.lattice !== 'square', angle: p.angle, ...(flip ? { flip } : {}) },
+        centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2],
+      }
   const web = patternWeb(port, webInput)
   return Ok({
     region,
@@ -652,6 +696,110 @@ function holder(pieces: readonly RegionPiece[], p: Vec2): number {
 }
 
 /**
+ * H3: the turn of a cell on a circle about `origin` so that its top (+v) faces out: the node's
+ * direction − 90° (0 at the origin itself). Shared with the engraved pattern's polar `radial`
+ * tiles (engraved-patterns.md E4).
+ */
+export function radialTurn(origin: Vec2, at: Vec2): number {
+  return Math.hypot(at[0] - origin[0], at[1] - origin[1]) > 1e-9
+    ? (Math.atan2(at[1] - origin[1], at[0] - origin[0]) * 180) / Math.PI - 90
+    : 0
+}
+
+/** H3: `count` nodes evenly on the circle of `radius` about `origin`, the first at `angle`. */
+export function radialNodes(
+  origin: Vec2,
+  count: number,
+  radius: number,
+  angle: number,
+): LatticeNode[] {
+  const nodes: LatticeNode[] = []
+  for (let i = 0; i < count; i++) {
+    const t = ((angle + (360 * i) / count) * Math.PI) / 180
+    nodes.push({
+      at: [origin[0] + radius * Math.cos(t), origin[1] + radius * Math.sin(t)],
+      flip: false,
+    })
+  }
+  return nodes
+}
+
+/**
+ * H3: whether two cells of a radial lattice overlap or come within `PATTERN_MIN_WEB`: by symmetry
+ * the cell of node 0 against those of nodes 1 … ⌊count / 2⌋ (each turned to face out) whose
+ * boxes come that close.
+ */
+function radialOverlap(
+  port: Region2dPort,
+  cell: Region,
+  count: number,
+  radius: number,
+): AppResult<boolean> {
+  const nodes = radialNodes([0, 0], count, radius, 0)
+  const placed = (k: number): Region =>
+    translateRegion(
+      orientRegion(cell, { rotation: radialTurn([0, 0], nodes[k]!.at), mirror: false }),
+      nodes[k]!.at,
+    )
+  const first = placed(0)
+  const fb = boundsOf(first)!
+  const lo: Vec2 = [fb.min[0] - PATTERN_MIN_WEB, fb.min[1] - PATTERN_MIN_WEB]
+  const hi: Vec2 = [fb.max[0] + PATTERN_MIN_WEB, fb.max[1] + PATTERN_MIN_WEB]
+  const grown = port.offset(first, -PATTERN_MIN_WEB)
+  if (grown.isErr()) return Err(grown.unwrapErr())
+  for (let k = 1; k <= Math.floor(count / 2); k++) {
+    const other = placed(k)
+    if (disjoint(boundsOf(other)!, lo, hi)) continue
+    const both = port.intersect(grown.unwrap(), other)
+    if (both.isErr()) return Err(both.unwrapErr())
+    if (both.unwrap().pieces.length > 0 && regionArea(both.unwrap()) > 1e-12) return Ok(true)
+  }
+  return Ok(false)
+}
+
+/**
+ * H3: what the web of a radial lattice is measured on. Its cells are turned copies, so the web
+ * between any two neighbours is the same: the first pair of whole neighbours (nodes k, k + 1 of
+ * the circle) goes in as the cell and its "flipped" partner, each about its own node; with no two
+ * whole neighbours, the one cell (no web; inverted, its island is still measured).
+ */
+function radialWebInput(
+  whole: readonly Vec2[],
+  cells: readonly Region[],
+  index: readonly number[],
+  count: number,
+  diameter: number,
+  invert: boolean,
+  lo: Vec2,
+  hi: Vec2,
+): WebInput {
+  const centre: Vec2 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]
+  const at = new Map(index.map((k, i) => [k, i] as const))
+  for (const [i, k] of index.entries()) {
+    const j = at.get((k + 1) % count)
+    if (j === undefined || j === i) continue
+    return {
+      cell: cells[i]!,
+      flipped: cells[j]!,
+      flips: [false, true],
+      diameter,
+      nodes: [whole[i]!, whole[j]!],
+      invert,
+      lattice: undefined,
+      centre,
+    }
+  }
+  return {
+    cell: cells[0] ?? { pieces: [] },
+    diameter,
+    nodes: whole.slice(0, 1),
+    invert,
+    lattice: undefined,
+    centre,
+  }
+}
+
+/**
  * Inverted (P2): the area minus the cells. The clipped fragments are subtracted (few booleans)
  * and, with `round`, the result opened (`opening`); then each whole cell's outer loop goes in as
  * a hole of the piece holding it (no fold), and the cell's own holes become pieces.
@@ -659,9 +807,8 @@ function holder(pieces: readonly RegionPiece[], p: Vec2): number {
 function invertCells(
   port: Region2dPort,
   area: Region,
-  cellAt: (flipped: boolean) => Region,
+  cells: readonly Region[],
   whole: readonly Vec2[],
-  flips: readonly boolean[],
   fragments: readonly RegionPiece[],
   round: boolean,
 ): AppResult<RegionPiece[]> {
@@ -680,7 +827,7 @@ function invertCells(
   const extra: RegionPiece[] = []
   const boxes = out.map((p) => chainBounds(p.outer.elements)!)
   for (const [k0, n] of whole.entries()) {
-    for (const piece of translateRegion(cellAt(flips[k0]!), [n[0] + 0, n[1] + 0]).pieces) {
+    for (const piece of translateRegion(cells[k0]!, [n[0] + 0, n[1] + 0]).pieces) {
       const at = piece.outer.elements[0]!.a
       const near = out.map((_, i) => i).filter((i) => !disjoint(boxes[i]!, at, at))
       const k = holder(

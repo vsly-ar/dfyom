@@ -211,6 +211,20 @@ export const ICON_SET = {
       { d: 'M9.35 1.5v13', a: true },
     ],
   },
+  // H3 (pattern-presets.md § UI): the Radial fins preset, a hub with eight slots running out from
+  // it, the one at 12 o'clock (the lattice's first, at 90°) the accent.
+  'fins-radial': {
+    label: 'Radial fins',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { circle: [8, 8, 2] },
+      {
+        d: 'M11.5 8H15M8 11.5V15M4.5 8H1M10.47 5.53l2.48-2.48M10.47 10.47l2.48 2.48M5.53 10.47l-2.48 2.48M5.53 5.53L3.05 3.05',
+      },
+      { d: 'M8 4.5V1', a: true },
+    ],
+  },
   // H2 (pattern-presets.md § UI): the pin-fin presets in top view, 3 × 3 pins (staggered 2-3-2
   // rows), the centre pin the accent.
   'pins-square': {
