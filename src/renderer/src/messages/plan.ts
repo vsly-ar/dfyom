@@ -368,6 +368,24 @@ export const planMessages = {
     grip: 'Grip on the stock',
     reach: 'Reach past the edge',
     top: 'Top above Z0',
+    // DF125: where the fields measure from (workholding.md#measured-from-df125)
+    xyFrom: 'X/Y from',
+    xyFromOptions: { corner: 'Corner', zero: 'Work zero' },
+    xyFromHint:
+      "Where positions are measured from: the front-left corner of the stock's up face, or the setup's work zero (as the DRO reads them). Only how the fields read: the item stays where it is.",
+    zFrom: 'Heights from',
+    zFromOptions: { top: 'Top', bottom: 'Bottom' },
+    zFromHint:
+      'Where heights are measured from: the stock top (Z0) or the stock bottom (the table, as a caliper reads them). Only how the fields read: the item stays where it is.',
+    xyFromInfo: {
+      corner: "From the front-left corner of the stock's up face.",
+      zero: 'From the work zero: X/Y as the DRO reads them.',
+    },
+    zFromInfo: {
+      top: 'Height above the stock top (Z0).',
+      bottom: 'Height above the stock bottom, as a caliper reads it from the table.',
+    },
+    topFromBottom: 'Top above stock bottom',
     axis: 'Jaws close along',
     protrusion: 'Stock above the jaws',
     jawLength: 'Jaw length',

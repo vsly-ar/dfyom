@@ -389,27 +389,32 @@ export function lengthText(mmValue: number, units: 'mm' | 'in'): string {
  * Positions are the setup-frame values (as the items are entered) less `zero`: the inspector
  * and `plan.workholding.set` pass none (setup frame, beside the fields), the program header
  * the setup's work zero, so its lines are in the WCS like every other coordinate of the
- * program (DF81, docs/modes/alignment.md S12).
+ * program (DF81, docs/modes/alignment.md S12). With `thickness` (the stock's T, mm) heights read
+ * from the stock bottom, "top 37 above bottom" (the inspector's "Heights from: Bottom", DF125,
+ * docs/modes/workholding.md#measured-from-df125).
  */
 export function itemSummary(
   item: ResolvedItem,
   units: 'mm' | 'in',
   zero: readonly [number, number] = [0, 0],
+  thickness?: number,
 ): string {
   const l = (v: number) => lengthText(v, units)
   const [zx, zy] = zero
+  const top = (z: number) =>
+    thickness === undefined ? `top Z${l(z)}` : `top ${l(z + thickness)} above bottom`
   switch (item.kind) {
     case 'toeClamp': {
       const alongY = item.edge === 'uMin' || item.edge === 'uMax'
       const at = item.at - (alongY ? zy : zx)
-      return `${EDGE_WORD[item.edge]} ${alongY ? 'Y' : 'X'}${l(at)} grip ${l(item.grip)} top Z${l(item.top)}`
+      return `${EDGE_WORD[item.edge]} ${alongY ? 'Y' : 'X'}${l(at)} grip ${l(item.grip)} ${top(item.top)}`
     }
     case 'vise':
       return `${item.soft ? 'soft jaws' : 'jaws'} along ${item.axis === 'u' ? 'X' : 'Y'}, stock ${l(item.protrusion)} above them`
     case 'screw':
-      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} head ${l(item.headDiameter)} top Z${l(item.top)}`
+      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} head ${l(item.headDiameter)} ${top(item.top)}`
     case 'block':
-      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} ${l(item.length)} x ${l(item.width)} top Z${l(item.top)}`
+      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} ${l(item.length)} x ${l(item.width)} ${top(item.top)}`
     case 'base':
       return item.type === 'spoilboard' ? 'spoilboard (sacrificial)' : 'fixture plate'
     case 'surface':

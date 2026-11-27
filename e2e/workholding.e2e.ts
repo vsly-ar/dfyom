@@ -611,3 +611,63 @@ test('workholding library in the setup inspector (WL4): the default clamp, detac
   await expect.poll(() => dfyom.app.windows().length).toBe(2)
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+test('measured from (DF125): a clamp entered from the work zero and the stock bottom, stored in the setup frame', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  const { planId } = await hardwoodPlan(page)
+  const setupId = (
+    await bridgeCall<{ plan: { setups: { id: string }[] } }>(page, 'plan.get', { planId })
+  ).plan.setups[0]!.id
+  // the user set the zero first: 50, 20 from the stock corner
+  await bridgeCall(page, 'plan.setup.update', { planId, setupId, zero: { at: ['50', '20'] } })
+  await bridgeCall(page, 'plan.workholding.set', {
+    planId,
+    setupId,
+    items: [{ kind: 'toeClamp', edge: 'vMin', at: '100', top: '12' }],
+  })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  await setups.getByRole('button', { name: /^Top G54/ }).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const section = inspector.getByRole('region', { name: /^Workholding/ })
+  const row = section.getByRole('button', { name: /^Toe clamp 1/ })
+  await row.click()
+  const fields = section.getByRole('group', { name: 'Item Toe clamp 1' })
+  await expect(row).toContainText('front X100 grip 10 top Z12')
+
+  // X/Y from the work zero, heights from the stock bottom (40 mm thick)
+  await fields.getByRole('radio', { name: 'Work zero' }).click()
+  await fields.getByRole('radio', { name: 'Bottom' }).click()
+  const at = fields.getByLabel('Position along the edge', { exact: true })
+  const top = fields.getByLabel('Top above stock bottom', { exact: true })
+  await expect(at).toHaveValue('50 mm')
+  await expect(top).toHaveValue('52 mm')
+  await expect(row).toContainText('front X50 grip 10 top 52 above bottom')
+  // measured at the machine: 30 from the zero, the clamp's top 55 above the table
+  await at.fill('30')
+  await at.press('Enter')
+  await expect(at).toHaveValue('30 mm')
+  await top.fill('55')
+  await top.press('Enter')
+  await expect(row).toContainText('front X30 grip 10 top 55 above bottom')
+  const plan = await bridgeCall<{
+    plan: {
+      setups: { workholding?: { at?: { source: string }; top?: { source: string } }[] }[]
+    }
+  }>(page, 'plan.get', { planId })
+  const item = plan.plan.setups[0]!.workholding![0]!
+  // stored in the setup frame: 30 + 50 along X, 55 − 40 above Z0
+  expect(item.at?.source).toBe('80 mm')
+  expect(item.top?.source).toBe('15 mm')
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await render(page, 'df125-measured-from')
+  expect(dfyom.rendererErrors).toEqual([])
+})

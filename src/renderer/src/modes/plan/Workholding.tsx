@@ -9,8 +9,11 @@
 // Q131 (design review, decided by the user): the generic dimension illustrations on every size
 // field, an open toe clamp's front view (`clampSection`) highlighting the focused size, the open
 // item renamed in place in its row (R12), a kind mark per base and surface type (R2), a text-only
-// "Arrange automatically" (R4) and its result line under the buttons (R13).
-// Doc: docs/conventions/ui.md#workholding, docs/modes/workholding-library.md#implementation-wl4
+// "Arrange automatically" (R4) and its result line under the buttons (R13). DF125: an open toe
+// clamp, screw or block reads its X/Y from the stock corner or the work zero and its heights from
+// the stock top or bottom (`workholding-from.ts`; stored values unchanged).
+// Doc: docs/conventions/ui.md#workholding, docs/modes/workholding-library.md#implementation-wl4,
+// docs/modes/workholding.md#measured-from-df125
 import { useEffect, useRef, useState } from 'react'
 import {
   builtinWorkholding,
@@ -57,11 +60,22 @@ import {
   useApplyOnEnter,
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
-import { allows, planPart, snapshotName, type PlanStale } from './model'
+import { allows, planPart, setupZeroOf, snapshotName, type PlanStale } from './model'
 import { SketchView } from '../../viewport/SketchView'
 import { clampSection, type ClampSectionPart } from './clamp-section'
 import { usePlanCommand, usePlanState, usePlanStore } from './plan-store'
 import styles from './Workholding.module.css'
+import {
+  shownQuantity,
+  storedSource,
+  storeOffset,
+  useMeasuredFrom,
+  type MeasuredAxis,
+  type MeasuredFrom,
+  type SetupReferences,
+  type XyFrom,
+  type ZFrom,
+} from './workholding-from'
 
 const m = planMessages.workholding
 
@@ -220,6 +234,12 @@ export function Workholding({
   const stock = planPart(doc, plan).loaded?.stock
   const holding = stock === undefined ? undefined : setupWorkholding(setup, stock)
   const summaryUnits = units === 'inch' ? 'in' : 'mm'
+  // DF125: where the fields and summaries measure from (the viewer's choice)
+  const alignment = usePlanState((s) => s.data?.alignment.find((a) => a.setupId === setup.id))
+  const zero = setupZeroOf(setup, alignment)
+  const measured = useMeasuredFrom()
+  const refs: SetupReferences | undefined =
+    holding === undefined ? undefined : { zero, thickness: holding.stock.thickness }
   const devices = useDevices(units)
   const stale = usePlanState((s) =>
     s.data?.planId === plan.id ? s.data.stale?.libraryCopies : undefined,
@@ -383,7 +403,15 @@ export function Workholding({
     const resolved = holding?.items[n]
     return resolved === undefined
       ? ''
-      : withDevice(itemSummary(resolved, summaryUnits), deviceLabel(plan.snapshots, item))
+      : withDevice(
+          itemSummary(
+            resolved,
+            summaryUnits,
+            measured.from.xy === 'zero' ? zero : [0, 0],
+            measured.from.z === 'bottom' ? refs?.thickness : undefined,
+          ),
+          deviceLabel(plan.snapshots, item),
+        )
   }
   /** R13: what Arrange automatically did, and what the facing leaves under the clamps. */
   const arrangedLine = () => {
@@ -481,6 +509,10 @@ export function Workholding({
                       item={item}
                       resolved={holding?.items[n]}
                       stockThickness={holding?.stock.thickness}
+                      from={measured.from}
+                      refs={refs}
+                      onXyFrom={measured.setXy}
+                      onZFrom={measured.setZ}
                       units={units}
                       readOnly={readOnly}
                       messages={(param) => [...issueAt(n, param), ...findingsAt(item, param)]}
@@ -598,6 +630,10 @@ function ItemFields({
   item,
   resolved,
   stockThickness,
+  from,
+  refs,
+  onXyFrom,
+  onZFrom,
   units,
   readOnly,
   messages,
@@ -608,6 +644,11 @@ function ItemFields({
   /** The item in mm (the toe clamp's front view), undefined while the stock does not load. */
   resolved: ResolvedItem | undefined
   stockThickness: number | undefined
+  /** DF125: where positions and heights are measured from, and the setup's references. */
+  from: MeasuredFrom
+  refs: SetupReferences | undefined
+  onXyFrom: (xy: XyFrom) => void
+  onZFrom: (z: ZFrom) => void
   units: UnitSystem
   readOnly: boolean
   messages: (param: string) => FieldMessage[]
@@ -628,21 +669,36 @@ function ItemFields({
           },
         }
       : {}
-  const length = (param: string, label: string, dto: Parameters<typeof quantityOf>[0]) => {
+  /** DF125: stored = shown + offset for a position (X/Y) or a height (Z); 0 for a size. */
+  const offsetOf = (axis: MeasuredAxis | undefined) =>
+    axis === undefined || refs === undefined ? 0 : storeOffset(axis, from, refs)
+  /** DF125: a position's or height's (i): what it is measured from. */
+  const fromInfo = (axis: MeasuredAxis | undefined) =>
+    axis === undefined ? undefined : axis === 'z' ? m.zFromInfo[from.z] : m.xyFromInfo[from.xy]
+  const length = (
+    param: string,
+    label: string,
+    dto: Parameters<typeof quantityOf>[0],
+    axis?: MeasuredAxis,
+    resolvedMm?: number,
+  ) => {
     const icon = SIZE_ICON[param]
+    const offset = offsetOf(axis)
+    const info = fromInfo(axis)
     return (
       <div key={param} className={styles['size']} {...track(param)}>
         <QuantityInput
-          label={label}
+          label={axis === 'z' && from.z === 'bottom' ? m.topFromBottom : label}
           kind="length"
           dense
           stepKind="xy"
           defaultUnit={defaultUnit('length', units)}
-          value={quantityOf(dto)}
+          value={shownQuantity(dto, resolvedMm, offset, units)}
           readOnly={readOnly}
+          {...(info === undefined ? {} : { info })}
           illustration={icon === undefined ? undefined : <FieldIcon name={icon} />}
           messages={messages(param)}
-          onCommit={(q, gesture) => onCommit({ [param]: q.source }, gesture)}
+          onCommit={(q, gesture) => onCommit({ [param]: storedSource(q, offset, units) }, gesture)}
           onCancelGesture={onCancelGesture}
         />
       </div>
@@ -650,34 +706,72 @@ function ItemFields({
   }
   const centre = (
     c: readonly [Parameters<typeof quantityOf>[0], Parameters<typeof quantityOf>[0]],
-  ) => (
+    at: readonly [number, number] | undefined,
+  ) => {
+    const [ox, oy] = [offsetOf('x'), offsetOf('y')]
+    const info = fromInfo('x')
+    return (
+      <>
+        <QuantityInput
+          label={m.centerX}
+          stepKind="xy"
+          kind="length"
+          dense
+          defaultUnit={defaultUnit('length', units)}
+          value={shownQuantity(c[0], at?.[0], ox, units)}
+          readOnly={readOnly}
+          info={info}
+          illustration={<FieldIcon name="positionX" />}
+          messages={messages('center')}
+          onCommit={(q, gesture) =>
+            onCommit({ center: [storedSource(q, ox, units), c[1].source] }, gesture)
+          }
+          onCancelGesture={onCancelGesture}
+        />
+        <QuantityInput
+          label={m.centerY}
+          stepKind="xy"
+          kind="length"
+          dense
+          defaultUnit={defaultUnit('length', units)}
+          value={shownQuantity(c[1], at?.[1], oy, units)}
+          readOnly={readOnly}
+          info={info}
+          illustration={<FieldIcon name="positionY" />}
+          messages={[]}
+          onCommit={(q, gesture) =>
+            onCommit({ center: [c[0].source, storedSource(q, oy, units)] }, gesture)
+          }
+          onCancelGesture={onCancelGesture}
+        />
+      </>
+    )
+  }
+  /** DF125: the two choices at the top of an item with a position (the viewer's, app-wide). */
+  const measuredFrom = (
     <>
-      <QuantityInput
-        label={m.centerX}
-        stepKind="xy"
-        kind="length"
-        dense
-        defaultUnit={defaultUnit('length', units)}
-        value={quantityOf(c[0])}
-        readOnly={readOnly}
-        illustration={<FieldIcon name="positionX" />}
-        messages={messages('center')}
-        onCommit={(q, gesture) => onCommit({ center: [q.source, c[1].source] }, gesture)}
-        onCancelGesture={onCancelGesture}
-      />
-      <QuantityInput
-        label={m.centerY}
-        stepKind="xy"
-        kind="length"
-        dense
-        defaultUnit={defaultUnit('length', units)}
-        value={quantityOf(c[1])}
-        readOnly={readOnly}
-        illustration={<FieldIcon name="positionY" />}
-        messages={[]}
-        onCommit={(q, gesture) => onCommit({ center: [c[0].source, q.source] }, gesture)}
-        onCancelGesture={onCancelGesture}
-      />
+      <Field label={m.xyFrom} kind="toggle" info={m.xyFromHint}>
+        <SegmentedControl<XyFrom>
+          label={m.xyFrom}
+          options={[
+            { value: 'corner', label: m.xyFromOptions.corner },
+            { value: 'zero', label: m.xyFromOptions.zero },
+          ]}
+          value={from.xy}
+          onValueChange={onXyFrom}
+        />
+      </Field>
+      <Field label={m.zFrom} kind="toggle" info={m.zFromHint}>
+        <SegmentedControl<ZFrom>
+          label={m.zFrom}
+          options={[
+            { value: 'top', label: m.zFromOptions.top },
+            { value: 'bottom', label: m.zFromOptions.bottom },
+          ]}
+          value={from.z}
+          onValueChange={onZFrom}
+        />
+      </Field>
     </>
   )
   switch (item.kind) {
@@ -708,6 +802,7 @@ function ItemFields({
               className={styles['sketch']}
             />
           )}
+          {measuredFrom}
           <Field label={m.edge} readOnly={readOnly}>
             <Select
               options={EDGES.map((e) => ({ value: e, label: m.edges[e] }))}
@@ -718,11 +813,17 @@ function ItemFields({
               }}
             />
           </Field>
-          {length('at', m.at, item.at)}
+          {length(
+            'at',
+            m.at,
+            item.at,
+            item.edge === 'uMin' || item.edge === 'uMax' ? 'y' : 'x',
+            clamp?.at,
+          )}
           {length('width', m.width, item.width)}
           {length('grip', m.grip, item.grip)}
           {length('reach', m.reach, item.reach)}
-          {length('top', m.top, item.top)}
+          {length('top', m.top, item.top, 'z', clamp?.top)}
         </div>
       )
     }
@@ -758,23 +859,29 @@ function ItemFields({
           </Field>
         </>
       )
-    case 'screw':
+    case 'screw': {
+      const screw = resolved?.kind === 'screw' ? resolved : undefined
       return (
         <>
-          {centre(item.center)}
+          {measuredFrom}
+          {centre(item.center, screw?.center)}
           {length('headDiameter', m.headDiameter, item.headDiameter)}
-          {length('top', m.top, item.top)}
+          {length('top', m.top, item.top, 'z', screw?.top)}
         </>
       )
-    case 'block':
+    }
+    case 'block': {
+      const block = resolved?.kind === 'block' ? resolved : undefined
       return (
         <>
-          {centre(item.center)}
+          {measuredFrom}
+          {centre(item.center, block?.center)}
           {length('length', m.length, item.length)}
           {length('width', m.width, item.width)}
-          {length('top', m.top, item.top)}
+          {length('top', m.top, item.top, 'z', block?.top)}
         </>
       )
+    }
     case 'base':
       return (
         <Field label={m.type} readOnly={readOnly}>
