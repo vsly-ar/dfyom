@@ -139,14 +139,14 @@ Built in hardening DF59 (2026-11-24). Code: `src/core/plan/workholding/` (`items
 
 ### Deferred
 
-| Item                                                            | Why / where                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Hops inside an operation and between operations                 | DF64's link pass, through the interface above                               |
-| `plan.workholding.inPart`, `partLoose`, held pieces (`surface`) | Built in v0.4-llm-first W5, [below](#held-pieces-and-screws-in-the-part-w5) |
-| Formulas in item params (`stock.length / 2`)                    | Plain quantities for now                                                    |
-| Toe clamp drag in the viewport                                  | Built in v0.4-llm-first X2-6, [below](#toe-clamp-drag-x2-6)                 |
-| The setup-change dialog list                                    | UI follow-up; the inspector edits every param                               |
-| Items in the Run scene                                          | With the setup-change picture                                               |
+| Item                                                            | Why / where                                                                                           |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Hops inside an operation and between operations                 | DF64's link pass, through the interface above                                                         |
+| `plan.workholding.inPart`, `partLoose`, held pieces (`surface`) | Built in v0.4-llm-first W5, [below](#held-pieces-and-screws-in-the-part-w5)                           |
+| Formulas in item params (`stock.length / 2`)                    | Plain quantities for now                                                                              |
+| Toe clamp drag in the viewport                                  | Built in v0.4-llm-first X2-6, [below](#toe-clamp-drag-x2-6)                                           |
+| The setup-change dialog list                                    | UI follow-up; the inspector edits every param                                                         |
+| Items in the Run scene                                          | Drafted in [run-workholding.md](run-workholding.md) (hardening DF133), with a guard on jogs and Go to |
 
 ## Held pieces and screws in the part (W5)
 

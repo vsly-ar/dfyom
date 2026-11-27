@@ -1,0 +1,133 @@
+# Run: workholding and holder in the machine view, guarded jogs
+
+Status: draft (2026-11-27; internal backlog idea 3, hardening [DF133](../plans/hardening.md#intake-user-feedback-goes-here); carries over "items in the Run scene", deferred from [v0.4-llm-first U1](../plans/v0.4-llm-first.md) and [workholding.md § Deferred](workholding.md#deferred); questions [Q184–Q192](#questions-for-the-user) open) · Base: [workholding.md § Obstacles](workholding.md#obstacles), [§ Collision check](workholding.md#collision-check), [tool-holder.md § Collision envelope](tool-holder.md#collision-envelope), [run-goto.md](run-goto.md), [run-recovery.md](run-recovery.md) · UI: [ui.md § Jog, position and probing](../conventions/ui.md#jog-position-and-probing-df88), [§ Jog hotkeys](../conventions/ui.md#jog-hotkeys), [§ Workholding](../conventions/ui.md#workholding) · Safety: [run.md § Safety](run.md#safety) · Terms: [glossary.md](../glossary.md)
+
+Plan already checks every **program** move against the setup's clamps, vise, screws and blocks with the tool and holder envelope, and the export guard blocks a program that hits ([workholding.md § Collision check](workholding.md#collision-check), [tool-holder.md § Checks](tool-holder.md#checks)). The moves the operator makes **by hand** are not checked: a jog toward a toe clamp, a Go to whose last step lowers the tool onto a clamp, a held Z− over a vise jaw at a tool change. And the Run scene does not draw the items at all, so the operator cannot see where DFYOM thinks they are. This doc draws the setup's workholding and the holder in the Run scene at the machine's position, and adds a **workholding guard**: before a jog or a Go to is sent, its straight move is checked against the items, and a move that would hit stops short of them.
+
+## Goals and not goals
+
+- **Goals:** the chosen setup's items and the holder in the Run scene, placed through the live work offset; a guard on step jogs, continuous jogs (pad and keys), Go to and "Move to touch-off spot"; a live clearance read-out; honest states when the position or the zero is unknown; tests on the virtual machine.
+- **Not goals:** checking program moves while they stream (Plan and the export guard did that, [tool-holder.md § Run mode](tool-holder.md#run-mode)); detecting where the clamps really are (no camera, no probing of clamps); the gantry, Z carriage or dust shoe ([tool-holder.md § Not yet](tool-holder.md#not-yet)); the material removed so far (no in-process stock in Run); a guard for agents ([Q191](#questions-for-the-user)).
+
+## Trust: what the guard knows
+
+The guard is only as good as what the user placed in Plan. It checks against the items **as entered**, at the **work zero the controller reports**, with the **planned** stickout. It cannot see a clamp that was moved, forgotten in Plan, or set at another height. Every place that shows the guard says so in one line: "Checks the clamps as placed in Plan, at the work zero." A guard that says nothing is not proof that the way is clear.
+
+| State                                                              | Scene                                                                                          | Guard                                                     | Status line (Position table)                                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| No plan, or a setup without items                                  | Nothing new (the holder is drawn when the machine has one)                                     | Off                                                       | "No workholding in this setup." (only with a plan)                                                       |
+| Not connected                                                      | Items at the plan's zero, **outlined** ("as planned")                                          | Off (nothing moves)                                       | none                                                                                                     |
+| Connected, **not homed**                                           | Items outlined, at the plan's zero; no holder at the tool marker ("—" in the DRO, run.md DF46) | Off: the position is unknown, and jogs are refused anyway | "Home the machine to check jogs against the workholding."                                                |
+| Homed, **G54 never set** (WCO 0 0 0, the DRO's hint, ui.md DF88)   | Items outlined at the machine origin would mislead: hidden, with the hint                      | Off                                                       | "Set the work zero to check jogs against the workholding."                                               |
+| Homed, G54 set                                                     | Items **solid**, at the work zero; holder at the tool marker                                   | **On** (Q184)                                             | "Checks the clamps as placed in Plan, at the work zero." + the clearance chip ([below](#live-clearance)) |
+| At a tool change, before the new tool's Z is set (Probe Z or zero) | Solid; Z of the tool marker is the old tool's                                                  | On, with the note                                         | "Z not set for this tool yet: heights may be off by the difference in tool length."                      |
+| Guard switched off by the user ([Q186](#questions-for-the-user))   | Solid, items without the red/amber states                                                      | Off until reconnect, setup change or switched on          | "Workholding guard off." (warning colour)                                                                |
+
+- **Which zero.** The scene and the guard use the setup frame like the Run scene does today ([run.md DF46](run.md#run-mode-presentation-df46)): WPos from the last status (MPos − WCO, so a `G92` a file left is included), plus the setup's work zero and the Z reference surface's `zeroLevel` when the tool run has one ([z-reference.md](z-reference.md#implementation-notes-df69)). The items are in the setup frame already ([workholding.md § Frame](workholding.md#frame)), so they need no conversion of their own.
+- **Which setup.** With a run job (running, paused, at a tool or setup change): the job's setup (`RunStatus.job.plan`, [run-machine.md § Run status](run-machine.md#run-status-and-the-zero-to-set-m7)). Without: the navigator's plan and setup. A G54 left from another setup cannot be detected; the setup-change dialog's "Zero to set" is where the operator re-zeros.
+- **Which tool ([Q189](#questions-for-the-user)).** At a tool-change wait, the tool being chucked; otherwise the tool of the last tool-change wait confirmed in this connection; otherwise the setup's first tool run. Its envelope is `toolEnvelope(tool, stickout, holder)` ([tool-holder.md § Collision envelope](tool-holder.md#collision-envelope)) with the planned stickout (the tool's default stickout, which the minimum stickout read-out told the user to reach) and the holder resolved tool → machine → none. Without a holder the tool cylinder alone (WH-F). The chip names it: "T2 Ø6 · stickout 25 · ER11".
+
+## Scene
+
+- **Items:** the Plan viewport's workholding layer (`WorkholdingLayer.tsx`, [ui.md § Workholding](../conventions/ui.md#workholding)) reused in the run scene, read-only (no drag, no selection), the margin shell not drawn. Outlined (no fill, dashed) while the guard cannot vouch for the placement (the table above), solid otherwise.
+- **Holder:** the H5 ghost ([tool-holder.md § Viewport: holder ghost](tool-holder.md#viewport-holder-ghost)) attached to the run scene's tool marker: tool, nut and body, neutral grey, following WPos at the status rate.
+- **Hit states:** an item turns amber while the envelope is within 2 × margin of it (the `plan.workholding.close` distance), red at a guarded stop or when the position is inside it (after a crash, an override, a moved zero). The Go to path ([run-goto.md § Preview](run-goto.md#preview)) turns red from the first contact on.
+- **Motion:** the outlined → solid change eases with `--motion-fast`, instant under reduced motion; nothing else animates beyond the marker that already moves.
+
+## The guard
+
+`jogGuard({ from, to, envelope, prisms, margin }) → { allowed: Vec3, contact?: { itemId, part, at: Vec3, gap } }`, pure, in `src/core/run/` (headless, no renderer imports), positions in the setup frame:
+
+- **Geometry:** the move is one straight segment (a step or continuous jog moves one axis; a Go to step is Z alone or X/Y together, [run-goto.md § The move: safe order](run-goto.md#the-move-safe-order)). The test is the existing per-move test of `checkWorkholding` with the stepped envelope ([tool-holder.md § Collision envelope](tool-holder.md#collision-envelope)): for each segment of the envelope, the Z band at the move's lowest point against each prism up to `zMax` + margin, and the XY distance against the segment's radius + margin. No new geometry; the 2D port's distance does the work.
+- **First contact:** "the prefix `from → from + t (to − from)` collides" is monotone in `t`, so a bisection to 0.01 mm finds the first contact `t*`; `allowed` is the point at `t*` less 0.01 mm (inside the margin's outer edge, never inside the margin). No contact → `allowed = to`.
+- **Stock top:** the holder (nut and body) is checked against the stock top plane over the stock footprint, as [tool-holder.md § Holder against the stock](tool-holder.md#holder-against-the-stock) does: the nut never goes below Z0 over the stock. The **tool tip** may go below the stock top (touching off with paper, measuring, clearing chips): no check, [Q188](#questions-for-the-user).
+- **Starting inside:** when `from` already collides (after a crash, an override, a re-zero), a move is allowed when it does not reduce the clearance at any point: Z+ always, and an X/Y move whose distance to the item never falls below the start's. So the guard never traps the tool where it is.
+- **Units and frames:** `allowed` is converted back to a machine target with the WCO of the last status, as Go to does ([run-goto.md § G-code](run-goto.md#g-code)); jogs start only in Idle, so the status is current.
+
+## Jogs
+
+How the guard answers ([Q185](#questions-for-the-user)): **a soft stop**, like a soft limit that knows the clamps. The jog goes as far as it can and stops at the margin.
+
+| Jog                                                                                    | Without the guard                                             | With the guard                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Step** (click, short key press)                                                      | `run.machine.jog { by, feed }`                                | `jogGuard` on the step; a contact sends `run.machine.jog { to: allowed }` (shorter step); `allowed = from` sends nothing                                                                             |
+| **Continuous** (hold, held key)                                                        | `run.machine.jog { by, continuous: true }` to the travel edge | The target is `min(travel edge, allowed)` along the axis, sent as `{ to }`; release still cancels (`0x85`). GRBL decelerates **to** the stop point: no poll-based stop ([Performance](#performance)) |
+| **Tool-change, setup-change and recovery dialogs' pads**                               | as above                                                      | the same (one `JogPad`, one guard)                                                                                                                                                                   |
+| **Keyboard** (WASD or arrows, [ui.md § Jog hotkeys](../conventions/ui.md#jog-hotkeys)) | as above                                                      | the same; no key ever overrides the guard                                                                                                                                                            |
+
+- **The notice:** a guarded stop writes, in the jog notice line (reserved height, DF34: nothing moves): "Stopped 2 mm from Toe clamp 2 (collet nut)." with the button **"Jog past once"** ([Q186](#questions-for-the-user)): the next jog or Go to, within 30 s, is sent unguarded; the notice then reads "Next jog unguarded." Pressing it is a deliberate click; there is no hotkey for it.
+- **Switching it off:** the jog section's menu has "Workholding guard" (checked by default). Off lasts until reconnect, a setup change, or switched on; the status line says so in the warning colour. For a setup the user knows is wrong in Plan.
+- **Why not refuse the whole jog:** a refused 10 mm step leaves the user switching to 1 mm and 0.1 mm to creep up; the soft stop does that in one click, and the stop point is the margin, not the clamp.
+- **Why not a confirmation:** jogs are not confirmed ([run.md § 3](run.md#3-confirmations-before-motion)) and a dialog on every hold breaks the click/hold rule; the stop is safe by itself.
+
+## Go to and the touch-off spot
+
+- **Go to ([Q187](#questions-for-the-user)):** each step of `goToMoves` runs through `jogGuard` on every change of the fields. A contact is a finding next to the fields, as the existing checks ([run-goto.md § Checks](run-goto.md#checks)): "Step 3 (down to Z 1.000) hits Toe clamp 2: the collet nut stops 2 mm above it at Z 14.200." and Go is disabled. The path turns red from the contact. A checkbox **"Go anyway (the clamps are not where the plan says)"** under the finding enables Go for this target; it unchecks when the target changes. The safe order itself already keeps X/Y above the setup's clearance (highest item + margin, [workholding.md § Implementation notes](workholding.md#implementation-notes-df59)), so hits come from targets on or beside an item, a machine-frame target low in the travel, or no plan (5 mm safe height).
+- **"Move to touch-off spot"** ([z-reference.md](z-reference.md#implementation-notes-df69)) and the alignment pointer's moves ([alignment.md](alignment.md)) use the same check; a hit shows the finding in their dialog with the same "Go anyway".
+
+## Live clearance
+
+- A chip under the Position table, beside the G54 line: "Clear: 14 mm to Toe clamp 2 (nut)" for the nearest item to the envelope at the current position; amber under 2 × margin, red inside the margin. Updated with each status report ([Q192](#questions-for-the-user)).
+- Its `aria-live` is polite and rate-limited to a change of item or colour, so a screen reader does not read every report.
+- The chip is absent when the guard is off for a state reason (the status line says why).
+
+## Recovery and the tool-change dialog
+
+- **Recovery ([run-recovery.md](run-recovery.md#the-recovery-panel)):** after a crash or power loss the machine is not homed, so the guard is off and the items outlined until Step 4 (home) and Step 5 (check the work zero); from then on "Go to last position" and the panel's jogs are guarded. The interrupted job's setup is the guard's setup. The **lead-in** is a program, not a jog: it goes up to the machine top, across at the top and down at the start point, and the program after it was checked in Plan; the guard does not touch it. The ghost tool at the last seen position (RC6) turns red when it is inside an item, which tells the user what probably happened.
+- **Starting inside an item** (the crash case) is allowed to move out, never deeper ([The guard](#the-guard)).
+- **Tool-change dialog:** its pad and "Move to touch-off spot" are guarded with the incoming tool's envelope; until Probe Z or Set Z zero, the Z note in the table applies. A tool change is where the user chucks the tool ≥ the minimum stickout; the dialog's reason line ([tool-holder.md § Run mode](tool-holder.md#run-mode)) and the guard both use that stickout.
+- **Setup-change dialog:** its picture already draws the items to place ([workholding.md § Program and Run](workholding.md#program-and-run)); after Continue, the scene shows the new setup's items outlined until the new zero is set (G54 changed since the dialog opened), then solid.
+
+## Performance
+
+- **The guard runs once per jog or Go to, on send**, not per status report: one segment × prisms (a dozen at most) × three envelope segments × ~20 bisection steps; well under 1 ms.
+- **Why not stop by polling:** the status poll is 200 ms (`pollMs`, `src/core/run/grbl/sender.ts`); at a 2000 mm/min jog that is 6.7 mm between reports, plus the serial and planner latency, and GRBL's deceleration after `0x85`. A poll-based stop would overshoot the margin. Sending the stop point as the jog's target lets GRBL plan the deceleration to it.
+- **Live chip and colours:** one distance query per status report (5 Hz), the same distance function; no React re-render of the item meshes, only their material colour.
+- **Scene:** the items are static meshes built once per setup (as in Plan); the holder ghost is three cylinders moved with the marker.
+
+## Agent API
+
+None ([Q191](#questions-for-the-user)): `tools/list` stays at 118,418 of 120,000 ([llm-api.md](../architecture/llm-api.md)). The guard is a UI composition of `run.machine.jog { to }`, as Go to is ([run-goto.md § Agent API](run-goto.md#agent-api)); on a real connection jogs are UI only ([run.md § 2](run.md#2-who-may-command-a-real-connection-q50)), and on the virtual machine an agent can call the plan's check itself. `jogGuard` is headless, so a later `run.machine.jog { guard: true }` could reuse it.
+
+## Files
+
+- `src/core/run/jog-guard.ts` (headless): `jogGuard`, `nearestClearance(at, envelope, prisms, margin)`; reuses `src/core/plan/workholding/obstacles.ts` (prisms, distances) and `toolEnvelope` (H2).
+- `src/renderer/src/modes/run/`: `useRunScene.ts` (items, holder ghost, states), `run-store.ts` (guard state, the "past once" token, the off switch), `JogPad.tsx` / `useJogHotkeys.ts` (through the guard), `GoToDialog.tsx` (findings, "Go anyway"), `Dro.tsx` (status line, chip), `RunNavigator.tsx` (menu item).
+- Messages in `messages/run.ts` (`guard`).
+
+## Testing
+
+All on the virtual machine (GRBL emulator, `src/core/run/grbl/emulator/`) and the loopback serial port ([run-machine.md § Testing](run-machine.md#testing)); no hardware.
+
+- **Unit (`jog-guard.test.ts`):** per item kind and envelope segment, a step into the item stops at the margin (± 0.01 mm); no holder = WH-F cylinder; a nut hit over a toe clamp beside the tip (the user-shaped case of [tool-holder.md § Testing](tool-holder.md#testing)); a move starting inside may leave and may not go deeper; the stock top stops the nut and not the tip. **Property:** for random items and moves, the move `from → allowed` passes `checkWorkholding` with the same envelope (the plan's own check is the oracle), and `allowed` is within 0.02 mm of the true first contact.
+- **Emulator:** a held X+ toward a clamp ends in Idle at the stop point (MPos checked), never at the travel edge; release before it cancels as today; "Jog past once" lets the next step through and only that one.
+- **UI:** `GoToDialog.test.tsx` (finding, disabled Go, "Go anyway", red path); `JogPad.test.tsx` (notice, button); `RunMode.test.tsx` (the state table's rows: outlined, hidden, solid; status lines); axe on each.
+- **Hidden e2e** (`DFYOM_HIDE_WINDOWS=1`): a plan with a toe clamp, connect the virtual machine, home, set the zero, hold a jog toward the clamp → it stops, red clamp, notice; renders `df133-run-workholding-{light,dark}.png`.
+
+## Questions for the user
+
+Numbering continues after [tool-holder.md](tool-holder.md#open-questions-for-the-user)'s Q183. "Q184 ok" takes the recommendation; "all ok" takes every one.
+
+1. **Q184 – When the guard is on.** (1) **Homed and G54 set (not 0 0 0) with a plan setup that has items; items solid then, outlined or hidden otherwise, with the reason in one line.** (2) Also on when not homed but unlocked, using the unhomed position. (3) Only after the user ticks "Clamps placed as in the plan" once per setup. _Recommendation: (1)._ (2) guards against clamps at an unknown place, which is false comfort; (3) adds a click per setup, and the setup-change dialog already lists the items to place.
+2. **Q185 – What a hit does to a jog.** (1) **Soft stop: the jog is shortened to the margin and a notice names the item.** (2) Refuse the whole jog. (3) Ask for confirmation. _Recommendation: (1)._ It behaves like a soft limit; (2) makes the user creep up in small steps; (3) breaks click/hold and jogs are never confirmed (run.md § 3).
+3. **Q186 – Override.** (1) **"Jog past once" in the notice (the next jog or Go to within 30 s), and a "Workholding guard" switch in the jog menu that lasts until reconnect or setup change.** (2) The switch only. (3) No override: fix the items in Plan. _Recommendation: (1)._ A clamp entered a few millimetres off must not lock the user out, but no key may bypass it; (3) sends the user to Plan mid-setup.
+4. **Q187 – Go to.** (1) **A finding per step, Go disabled, and a "Go anyway" checkbox that resets when the target changes.** (2) Go disabled, no way past. (3) A warning only. _Recommendation: (1)._ The dialog shows the move before it happens, so a deliberate tick is enough; Go to's own checks already work this way.
+5. **Q188 – The stock.** (1) **The holder against the stock top plane; the tool tip may enter the stock.** (2) The tip too: no X/Y move below Z0 over the stock. (3) No stock check. _Recommendation: (1)._ Touching off, measuring and clearing chips put the tip in or on the stock; after a run the stock is partly cut and Run does not know where; the nut below the top is always wrong.
+6. **Q189 – Which tool and stickout.** (1) **The tool at the tool-change wait, else the last one confirmed in this connection, else the setup's first; its planned stickout; the chip names it.** (2) The largest tool and the shortest stickout of the setup (worst case). (3) A tool select in the jog section. _Recommendation: (1)._ It is the tool almost always in the spindle; (2) stops jogs too early for the small tools; (3) is one more thing to keep right.
+7. **Q190 – After a tool change, before Z is set.** (1) **Guard on, with the note that heights may be off by the tool length difference.** (2) Guard off until Z is set. (3) Guard X/Y only. _Recommendation: (1)._ The user jogs to the touch-off spot right then, often beside a clamp; a guard that is roughly right in Z with a note beats none.
+8. **Q191 – Agent API.** (1) **None: the guard is UI, like Go to.** (2) `run.machine.jog` gains `guard` (≈ +0.15 K of the 1.6 K left). _Recommendation: (1)._ Agents may not move a real machine (Q50), and on the virtual machine a hit costs nothing.
+9. **Q192 – Live clearance.** (1) **A chip under the Position table with the nearest item and its distance, amber/red, plus the item colours in the scene.** (2) The scene colours only. (3) Neither: only the stop. _Recommendation: (1)._ One line answers "how close am I" before the stop does; it costs one distance query per status report.
+
+## Slices
+
+| Slice | Content                                                                                                        | Done when                                                                                                                                                |
+| ----- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RW0   | This doc → accepted (Q184–Q192)                                                                                | Answers recorded; glossary row "Workholding guard"; ui.md and run.md § 3 amendments listed                                                               |
+| RW1   | Items and holder ghost in the Run scene with the trust states (outlined, hidden, solid) and the status line    | `RunMode.test.tsx` per state; the scene matches the Plan viewport's items at a moved zero and a `zeroLevel`; ui.md § Workholding amended                 |
+| RW2   | `jogGuard` and `nearestClearance` (headless)                                                                   | Unit and property tests above; `checkWorkholding` agrees on every `from → allowed`; `src/core` lint (no renderer imports) passes                         |
+| RW3   | Jogs through the guard: step, continuous, hotkeys, the dialogs' pads; notice, "Jog past once", the menu switch | Emulator test: held jog stops at the margin in Idle; past-once lets one jog through; `JogPad.test.tsx`; jogs without items send exactly today's commands |
+| RW4   | Go to, touch-off spot and alignment moves through the guard: findings, red path, "Go anyway"                   | `GoToDialog.test.tsx`; a target beside a clamp is refused with the nut named; Go to without items unchanged                                              |
+| RW5   | Live clearance chip and item colours; recovery and tool-change interplay (starting inside, Z note, ghost red)  | Chip and colour tests; recovery test: after power loss the guard is off until home and zero, then guards "Go to last position"                           |
+| RW6   | Hidden e2e and screenshots; docs to implemented                                                                | `df133-run-workholding` e2e green and screenshots reviewed; `tools/list` re-measured unchanged (118,418); hardening DF133 row done                       |
+
+RW1–RW3 carry the safety value; RW4 matters most where Go to targets sit near clamps; RW5 and RW6 can follow.
