@@ -29,3 +29,24 @@ describe('gcodeClearance', () => {
     expect(gcodeClearance(program('0.00'), BOX, 3)).toBe(Infinity)
   })
 })
+
+describe('gcodeClearance with a stepped envelope (DF132 H2)', () => {
+  // a Ø6 tool with 20 mm stickout in an ER11 (nut Ø19 × 12, body Ø52)
+  const er11 = [
+    { radius: 3, above: 0 },
+    { radius: 9.5, above: 20 },
+    { radius: 26, above: 32 },
+  ]
+
+  it('the nut counts where its bottom is below the box top + margin', () => {
+    // a cut at Z-1, 10 mm beside the box: the tool clears it, the nut (Z19 < 27) does not
+    const cut = 'G21\nG0 X20 Y5 Z-1\nG1 Y8\n'
+    expect(gcodeClearance(cut, BOX, 3)).toBe(7)
+    expect(gcodeClearance(cut, BOX, er11)).toBe(0.5)
+    // with 40 mm stickout the nut is at Z39 and the body above it: only the tool counts
+    const long = er11.map((c, i) => (i === 0 ? c : { ...c, above: c.above + 20 }))
+    expect(gcodeClearance(cut, BOX, long)).toBe(7)
+    // the body alone: a move 25 mm beside the box with the tip at Z-6 (body bottom Z26 < 27)
+    expect(gcodeClearance('G21\nG0 X35 Y5 Z-6\n', BOX, er11)).toBe(-1)
+  })
+})

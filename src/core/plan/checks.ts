@@ -50,6 +50,9 @@ export const PLAN_WARNING_CODES = [
   'plan.workholding.inPart',
   'plan.workholding.partLoose',
   'plan.workholding.outOfRange',
+  // DF132 H2: docs/modes/tool-holder.md#findings
+  'plan.holder.unknown',
+  'plan.holder.shankTooLarge',
   'feeds.rpmAboveMachine',
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',

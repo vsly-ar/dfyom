@@ -3,13 +3,21 @@
 // 0.05 mm steps along true lines and arcs, and returns the smallest XY gap between the tool
 // (radius `radius`) and any box while the tip is below the box's top + `margin`. A later tool's
 // own Z0 ("(Z0 for tool 2: Facing 1 floor, 1.00 below the stock top)", DF69) applies from its
-// tool change's M0, so every height is from the stock top. It shares no code with
-// `checkWorkholding`. Not app code.
+// tool change's M0, so every height is from the stock top. DF132 H2 (tool-holder.md § Testing):
+// instead of a radius it takes a stepped envelope (cylinders from a height above the tip up), as
+// the collet nut and the spindle body above the tool. It shares no code with `checkWorkholding`
+// or `toolEnvelope`. Not app code.
 
 export interface OracleBox {
   readonly x: readonly [number, number]
   readonly y: readonly [number, number]
   readonly top: number
+}
+
+/** One cylinder of a stepped envelope: radius, and its bottom above the tool tip (mm). */
+export interface OracleCylinder {
+  readonly radius: number
+  readonly above: number
 }
 
 const STEP = 0.05
@@ -23,14 +31,17 @@ function boxDistance(b: OracleBox, x: number, y: number): number {
 /**
  * The smallest gap (mm) between the tool and a box over every executed move below the box's
  * top + margin; Infinity when no move passes below one. Moves from an unknown position (program
- * start, after a pause) count from their end point.
+ * start, after a pause) count from their end point. `tool` is the tool's radius, or a stepped
+ * envelope: each cylinder counts where its bottom is below the box's top + margin.
  */
 export function gcodeClearance(
   text: string,
   boxes: readonly OracleBox[],
-  radius: number,
+  tool: number | readonly OracleCylinder[],
   margin = 2,
 ): number {
+  const cylinders: readonly OracleCylinder[] =
+    typeof tool === 'number' ? [{ radius: tool, above: 0 }] : tool
   let scale = 1
   let mode = 0
   let pos: [number, number, number] | undefined
@@ -41,7 +52,9 @@ export function gcodeClearance(
   let nextZ0: number | undefined
   const visit = (x: number, y: number, zz: number) => {
     for (const b of boxes)
-      if (zz - z0 < b.top + margin - 1e-6) best = Math.min(best, boxDistance(b, x, y) - radius)
+      for (const c of cylinders)
+        if (zz - z0 + c.above < b.top + margin - 1e-6)
+          best = Math.min(best, boxDistance(b, x, y) - c.radius)
   }
   for (const raw of text.split('\n')) {
     const below = /\(Z0 for tool \d+: .*, (-?[0-9.]+) below the stock top\)/.exec(raw)

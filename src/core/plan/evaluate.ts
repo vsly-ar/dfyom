@@ -10,6 +10,7 @@ import type { OperationKind } from '../design/part.dto'
 import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
 import type { CuttingPreset, Tool } from '../library/tool'
+import { HOLDER_PRESET_NAMES, type Holder } from '../library/holder'
 import { Quantity } from '../quantity/quantity'
 import {
   feedFindings,
@@ -263,6 +264,13 @@ export function evaluateOperation(
     ))
       push(f, 'plan.check', severity)
   plan.machine.map((m) => feedFindings(feeds, m).forEach((f) => push(f, 'plan.machine', 'warning')))
+  // DF132 Q183: a shank the machine's collet cannot take (a sleeve or a wrong value is possible)
+  plan.machine
+    .andThen((m) => m.holder)
+    .map((h) => {
+      const f = shankFinding(t, h)
+      if (f !== undefined) push(f, 'plan.holder.shankTooLarge', 'warning')
+    })
   for (const w of feeds.warnings)
     findings.push({
       code: w.code,
@@ -285,6 +293,29 @@ export function evaluateOperation(
     strategy,
     feeds: Some(feeds),
     findings,
+  }
+}
+
+/**
+ * `plan.holder.shankTooLarge` (DF132 Q183): the tool's shank (its cutting Ø without a shank Ø)
+ * over the holder's `maxShank`; none without a `maxShank`.
+ * Doc: docs/modes/tool-holder.md#findings
+ */
+function shankFinding(
+  tool: Tool,
+  holder: Holder,
+): Omit<PlanWarning, 'code' | 'severity' | 'planOperationId'> | undefined {
+  if (holder.maxShank.isNone()) return undefined
+  const max = holder.maxShank.unwrap().canonical
+  const shank = tool.shankDiameter.mapOr(tool.diameter.canonical, (q) => q.canonical)
+  if (shank <= max + 1e-6) return undefined
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  const name = holder.preset.mapOr('the collet', (p) => `the ${HOLDER_PRESET_NAMES[p]} collet`)
+  return {
+    field: 'tool',
+    rule: 'shankTooLarge',
+    message: `the tool's shank (Ø${r2(shank)} mm${tool.shankDiameter.isNone() ? ', its cutting Ø: no shank Ø entered' : ''}) is larger than ${name} takes (up to Ø${r2(max)} mm): use a tool that fits, a larger collet, or check the shank Ø in the library`,
+    params: { shank, maxShank: max },
   }
 }
 
