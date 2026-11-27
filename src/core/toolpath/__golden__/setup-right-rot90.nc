@@ -15,9 +15,9 @@ G54
 G0 Z10
 (Drilling 1)
 (DFYOM TOOL CHANGE 1: Flat 4, 4 mm flat, min stickout 17 mm)
-M3 S12128
-(Set spindle to 12128 rpm)
-M0 ;Set spindle to 12128 rpm
+M3 S24255
+(Set spindle to 24255 rpm)
+M0 ;Set spindle to 24255 rpm
 X11 Y30
 Z2
 G1 Z0 F154

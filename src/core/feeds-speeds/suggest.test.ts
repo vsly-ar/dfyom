@@ -5,7 +5,15 @@ import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { None, Some, type Option } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
-import { deg, flatEndMillValues, len, machineValues, rpm, watt } from '../library/library.fixture'
+import {
+  deg,
+  flatEndMillValues,
+  len,
+  machineValues,
+  num,
+  rpm,
+  watt,
+} from '../library/library.fixture'
 import { Machine } from '../library/machine'
 import { MachineValuesDtoSchema, type Rigidity } from '../library/machine.dto'
 import { Tool } from '../library/tool'
@@ -247,6 +255,139 @@ describe('shipped material table: golden cases against the cited charts', () => 
       'brass',
       'steel',
     ])
+  })
+})
+
+describe('hobby metal cutting (hardening DF131, TG #425)', () => {
+  // The user's first aluminium cut: Ø6.33 3-flute carbide flat end mill (20 mm flutes), 6061-T6,
+  // a 3020 with an 800 W spindle (6200–29 300 rpm), 3000 / 1000 mm/min, pocket = slot.
+  const flat633 = () =>
+    tool({
+      diameter: len('6.33'),
+      fluteCount: num('3'),
+      fluteLength: len('20'),
+      overallLength: len('50'),
+    })
+  const nova = (rigidity: Rigidity) =>
+    limits({
+      minSpeed: 6200,
+      maxSpeed: 29_300,
+      maxFeedXY: 3000,
+      maxFeedZ: 1000,
+      power: Some(800),
+      rigidity,
+    })
+  const userCase = (rigidity: Rigidity, over: Partial<CuttingInput> = {}) =>
+    suggestCutting({
+      tool: flat633(),
+      materialClass: 'aluminum',
+      engagement: SLOT,
+      machine: nova(rigidity),
+      ...over,
+    })
+
+  it('pins the user case inside the hobby band: 15–24k rpm, 0.02–0.04 mm/tooth, slot DOC ≤ 0.1·D, spindle load ≤ 50 %', () => {
+    for (const rigidity of ['extrusion', 'fixedGantry'] as const) {
+      const s = userCase(rigidity)
+      const d = s.display.unwrap()
+      const n = value(s.spindleSpeed)
+      expect(n).toBeCloseTo((304.8 * 1000) / (Math.PI * 6.33), 6) // 1000 SFM: 15 327 rpm
+      expect(n).toBeGreaterThanOrEqual(15_000)
+      expect(d.fz).toBeGreaterThanOrEqual(0.02)
+      expect(d.fz).toBeLessThanOrEqual(0.04)
+      expect(value(s.stepdown)).toBeLessThanOrEqual(0.1 * 6.33)
+      expect(d.spindleLoad.unwrap()).toBeLessThanOrEqual(50)
+      expect(value(s.feedRate)).toBeLessThanOrEqual(1500)
+      expect(codes(s)).toEqual(['feeds.manyFlutes'])
+    }
+    // before DF131 (fixedGantry): 9043 rpm, 0.0508 mm/tooth, 1378 mm/min, 1.99 mm at 99.9 % load
+    const fg = userCase('fixedGantry')
+    expect(value(fg.stepdown)).toBeCloseTo(6.33 * 0.5 * 0.16, 9) // 0.506 mm
+    expect(fg.display.unwrap().fz).toBeCloseTo(0.0508 * 0.6, 9) // 0.0305 mm
+    expect(value(fg.feedRate)).toBeCloseTo(value(fg.spindleSpeed) * 3 * 0.0508 * 0.6, 6) // 1402
+    const ex = userCase('extrusion')
+    expect(value(ex.stepdown)).toBeCloseTo(6.33 * 0.5 * 0.1, 9) // 0.317 mm
+    expect(ex.display.unwrap().fz).toBeCloseTo(0.0254, 9)
+  })
+
+  it('"aluminium extrusion" is clearly gentler than every stiffer class (chip load, stepdown, Q)', () => {
+    const order: Rigidity[] = ['extrusion', 'hobby', 'prosumer', 'benchMill', 'rigidMill']
+    const qs = order.map((r) => userCase(r).display.unwrap().Q.unwrap())
+    for (let i = 1; i < qs.length; i++) expect(qs[i]!).toBeGreaterThan(qs[i - 1]!)
+    expect(qs[1]! / qs[0]!).toBeGreaterThan(1.2)
+  })
+
+  it('the speed is the top of the vc range for every class (a low speed is not the safe side)', () => {
+    const speeds = (['extrusion', 'hobby', 'rigidMill'] as const).map((r) =>
+      value(userCase(r).spindleSpeed),
+    )
+    expect(new Set(speeds).size).toBe(1)
+  })
+
+  it('power: Machinery’s Handbook feed factor C and wear factor W, against 80 % of Pavail', () => {
+    const s = userCase('extrusion')
+    const d = s.display.unwrap()
+    const C = (0.3048 / d.fz) ** 0.19
+    expect(d.Pc.unwrap()).toBeCloseTo((d.Q.unwrap() * 0.6825 * C * 1.25) / 60_000, 9)
+    // a big tool at a low speed: the stepdown is cut until Pc ≤ 0.8 · Pavail
+    const big = userCase('rigidMill', {
+      tool: tool({ diameter: len('12'), fluteLength: len('30'), overallLength: len('75') }),
+    })
+    const bd = big.display.unwrap()
+    const w = big.warnings.find((x) => x.code === 'feeds.powerExceeded')!
+    expect(w.params['loadLimit']).toBe(0.8)
+    expect(w.message).toContain('80 % of the spindle')
+    expect(bd.spindleLoad.unwrap()).toBeLessThanOrEqual(80 + 1e-6)
+    expect(bd.spindleLoad.unwrap()).toBeGreaterThan(70)
+  })
+
+  it('wood rows keep the plain F7 and the full spindle power', () => {
+    const s = userCase('extrusion', { materialClass: 'hardwood', tool: tool() })
+    const d = s.display.unwrap()
+    expect(d.Pc.unwrap()).toBeCloseTo((d.Q.unwrap() * 0.6825) / 60_000, 12)
+  })
+
+  it('feeds.manyFlutes: 3+ flutes slotting aluminium on a router class; not 2 flutes, not a mill', () => {
+    expect(codes(userCase('extrusion'))).toContain('feeds.manyFlutes')
+    expect(codes(userCase('benchMill'))).not.toContain('feeds.manyFlutes')
+    expect(codes(userCase('extrusion', { tool: tool() }))).not.toContain('feeds.manyFlutes')
+    expect(codes(userCase('extrusion', { engagement: { kind: 'stepover', ae: 1 } }))).not.toContain(
+      'feeds.manyFlutes',
+    )
+  })
+
+  it('the final-value check flags the failed run’s power only above 80 % (it was 67 %)', () => {
+    // run 2 of TG #425: 12 043 rpm, 1178.2 mm/min, 1.089 mm stepdown (entered)
+    const input: CuttingInput = {
+      tool: flat633(),
+      materialClass: 'aluminum',
+      engagement: SLOT,
+      machine: nova('fixedGantry'),
+    }
+    const at = cuttingAt(input, { n: 12_043, vf: 1178.2, ap: 1.089 }).unwrap()
+    expect(at.spindleLoad.unwrap()).toBeGreaterThan(60)
+    expect(at.spindleLoad.unwrap()).toBeLessThan(80)
+    expect(checkCutting(input, { n: 12_043, vf: 1178.2, ap: 1.089 })).toEqual([])
+    expect(checkCutting(input, { n: 12_043, vf: 1178.2, ap: 1.5 }).map((w) => w.code)).toEqual([
+      'feeds.powerExceeded',
+    ])
+  })
+
+  it('finishing pass in metal: no faster than the roughing pass removes material', () => {
+    const s = userCase('extrusion')
+    const values = { n: value(s.spindleSpeed), vf: value(s.feedRate), ap: value(s.stepdown) }
+    const input: CuttingInput = {
+      tool: flat633(),
+      materialClass: 'aluminum',
+      engagement: SLOT,
+      machine: nova('extrusion'),
+    }
+    const f = finishingAt(input, values, 0.2, 7).unwrap()
+    expect(f.feedRate).toBeCloseTo((6.33 * values.ap * values.vf) / (0.2 * 7), 6) // ≈ 1672
+    expect(f.clamped).toBe(false)
+    // wood keeps the chip-load-keeping feed (DF74)
+    const wood = finishingAt({ ...input, materialClass: 'hardwood' }, values, 0.2, 7).unwrap()
+    expect(wood.feedRate).toBe(3000)
   })
 })
 

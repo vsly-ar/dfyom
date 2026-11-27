@@ -446,7 +446,8 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   const limit = loadLimit(c.row)
   const reduced: DerivationStep = {
     step: 'power',
-    formula: limit < 1 ? 'ap reduced until Pc ≤ loadLimit · Pavail' : 'ap reduced until Pc ≤ Pavail',
+    formula:
+      limit < 1 ? 'ap reduced until Pc ≤ loadLimit · Pavail' : 'ap reduced until Pc ≤ Pavail',
     inputs:
       limit < 1
         ? { PcBefore: first, Pavail: result.pAvail, loadLimit: limit }
@@ -1150,7 +1151,10 @@ function dataSpeed(
   const n0 = spindleSpeed(value, dCalc)
   const steps = [
     c.row.chart === 'machining'
-      ? { ...dataStep(c.row, 'vc', value, 'm/min', range), formula: 'vc = max (the top of the range)' }
+      ? {
+          ...dataStep(c.row, 'vc', value, 'm/min', range),
+          formula: 'vc = max (the top of the range)',
+        }
       : dataStep(c.row, 'vc', value, 'm/min', range),
   ]
   if (f4 !== undefined) steps.push(f4)
