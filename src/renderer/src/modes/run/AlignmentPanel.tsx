@@ -15,7 +15,7 @@ import { runMessages } from '../../messages/run'
 import { Button, Icon } from '../../ui'
 import { AlignmentStep, stepOf } from './AlignmentStep'
 import { activeJob, runGates } from './machine-state'
-import { planRunInfo, setupPlacement } from './plan-info'
+import { firstRunSetup, planRunInfo, setupPlacement } from './plan-info'
 import { useRun, useRunStore } from './run-store'
 import { SetupPicture } from './SetupChangeDialog'
 import styles from './Run.module.css'
@@ -52,7 +52,7 @@ export function AlignmentPanel({ doc }: { doc: ProjectDoc }): React.JSX.Element 
   const plan = planId === undefined ? undefined : doc.plans[planId]
   if (plan === undefined || activeJob(status) !== undefined) return null
   const setupId =
-    setupChange ?? (plan.setups.some((s) => s.id === chosen) ? chosen : plan.setups[0]?.id)
+    setupChange ?? (plan.setups.some((s) => s.id === chosen) ? chosen : firstRunSetup(plan)?.id)
   const setup = plan.setups.find((s) => s.id === setupId)
   const points = setup?.alignment?.length ?? 0
   if (setup === undefined || points === 0) return null

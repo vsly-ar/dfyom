@@ -8,6 +8,7 @@
 import type { Tool } from '../../../../core/library/tool'
 import type { UnitSystem } from '../../../../core/project/document'
 import { resolveHolder } from '../../../../core/library/holder'
+import { cutTest } from '../../../../core/plan/cut'
 import { stickoutOf } from '../../../../core/plan/evaluate'
 import type { LoadedPlan } from '../../../../core/plan/plan'
 import type { SetupDTO } from '../../../../core/plan/plan.dto'
@@ -89,8 +90,10 @@ export function guardTool(
   // the first operation of each tool, by first use; a copy that does not load keeps its number
   const firsts: { op: SetupDTO['operations'][number]; tool: Tool | undefined }[] = []
   const seen = new Set<string>()
+  // DF137: already-cut operations are not in the program, so they number no tool
+  const isCut = cutTest(plan.dto.design.part)
   for (const op of setup.operations) {
-    if (op.tool === undefined || seen.has(op.tool)) continue
+    if (op.tool === undefined || seen.has(op.tool) || isCut(op)) continue
     seen.add(op.tool)
     firsts.push({ op, tool: plan.tools.get(op.tool) })
   }

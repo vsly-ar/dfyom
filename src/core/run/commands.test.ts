@@ -7,7 +7,7 @@ import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { agentSource, fakeIds, uiSource } from '../commands/testing'
-import { libraryInput, machineValues, rpm } from '../library/library.fixture'
+import { deg, len, libraryInput, machineValues, num, rpm } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
@@ -21,6 +21,7 @@ import type { MachineService, RunStatus } from './service'
 import { loopbackSerialPorts, type LoopbackOptions } from './grbl/loopback.fixture'
 import { machineSettings } from './grbl/emulator/settings'
 import { Machine } from '../library/machine'
+import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 
 // core stays environment-neutral (no node: imports, eslint): the built-in fs as gcode-file.test.ts
 const fs = (
@@ -29,6 +30,7 @@ const fs = (
   }
 ).process.getBuiltinModule('node:fs')
 
+const region2d = nodeRegion2d()
 const agent = agentSource()
 const ui = uiSource()
 const clients: MachineClient[] = []
@@ -60,6 +62,8 @@ async function setup(
     serial?: (settings: Record<number, number>) => LoopbackOptions
     /** gCode files by path for file runs (DF93). */
     files?: ReadonlyMap<string, string>
+    /** The 2D geometry port (chamfers, DF137). */
+    region2d?: boolean
   } = {},
 ) {
   const s: PlanSetup = await planSetup()
@@ -81,6 +85,8 @@ async function setup(
     opts.serial === undefined || libMachine === undefined
       ? undefined
       : loopbackSerialPorts(systemTimerHost, opts.serial({ ...machineSettings(libMachine) }))
+  /** The texts `plan.export` wrote, in order. */
+  const written: string[] = []
   const client = new MachineClient({
     factory: inProcessHostFactory({
       timers: systemTimerHost,
@@ -95,10 +101,18 @@ async function setup(
     revision: s.d.revision,
     ids: fakeIds(),
     services: {
-      workers: createInProcessWorkers(),
+      workers: createInProcessWorkers(
+        opts.region2d === true ? { region2d: () => Ok(region2d) } : {},
+      ),
+      ...(opts.region2d === true ? { region2d } : {}),
       library: s.library,
       toolpaths: createToolpathCache(),
-      exportFiles: { write: async (target) => Ok({ filePath: target }) },
+      exportFiles: {
+        write: async (target, text) => {
+          written.push(text)
+          return Ok({ filePath: target })
+        },
+      },
       gcodeFiles: {
         read: async (path: string) => {
           const text = opts.files?.get(path)
@@ -120,7 +134,7 @@ async function setup(
   }
   const open = (over: object = {}) =>
     run('run.connection.open', { target: 'virtual', planId, timeScale: 'max', ...over })
-  return { s, planId, d, client, run, status, job, open, serial }
+  return { s, planId, d, client, run, status, job, open, serial, written }
 }
 
 describe('run commands', { timeout: 60_000 }, () => {
@@ -257,6 +271,95 @@ describe('run commands', { timeout: 60_000 }, () => {
       last = j.executing
     }
     expect(last).toBeGreaterThan(summary.lines / 2)
+  })
+
+  it('an already-cut pocket: Run streams exactly the export, no pocket moves (DF137, TG #454)', async () => {
+    const t = await setup({ region2d: true })
+    const { s } = t
+    // the user's case: the pocket marked already cut in Design, a chamfer on its rim added
+    expectOk(
+      await t.run(
+        'library.tool.add',
+        {
+          values: libraryInput({
+            name: 'Chamfer 6',
+            type: 'chamferMill',
+            diameter: len('6'),
+            angle: deg('90'),
+            fluteLength: len('8'),
+            overallLength: len('50'),
+            fluteCount: num('2'),
+            toolMaterial: 'carbide',
+            presets: [],
+          }),
+        },
+        ui,
+      ),
+    )
+    expectOk(await t.run('design.part.update', { partId: s.partId, alreadyCut: ['pocket1'] }, ui))
+    expectOk(
+      await t.run('design.chamfer.add', { partId: s.partId, edgeOf: 'pocket1', width: '1' }, ui),
+    )
+    expectOk(await t.run('project.apply', {}, ui))
+    const plan = t.d.doc.plans[t.planId]!
+    expect(plan.status).toBe('draft')
+    const ops = plan.setups.flatMap((o) => o.operations)
+    const pocket = ops.find((o) => o.designOperationIds.includes('pocket1'))!
+    const chamfer = ops.find((o) => o.designOperationIds.includes('chamfer1'))!
+    expect(chamfer).toBeDefined()
+    expectOk(await t.open({ prepare: true }))
+    expectOk(await t.run('plan.export', { planId: t.planId, target: '/x.nc' }))
+    const exported = t.written.at(-1)!.split('\n')
+    if (exported.at(-1) === '') exported.pop()
+    expect(exported.some((l) => l.includes('Pocket 1'))).toBe(false)
+    expect(exported.some((l) => l.includes('Chamfer 1'))).toBe(true)
+    // the pre-flight (Start at, gCode before the start) reads the same lines
+    const checked = expectOk(await t.run('run.job.check', { planId: t.planId, program: true })) as {
+      program: { lines: string[]; points: { line: number; kind: string; label?: string }[] }
+    }
+    expect(checked.program.lines).toEqual(exported)
+    expect(checked.program.points.some((p) => p.label?.includes('Pocket 1') === true)).toBe(false)
+    // the run streams exactly the export
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    let finished = false
+    void result.then(() => (finished = true))
+    for (;;) {
+      expect(
+        await waitFor(() => {
+          const p = t.status().job?.phase
+          return finished || p === 'toolChange' || p === 'programPause'
+        }),
+      ).toBe(true)
+      if (finished) break
+      const job = t.status().job!
+      const which =
+        job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+      expectOk(await t.run('run.job.continue', { jobId, ...which }))
+      await waitFor(() => finished || t.status().job?.phase === 'streaming')
+    }
+    expectOk(await result)
+    const streamed = t.client.program(jobId)!
+    expect(streamed.lines).toEqual(exported)
+    const streamedOps = streamed.operations.map((o) => o.planOperationId)
+    expect(streamedOps).not.toContain(pocket.id)
+    expect(streamedOps).toContain(chamfer.id)
+    // TG #456: the program's tools are the uncut operations' only (the pocket's end mill is
+    // called only when an uncut operation uses it too)
+    const tools = streamed.lines.filter((l) => /^\(Tool \d+:/.test(l))
+    const uncut = new Set(ops.filter((o) => o.id !== pocket.id).map((o) => o.tool))
+    expect(tools).toHaveLength(uncut.size)
+    expect(streamed.lines.filter((l) => /^M0 ;.*install T/.test(l)).length).toBeLessThanOrEqual(
+      uncut.size,
+    )
+    // Start at's points are the program's lines (no pocket section)
+    for (const p of checked.program.points) expect(p.line).toBeLessThanOrEqual(exported.length)
+    // a resume at the cut pocket is refused: it is not in the program
+    expectErrCode(
+      await (
+        await t.job('run.job.start', { planId: t.planId, from: pocket.id })
+      ).result,
+      'input.malformed',
+    )
   })
 
   it('runs one setup per job; the result names the next setup (E2)', async () => {

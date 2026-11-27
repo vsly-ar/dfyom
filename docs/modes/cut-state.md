@@ -61,6 +61,16 @@ DFYOM sits between: no 3D simulation for generation, but it already knows each o
 - **Findings.** A cut operation keeps its errors (they block the removal later operations read) and drops its warnings and infos.
 - **Display** ([Q200](#questions-for-the-user)). The row is muted with a check and **Cut**; its toolpath is hidden in the viewport unless **Show cut toolpaths** (the Toolpaths group, shown when the plan has cut operations) is on. The viewport's stock already shows the design's removal; slice C5 draws the in-process stock from the height map.
 
+## Run (DF137)
+
+Run shows and streams exactly the export (dogfood TG #454: Run drew the cut pocket's toolpath with no way to hide it). The program `run.job.check` and `run.job.start` stream is `exportPlan`'s, so a cut operation is never streamed, the gCode panel, Start at, the time and the tool waits are the export's, and a section resume at a cut operation is refused (`input.malformed`, rule `unknownOperation`). The run mode around it follows the same rule, from the plan's design copy (`cutTest`, as Plan):
+
+- **Scene.** The toolpaths are linked over every operation (as the export links them), then the cut ones are left out: Run draws the lines Plan draws with **Show cut toolpaths** off. Run has no such switch; playback follows the program.
+- **Tools.** The pre-flight's tool list, "Resume at" and the workholding guard's tool numbers (by first use in the program) skip cut operations.
+- **Setups.** Run starts on the first setup with an uncut operation, and a run's next setup (the setup-change prompt, `run.job.start`'s `next`) skips setups cut in full, which have no program.
+
+A plan that is not a draft keeps its copy of the mark (a snapshot, [§ What is stored](#what-is-stored)): Plan, Export and Run then all still cut the operation until the plan is rebuilt, so the three agree either way.
+
 ## Planning new work on the cut part
 
 The user's flow: plan 2 was cut. In Design, Pocket 2 (and the facing) are marked already cut; then the user adds the pocket `on` Pocket 2's floor, the chamfer on its edge, a hole. A `draft` plan (plan 2 itself, or a new plan) follows: the new operations are placed after the cut ones; their toolpaths start from the material left: the pocket from Pocket 2's floor (its `on` level, and DF61's band for anything stacked), the hole's drilling cycle from the band's top, the chamfer at its edge's face; the links over Pocket 2 use its cleared air. Its export holds only the new operations. No "continue" copy of a plan is needed ([Q194](#questions-for-the-user)).
@@ -145,3 +155,5 @@ Choices made with the implementation:
 - **Plans are snapshots** of the mark: a draft follows, others show the design changed; `plan.duplicate` copies the plan's copy as it is. No plan-level mark, no continuing plan (TG #447).
 - **The input hash** leaves the list out (the part is hashed with `alreadyCut` removed), so marking and clearing regenerate no toolpath; clearing restores the program byte-equal.
 - **Not in C1:** the mark's date and author (C2 needs them; the marker says "Cut"), multi-select and an inspector switch (C3), the as-cut geometry (C4).
+
+**Fix DF137** (2026-11-27, dogfood TG #454): Run drew the cut operation's toolpath (`useRunScene` read every operation of the setup) and numbered its tool in the pre-flight's tool list, "Resume at" and the workholding guard; the streamed program was already the export's (`exportPlan`, verified). Now [§ Run](#run-df137): `plan-info.ts` (`PlanRunInfo.cut`, `firstRunSetup`, `resumePoints`), `useRunScene.ts`, `run-workholding.ts` (`guardTool`), `RunNavigator.tsx`, `AlignmentPanel.tsx`, `core/run/job.ts` (the next setup). No journal or hash change: the run journal and `programHash` hash the streamed lines, which were already right. Tests: `core/run/commands.test.ts` (Run's checked and streamed program equal the export, no pocket lines; a resume at the pocket is refused), `run/run-scene-cut.test.tsx` (Run's lines equal Plan's with the cut hidden; tools, resume points, guard), `e2e/run-cut-state.e2e.ts`.

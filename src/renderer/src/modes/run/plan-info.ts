@@ -6,6 +6,7 @@
 import type { Direction } from '../../../../core/geometry/face'
 import type { Placement, Vec2 } from '../../../../core/geometry/model'
 import { setupAlignment } from '../../../../core/plan/alignment'
+import { cutTest } from '../../../../core/plan/cut'
 import { planOpLabel } from '../../../../core/plan/labels'
 import { loadPlanDTO } from '../../../../core/plan/plan'
 import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
@@ -35,9 +36,18 @@ const snapshotName = (plan: PlanDTO, id: string | undefined): string | undefined
   return typeof name === 'string' ? name : undefined
 }
 
-/** The setup run mode works on: the chosen one if the plan has it, else the first. */
+/**
+ * The setup run mode starts on: the first with a program, i.e. an operation not already cut
+ * (DF137: a setup cut in full has none, docs/modes/cut-state.md#run-df137), else the first.
+ */
+export function firstRunSetup(plan: PlanDTO): SetupDTO | undefined {
+  const isCut = cutTest(plan.design.part)
+  return plan.setups.find((s) => s.operations.some((o) => !isCut(o))) ?? plan.setups[0]
+}
+
+/** The setup run mode works on: the chosen one if the plan has it, else `firstRunSetup`. */
 export function runSetup(plan: PlanDTO, setupId: string | undefined): SetupDTO {
-  return plan.setups.find((s) => s.id === setupId) ?? plan.setups[0]!
+  return plan.setups.find((s) => s.id === setupId) ?? firstRunSetup(plan)!
 }
 
 export interface PlanRunInfo {
@@ -47,17 +57,30 @@ export interface PlanRunInfo {
   readonly setup: { readonly id: string; readonly name: string; readonly direction: Direction }
   /** Every setup of the plan, in machining order. */
   readonly setups: readonly { readonly id: string; readonly name: string }[]
-  /** Tool names in machining order, a tool repeated only when it comes back after another. */
+  /**
+   * Tool names of the program in machining order, a tool repeated only when it comes back after
+   * another; already-cut operations (DF135) have none, as they are not in the program.
+   */
   readonly tools: readonly string[]
-  /** The setup's plan operation ids in machining order (toolpath playback). */
+  /**
+   * The setup's plan operation ids in machining order, already-cut ones included: the links
+   * between operations are computed over all of them (docs/modes/cut-state.md).
+   */
   readonly operations: readonly string[]
+  /**
+   * DF137: the setup's already-cut operations (the plan's design copy, DF135): left out of the
+   * program, so Run never draws, numbers or offers them (docs/modes/cut-state.md#run-df137).
+   */
+  readonly cut: ReadonlySet<string>
 }
 
 export function planRunInfo(plan: PlanDTO, setupId?: string): PlanRunInfo {
   const setup = runSetup(plan, setupId)
   const ops = setup.operations
+  const isCut = cutTest(plan.design.part)
   const tools: string[] = []
   for (const op of ops) {
+    if (isCut(op)) continue
     const name = snapshotName(plan, op.tool)
     if (name !== undefined && tools.at(-1) !== name) tools.push(name)
   }
@@ -68,6 +91,7 @@ export function planRunInfo(plan: PlanDTO, setupId?: string): PlanRunInfo {
     setups: plan.setups.map((s) => ({ id: s.id, name: s.name })),
     tools,
     operations: ops.map((o) => o.id),
+    cut: new Set(ops.filter(isCut).map((o) => o.id)),
   }
 }
 
@@ -81,20 +105,27 @@ export interface ResumePoint {
   readonly toolName: string
 }
 
-/** The setup's operations in machining order, as "Resume at" offers them (run-machine.md#section-resume-m5). */
+/**
+ * The setup's operations in machining order, as "Resume at" offers them
+ * (run-machine.md#section-resume-m5); already-cut ones (DF135) are not in the program, so neither
+ * offered nor numbered (DF137).
+ */
 export function resumePoints(plan: PlanDTO, setupId: string | undefined): ResumePoint[] {
   const numbers = new Map<string, number>()
-  return runSetup(plan, setupId).operations.map((op) => {
-    const key = op.tool ?? ''
-    const n = numbers.get(key) ?? numbers.size + 1
-    numbers.set(key, n)
-    return {
-      planOperationId: op.id,
-      label: planOpLabel(plan.design.part, op),
-      tool: n,
-      toolName: snapshotName(plan, op.tool) ?? '–',
-    }
-  })
+  const isCut = cutTest(plan.design.part)
+  return runSetup(plan, setupId)
+    .operations.filter((op) => !isCut(op))
+    .map((op) => {
+      const key = op.tool ?? ''
+      const n = numbers.get(key) ?? numbers.size + 1
+      numbers.set(key, n)
+      return {
+        planOperationId: op.id,
+        label: planOpLabel(plan.design.part, op),
+        tool: n,
+        toolName: snapshotName(plan, op.tool) ?? '–',
+      }
+    })
 }
 
 /** "Resume from…" is offered after a stopped or failed run of this plan and setup (M5). */
