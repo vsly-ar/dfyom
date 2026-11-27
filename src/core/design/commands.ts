@@ -168,9 +168,8 @@ export const ToleranceArg = z.object({
 })
 // No description: the primer says once that ids come from results and names are labels (llm-api.md#schemas).
 export const NameArg = z.string().min(1).max(NAME_MAX)
-export const OnArg = SurfaceIdSchema.describe(
-  'Or an earlier floor / tab top; default last top facing floor',
-)
+// The default (the last top facing floor) is on the primer's operation-args line.
+export const OnArg = SurfaceIdSchema.describe('Or an earlier floor / tab top')
 const StockFaceArg = SurfaceIdSchema.describe('A stock face')
 export const PartArg = { partId: PartIdSchema }
 const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
@@ -1440,6 +1439,10 @@ const partAdd = defineCommand({
     stockLibraryItemId: ItemIdSchema.optional().describe('Library stock to take a snapshot of'),
     stock: StockArg.optional() as z.ZodOptional<z.ZodType<object>>,
   }),
+  // the stock values are listed in full on library.stock.add (tools/list budget); validated in full
+  listedArgs: {
+    stock: listedAs('object', 'library.stock.add values: own block, bare numbers in project units'),
+  },
   result: z.object({ partId: PartIdSchema }),
   run(draft, args, ctx) {
     const where = 'design.part.add'
@@ -1536,8 +1539,10 @@ const partUpdate = defineCommand({
       .describe('Ids already cut in the stock (replaces the list)'),
     cutByRun: z.string().min(1).optional().describe('Plan of the real run that cut the ids added'),
   }),
-  // the stock is listed on design.part.add only (tools/list budget, DF95); validated in full
-  listedArgs: { stock: listedAs('object', 'design.part.add stock (changes the stock)') },
+  // the stock is listed on library.stock.add only (tools/list budget, DF95); validated in full
+  listedArgs: {
+    stock: listedAs('object', 'library.stock.add values, project units (changes the stock)'),
+  },
   result: z.object({ warnings: Warnings }),
   run(draft, args, ctx) {
     const where = 'design.part.update'

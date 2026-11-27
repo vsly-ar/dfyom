@@ -150,7 +150,8 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
     summary:
       'Wait until a job finishes, a run waits for the operator (waiting: what, and the next call) or the timeout passes; returns job.get (timedOut: true if still running). Cancelling the wait never stops the job.',
     args: z.object({
-      jobId: z.string().describe('Id returned when the job started'),
+      // No description: ids come from results (primer; llm-api.md#schemas).
+      jobId: z.string(),
       timeoutSeconds: z
         .number()
         .min(0)

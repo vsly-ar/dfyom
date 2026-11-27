@@ -9,7 +9,7 @@
 import { z } from 'zod'
 import { Ok, type AppResult } from '../../shared/result'
 import type { AnyCommand, AnyQueryDef } from '../commands/define'
-import { toolDescriptor } from '../commands/json-schema'
+import { toolDescriptor, type ToolDescriptor } from '../commands/json-schema'
 import type { Registry } from '../commands/registry'
 import { OPERATION_ID_PATTERN, RECORD_ID_PATTERN } from '../design/part.dto'
 import { FEATURE_ID_PATTERN } from '../design/feature.dto'
@@ -73,6 +73,8 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
  * for 124 tools after `withoutValidationOnlyKeywords` and shared descriptions moved to the primer.
  * Hardening headroom work: 119.9 → 100.7 K for 133 tools (listed sketches, no id/name
  * descriptions, sharing only where it pays, equivalent short forms, no hints beside readOnlyHint).
+ * Headroom 2: 119.3 → 110.3 K for 150 tools ("Args as <add tool>" on update tools, `enum`
+ * without `type`, descriptions the primer says).
  * Raise it deliberately.
  */
 export const TOOLS_LIST_BUDGET_CHARS = 120_000
@@ -137,24 +139,141 @@ export function annotationsOf(
   return out
 }
 
-function registryTool(def: AnyCommand | AnyQueryDef, scope: ToolScope): AppResult<AgentTool> {
-  return toolDescriptor(def).map((d) => {
-    const kind: AgentTool['kind'] = 'kind' in def ? def.kind : 'query'
+function registryTool(
+  def: AnyCommand | AnyQueryDef,
+  scope: ToolScope,
+  d: ToolDescriptor,
+  sources: readonly JsonObject[],
+  argsAs: string,
+): AgentTool {
+  const kind: AgentTool['kind'] = 'kind' in def ? def.kind : 'query'
+  const listed = withoutRepeatedDescriptions(d.listedInputSchema, sources)
+  const repeats = JSON.stringify(listed) !== JSON.stringify(d.listedInputSchema)
+  return {
+    name: def.name,
+    mcpName: toMcpName(def.name),
+    scope,
+    area: def.name.split('.')[0] ?? def.name,
+    kind,
+    description: describe(def, kind) + (repeats ? ` Args as ${argsAs}.` : ''),
+    // The reserved keys (expectedRevision, apply) are not listed: the primer explains them
+    // once, the session strips them (docs/architecture/llm-api.md#schemas).
+    inputSchema: compactSchema(listed),
+    fullInputSchema: compactSchema(d.inputSchema),
+    outputSchema: compactSchema(d.outputSchema),
+    annotations: annotationsOf(def, d.inputSchema),
+  }
+}
+
+/** A tool (or one arg of it) whose listed field descriptions another tool repeats. */
+export interface DescriptionSource {
+  readonly tool: string
+  /** The arg whose schema (an array arg's item) has the fields; absent: the tool's args. */
+  readonly arg?: string
+}
+
+/** The design operation adds whose args `plan.design.operation.update` repeats. */
+const DESIGN_OPERATION_ADDS = [
+  'design.facing.add',
+  'design.pocket.add',
+  'design.drilling.add',
+  'design.profile.add',
+  'design.chamfer.add',
+] as const
+
+/**
+ * Where a tool's repeated field descriptions are listed (docs: #schemas, "Args as"): `X.update`
+ * repeats `X.add`, `plan.design.operation.update` the design operation adds,
+ * `design.shape.item.update` an item of `design.shape.add`. Returns the sources and the text
+ * after "Args as".
+ */
+export function describedOn(
+  name: string,
+  names: ReadonlySet<string>,
+): { readonly sources: DescriptionSource[]; readonly argsAs: string } {
+  if (name === 'plan.design.operation.update')
     return {
-      name: def.name,
-      mcpName: toMcpName(def.name),
-      scope,
-      area: def.name.split('.')[0] ?? def.name,
-      kind,
-      description: describe(def, kind),
-      // The reserved keys (expectedRevision, apply) are not listed: the primer explains them
-      // once, the session strips them (docs/architecture/llm-api.md#schemas).
-      inputSchema: compactSchema(d.listedInputSchema),
-      fullInputSchema: compactSchema(d.inputSchema),
-      outputSchema: compactSchema(d.outputSchema),
-      annotations: annotationsOf(def, d.inputSchema),
+      sources: DESIGN_OPERATION_ADDS.filter((n) => names.has(n)).map((tool) => ({ tool })),
+      argsAs: 'design.<kind>.add',
     }
-  })
+  if (name === 'design.shape.item.update' && names.has('design.shape.add'))
+    return {
+      sources: [{ tool: 'design.shape.add', arg: 'items' }],
+      argsAs: 'design.shape.add items',
+    }
+  const add = name.endsWith('.update') ? `${name.slice(0, -'.update'.length)}.add` : undefined
+  if (add === undefined || !names.has(add)) return { sources: [], argsAs: '' }
+  return { sources: [{ tool: add }], argsAs: add }
+}
+
+/** The listed schema a source names: the tool's args, or one arg's (an array's item). */
+function sourceSchema(listed: ReadonlyMap<string, JsonObject>, s: DescriptionSource): JsonObject {
+  const root = listed.get(s.tool) ?? {}
+  if (s.arg === undefined) return root
+  const props = root['properties']
+  const arg = isObject(props) ? props[s.arg] : undefined
+  if (!isObject(arg)) return {}
+  const items = arg['items']
+  return isObject(items) ? items : arg
+}
+
+/** A schema's properties, also those of its `oneOf`/`anyOf` branches (an item union). */
+function propertiesOf(node: JsonObject): JsonObject[] {
+  const out: JsonObject[] = []
+  const own = node['properties']
+  if (isObject(own)) out.push(own)
+  for (const k of ['oneOf', 'anyOf']) {
+    const branches = node[k]
+    if (Array.isArray(branches))
+      for (const b of branches as unknown[])
+        if (isObject(b) && isObject(b['properties'])) out.push(b['properties'])
+  }
+  return out
+}
+
+/**
+ * The schema without the field descriptions that a source schema gives the same field (same
+ * property path, same text; a union source's branches count): an update tool lists them once,
+ * on its add tool, and says "Args as <add tool>." (docs/architecture/llm-api.md#schemas). Types,
+ * enums and required keys stay; only descriptions go.
+ */
+export function withoutRepeatedDescriptions(
+  schema: JsonObject,
+  sources: readonly JsonObject[],
+): JsonObject {
+  if (sources.length === 0) return schema
+  const strip = (node: JsonObject, srcs: readonly JsonObject[], root: boolean): JsonObject => {
+    const out: JsonObject = { ...node }
+    const desc = out['description']
+    // a sketch's "As <tool> <arg>" is its contract: it stays
+    if (
+      !root &&
+      typeof desc === 'string' &&
+      !desc.startsWith('As ') &&
+      srcs.some((s) => s['description'] === desc)
+    )
+      delete out['description']
+    const props = out['properties']
+    if (isObject(props)) {
+      out['properties'] = Object.fromEntries(
+        Object.entries(props).map(([k, v]) => {
+          if (!isObject(v)) return [k, v]
+          const sub = srcs
+            .flatMap(propertiesOf)
+            .map((p) => p[k])
+            .filter(isObject)
+          return [k, sub.length === 0 ? v : strip(v, sub, false)]
+        }),
+      )
+    }
+    const items = out['items']
+    if (isObject(items)) {
+      const sub = srcs.map((s) => s['items']).filter(isObject)
+      if (sub.length > 0) out['items'] = strip(items, sub, false)
+    }
+    return out
+  }
+  return strip(schema, sources, true)
 }
 
 function sessionTool(def: SessionToolDef): AgentTool {
@@ -181,16 +300,23 @@ export function buildAgentTools(
   registries: { readonly app: Registry; readonly project: Registry },
   sessionTools: readonly SessionToolDef[],
 ): AppResult<AgentTool[]> {
-  const out: AgentTool[] = []
+  const entries: { def: AnyCommand | AnyQueryDef; scope: ToolScope; d: ToolDescriptor }[] = []
   for (const [scope, reg] of [
     ['app', registries.app],
     ['project', registries.project],
   ] as const)
     for (const def of [...reg.commands, ...reg.queries]) {
-      const t = registryTool(def, scope)
-      if (t.isErr()) return t
-      out.push(t.unwrap())
+      const d = toolDescriptor(def)
+      if (d.isErr()) return d
+      entries.push({ def, scope, d: d.unwrap() })
     }
+  const listed = new Map(entries.map((e) => [e.def.name, e.d.listedInputSchema]))
+  const names = new Set(listed.keys())
+  const out: AgentTool[] = entries.map(({ def, scope, d }) => {
+    const { sources, argsAs } = describedOn(def.name, names)
+    const schemas = sources.map((src) => sourceSchema(listed, src))
+    return registryTool(def, scope, d, schemas, argsAs)
+  })
   for (const def of sessionTools) out.push(sessionTool(def))
   return Ok(out)
 }
@@ -374,6 +500,37 @@ export function withoutConstTypes(node: unknown): unknown {
 }
 
 /**
+ * `{ type: 'string', enum: ['a', 'b'] }` → `{ enum: ['a', 'b'] }` when every enum value has one of
+ * the listed types (a nullable type array with `null` in the enum too): the enum alone accepts
+ * exactly the same values, as `const` does (docs/architecture/llm-api.md#schemas).
+ */
+export function withoutEnumTypes(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutEnumTypes)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) out[k] = withoutEnumTypes(v)
+  const e = out['enum']
+  const t = out['type']
+  const types = typeof t === 'string' ? [t] : Array.isArray(t) ? t : undefined
+  if (!Array.isArray(e) || e.length === 0 || types === undefined) return out
+  const hasType = (v: unknown) =>
+    types.some((ty) =>
+      ty === 'null'
+        ? v === null
+        : ty === 'integer'
+          ? Number.isInteger(v)
+          : ty === 'array'
+            ? Array.isArray(v)
+            : ty === 'object'
+              ? isObject(v)
+              : v !== null && typeof v === ty,
+    )
+  if (!e.every(hasType)) return out
+  const { type: _t, ...rest } = out
+  return rest
+}
+
+/**
  * Drops keywords that allow everything: `additionalProperties: {}` and, below the root (MCP
  * wants `properties` on the input schema itself), `properties: {}` (an "As <tool>" sketch is
  * then just `{ type: 'object' }`).
@@ -464,7 +621,8 @@ function sharingPays(chars: number, uses: number): boolean {
  * `$schema`, the safe-integer bounds and the validation-only keywords
  * (`withoutValidationOnlyKeywords`), and writes the equivalent shorter forms: tuples of equal items
  * as arrays (`withHomogeneousTuples`), `const` without its `type` (`withoutConstTypes`),
- * nullable simple types as type arrays (`withNullableTypes`), no allow-all keywords
+ * nullable simple types as type arrays (`withNullableTypes`), `enum` without its `type`
+ * (`withoutEnumTypes`), no allow-all keywords
  * (`withoutNoOpKeywords`).
  * Schemas that already use `$ref`/`$defs` (recursive Zod schemas) are returned without sharing.
  */
@@ -518,9 +676,11 @@ export function compactSchema(schema: JsonObject): JsonObject {
  */
 export function equivalentShortForms(schema: JsonObject): JsonObject {
   return withoutNoOpKeywords(
-    withNullableTypes(
-      withoutConstTypes(
-        withHomogeneousTuples(withoutValidationOnlyKeywords(withoutSafeIntBounds(schema))),
+    withoutEnumTypes(
+      withNullableTypes(
+        withoutConstTypes(
+          withHomogeneousTuples(withoutValidationOnlyKeywords(withoutSafeIntBounds(schema))),
+        ),
       ),
     ),
   ) as JsonObject

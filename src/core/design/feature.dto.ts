@@ -11,7 +11,8 @@ import { NAME_MAX } from '../library/item'
 /** `hole1`, `clones2`: kind prefix + number, immutable (features.md § Persistence). */
 export const FEATURE_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*$/
 
-export const FeatureIdSchema = z.string().regex(FEATURE_ID_PATTERN).describe('e.g. hole1')
+// No description: ids come from results (primer; llm-api.md#schemas).
+export const FeatureIdSchema = z.string().regex(FEATURE_ID_PATTERN)
 
 /**
  * Role of an owned operation (A3): `<step>` or `<instance>_<step>` for repeated cuts (Clones:

@@ -231,7 +231,8 @@ export const inProcessWorkers: WorkerPort = createInProcessWorkers()
 export const JOB_STATES = ['running', 'paused', 'finished'] as const
 export type JobState = (typeof JOB_STATES)[number]
 
-const JobControlArgs = z.object({ jobId: z.string().describe('Id returned when the job started') })
+// No `jobId` description: ids come from results (primer; llm-api.md#schemas).
+const JobControlArgs = z.object({ jobId: z.string() })
 const JobControlResult = z.object({ state: z.enum(JOB_STATES).describe('Job state afterwards') })
 type JobControl = BuiltinCommand<typeof JobControlArgs, z.output<typeof JobControlResult>>
 

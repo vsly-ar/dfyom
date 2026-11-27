@@ -8,7 +8,7 @@ import { commonValuesShape, MaterialClassSchema, NAME_MAX, quantityDto } from '.
 export const StockValuesDtoSchema = z.object({
   kind: z.literal('stock'),
   ...commonValuesShape,
-  shape: z.literal('block').describe('Stock shape; v0.1 has only the rectangular block'),
+  shape: z.literal('block').describe('Rectangular block only'),
   length: quantityDto('length').describe('Size along X'),
   width: quantityDto('length').describe('Size along Y'),
   thickness: quantityDto('length').describe('Size along Z; its tolerance is the real variation'),

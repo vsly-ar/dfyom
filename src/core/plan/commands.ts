@@ -421,7 +421,7 @@ const planRemove = defineCommand({
   machine: false,
   args: z.object({
     ...PlanArg,
-    confirm: z.literal(true).describe('Must be true: the user confirmed the deletion'),
+    confirm: z.literal(true), // the primer says what confirm: true asserts (llm-api.md#schemas)
   }),
   result: Empty,
   run(draft, args) {

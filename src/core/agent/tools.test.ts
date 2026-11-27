@@ -22,6 +22,9 @@ import {
   listedAnnotations,
   withNullableTypes,
   withoutConstTypes,
+  withoutEnumTypes,
+  withoutRepeatedDescriptions,
+  describedOn,
   withoutNoOpKeywords,
   withoutValidationOnlyKeywords,
 } from './tools'
@@ -299,6 +302,116 @@ describe('agent tools', () => {
       type: 'object',
       properties: {},
     })
+
+    // an enum fixes the type when every value has it
+    expect(withoutEnumTypes({ type: 'string', enum: ['a', 'b'] })).toEqual({ enum: ['a', 'b'] })
+    expect(withoutEnumTypes({ type: ['string', 'null'], enum: ['a', null] })).toEqual({
+      enum: ['a', null],
+    })
+    expect(withoutEnumTypes({ type: 'integer', enum: [1, 2] })).toEqual({ enum: [1, 2] })
+    // a value of another type stays refused by the type: keep it as generated
+    for (const kept of [
+      { type: 'string', enum: ['a', 2] },
+      { type: 'integer', enum: [1.5] },
+      { type: 'string', enum: ['a', null] },
+    ])
+      expect(withoutEnumTypes(kept)).toEqual(kept)
+    // a property named "type" or "enum" is not a keyword
+    const props = {
+      type: 'object',
+      properties: { type: { type: 'string' }, enum: { type: 'string' } },
+    }
+    expect(withoutEnumTypes(props)).toEqual(props)
+  })
+
+  it('an update tool leaves out the field descriptions its add tool lists ("Args as")', () => {
+    const add = {
+      type: 'object',
+      properties: {
+        depth: { type: 'string', description: 'Below on' },
+        tabs: { type: 'object', properties: { count: { type: 'string', description: 'n' } } },
+        op: { type: 'string', description: 'add' },
+      },
+    }
+    const update = {
+      type: 'object',
+      description: 'root stays',
+      properties: {
+        featureId: { type: 'string', description: 'own' },
+        depth: { type: 'string', description: 'Below on' },
+        tabs: { type: 'object', properties: { count: { type: 'string', description: 'n' } } },
+        op: { type: 'string', description: 'differs' },
+      },
+    }
+    expect(withoutRepeatedDescriptions(update, [add])).toEqual({
+      type: 'object',
+      description: 'root stays',
+      properties: {
+        featureId: { type: 'string', description: 'own' },
+        depth: { type: 'string' },
+        tabs: { type: 'object', properties: { count: { type: 'string' } } },
+        op: { type: 'string', description: 'differs' },
+      },
+    })
+    // a union source (an item kind per branch) counts its branches' fields
+    const union = { oneOf: [{ properties: { sides: { type: 'string', description: '3–64' } } }] }
+    expect(
+      withoutRepeatedDescriptions(
+        { properties: { sides: { type: 'string', description: '3–64' } } },
+        [union],
+      ),
+    ).toEqual({ properties: { sides: { type: 'string' } } })
+
+    const names = new Set(['design.hole.add', 'design.hole.update', 'design.shape.add'])
+    expect(describedOn('design.hole.update', names)).toEqual({
+      sources: [{ tool: 'design.hole.add' }],
+      argsAs: 'design.hole.add',
+    })
+    expect(describedOn('design.shape.item.update', names).argsAs).toBe('design.shape.add items')
+    expect(describedOn('design.part.update', names).sources).toEqual([])
+
+    // on the real tools: only descriptions go, the line names a listed tool, and the full
+    // schema keeps every description
+    const { app, project } = registries()
+    const tools = allTools()
+    const strip = (n: unknown): unknown =>
+      Array.isArray(n)
+        ? n.map(strip)
+        : typeof n === 'object' && n !== null
+          ? Object.fromEntries(
+              Object.entries(n)
+                .filter(([k, v]) => !(k === 'description' && typeof v === 'string'))
+                .map(([k, v]) => [k, strip(v)]),
+            )
+          : n
+    let described = 0
+    for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
+      const t = tool(tools, def.name)
+      const as = / Args as ([a-z.<>]+[a-zA-Z.]*)( items)?\.$/.exec(t.description)
+      if (as === null) continue
+      described++
+      if (!as[1]!.includes('<kind>')) tool(tools, as[1]!)
+      const generated = expectOk(toolDescriptor(def)).listedInputSchema
+      const { $schema: _s, ...plain } = equivalentShortForms(generated)
+      const defs = (t.inputSchema['$defs'] as JsonObject | undefined) ?? {}
+      expect(strip(expand(t.inputSchema, defs)), def.name).toEqual(
+        strip(expand(plain, (plain['$defs'] as JsonObject) ?? {})),
+      )
+      expect(JSON.stringify(t.inputSchema).length, def.name).toBeLessThan(
+        JSON.stringify(compactSchema(generated)).length,
+      )
+    }
+    expect(described).toBeGreaterThanOrEqual(10)
+    expect(tool(tools, 'design.hole.update').description).toMatch(/Args as design\.hole\.add\.$/)
+    expect(JSON.stringify(tool(tools, 'design.hole.update').inputSchema)).not.toContain(
+      'countersink; default 90°',
+    )
+    expect(JSON.stringify(tool(tools, 'design.hole.add').inputSchema)).toContain(
+      'countersink; default 90°',
+    )
+    expect(JSON.stringify(tool(tools, 'design.hole.update').fullInputSchema)).toContain(
+      'countersink; default 90°',
+    )
   })
 
   it('lists no idempotent or destructive hint beside readOnlyHint (meaningless per MCP)', () => {
@@ -327,6 +440,7 @@ describe('agent tools', () => {
       'design.engraving.add',
       'design.engraving.update',
       'design.line.update',
+      'design.part.add',
       'design.part.update',
       'design.pattern.update',
       'design.pocket.update',
