@@ -19,11 +19,15 @@ function roughingOwner(op: OperationDTO): string | undefined {
 /**
  * The design operation ids of `part` that are already cut: those of a listed unit (an operation,
  * or every operation a listed feature owns or nests), and the roughing pass of a cut operation
- * (its material went first). Dependants are not: a pocket on a cut pocket's floor is new work.
+ * (its material went first). Dependants are not: a pocket on a cut pocket's floor is new work,
+ * and neither are recut units (C4, `recutUnits`): they cut the difference to their as-cut version.
  */
 export function alreadyCutOperations(part: PartDTO): ReadonlySet<string> {
   const listed = new Set(part.alreadyCut ?? [])
   const out = new Set<string>()
+  if (listed.size === 0) return out
+  // C4: an edited run-marked unit is cut again for the difference
+  for (const id of recutUnits(part)) listed.delete(id)
   if (listed.size === 0) return out
   for (const op of part.operations) if (listed.has(unitOfOperation(part, op.id))) out.add(op.id)
   for (const op of part.operations) {
@@ -65,31 +69,61 @@ export function cutMarkOf(part: PartDTO, id: string): CutMarkDTO | undefined {
 /**
  * The marks of a new already-cut `list` of `part` (DF135 C2): kept for ids still listed, new for
  * ids the list adds – by `run` with the unit's fingerprint in `runPart` (the run's plan's design
- * copy) when given, else by `hand` – at ISO time `at`. `undefined` for an empty list.
+ * copy, with its operations as `asCut`, C4) when given, else by `hand` – at ISO time `at`; listed
+ * ids in `recut` (C4: the run cut a recut unit again) are marked by the run anew. `undefined` for
+ * an empty list.
  */
 export function cutMarksFor(
   part: PartDTO,
   list: readonly string[],
   runPart: PartDTO | undefined,
   at: string,
+  recut: readonly string[] = [],
 ): Record<string, CutMarkDTO> | undefined {
   if (list.length === 0) return undefined
   const before = new Set(part.alreadyCut ?? [])
+  const again = new Set(runPart === undefined ? [] : recut)
   const out: Record<string, CutMarkDTO> = {}
   for (const id of list) {
-    const kept = before.has(id) ? part.alreadyCutMarks?.[id] : undefined
+    const kept = before.has(id) && !again.has(id) ? part.alreadyCutMarks?.[id] : undefined
     if (kept !== undefined) out[id] = kept
-    else if (before.has(id))
+    else if (before.has(id) && !again.has(id))
       continue // listed before marks were kept: when is unknown
     else if (runPart === undefined) out[id] = { by: 'hand', at }
     else {
       const source = runPart.operations.some((o) => unitOfOperation(runPart, o.id) === id)
         ? runPart
         : part
-      out[id] = { by: 'run', at, fingerprint: unitFingerprint(source, id) }
+      out[id] = {
+        by: 'run',
+        at,
+        fingerprint: unitFingerprint(source, id),
+        asCut: asCutOperations(source, id),
+      }
     }
   }
   return Object.keys(out).length === 0 ? undefined : out
+}
+
+/** The operations of unit `id` of `part` as a run mark keeps them (C4): roughing passes left out. */
+function asCutOperations(part: PartDTO, id: string): OperationDTO[] {
+  return part.operations.filter(
+    (o) => unitOfOperation(part, o.id) === id && roughingOwner(o) === undefined,
+  )
+}
+
+/**
+ * The recut units of `part` (DF135 C4): listed ids marked by a run that kept the as-cut geometry
+ * (`asCut`) and whose geometry changed since. Their operations are not already cut: plans cut the
+ * difference to the as-cut version (plan/as-cut.ts).
+ * Doc: docs/modes/cut-state.md#cutting-only-the-difference-c4
+ */
+export function recutUnits(part: PartDTO): ReadonlySet<string> {
+  // not memoized: commands read it on drafts that change in place
+  const out = new Set<string>()
+  for (const id of cutChangedUnits(part))
+    if ((part.alreadyCutMarks?.[id]?.asCut?.length ?? 0) > 0) out.add(id)
+  return out
 }
 
 /**

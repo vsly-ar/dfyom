@@ -6,6 +6,8 @@
 // Q199 (a new blank): with Pocket 2 marked too, the part menu's Clear cut marks clears both (Undo
 // brings them back); Run's pre-flight on the setup cut in full offers Clear marks, and the draft
 // plan then has a program again. C3: the inspector's Already cut switch marks Pocket 1 again.
+// C4: a run's mark on Pocket 1 (the command Run sends), Pocket 1 deepened 6 → 8 in Design: its
+// marker reads Changed ("plans cut only the difference"), and the export cuts it from 6 to 8 only.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -221,5 +223,41 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   await cutSwitch.click()
   await expect(pocket1).toContainText('Cut')
   await expect(cutSwitch).toBeChecked()
+
+  // ── C4: a run's mark on Pocket 1 (as Run sends it), then Pocket 1 deepened 6 → 8 ───────────
+  const call = async <T>(name: string, args: object): Promise<T> => {
+    const r = await page.evaluate(
+      ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+      [name, args] as const,
+    )
+    expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
+    return (r as { ok: true; value: T }).value
+  }
+  const { plans } = await call<{ plans: { id: string; partId: string }[] }>('plan.list', {})
+  const { id: planId, partId } = plans[0]!
+  await call('design.part.update', { partId, alreadyCut: [] })
+  await call('design.part.update', { partId, alreadyCut: ['pocket1'], cutByRun: planId })
+  await expect(page.locator('[data-cut-marker="run"]')).toHaveCount(1)
+  // (a click on the selected row clears the selection)
+  if (!(await inspector.getByRole('heading', { name: 'Pocket 1' }).isVisible()))
+    await pocket1.click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  await setField(inspector, 'Depth', '8')
+  const changed = page.locator('[data-cut-marker="run"][data-tone="warning"]')
+  await expect(changed).toContainText('Changed')
+  await expect(changed).toHaveAttribute('title', /plans cut only the difference/)
+  // Plan: Pocket 1 is in the program again, from its old floor down only
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  await expect(cutRow).not.toContainText('Cut', { timeout: 30_000 })
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  const recut = await exportProgram()
+  expect(recut).toContain('(Pocket 1)')
+  const section = recut.slice(recut.indexOf('(Pocket 1)'), recut.indexOf('(Pocket 2)'))
+  const depths = [...section.matchAll(/Z(-[\d.]+)/g)].map((m) => Number(m[1]))
+  expect(Math.min(...depths)).toBeCloseTo(-8, 6)
+  // no level between the top and the floor the run cut (6 mm)
+  expect(depths.filter((z) => z > -6 + 1e-6)).toEqual([])
   expect(dfyom.rendererErrors).toEqual([])
 })

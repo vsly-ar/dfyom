@@ -1538,6 +1538,10 @@ const partUpdate = defineCommand({
       .optional()
       .describe('Ids already cut in the stock (replaces the list)'),
     cutByRun: z.string().min(1).optional().describe('Plan of the real run that cut the ids added'),
+    recut: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Listed ids that run cut again after an edit'),
   }),
   // the stock is listed on library.stock.add only (tools/list budget, DF95); validated in full
   listedArgs: {
@@ -1621,11 +1625,13 @@ const partUpdate = defineCommand({
           )
         runPart = baseOf(plan.design.part)
       }
+      // C4: recut units the run cut again take a new run mark (cut-state.md#cutting-only-the-difference-c4)
       const marks = cutMarksFor(
         baseOf(target),
         list,
         runPart,
         new Date(ctx.clock.now()).toISOString(),
+        args.recut ?? [],
       )
       if (list.length === 0) delete target.alreadyCut
       else if (!deepEqual(target.alreadyCut, list)) target.alreadyCut = list

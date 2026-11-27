@@ -16,6 +16,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { Direction } from '../geometry/face'
 import { faceWaste, type FaceWaste } from '../geometry/waste'
 import { materialBands, throughDepths, type MaterialCover } from '../geometry/through-depth'
+import { asCutRemovals } from './as-cut'
 import type { LoadedPlan } from './plan'
 
 interface Derived {
@@ -56,15 +57,24 @@ function derived(plan: LoadedPlan, port: Region2dPort | undefined): Derived {
     const none: Derived = { through: new Map(), bands: new Map(), waste: () => undefined }
     out = toGeometryInput(plan.part, plan.stock, port).mapOr(none, (input): Derived => {
       const wastes = new Map<Direction, FaceWaste | undefined>()
+      // DF135 C4: recut units' as-cut operations, hidden removals just before their first plan
+      // operation (docs/modes/cut-state.md#cutting-only-the-difference-c4)
+      const removals = asCutRemovals(plan, port)
+      for (const r of removals) {
+        indexOf.set(r.geometry.id, r.index - 0.5)
+        setupOf.set(r.geometry.id, r.setup)
+      }
+      const ops = [...input.operations, ...removals.map((r) => r.geometry)]
+      const asCut = new Set(removals.map((r) => r.geometry.id))
+      const visible = <T>(m: Map<string, T>): Map<string, T> => {
+        for (const id of asCut) m.delete(id)
+        return m
+      }
       return {
-        through: throughDepths(input.operations, input.stock, port, earlier(setupOf)),
+        through: visible(throughDepths(ops, input.stock, port, earlier(setupOf), asCut)),
         // openings count from the next setup on (the slug may still sit in its slot in its own)
-        bands: materialBands(
-          input.operations,
-          input.stock,
-          port,
-          earlier(indexOf),
-          earlier(setupOf),
+        bands: visible(
+          materialBands(ops, input.stock, port, earlier(indexOf), earlier(setupOf), asCut),
         ),
         waste: (d) => {
           if (!wastes.has(d)) wastes.set(d, faceWaste(input.operations, d, input.stock, port))

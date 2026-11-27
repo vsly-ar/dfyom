@@ -19,7 +19,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { isDisabled, type DisabledState } from '../../../../core/design/disabled'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
-import { cutChangedUnits, cutMarkOf } from '../../../../core/design/already-cut'
+import { cutChangedUnits, cutMarkOf, recutUnits } from '../../../../core/design/already-cut'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
@@ -483,7 +483,7 @@ function CutMarker({ part, id }: { part: PartDTO; id: string }): React.JSX.Eleme
   const run = mark?.by === 'run' && mark.at !== ''
   const changed = run && cutChangedUnits(part).has(id)
   const title = changed
-    ? m.navigator.cutChangedTitle(markDay(mark.at))
+    ? m.navigator.cutChangedTitle(markDay(mark.at), recutUnits(part).has(id))
     : run
       ? m.navigator.cutByRunTitle(markDay(mark.at))
       : m.navigator.cutTitle

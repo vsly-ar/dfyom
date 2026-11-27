@@ -407,6 +407,7 @@ describe('cut state C2: marks from Run (Q196–Q198 as revised)', () => {
       by: 'run',
       at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
       fingerprint: expect.any(String),
+      asCut: [expect.objectContaining({ id: 'pocket1', kind: 'pocket' })],
     })
     const pocket = opOf(s.plan(planId), 'pocket1').id
     expect(cutChanged(s, planId)).toEqual([])
@@ -414,7 +415,7 @@ describe('cut state C2: marks from Run (Q196–Q198 as revised)', () => {
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', name: 'P2' })
     await s.run('project.apply', {})
     expect(cutChanged(s, planId)).toEqual([])
-    // deeper than the run cut it: a warning, kept on the cut operation (a cut finding)
+    // deeper than the run cut it: a warning; C4: the plan cuts only the difference
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '7' })
     await s.run('project.apply', {})
     expect(cutChanged(s, planId)).toMatchObject([
@@ -422,7 +423,9 @@ describe('cut state C2: marks from Run (Q196–Q198 as revised)', () => {
         severity: 'warning',
         planOperationId: pocket,
         rule: 'cutChanged',
-        message: expect.stringMatching(/^P2 .*changed since the run cut it$/),
+        message: expect.stringMatching(
+          /^P2 .*changed since the run cut it: the plan cuts only the difference$/,
+        ),
       },
     ])
     // back as cut: no warning; cleared: no marks, the program as before (not in the hash)
