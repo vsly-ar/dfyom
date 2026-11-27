@@ -30,6 +30,7 @@ import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 import { RestLayer, type RestOverlay } from './RestLayer'
 import { GoToPath, type GoToOverlay } from './GoToPath'
 import { HolderGhost, type HolderGhostOverlay } from './HolderGhost'
+import { InProcessStockLayer, type InProcessStockView } from './InProcessStockLayer'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -97,6 +98,12 @@ export interface RunScene {
   readonly ghost?: readonly [number, number, number] | undefined
   /** DF133 RW5: the ghost tool was inside an item (what probably happened): drawn in `--danger`. */
   readonly ghostColliding?: boolean | undefined
+  /**
+   * DF135 C5: the material left after the plan's already-cut operations, in the **part frame**
+   * (not the setup's WCS): a translucent solid around the part
+   * (docs/modes/cut-state.md#in-process-stock-display-c5); absent: none.
+   */
+  readonly inProcessStock?: InProcessStockView | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -223,95 +230,105 @@ export function RunLayer({
     [palette, run.ghostColliding],
   )
   return (
-    <group {...(matrix === undefined ? {} : { matrix, matrixAutoUpdate: false })}>
-      {geometry ? (
-        <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={2}>
-          <lineBasicMaterial vertexColors />
-        </lineSegments>
+    <>
+      {run.inProcessStock ? (
+        <InProcessStockLayer stock={run.inProcessStock} palette={palette} />
       ) : null}
-      {travel && envelope ? (
-        // machine travel (box outline) and the home position (a small ring), DF33
-        <group raycast={noRaycast}>
-          <lineSegments geometry={travel} raycast={noRaycast}>
-            <lineBasicMaterial color={travelColour} />
+      <group {...(matrix === undefined ? {} : { matrix, matrixAutoUpdate: false })}>
+        {geometry ? (
+          <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={2}>
+            <lineBasicMaterial vertexColors />
           </lineSegments>
-          <mesh
-            position={[envelope.home[0], envelope.home[1], envelope.home[2]]}
-            raycast={noRaycast}
-          >
-            <ringGeometry args={[4, 5, 32]} />
-            <meshBasicMaterial color={travelColour} />
-          </mesh>
-        </group>
-      ) : null}
-      {run.workholding ? (
-        <WorkholdingLayer
-          workholding={run.workholding}
-          palette={palette}
-          reducedMotion={reducedMotion}
-        />
-      ) : null}
-      {run.rest ? <RestLayer rest={run.rest} palette={palette} /> : null}
-      {run.holder ? <HolderGhost ghost={run.holder} palette={palette} /> : null}
-      {run.zRef ? (
-        <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
-      ) : null}
-      {run.flipAxes && run.flipAxes.length > 0 ? (
-        <FlipAxes axes={run.flipAxes} palette={palette} reducedMotion={reducedMotion} />
-      ) : null}
-      {run.aids && run.aids.handles.length > 0 ? (
-        <AidHandles aids={run.aids} palette={palette} />
-      ) : null}
-      {run.alignment && run.alignment.length > 0 ? (
-        <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />
-      ) : null}
-      {run.goTo ? (
-        <GoToPath goTo={run.goTo} palette={palette} reducedMotion={reducedMotion} />
-      ) : null}
-      {run.alignmentTargets && run.alignmentTargets.length > 0 ? (
-        <AlignmentTargets targets={run.alignmentTargets} palette={palette} />
-      ) : null}
-      {/* work zero: a ring with a dot at the WCS origin */}
-      <group raycast={noRaycast}>
-        <mesh raycast={noRaycast}>
-          <ringGeometry args={[2.5, 3.2, 32]} />
-          <meshBasicMaterial color={toolColour} />
-        </mesh>
-        <mesh raycast={noRaycast}>
-          <sphereGeometry args={[0.9, 12, 8]} />
-          <meshBasicMaterial color={toolColour} />
-        </mesh>
-      </group>
-      {run.ghost ? (
-        // RC6: where the interrupted run was last seen, a see-through copy of the tool marker
-        <group position={[run.ghost[0], run.ghost[1], run.ghost[2]]}>
-          <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
-            <coneGeometry args={[3, 6, 24]} />
-            <meshBasicMaterial color={ghostColour} transparent opacity={0.3} depthWrite={false} />
-          </mesh>
-          <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
-            <cylinderGeometry args={[3, 3, 20, 24]} />
-            <meshBasicMaterial color={ghostColour} transparent opacity={0.18} depthWrite={false} />
+        ) : null}
+        {travel && envelope ? (
+          // machine travel (box outline) and the home position (a small ring), DF33
+          <group raycast={noRaycast}>
+            <lineSegments geometry={travel} raycast={noRaycast}>
+              <lineBasicMaterial color={travelColour} />
+            </lineSegments>
+            <mesh
+              position={[envelope.home[0], envelope.home[1], envelope.home[2]]}
+              raycast={noRaycast}
+            >
+              <ringGeometry args={[4, 5, 32]} />
+              <meshBasicMaterial color={travelColour} />
+            </mesh>
+          </group>
+        ) : null}
+        {run.workholding ? (
+          <WorkholdingLayer
+            workholding={run.workholding}
+            palette={palette}
+            reducedMotion={reducedMotion}
+          />
+        ) : null}
+        {run.rest ? <RestLayer rest={run.rest} palette={palette} /> : null}
+        {run.holder ? <HolderGhost ghost={run.holder} palette={palette} /> : null}
+        {run.zRef ? (
+          <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
+        ) : null}
+        {run.flipAxes && run.flipAxes.length > 0 ? (
+          <FlipAxes axes={run.flipAxes} palette={palette} reducedMotion={reducedMotion} />
+        ) : null}
+        {run.aids && run.aids.handles.length > 0 ? (
+          <AidHandles aids={run.aids} palette={palette} />
+        ) : null}
+        {run.alignment && run.alignment.length > 0 ? (
+          <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />
+        ) : null}
+        {run.goTo ? (
+          <GoToPath goTo={run.goTo} palette={palette} reducedMotion={reducedMotion} />
+        ) : null}
+        {run.alignmentTargets && run.alignmentTargets.length > 0 ? (
+          <AlignmentTargets targets={run.alignmentTargets} palette={palette} />
+        ) : null}
+        {/* work zero: a ring with a dot at the WCS origin */}
+        <group raycast={noRaycast}>
+          <mesh raycast={noRaycast}>
+            <ringGeometry args={[2.5, 3.2, 32]} />
+            <meshBasicMaterial color={toolColour} />
           </mesh>
           <mesh raycast={noRaycast}>
-            <ringGeometry args={[4, 4.8, 32]} />
-            <meshBasicMaterial color={ghostColour} transparent opacity={0.6} depthWrite={false} />
+            <sphereGeometry args={[0.9, 12, 8]} />
+            <meshBasicMaterial color={toolColour} />
           </mesh>
         </group>
-      ) : null}
-      {tool ? (
-        // tool marker: a cone with its tip at the tool tip, and the shank above it
-        <group position={[tool[0], tool[1], tool[2]]}>
-          <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
-            <coneGeometry args={[3, 6, 24]} />
-            <meshStandardMaterial color={toolColour} roughness={0.6} />
-          </mesh>
-          <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
-            <cylinderGeometry args={[3, 3, 20, 24]} />
-            <meshStandardMaterial color={toolColour} roughness={0.6} transparent opacity={0.6} />
-          </mesh>
-        </group>
-      ) : null}
-    </group>
+        {run.ghost ? (
+          // RC6: where the interrupted run was last seen, a see-through copy of the tool marker
+          <group position={[run.ghost[0], run.ghost[1], run.ghost[2]]}>
+            <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
+              <coneGeometry args={[3, 6, 24]} />
+              <meshBasicMaterial color={ghostColour} transparent opacity={0.3} depthWrite={false} />
+            </mesh>
+            <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
+              <cylinderGeometry args={[3, 3, 20, 24]} />
+              <meshBasicMaterial
+                color={ghostColour}
+                transparent
+                opacity={0.18}
+                depthWrite={false}
+              />
+            </mesh>
+            <mesh raycast={noRaycast}>
+              <ringGeometry args={[4, 4.8, 32]} />
+              <meshBasicMaterial color={ghostColour} transparent opacity={0.6} depthWrite={false} />
+            </mesh>
+          </group>
+        ) : null}
+        {tool ? (
+          // tool marker: a cone with its tip at the tool tip, and the shank above it
+          <group position={[tool[0], tool[1], tool[2]]}>
+            <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
+              <coneGeometry args={[3, 6, 24]} />
+              <meshStandardMaterial color={toolColour} roughness={0.6} />
+            </mesh>
+            <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
+              <cylinderGeometry args={[3, 3, 20, 24]} />
+              <meshStandardMaterial color={toolColour} roughness={0.6} transparent opacity={0.6} />
+            </mesh>
+          </group>
+        ) : null}
+      </group>
+    </>
   )
 }

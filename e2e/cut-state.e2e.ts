@@ -8,6 +8,8 @@
 // plan then has a program again. C3: the inspector's Already cut switch marks Pocket 1 again.
 // C4: a run's mark on Pocket 1 (the command Run sends), Pocket 1 deepened 6 → 8 in Design: its
 // marker reads Changed ("plans cut only the difference"), and the export cuts it from 6 to 8 only.
+// C5: Plan (with its switch) and Run draw the in-process stock (Pocket 1 cut out of the blank);
+// with DFYOM_C5_DIR, c5-{plan,run}-{light,dark}.png.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -17,6 +19,7 @@ import type { PreloadApi } from '../src/shared/preload-api'
 import { closeDialog, expect, test } from './app.fixture'
 
 const SHOTS = process.env['DFYOM_C1_DIR']
+const C5_SHOTS = process.env['DFYOM_C5_DIR']
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -25,10 +28,10 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
   await field.blur()
 }
 
-/** `name`-light.png and -dark.png of the window (only with DFYOM_C1_DIR). */
-async function shoot(page: Page, name: string): Promise<void> {
-  if (SHOTS === undefined) return
-  const dir = resolve(SHOTS)
+/** `name`-light.png and -dark.png of the window (only with DFYOM_C1_DIR, or `into`). */
+async function shoot(page: Page, name: string, into = SHOTS): Promise<void> {
+  if (into === undefined) return
+  const dir = resolve(into)
   mkdirSync(dir, { recursive: true })
   for (const theme of ['light', 'dark'] as const) {
     // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
@@ -58,7 +61,8 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   }, dfyom.dataDir)
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
-  if (SHOTS !== undefined) await page.setViewportSize({ width: 1440, height: 900 })
+  if (SHOTS !== undefined || C5_SHOTS !== undefined)
+    await page.setViewportSize({ width: 1440, height: 900 })
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   const added = await page.evaluate(
@@ -163,9 +167,25 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
   await expect(navigator.getByRole('switch', { name: 'Show cut toolpaths' })).not.toBeChecked()
   await shoot(page, 'df135-cut')
+  // C5: the in-process stock (Pocket 1 cut out of the blank) around the part, on by default
+  const view = page.getByRole('region', { name: '3D viewport' })
+  const showStock = navigator.getByRole('switch', { name: 'Show in-process stock' })
+  await expect(showStock).toBeChecked()
+  await expect(view).toHaveAttribute('data-in-process-stock', '1', { timeout: 30_000 })
+  await shoot(page, 'c5-plan', C5_SHOTS)
+  await showStock.click()
+  await expect(view).not.toHaveAttribute('data-in-process-stock')
+  await showStock.click()
+  await expect(view).toHaveAttribute('data-in-process-stock', '1')
   const program = await exportProgram()
   expect(program).toContain('(Pocket 2)')
   expect(program).not.toContain('(Pocket 1)')
+  // ... and Run draws it too, under the program still to run
+  await page.keyboard.press('ControlOrMeta+3')
+  await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked()
+  await expect(view).toHaveAttribute('data-in-process-stock', '1', { timeout: 30_000 })
+  await expect(view).toHaveAttribute('data-toolpath-segments', /^[1-9]/)
+  await shoot(page, 'c5-run', C5_SHOTS)
 
   // ── Q199: everything cut; Clear cut marks in Design (and Undo) ─────────────────────────────
   await page.keyboard.press('ControlOrMeta+1')

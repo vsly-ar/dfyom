@@ -428,6 +428,7 @@ function ToolpathSection({
   const failures = usePlanState((s) => s.failures)
   const exporting = usePlanState((s) => s.exporting)
   const showCut = usePlanState((s) => s.showCutToolpaths)
+  const showStock = usePlanState((s) => s.showInProcessStock)
   const ids = { generate: useId(), export: useId() }
   const ops = allPlanOperations(plan)
   const ready = ops.filter(
@@ -485,6 +486,14 @@ function ToolpathSection({
           label={m.cut.showToolpaths}
           checked={showCut}
           onCheckedChange={(on) => store.getState().setShowCutToolpaths(on)}
+        />
+      ) : null}
+      {/* C5: the material left after them, around the part */}
+      {cutIds(plan).size > 0 ? (
+        <Switch
+          label={m.cut.showStock}
+          checked={showStock}
+          onCheckedChange={(on) => store.getState().setShowInProcessStock(on)}
         />
       ) : null}
       <div className={styles['actions']}>

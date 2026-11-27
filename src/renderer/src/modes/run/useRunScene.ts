@@ -15,7 +15,8 @@
 // toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6). DF133 RW1: the
 // setup's workholding, outlined until homed with the work zero set, hidden while G54 was never
 // set, and the holder ghost of the tool in the spindle at the tool marker
-// (docs/modes/run-workholding.md#implementation-rw1). RW5: the items amber while the tool and
+// (docs/modes/run-workholding.md#implementation-rw1). DF135 C5: the in-process stock, always
+// (Run has no switch; docs/modes/cut-state.md#in-process-stock-display-c5). RW5: the items amber while the tool and
 // holder are within 2 × margin, red at or within the margin, the holder ghost red with them; the
 // interrupted run's ghost tool red when it was inside an item (#implementation-rw5).
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
@@ -42,6 +43,7 @@ import {
   type ZRefOverlay,
 } from '../../viewport'
 import type { LoweredLinkView, SetupLinksView, ZRefRunView } from '../plan/plan-store'
+import { useInProcessStock } from '../plan/useInProcessStock'
 import { activeJob, isConnected } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
@@ -270,6 +272,8 @@ export function useRunScene(mode: AppMode): RunScene | null {
     // the offset by value (a new status each report)
   }, [preview, wco?.[0], wco?.[1], wco?.[2], level])
   const workholding = useSceneWorkholding(tool, units, ghost)
+  // DF135 C5: the material left after the plan's already-cut operations (a file run has no plan)
+  const inProcessStock = useInProcessStock(plan, units, active)
   return useMemo(
     () =>
       active
@@ -285,9 +289,10 @@ export function useRunScene(mode: AppMode): RunScene | null {
             ...(goTo === undefined ? {} : { goTo }),
             ...(ghost === undefined ? {} : { ghost }),
             ...(workholding.ghostInside ? { ghostColliding: true } : {}),
+            ...(inProcessStock === undefined ? {} : { inProcessStock }),
           }
         : null,
-    [active, lines, done, tool, frame, envelope, zRef, goTo, ghost, workholding],
+    [active, lines, done, tool, frame, envelope, zRef, goTo, ghost, workholding, inProcessStock],
   )
 }
 

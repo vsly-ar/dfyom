@@ -40,6 +40,9 @@ export const viewportMessages = {
   pickCancelled: 'Pick cancelled.',
   /** DF122: added to the text summary while the plan scene shades a rest region. */
   restShaded: 'Shaded: what the roughing left for this operation.',
+  /** DF135 C5 (cut-state.md#in-process-stock-display-c5). */
+  inProcessStock: (n: number): string =>
+    `In-process stock shown: the material left after ${n} already-cut ${n === 1 ? 'operation' : 'operations'}.`,
   keys: 'Keys: 1 to 4 Top, Front, Right and Isometric view, Shift and 1 to 3 Bottom, Back and Left view, F fit, arrows orbit, Shift and arrows pan, plus and minus zoom.',
   /** Default text summary (the shell may pass a richer one, ui.md#accessibility). */
   summary: (p: { operations: number; status: 'done' | 'pending' | 'failed' | 'empty' }): string => {

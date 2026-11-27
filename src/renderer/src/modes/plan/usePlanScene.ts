@@ -23,7 +23,9 @@
 // re-reads it (docs/modes/workholding.md#toe-clamp-drag-x2-6). DF122: while an operation cut after
 // its roughing, or that roughing, is selected, its rest region (`RunScene.rest`,
 // docs/modes/roughing.md#plan-viewport-rest-shading). DF132 H5: the shown operation's holder ghost
-// (`RunScene.holder`, holder-ghost.ts; docs/modes/tool-holder.md#implementation-h5).
+// (`RunScene.holder`, holder-ghost.ts; docs/modes/tool-holder.md#implementation-h5). DF135 C5: the
+// in-process stock while "Show in-process stock" is on (`RunScene.inProcessStock`,
+// useInProcessStock.ts; docs/modes/cut-state.md#in-process-stock-display-c5).
 import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
@@ -93,6 +95,7 @@ import { holderGhost } from './holder-ghost'
 import { shownZRefRun, snapSpot } from './z-spot'
 import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
 import { usePlanSelection } from './usePlan'
+import { useInProcessStock } from './useInProcessStock'
 
 type P = readonly [number, number]
 
@@ -139,6 +142,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const picking = usePlanState((s) => s.pickingAlignment)
   const openItem = usePlanState((s) => s.workholdingItem)
   const showCut = usePlanState((s) => s.showCutToolpaths)
+  const showStock = usePlanState((s) => s.showInProcessStock)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
   const [heldAid, setHeldAid] = useState<HeldAid | null>(null)
@@ -410,6 +414,23 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       }
     })
   }, [plan, setup, picking, info, data?.alignmentSources, units, call])
+  // DF135 C5: the material left after the cut operations, with the zeros the toolpaths were made at
+  const zeros = useMemo(
+    () =>
+      plan === undefined
+        ? undefined
+        : Object.fromEntries(
+            plan.setups.map((s) => [
+              s.id,
+              setupZeroOf(
+                s,
+                data?.alignment.find((a) => a.setupId === s.id),
+              ),
+            ]),
+          ),
+    [plan, data?.alignment],
+  )
+  const inProcessStock = useInProcessStock(plan, units, mode === 'plan' && showStock, zeros)
   return useMemo(() => {
     if (data === undefined || plan === undefined || setup === undefined || doc === undefined)
       return null
@@ -509,8 +530,10 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(workholding === undefined ? {} : { workholding }),
       ...(rest === undefined ? {} : { rest: { patch: rest.patch, level: rest.level } }),
       ...(ghost === undefined ? {} : { holder: ghost }),
+      ...(inProcessStock === undefined ? {} : { inProcessStock }),
     }
   }, [
+    inProcessStock,
     preview,
     units,
     data,

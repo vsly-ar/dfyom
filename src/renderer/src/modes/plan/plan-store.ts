@@ -273,6 +273,8 @@ export interface PlanState {
    * docs/modes/cut-state.md#what-a-cut-operation-means-in-its-plan).
    */
   readonly showCutToolpaths: boolean
+  /** DF135 C5: the in-process stock is drawn (on by default, cut-state.md#in-process-stock-display-c5). */
+  readonly showInProcessStock: boolean
   /**
    * DF78 S22: the setup whose alignment points are being picked in the viewport (its valid
    * sources are drawn as targets); undefined: not picking.
@@ -306,6 +308,8 @@ export interface PlanState {
   focusAlignmentPoint(id: string | undefined): void
   /** DF135: "Show cut toolpaths". */
   setShowCutToolpaths(show: boolean): void
+  /** DF135 C5: "Show in-process stock". */
+  setShowInProcessStock(show: boolean): void
   /** Starts (a setup id) or ends (undefined) picking alignment points in the viewport. */
   pickAlignment(setupId: string | undefined): void
   /** Opens a workholding item in the setup inspector; undefined closes it. */
@@ -369,6 +373,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     zRefPreview: undefined,
     alignmentPoint: undefined,
     showCutToolpaths: false,
+    showInProcessStock: true,
     pickingAlignment: undefined,
     workholdingItem: undefined,
     exported: undefined,
@@ -387,6 +392,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     revealField: (planOperationId, field) => set({ fieldRequest: { planOperationId, field } }),
     fieldShown: () => set({ fieldRequest: undefined }),
     setShowCutToolpaths: (showCutToolpaths) => set({ showCutToolpaths }),
+    setShowInProcessStock: (showInProcessStock) => set({ showInProcessStock }),
     focusAlignmentPoint: (alignmentPoint) => {
       if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
     },
