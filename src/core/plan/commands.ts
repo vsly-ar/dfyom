@@ -1487,6 +1487,7 @@ const StickoutReasonDTO = z.object({
   part: z.enum(['nut', 'body']).optional(),
   x: z.number().optional().describe('mm, WCS'),
   y: z.number().optional().describe('mm, WCS'),
+  z: z.number().optional().describe('mm, WCS: the tip at that move'),
 })
 
 const operationList = defineQuery({

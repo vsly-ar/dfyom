@@ -452,6 +452,8 @@ export const planMessages = {
       `Needs ≥ ${length} stickout: the ${part === 'nut' ? 'collet nut' : 'spindle body'} must clear ${item}`,
     stickoutClampTitle: (part: 'nut' | 'body', item: string) =>
       `${item} under the ${part === 'nut' ? 'collet nut' : 'spindle body'} + 5 mm: chuck the tool with at least this much out.`,
+    /** DF132 H5: the holder ghost's chip in the plan viewport (docs/modes/tool-holder.md#implementation-h5). */
+    holderGhost: (stickout: string, needed: string) => `Stickout ${stickout} · needs ${needed}`,
     stickoutPending: (length: string) => `Needs ≥ ${length} stickout (clamps not yet checked)`,
     stickoutPendingTitle:
       'Deepest cut of this tool run + 5 mm for the collet nut. Generate the toolpaths to check the collet nut against the workholding.',

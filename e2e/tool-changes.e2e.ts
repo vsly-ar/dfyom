@@ -12,7 +12,8 @@
 // after a jog away, and Probe Z lays the virtual plate on the floor (G54 Z 0.5 mm lower).
 // DF130: each run shows its minimum stickout ("Needs ≥ 6 mm stickout"; renders df130-stickout-*.png).
 // DF132 H3: with an ER11 holder and a toe clamp, the run names the clamp under the holder once the
-// toolpaths are current ("(clamps not yet checked)" before).
+// toolpaths are current ("(clamps not yet checked)" before). DF132 H5: the selected pocket's holder
+// ghost and its chip, red at a holder collision (renders df132-holder-ghost{,-collision}-*.png).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
@@ -196,12 +197,13 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
 })
 
 // DF132 H3: docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term
-test('setup inspector: a clamp under the holder decides a run’s stickout (DF132 H3)', async ({
+test('setup inspector: a clamp under the holder decides a run’s stickout; the holder ghost (DF132 H3, H5)', async ({
   dfyom,
 }) => {
   test.setTimeout(90_000)
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
   await twoToolPlan(page, { holder: { preset: 'er11' } })
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   const { plans } = await call<{ plans: { id: string }[] }>('plan.list')
@@ -237,6 +239,26 @@ test('setup inspector: a clamp under the holder decides a run’s stickout (DF13
   )
   await expect(runs.nth(1)).toContainText('Needs ≥ 6 mm stickout')
   await expect(runs.nth(1)).not.toContainText('clamp')
+
+  // DF132 H5: the wide pocket selected, its holder ghost stands at the deciding move, neutral
+  const ops = navigator.getByRole('list', { name: 'Plan operations of Top in machining order' })
+  await ops.getByRole('button', { name: /^Pocket 2/ }).click()
+  const chip = page.locator('[data-holder-ghost]')
+  await expect(chip).toHaveText(/^Stickout 20 mm · needs [\d.]+ mm$/)
+  await expect(chip).not.toHaveAttribute('data-colliding')
+  await render(page, 'df132-holder-ghost')
+  // a short stickout: the spindle body hits the clamp, the ghost turns red at the first hit
+  const { operations } = await call<{ operations: { id: string; designOperationIds: string[] }[] }>(
+    'plan.operation.list',
+    { planId },
+  )
+  const wide = operations.find((o) => o.designOperationIds.includes('pocket2'))!
+  await call('plan.operation.update', { planId, planOperationId: wide.id, stickout: '8' })
+  const generate = navigator.getByRole('button', { name: 'Generate toolpaths' })
+  if (await generate.isVisible()) await generate.click()
+  await expect(chip).toHaveAttribute('data-colliding', '', { timeout: 30_000 })
+  await expect(chip).toHaveText(/^Stickout 8 mm · needs [\d.]+ mm$/)
+  await render(page, 'df132-holder-ghost-collision')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

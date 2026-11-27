@@ -200,6 +200,8 @@ describe('the minimum stickout with the clamp under the ER11 nut (DF132 H3)', ()
       part: 'nut',
       x: expect.any(Number),
       y: expect.any(Number),
+      // DF132 H5: the tip at the deciding move (the ghost stands there): the pocket's floor
+      z: -6,
     })
     // the collision names the same number
     const hit = warnings().find((w) => w.code === 'plan.workholding.collision')!

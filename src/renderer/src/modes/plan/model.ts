@@ -9,7 +9,7 @@ import type { OperationKind, PartDTO } from '../../../../core/design/part.dto'
 import { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Direction, StockSize } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
-import { loadPlanDTO } from '../../../../core/plan/plan'
+import { loadPlanDTO, type LoadedPlan } from '../../../../core/plan/plan'
 import { planOpLabel } from '../../../../core/plan/labels'
 import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
@@ -80,6 +80,18 @@ export const editable = (plan: PlanDTO): boolean => allows(plan, 'plan.operation
 // ── the plan's part (plan copy, snapshot scene) ───────────────────────────────────────────
 
 const partCache = new WeakMap<PlanDTO, DesignPart>()
+const loadedCache = new WeakMap<PlanDTO, LoadedPlan | null>()
+
+/** The plan loaded (its part, stock, tool copies and machine copy), memoized per plan record. */
+export function loadedPlanOf(doc: ProjectDoc, plan: PlanDTO): LoadedPlan | undefined {
+  let hit = loadedCache.get(plan)
+  if (hit === undefined) {
+    const r = loadPlanDTO(plan, doc.unitSystem, 'plan UI')
+    hit = r.isOk() ? r.unwrap() : null
+    loadedCache.set(plan, hit)
+  }
+  return hit ?? undefined
+}
 
 /**
  * The plan's part as the shared Design field components read it: its design snapshot with the
@@ -89,17 +101,18 @@ const partCache = new WeakMap<PlanDTO, DesignPart>()
 export function planPart(doc: ProjectDoc, plan: PlanDTO): DesignPart {
   const hit = partCache.get(plan)
   if (hit !== undefined) return hit
-  const r = loadPlanDTO(plan, doc.unitSystem, 'plan UI')
-  const loaded = r.isOk()
-    ? {
-        dto: plan.design.part,
-        part: r.unwrap().part,
-        stock: r.unwrap().stock,
-        units: doc.unitSystem,
-        // Plan sees operations only (docs/modes/features.md#plan)
-        features: [],
-      }
-    : undefined
+  const r = loadedPlanOf(doc, plan)
+  const loaded =
+    r !== undefined
+      ? {
+          dto: plan.design.part,
+          part: r.part,
+          stock: r.stock,
+          units: doc.unitSystem,
+          // Plan sees operations only (docs/modes/features.md#plan)
+          features: [],
+        }
+      : undefined
   const part: DesignPart = {
     doc,
     units: doc.unitSystem,
@@ -440,6 +453,8 @@ export interface StickoutReasonView {
   readonly part?: 'nut' | 'body'
   readonly x?: number
   readonly y?: number
+  /** DF132 H5: the tool tip's Z at the deciding move (WCS, mm). */
+  readonly z?: number
 }
 
 /** One row of `plan.operation.list`. */
