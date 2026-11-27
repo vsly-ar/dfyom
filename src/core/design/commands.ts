@@ -606,6 +606,13 @@ export class Fields {
     return undefined as unknown as Quantity
   }
 
+  /** An arg rule the schema does not say (`input.malformed` at `path`, e.g. `oneOf`). */
+  refuse(path: string, rule: string, message: string): void {
+    this.results.push(
+      fail('input.malformed', message, { issues: [{ path: toPath(path), rule, message }] }),
+    )
+  }
+
   done(): AppResult<void> {
     return collect(this.results).map(() => undefined)
   }

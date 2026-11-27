@@ -181,6 +181,8 @@ export function placeFeature<F extends FeatureBase>(
     before: ops.slice(0, start),
     ownedId: (role) => ownedOperationId(feature.id, role),
     shapes: env.dto.shapes ?? [],
+    region2d: env.port,
+    after: ops.slice(end),
   })
   if (expanded.isErr()) return Err(expanded.unwrapErr().withContext(where))
   // owned shapes (patterns P1) take the place of the feature's previous ones before the checks

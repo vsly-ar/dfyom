@@ -85,24 +85,47 @@ export interface AlongRow extends RowBase {
   readonly spacing?: number
   readonly count?: number
 }
+/**
+ * A mirror image of every position numbered before the row, across the line u = `c` (`flip: 'u'`)
+ * or v = `c` (`flip: 'v'`), absolute in the face frame (mm; clones.ts resolves the reference).
+ * One position per earlier number, in number order; the reference point does not move. Mirror
+ * rows come last (clones.ts `clonesMirrorLast`). Doc: docs/modes/clones-mirror.md
+ */
+export interface MirrorRow extends RowBase {
+  readonly kind: 'mirror'
+  readonly flip: 'u' | 'v'
+  readonly c: number
+}
 /** One path row. */
-export type PathRow = GridRow | OffsetRow | PolarRow | ArcRow | PointRow | AlongRow
+export type PathRow = GridRow | OffsetRow | PolarRow | ArcRow | PointRow | AlongRow | MirrorRow
+
+/** The face frame axes an instance is mirrored in (both: a half turn); absent = none. */
+export interface Flip {
+  readonly u?: true
+  readonly v?: true
+}
 
 /**
  * What became of one point: a clone; skipped (in the row's `skip`); back on the row's start (a
  * full circle's last point, an `along` position at arc length 0: `closes`, no number, no clone);
- * or a duplicate of an earlier instance.
+ * a duplicate of an earlier instance; or a mirror image equal to its original (`onLine`: on the
+ * mirror line and symmetric about it, dropped silently, number kept).
  */
-export type PathPointKind = 'clone' | 'skipped' | 'closes' | 'duplicate'
+export type PathPointKind = 'clone' | 'skipped' | 'closes' | 'duplicate' | 'onLine'
 
 export interface PathPoint {
   /** The reference point's position, rounded to the G-code's resolution. */
   readonly at: UV
-  /** `at` minus the origin (what an instance is translated by), rounded likewise. */
+  /**
+   * What an instance is translated by after its flips about the face frame axes (a position p
+   * goes to ±p + offset), rounded likewise; without flips `at` minus the origin.
+   */
   readonly offset: UV
   readonly kind: PathPointKind
   /** Stable instance number (2…); absent on `closes`. */
   readonly number?: number
+  /** A mirror row's position: the axes it is mirrored in (clones-mirror.md). */
+  readonly flip?: Flip
 }
 
 export interface PathRowResult {
@@ -131,14 +154,23 @@ export interface PathRowResult {
     readonly from: number
     readonly sweep: number
   }
+  /** A mirror row's line: the flipped axis and its coordinate (absolute, mm). */
+  readonly mirror?: { readonly flip: 'u' | 'v'; readonly c: number }
 }
 
 export interface ClonePath {
   /** Instance 1 (the source, offset 0) and every clone, in number order. */
-  readonly instances: readonly { readonly number: number; readonly offset: UV; readonly at: UV }[]
+  readonly instances: readonly {
+    readonly number: number
+    readonly offset: UV
+    readonly at: UV
+    readonly flip?: Flip
+  }[]
   readonly rows: readonly PathRowResult[]
   /** Positions left out because they sat on an earlier instance. */
   readonly duplicates: readonly number[]
+  /** Mirror positions dropped because they equal their original (on the line, symmetric). */
+  readonly onLine: readonly number[]
   /** Skipped positions' numbers. */
   readonly skipped: readonly number[]
   /** The highest number given (1 without rows). */
@@ -152,19 +184,59 @@ export const SAME_SPOT = 0.001
  * The clone path from the source's reference point `origin`: instance 1, then each row's points
  * from the moving reference point. Every point but a circle's closing one gets the next number,
  * so skipping keeps the numbers of the others (D30). Duplicates of an earlier clone are left out.
+ * A mirror row mirrors every numbered position before it (clones-mirror.md); `symmetric` says
+ * whether the source maps onto itself under a flip in u (v) about the line through its reference
+ * point: a mirror image on its own original is then dropped (`onLine`), and a flip in that axis
+ * makes no different instance.
  */
-export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
-  const instances: { number: number; offset: UV; at: UV }[] = [
+export function clonePath(
+  origin: UV,
+  rows: readonly PathRow[],
+  symmetric: { readonly u: boolean; readonly v: boolean } = { u: false, v: false },
+): ClonePath {
+  const instances: { number: number; offset: UV; at: UV; flip?: Flip }[] = [
     { number: 1, offset: { u: 0, v: 0 }, at: origin },
   ]
   const taken = new Set<string>([key({ u: 0, v: 0 })])
   const duplicates: number[] = []
   const skipped: number[] = []
+  const onLine: number[] = []
   const out: PathRowResult[] = []
+  // every numbered position so far (what a mirror row mirrors), unrounded
+  const numbered: { kind: PathPointKind; offset: UV; at: UV; flip: Flip }[] = [
+    { kind: 'clone', offset: { u: 0, v: 0 }, at: origin, flip: {} },
+  ]
   let number = 1
   // the reference point relative to the origin, exact so a long chain adds up no rounding
   let ref: UV = { u: 0, v: 0 }
+  const abs = (p: UV) => ({ u: origin.u + p.u, v: origin.v + p.v })
   for (const row of rows) {
+    if (row.kind === 'mirror') {
+      out.push(
+        mirrorRow(row, numbered.slice(), abs(ref), symmetric, (p, entry) => {
+          const n = ++number
+          numbered.push(entry)
+          if (p.kind === 'skipped') skipped.push(n)
+          else if (p.kind === 'duplicate') duplicates.push(n)
+          else if (p.kind === 'onLine') onLine.push(n)
+          else if (near(taken, rel(entry.at, origin), sig(entry.flip, symmetric))) {
+            duplicates.push(n)
+            entry.kind = 'duplicate'
+            return { ...p, kind: 'duplicate', number: n }
+          } else {
+            taken.add(key(rel(entry.at, origin)) + sig(entry.flip, symmetric))
+            instances.push({
+              number: n,
+              offset: p.offset,
+              at: p.at,
+              ...(p.flip && { flip: p.flip }),
+            })
+          }
+          return { ...p, number: n }
+        }),
+      )
+      continue
+    }
     const { points, end, arc, closes, curve } = rowPoints(row, ref, origin)
     const skip = new Set(row.skip)
     const marked = points.map((p, k): PathPoint => {
@@ -172,20 +244,23 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
       const at = { u: round(origin.u + p.u), v: round(origin.v + p.v) }
       if (closes.includes(k)) return { at, offset, kind: 'closes' }
       const n = ++number
+      const record = (kind: PathPointKind): PathPointKind => {
+        numbered.push({ kind, offset: p, at: abs(p), flip: {} })
+        return kind
+      }
       if (skip.has(k)) {
         skipped.push(n)
-        return { at, offset, kind: 'skipped', number: n }
+        return { at, offset, kind: record('skipped'), number: n }
       }
       if (near(taken, offset)) {
         duplicates.push(n)
-        return { at, offset, kind: 'duplicate', number: n }
+        return { at, offset, kind: record('duplicate'), number: n }
       }
       taken.add(key(offset))
       instances.push({ number: n, offset, at })
-      return { at, offset, kind: 'clone', number: n }
+      return { at, offset, kind: record('clone'), number: n }
     })
     const next = points[end] ?? ref
-    const abs = (p: UV) => ({ u: origin.u + p.u, v: origin.v + p.v })
     out.push({
       kind: row.kind,
       start: abs(ref),
@@ -203,8 +278,74 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
     })
     ref = next
   }
-  return { instances, rows: out, duplicates, skipped, lastNumber: number }
+  return { instances, rows: out, duplicates, skipped, onLine, lastNumber: number }
 }
+
+/** A numbered position as a mirror row reads it (`kind` may still turn into a duplicate). */
+interface Numbered {
+  kind: PathPointKind
+  readonly offset: UV
+  readonly at: UV
+  readonly flip: Flip
+}
+
+/**
+ * A mirror row's points: the mirror image of each earlier numbered position in number order.
+ * Skipped in the row's own `skip`, not placed where its original is not (skipped, duplicate, on
+ * the line), on the line where it equals its original; `take` numbers each point and decides
+ * whether it lands on another instance.
+ */
+function mirrorRow(
+  row: MirrorRow,
+  before: readonly Numbered[],
+  start: UV,
+  symmetric: { readonly u: boolean; readonly v: boolean },
+  take: (p: PathPoint, entry: Numbered) => PathPoint,
+): PathRowResult {
+  const skip = new Set(row.skip)
+  const axis = row.flip
+  const points = before.map((e, k) => {
+    const flip = toggle(e.flip, axis)
+    const offset = { ...e.offset, [axis]: 2 * row.c - e.offset[axis] }
+    const at = { ...e.at, [axis]: 2 * row.c - e.at[axis] }
+    const kind: PathPointKind = skip.has(k)
+      ? 'skipped'
+      : e.kind !== 'clone'
+        ? e.kind
+        : symmetric[axis] && Math.abs(at[axis] - e.at[axis]) < SAME_SPOT
+          ? 'onLine'
+          : 'clone'
+    const p: PathPoint = {
+      at: roundUV(at),
+      offset: roundUV(offset),
+      kind,
+      ...(flip.u === true || flip.v === true ? { flip } : {}),
+    }
+    return take(p, { kind, offset, at, flip })
+  })
+  return {
+    kind: 'mirror',
+    start,
+    points,
+    end: start,
+    line: [start],
+    mirror: { flip: axis, c: row.c },
+  }
+}
+
+/** `f` with `axis` flipped once more. */
+function toggle(f: Flip, axis: 'u' | 'v'): Flip {
+  const u = axis === 'u' ? f.u !== true : f.u === true
+  const v = axis === 'v' ? f.v !== true : f.v === true
+  return { ...(u ? { u: true as const } : {}), ...(v ? { v: true as const } : {}) }
+}
+
+/** The flips that make a different instance (not those in an axis the source is symmetric in). */
+const sig = (f: Flip, s: { readonly u: boolean; readonly v: boolean }): string =>
+  `${f.u === true && !s.u ? '|u' : ''}${f.v === true && !s.v ? '|v' : ''}`
+
+const rel = (p: UV, o: UV): UV => ({ u: p.u - o.u, v: p.v - o.v })
+const roundUV = (p: UV): UV => ({ u: round(p.u), v: round(p.v) })
 
 /**
  * How many whole steps an arc row makes, and the angle it really turns (degrees, with the arc's
@@ -298,6 +439,9 @@ function rowPoints(
     }
     case 'point':
       points.push({ u: row.u - origin.u, v: row.v - origin.v })
+      break
+    case 'mirror':
+      // its positions come from the rows before it (clonePath `mirrorRow`)
       break
     case 'arc': {
       const a = rad(row.angle)
@@ -419,12 +563,15 @@ export function withSkip<R extends PathRow>(row: R, skip: readonly number[]): R 
   return (sorted.length > 0 ? { ...rest, skip: sorted } : rest) as R
 }
 
-/** A position already taken within `SAME_SPOT`: the same 0.001 mm step or a neighbouring one. */
-function near(taken: ReadonlySet<string>, p: UV): boolean {
+/**
+ * A position already taken within `SAME_SPOT`: the same 0.001 mm step or a neighbouring one;
+ * `flips` (`sig`) tells a mirrored instance from a plain one on the same spot.
+ */
+function near(taken: ReadonlySet<string>, p: UV, flips = ''): boolean {
   const u = Math.round(p.u / SAME_SPOT)
   const v = Math.round(p.v / SAME_SPOT)
   for (let i = -1; i <= 1; i++)
-    for (let j = -1; j <= 1; j++) if (taken.has(`${u + i},${v + j}`)) return true
+    for (let j = -1; j <= 1; j++) if (taken.has(`${u + i},${v + j}${flips}`)) return true
   return false
 }
 

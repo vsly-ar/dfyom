@@ -50,7 +50,29 @@ import { isOwnedRoughing } from '../roughing'
 import type { ShapeDTO } from '../shape.dto'
 import { definitionOf, shapeFromDTO } from '../shape'
 import { itemChain } from '../shape-items'
-import { footprintBounds, footprintsOverlap, sourceFootprint } from './footprint'
+import type { Region2dPort } from '../../geometry/2d/port'
+import { Some } from '../../../shared/result'
+import type { LinePath, Part, Shape } from '../operation'
+import {
+  flipFootprint,
+  flipKey,
+  footprintBounds,
+  footprintsOverlap,
+  sourceFootprint,
+  type FootprintPart,
+} from './footprint'
+import {
+  faceSizeOf,
+  flippedRotation,
+  flippedTabs,
+  flipShapeFlags,
+  halfTurn,
+  mirrorLines,
+  mirrorRefIssues,
+  positionDelta,
+  sourceSymmetry,
+  tabShapes,
+} from './mirror'
 import {
   alongStations,
   clonePath,
@@ -58,6 +80,7 @@ import {
   SAME_SPOT,
   type AlongChain,
   type ClonePath,
+  type Flip,
   type PathRow,
   type UV,
 } from './path'
@@ -100,6 +123,16 @@ export const ROW_FIELDS = {
     on: ['count'],
     s: ['shapeId'],
   },
+  // clones-mirror.md: the line's coordinate `at`, or the centre of `about`, or the stock face's
+  mirror: {
+    q: {},
+    oq: { at: 'length' },
+    n: [],
+    on: [],
+    s: [],
+    os: ['about'],
+    e: { flip: ['u', 'v'] },
+  },
 } as const satisfies Record<
   PathRow['kind'],
   {
@@ -108,17 +141,32 @@ export const ROW_FIELDS = {
     n: readonly string[]
     on: readonly string[]
     s: readonly string[]
+    /** Optional strings (a mirror row's `about`). */
+    os?: readonly string[]
+    /** Required enumerations (a mirror row's `flip`). */
+    e?: Readonly<Record<string, readonly [string, ...string[]]>>
   }
 >
 
 export type CloneRowKind = keyof typeof ROW_FIELDS
 type RowFields<K extends CloneRowKind> = (typeof ROW_FIELDS)[K]
+type OptStrings<K extends CloneRowKind> =
+  RowFields<K> extends { os: readonly (infer S)[] } ? S : never
+type Enums<K extends CloneRowKind> = RowFields<K> extends { e: infer E } ? E : object
 type RowOf<K extends CloneRowKind> = { readonly kind: K; readonly skip?: readonly number[] } & {
   readonly [F in keyof RowFields<K>['q']]: Quantity
 } & { readonly [F in keyof RowFields<K>['oq']]?: Quantity } & {
   readonly [F in RowFields<K>['n'][number]]: number
 } & { readonly [F in RowFields<K>['on'][number]]?: number } & {
   readonly [F in RowFields<K>['s'][number]]: string
+} & { readonly [F in OptStrings<K> & string]?: string } & {
+  readonly [F in keyof Enums<K>]: Enums<K>[F] extends readonly (infer V)[] ? V : never
+}
+
+/** The optional string and enumeration fields of a row kind (absent: none). */
+const extraFields = (kind: CloneRowKind): string[] => {
+  const f = ROW_FIELDS[kind] as { os?: readonly string[]; e?: Record<string, unknown> }
+  return [...(f.os ?? []), ...Object.keys(f.e ?? {})]
 }
 
 /** One path row with quantities (path.ts `PathRow` with canonical numbers). */
@@ -143,7 +191,7 @@ export function mapRow<A, B>(
   for (const [k, kind] of rowQuantities(r.kind))
     if (rec[k] !== undefined) out[k] = f(rec[k] as A, k, kind)
   const fields = ROW_FIELDS[r.kind]
-  for (const k of [...fields.n, ...fields.on, ...fields.s])
+  for (const k of [...fields.n, ...fields.on, ...fields.s, ...extraFields(r.kind)])
     if (rec[k] !== undefined) out[k] = rec[k]
   const skip = rec['skip'] as readonly number[] | undefined
   if (skip !== undefined && skip.length > 0) out['skip'] = [...new Set(skip)].sort((a, b) => a - b)
@@ -236,8 +284,13 @@ const Skip = z.array(z.number().int().min(0)).max(CLONE_ROW_MAX)
 /** A row schema per kind with `q` as the quantity field schema (DTO or arg). */
 function rowSchemas<Q extends z.ZodType>(q: Q) {
   return (Object.keys(ROW_FIELDS) as CloneRowKind[]).map((kind) => {
-    const f = ROW_FIELDS[kind]
+    const f = ROW_FIELDS[kind] as (typeof ROW_FIELDS)[CloneRowKind] & {
+      os?: readonly string[]
+      e?: Record<string, readonly [string, ...string[]]>
+    }
     return z.object({
+      ...Object.fromEntries((f.os ?? []).map((k) => [k, z.string().min(1).max(64).optional()])),
+      ...Object.fromEntries(Object.entries(f.e ?? {}).map(([k, v]) => [k, z.enum(v)])),
       kind: z.literal(kind),
       ...Object.fromEntries(Object.keys(f.q).map((k) => [k, q])),
       ...Object.fromEntries(Object.keys(f.oq).map((k) => [k, q.optional()])),
@@ -294,10 +347,17 @@ export function alongChain(
 
 /**
  * The rows as canonical numbers for the path walk; `along` rows take their chain from `shapes`
- * (none when the shape is unknown or invalid: `alongIssues` names it) and `start` 0 by default.
+ * (none when the shape is unknown or invalid: `alongIssues` names it) and `start` 0 by default;
+ * mirror rows their line from `lines` (mirror.ts `mirrorLines`, index-aligned; absent: 0).
  */
-export function pathRows(rows: readonly CloneRow[], shapes: CloneShapes = []): PathRow[] {
-  return rows.map((r) => {
+export function pathRows(
+  rows: readonly CloneRow[],
+  shapes: CloneShapes = [],
+  lines: readonly (number | undefined)[] = [],
+): PathRow[] {
+  return rows.map((r, i) => {
+    if (r.kind === 'mirror')
+      return { kind: 'mirror', flip: r.flip, c: lines[i] ?? 0, ...(r.skip && { skip: r.skip }) }
     const out = mapRow<Quantity, number>(r, (q) => q.canonical)
     if (r.kind === 'along') {
       out['chain'] = alongChain(shapes, r.shapeId).chain
@@ -537,21 +597,72 @@ function valueOf(q: Quantity, delta: Rational): AppResult<Quantity> {
   })
 }
 
-/** Source operation `op` as instance `n` at `offset`, references inside the source mapped. */
+/** A Line path's position (`paths.<i>.center.<k>`) or rotation (`paths.<i>.rotation`). */
+const LINE_PATH = /^paths\.(\d+)\.(center\.([01])|rotation)$/
+
+/** The shape a rotation path turns: an operation's shape or a Line's path. */
+function rotatedShape(op: Operation, path: string): Shape | undefined {
+  if (path === 'shape.rotation' && 'shape' in op) return op.shape
+  const m = LINE_PATH.exec(path)
+  return m !== null && m[2] === 'rotation' && op.kind === 'line'
+    ? op.paths[Number(m[1])]
+    : undefined
+}
+
+/** The tab positions `flippedTabs` reads, per expansion. */
+interface TabEnv {
+  readonly shapes: Part['shapes']
+  readonly port: Region2dPort | undefined
+}
+
+/**
+ * Source operation `op` as instance `n` (path.ts: flipped in `flip` about the face frame axes,
+ * then translated by `offset`), references inside the source mapped. A flip mirrors positions,
+ * rotations, anchors, a named placement's `mirror` and tab positions (mirror.ts, clones-mirror.md
+ * § How an instance is mirrored); without flips it is a translation (v0.4 F5).
+ */
 function instanceOf(
   op: Operation,
-  n: number,
-  offset: UV,
+  inst: { readonly number: number; readonly offset: UV; readonly flip?: Flip },
   inSource: ReadonlySet<string>,
   ctx: ExpansionContext,
+  tabs: () => TabEnv,
 ): AppResult<ExpandedOperation> {
+  const n = inst.number
+  const flip = inst.flip ?? {}
+  const flipped = [flip.u === true, flip.v === true] as const
   let moved: Operation = op
-  const delta = [exactMm(offset.u), exactMm(offset.v)] as const
+  const delta = [exactMm(inst.offset.u), exactMm(inst.offset.v)] as const
   for (const { path, value } of quantityParams(op)) {
-    const axis = POSITION[path]
-    const q = valueOf(value, axis === undefined ? Rational.ZERO : delta[axis])
+    const line = LINE_PATH.exec(path)
+    const axis =
+      POSITION[path] ?? (line?.[3] === undefined ? undefined : (Number(line[3]) as 0 | 1))
+    const turned = axis === undefined ? rotatedShape(op, path) : undefined
+    const d =
+      axis !== undefined
+        ? positionDelta(value.exact, flipped[axis], delta[axis])
+        : turned !== undefined
+          ? flippedRotation(turned.kind, value.exact, flip).sub(value.exact)
+          : Rational.ZERO
+    const q = valueOf(value, d)
     if (q.isErr()) return Err(q.unwrapErr().prefixIssues(...path.split('.')))
     moved = withParam(moved, path, q.unwrap())
+  }
+  if (flipped[0] || flipped[1]) {
+    const f = flipShapes(moved, flip)
+    if (f.isErr()) return f
+    moved = f.unwrap()
+    if (op.kind === 'profile' && moved.kind === 'profile') {
+      const s = flippedTabs(op, moved, flip, tabs())
+      if (s !== undefined) {
+        const list = op.tabs.positions
+          .unwrap()
+          .map((q, i) => valueOf(q, exactMm(s[i]!).sub(q.exact)))
+        const all = collect(list)
+        if (all.isErr()) return Err(all.unwrapErr().prefixIssues('tabs', 'positions'))
+        moved = { ...moved, tabs: { ...moved.tabs, positions: Some(all.unwrap()) } }
+      }
+    }
   }
   const owner = surfaceOwner(op.on)
   const on = inSource.has(owner) ? ctx.ownedId(`${n}_${owner}`) + op.on.slice(owner.length) : op.on
@@ -578,16 +689,52 @@ function instanceOf(
   })
 }
 
-/** The clone path of a feature from its source in `ops` (the source's reference point). */
+/**
+ * A shape's anchor and `mirror` flag on a flipped instance, and a named placement without a
+ * rotation given 180° where the flips turn it (a v flip); a Line's paths likewise.
+ */
+function flipShapes(op: Operation, flip: Flip): AppResult<Operation> {
+  const turn = (s: Shape): AppResult<Shape> => {
+    const f = flipShapeFlags(s, flip)
+    if (f.kind !== 'named' || f.rotation.isSome()) return Ok(f)
+    const r = flippedRotation('named', Rational.ZERO, flip)
+    if (r.equals(Rational.ZERO)) return Ok(f)
+    return halfTurn().map((q) => ({ ...f, rotation: Some(q) }))
+  }
+  if (op.kind === 'line')
+    return collect(op.paths.map(turn)).map((paths) => ({ ...op, paths: paths as LinePath[] }))
+  if ('shape' in op) return turn(op.shape).map((shape) => ({ ...op, shape }) as Operation)
+  return Ok(op)
+}
+
+/**
+ * The clone path of a feature from its source in `ops` (the source's reference point). Mirror
+ * rows take their lines from `mirror` (the stock and the 2D layer; mirror.ts `mirrorLines`):
+ * without it their lines are 0 and nothing is on a line (counts for the limit only).
+ */
 export function featurePath(
   feature: Clones,
   ops: readonly Operation[],
   shapes: CloneShapes,
+  mirror?: {
+    readonly stock: Stock
+    readonly port?: Region2dPort | undefined
+    /** The operations a mirror row's `about` may name (default `ops`). */
+    readonly around?: readonly Operation[]
+  },
 ): ClonePath {
-  return clonePath(
-    referencePoint(sourceOperations(feature.source, ops)),
-    pathRows(feature.rows, shapes),
-  )
+  const src = sourceOperations(feature.source, ops)
+  const ref = referencePoint(src)
+  if (mirror === undefined || !feature.rows.some((r) => r.kind === 'mirror'))
+    return clonePath(ref, pathRows(feature.rows, shapes))
+  const face = sourceFace(src) ?? 'stock.top'
+  const lines = mirrorLines(feature.rows, face, {
+    stock: mirror.stock,
+    port: mirror.port,
+    ops: mirror.around ?? ops,
+    shapes,
+  })
+  return clonePath(ref, pathRows(feature.rows, shapes, lines), sourceSymmetry(src, ref))
 }
 
 /**
@@ -643,7 +790,20 @@ export function expandClones(
       issues: along,
       data: { featureId: feature.id },
     })
-  const path = clonePath(referencePoint(src), pathRows(feature.rows, ctx.shapes))
+  // the mirror rows' references, before or after the block (clones-mirror.md)
+  const face = sourceFace(src) ?? 'stock.top'
+  const around = ctx.after === undefined ? ctx.before : [...ctx.before, ...ctx.after]
+  const refs = mirrorRefIssues(feature.rows, feature, face, around)
+  if (refs.length > 0)
+    return fail('model.invariant', `${feature.id}: ${refs[0]!.message}`, {
+      issues: refs,
+      data: { featureId: feature.id },
+    })
+  const path = featurePath(feature, ctx.before, ctx.shapes, {
+    stock: ctx.stock,
+    port: ctx.region2d,
+    around,
+  })
   const limit = limitIssues(path, holdsClones(src), src.length)
   if (limit.length > 0)
     return fail('model.invariant', limit[0]!.message, {
@@ -651,10 +811,12 @@ export function expandClones(
       data: { featureId: feature.id },
     })
   const inSource = new Set(src.map((o) => o.id))
+  let tabEnv: TabEnv | undefined
+  const tabs = () => (tabEnv ??= { shapes: tabShapes(ctx.before, ctx.shapes), port: ctx.region2d })
   const out: ExpandedOperation[] = []
   for (const op of src)
     for (const inst of path.instances.slice(1)) {
-      const e = instanceOf(op, inst.number, inst.offset, inSource, ctx)
+      const e = instanceOf(op, inst, inSource, ctx, tabs)
       if (e.isErr()) return e
       out.push(e.unwrap())
     }
@@ -711,6 +873,14 @@ export function rowIssues(rows: readonly CloneRow[], shapes?: CloneShapes): Issu
   if (rows.length === 0)
     issues.push({ path: ['rows'], rule: 'clonesRows', message: 'needs at least one row' })
   for (const [i, r] of rows.entries()) {
+    // clones-mirror.md (Q166): place, then mirror; a path row after a mirror row is refused
+    if (r.kind !== 'mirror' && rows.slice(0, i).some((x) => x.kind === 'mirror'))
+      at(
+        i,
+        'kind',
+        'clonesMirrorLast',
+        'a path row after a mirror row: move the mirror rows to the end',
+      )
     switch (r.kind) {
       case 'grid':
         // a step only separates cells along a direction with more than one (DF90: a 2 × 1 grid
@@ -734,6 +904,10 @@ export function rowIssues(rows: readonly CloneRow[], shapes?: CloneShapes): Issu
           at(i, 'step', 'stepInArc', 'must be at most the arc')
         break
       case 'point':
+        break
+      case 'mirror':
+        if (r.about !== undefined && r.at !== undefined)
+          at(i, 'at', 'oneOf', 'give about or at, not both')
         break
       case 'along':
         if ((r.spacing === undefined) === (r.count === undefined))
@@ -787,21 +961,8 @@ export function alongIssues(rows: readonly CloneRow[], shapes: CloneShapes): Iss
 // ── warnings ───────────────────────────────────────────────────────────────────────────────
 
 /** Size of the stock face of the Clones' face direction, `[u, v]` mm (design-v0.2.md § Face frame). */
-function faceSize(
-  stock: Stock,
-  src: readonly Operation[],
-  ops: readonly Operation[],
-): [number, number] {
-  const L = stock.length.canonical
-  const W = stock.width.canonical
-  const T = stock.thickness.canonical
-  // the face's stock face: follow `on` through earlier operations to a stock face
-  let on = sourceFace(src) ?? 'stock.top'
-  for (let guard = 0; guard < 64 && !on.startsWith('stock.'); guard++)
-    on = ops.find((o) => o.id === surfaceOwner(on))?.on ?? 'stock.top'
-  if (on === 'stock.top' || on === 'stock.bottom') return [L, W]
-  return on === 'stock.side[0]' || on === 'stock.side[2]' ? [L, T] : [W, T]
-}
+const faceSize = (stock: Stock, src: readonly Operation[], ops: readonly Operation[]) =>
+  faceSizeOf(stock, sourceFace(src) ?? 'stock.top', ops)
 
 /**
  * The feature's own DFM warnings (features.md § Checks and DFM): `dfm.cloneOutsideStock`
@@ -821,8 +982,7 @@ export function clonesWarnings(
 ): DfmWarning[] {
   const src = sourceOperations(feature.source, ops)
   if (src.length === 0) return []
-  const ref = referencePoint(src)
-  const path = clonePath(ref, pathRows(feature.rows, shapes))
+  const path = featurePath(feature, ops, shapes, { stock, port: geometry.region2d })
   const out: DfmWarning[] = []
   const w = (
     code: DfmWarning['code'],
@@ -837,10 +997,19 @@ export function clonesWarnings(
     geometry.operations.filter((g) => ids.has(g.id)),
     port,
   )
+  // a mirrored instance's footprint: the source's flipped about the face frame axes (mirror rows)
+  const flippedParts = new Map<string, FootprintPart[]>()
+  const partsOf = (f: Flip | undefined): FootprintPart[] => {
+    const k = flipKey(f)
+    if (k === '') return parts
+    let p = flippedParts.get(k)
+    if (p === undefined) flippedParts.set(k, (p = flipFootprint(parts, f!)))
+    return p
+  }
   // how far past each face edge the footprint reaches (0: inside); the source's own overhang is
   // allowed (a source open to an edge on purpose), an instance reaching further is outside
-  const overhang = (d: UV): [number, number, number, number] => {
-    const b = footprintBounds(parts, d)
+  const overhang = (d: UV, f?: Flip): [number, number, number, number] => {
+    const b = footprintBounds(partsOf(f), d)
     if (b === undefined) return [0, 0, 0, 0]
     return [
       Math.max(0, -b.min[0]),
@@ -851,7 +1020,9 @@ export function clonesWarnings(
   }
   const own = overhang({ u: 0, v: 0 })
   const outside = path.instances
-    .filter((i) => i.number > 1 && overhang(i.offset).some((x, k) => x > own[k]! + SAME_SPOT))
+    .filter(
+      (i) => i.number > 1 && overhang(i.offset, i.flip).some((x, k) => x > own[k]! + SAME_SPOT),
+    )
     .map((i) => i.number)
   if (outside.length > 0)
     w(
@@ -869,12 +1040,13 @@ export function clonesWarnings(
     )
   const overlapping = new Set<number>()
   const list = path.instances
-  // instances are translations: the answer depends on the offset between them only
+  // instances are (flipped) translations: the answer depends on the offset between them and
+  // their two flips only
   const seen = new Map<string, boolean>()
-  const overlaps = (d: UV) => {
-    const key = `${Math.round(d.u * 1e6)},${Math.round(d.v * 1e6)}`
+  const overlaps = (d: UV, fa: Flip | undefined, fb: Flip | undefined) => {
+    const key = `${Math.round(d.u * 1e6)},${Math.round(d.v * 1e6)}${flipKey(fa)}/${flipKey(fb)}`
     let o = seen.get(key)
-    if (o === undefined) seen.set(key, (o = footprintsOverlap(parts, d, port)))
+    if (o === undefined) seen.set(key, (o = footprintsOverlap(partsOf(fa), d, port, partsOf(fb))))
     return o
   }
   for (let a = 0; a < list.length; a++)
@@ -883,7 +1055,7 @@ export function clonesWarnings(
         u: list[b]!.offset.u - list[a]!.offset.u,
         v: list[b]!.offset.v - list[a]!.offset.v,
       }
-      if (overlaps(d)) {
+      if (overlaps(d, list[a]!.flip, list[b]!.flip)) {
         overlapping.add(list[a]!.number)
         overlapping.add(list[b]!.number)
       }
@@ -971,8 +1143,18 @@ function arrangeClones(
   const next = keyed.map((x) => x.o)
   const start = next.findIndex((o) => nested.has(o.id)) + nested.size // right after the source (an empty block is still there)
   const owned = next.filter((o) => ownerOf(o) === feature.id).length
+  const refs = mirrorRefIssues(
+    feature.rows,
+    feature,
+    sourceFace(sourceOperations(feature.source, next)) ?? feature.on,
+    next,
+  )
+  if (refs.length > 0) return fail('model.invariant', issueSummary(refs), { issues: refs, where })
+  // mirror rows: the expansion checks the limit with their lines (an on-line copy is no instance)
   const path = featurePath(feature, next, shapes)
-  const limit = limitIssues(path, holdsClones(sourceOperations(feature.source, next)), nested.size)
+  const limit = feature.rows.some((r) => r.kind === 'mirror')
+    ? []
+    : limitIssues(path, holdsClones(sourceOperations(feature.source, next)), nested.size)
   if (limit.length > 0)
     return fail('model.invariant', issueSummary(limit), { issues: limit, where })
   return Ok({ ops: next, start, end: start + owned })
@@ -1025,5 +1207,7 @@ export const clonesKindSpec: FeatureKindSpec<Clones> = {
     return src
   },
   arrange: arrangeClones,
+  // a mirror row's `about` may name an operation after the block (DF126)
+  readsAfter: (c) => c.rows.some((r) => r.kind === 'mirror' && r.about !== undefined),
   spanWarnings: clonesWarnings,
 }

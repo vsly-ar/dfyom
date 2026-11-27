@@ -49,6 +49,7 @@ import {
   type CloneRow,
   type Clones,
 } from './clones'
+import { mirrorRefIssues } from './mirror'
 
 const count = z.number().int().min(1).max(CLONE_ROW_MAX)
 const skip = z.array(z.number().int().min(0)).max(CLONE_ROW_MAX).optional()
@@ -68,6 +69,14 @@ const RowArg = z.discriminatedUnion('kind', [
     count: count.optional(),
     skip,
   }),
+  // clones-mirror.md § Agent API
+  z.object({
+    kind: z.literal('mirror'),
+    flip: z.enum(['u', 'v']),
+    about: z.string().min(1).max(128).optional(),
+    at: Src.optional(),
+    skip,
+  }),
 ])
 type RowArgs = z.output<typeof RowArg>
 
@@ -75,7 +84,7 @@ const RowsArg = z
   .array(RowArg)
   .max(CLONE_ROWS_MAX)
   .describe(
-    'From the source, each row from the last position of the one before. grid: cols × rows cells, the first on that position (cols·rows−1 clones; du/dv 0 only with 1 col/row). offset, polar: count steps beyond it (count clones). polar: angle from +u CCW. arc: centre radius away at angle, sweep arc (±360°, + CCW) every step. point: absolute u v. along: a one-item shape with its start on that position; from arc length start (0), every spacing or count evenly (one at length 0 is no clone). skip: indices of the row points from 0 (first row: instance n is n-2), left out, numbers kept.',
+    'From the source, each row from the last position of the one before. grid: cols × rows cells, the first on that position (cols·rows−1 clones; du/dv 0 only with 1 col/row). offset, polar: count steps beyond it (count clones). polar: angle from +u CCW. arc: centre radius away at angle, sweep arc (±360°, + CCW) every step. point: absolute u v. along: a one-item shape with its start on that position; from arc length start (0), every spacing or count evenly (one at length 0 is no clone). mirror (last rows): flip all before in u|v across at, about centre or stock centre. skip: indices of the row points from 0 (first row: instance n is n-2), left out, numbers kept.',
   )
 
 const params = {
@@ -96,6 +105,8 @@ const AS_ADD = {
 }
 
 function parseRow(f: Fields, r: RowArgs, i: number): CloneRow {
+  if (r.kind === 'mirror' && r.about !== undefined && r.at !== undefined)
+    f.refuse(`rows.${i}.at`, 'oneOf', 'give about or at, not both')
   return mapRow<string, unknown>(r, (src, k, kind) =>
     f.q(`rows.${i}.${k}`, kind, src),
   ) as unknown as CloneRow
@@ -172,10 +183,22 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
       const on = sourceFace(sourceOperations(c.source, ops))
       if (on !== undefined && on !== c.on) ons.set(c.id, on)
       const span = featureSpan(ops, lf)
+      // a mirror row's reference removed, moved after the instances or off the face (DF126)
+      const refs = mirrorRefIssues(c.rows, c, on ?? c.on, ops)
+      if (refs.length > 0)
+        return invalid(refs, where).mapErr((e) => e.withContext(where, { featureId: c.id }))
       // inputs and block as a committed document had them, already in line: nothing to redo
+      // a mirror row's `about` may read operations after the block (DF126): all of them then
       const key = changed
         ? undefined
-        : [stockRecord, l.units, records.shapes, ...records.operations.slice(0, span.end)]
+        : [
+            stockRecord,
+            l.units,
+            records.shapes,
+            ...(clonesSpec.readsAfter?.(c) === true
+              ? records.operations
+              : records.operations.slice(0, span.end)),
+          ]
       const record = records.features?.[k]
       const cacheable =
         key !== undefined &&
@@ -188,6 +211,8 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
         before: ops.slice(0, span.ownedStart),
         ownedId: (role) => ownedOperationId(c.id, role),
         shapes: l.dto.shapes ?? [],
+        region2d: ctx.services.region2d,
+        after: ops.slice(span.end),
       })
       if (expanded.isErr()) return Err(expanded.unwrapErr().withContext(where, { featureId: c.id }))
       const prevBlock = ops.slice(span.ownedStart, span.end)
@@ -277,6 +302,8 @@ export const clonesFollowApply: ApplyHook = {
 // ── preview ────────────────────────────────────────────────────────────────────────────────
 
 const UVOut = z.tuple([z.number(), z.number()])
+/** A mirror row's position: the axes it is mirrored in (clones-mirror.md § Agent API). */
+const Mirrored = z.object({ u: z.literal(true).optional(), v: z.literal(true).optional() })
 
 const clonesPreview = defineQuery({
   name: 'design.clones.preview',
@@ -291,18 +318,23 @@ const clonesPreview = defineQuery({
   listedArgs: AS_ADD,
   result: z.object({
     on: z.string(),
-    instances: z.array(z.object({ n: z.number(), at: UVOut })).describe('1 = the source'),
+    instances: z
+      .array(z.object({ n: z.number(), at: UVOut, mirrored: Mirrored.optional() }))
+      .describe('1 = the source'),
+    onLine: z.array(z.number()).describe('Mirror positions dropped: equal to their original'),
     rows: z.array(
       z.object({
         start: UVOut,
         end: UVOut,
         path: z.array(UVOut).describe('Drawn path: straight, along the arc or the shape'),
         centre: UVOut.optional().describe('arc'),
+        mirror: z.object({ flip: z.enum(['u', 'v']), c: z.number() }).optional(),
         points: z.array(
           z.object({
             at: UVOut,
-            kind: z.enum(['clone', 'skipped', 'closes', 'duplicate']),
+            kind: z.enum(['clone', 'skipped', 'closes', 'duplicate', 'onLine']),
             n: z.number().optional(),
+            mirrored: Mirrored.optional(),
           }),
         ),
       }),
@@ -352,10 +384,11 @@ const clonesPreview = defineQuery({
     }
     const shapes = l.dto.shapes ?? []
     const issues = [...rowIssues(rows, shapes), ...sourceIssues(draft, ops, l.features)]
+    if (issues.length === 0) issues.push(...mirrorRefIssues(rows, draft, draft.on, ops))
     if (issues.length > 0) return invalid(issues, where)
-    const path = featurePath(draft, ops, shapes)
     // the source's footprint reads the placed shapes (B3)
     const region2d = ctx.services.region2d
+    const path = featurePath(draft, ops, shapes, { stock: l.stock, port: region2d })
     const input = shapesOf(ops, l.dto).andThen((placed) =>
       toGeometryInput(
         { ...l.part, ...(placed.size === 0 ? {} : { shapes: placed }) },
@@ -368,16 +401,23 @@ const clonesPreview = defineQuery({
     const uv = (p: { u: number; v: number }): [number, number] => [p.u, p.v]
     return Ok({
       on: draft.on,
-      instances: path.instances.map((i) => ({ n: i.number, at: uv(i.at) })),
+      instances: path.instances.map((i) => ({
+        n: i.number,
+        at: uv(i.at),
+        ...(i.flip === undefined ? {} : { mirrored: i.flip }),
+      })),
+      onLine: [...path.onLine],
       rows: path.rows.map((r) => ({
         start: uv(r.start),
         end: uv(r.end),
         path: (r.curve ?? r.line).map(uv),
         ...(r.arc === undefined ? {} : { centre: uv(r.arc.centre) }),
+        ...(r.mirror === undefined ? {} : { mirror: r.mirror }),
         points: r.points.map((p) => ({
           at: uv(p.at),
           kind: p.kind,
           ...(p.number === undefined ? {} : { n: p.number }),
+          ...(p.flip === undefined ? {} : { mirrored: p.flip }),
         })),
       })),
       warnings: clonesWarnings(draft, ops, l.stock, l.units, shapes, geometry),

@@ -72,6 +72,18 @@ export interface ExpansionContext {
   ownedId(role: string): string
   /** The part's named shape records (`PartDTO.shapes`, [] = none): Clones `along` rows follow them (F6). */
   readonly shapes: readonly ShapeDTO[]
+  /**
+   * The 2D layer where the caller has it (commands, the Clones follow): a Clones mirror reads
+   * named shapes' centres and maps tab positions with it (clones-mirror.md § Implementation (M1));
+   * absent (the load's consistency check, which compares roles only): approximations.
+   */
+  readonly region2d?: Region2dPort | undefined
+  /**
+   * The operations after the feature's block (design order): a Clones mirror row's `about` may
+   * name one (its centre is read as a value, nothing references it; clones-mirror.md
+   * § Implementation (M1)). Absent: none. A kind that reads them says so (`readsAfter`).
+   */
+  readonly after?: readonly Operation[] | undefined
 }
 
 /**
@@ -153,6 +165,11 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
    * `[start, end)` the owned block replaces. Absent: a new feature at the end, a changed one in
    * place.
    */
+  /**
+   * The expansion reads operations after the block too (`ExpansionContext.after`): the expansion
+   * caches then key on every operation record. Absent = false.
+   */
+  readsAfter?(feature: F): boolean
   arrange?(
     feature: F,
     ops: readonly Operation[],
@@ -513,13 +530,21 @@ function expansionOf(
   shapes: readonly ShapeDTO[],
   record: object | undefined,
   records: FrozenRecords | undefined,
+  after: readonly Operation[],
 ): AppResult<readonly string[]> {
   // only frozen records key the cache: a committed document's, and a draft's unmodified ones
-  // (a command's load after an edit before this feature's block expands it anew)
+  // (a command's load after an edit before this feature's block expands it anew); a kind that
+  // reads what follows its block keys on every record
+  const reads = spec.readsAfter?.(feature) === true
   const key =
     records === undefined || record === undefined || !Object.isFrozen(record)
       ? undefined
-      : [records.stock, units, records.shapes, ...records.operations.slice(0, start)]
+      : [
+          records.stock,
+          units,
+          records.shapes,
+          ...(reads ? records.operations : records.operations.slice(0, start)),
+        ]
   const cacheable =
     key !== undefined && key.every((k) => typeof k !== 'object' || Object.isFrozen(k))
   const hit = cacheable ? expansionCache.get(record!) : undefined
@@ -531,6 +556,7 @@ function expansionOf(
       before: ops.slice(0, start),
       ownedId: (role) => ownedOperationId(feature.id, role),
       shapes,
+      after,
     })
     .map((list) => {
       const roles = list.map((e) => `${e.role}:${e.operation.kind}`)
@@ -671,6 +697,7 @@ export function checkFeatures(
       dto.shapes ?? [],
       records?.features[i],
       records,
+      ops.slice(start === end ? blockAt : end),
     )
     if (expanded.isErr())
       return fail('input.malformed', `feature ${feature.id} does not expand`, {

@@ -44,6 +44,7 @@ function isCurrent(l: LoadedPart, { spec, feature }: LoadedFeature): boolean {
     before: ops.slice(0, start),
     ownedId: (role) => ownedOperationId(feature.id, role),
     shapes: l.dto.shapes ?? [],
+    after: ops.slice(end),
   }
   // an expansion that fails now is not current: the placement reports why
   const owned = spec
