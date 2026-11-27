@@ -15,7 +15,7 @@ import { ENCLOSURE_SECTIONS_SVG } from '../design/enclosure-sections.testing'
 import { importSvg } from '../import/svg'
 import { generateRegionPocket, type RegionPocketInput } from './region-pocket'
 import { cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
-import { placeLoops, regionCoverage } from './testing/region-coverage'
+import { placeLoops, pocketRapids, regionCoverage } from './testing/region-coverage'
 import { violations } from './testing/rules'
 
 interface NodeProcess {
@@ -169,6 +169,7 @@ describe('pockets of the enclosure outline inset by 4.70–5.10 mm', () => {
             plungeRate: inp.cutting.plungeRate,
             rampAngle: 3,
             retractZ: HEIGHTS.retractHeight,
+            lowRapids: true,
             clearanceZ: HEIGHTS.clearanceHeight,
             targetZ: -1,
             contains: (p: Vec3) =>
@@ -181,6 +182,7 @@ describe('pockets of the enclosure outline inset by 4.70–5.10 mm', () => {
         const rest = port.difference(region, opening).unwrap()
         const expectedRest = regionArea(rest)
         expect(cov.gouge).toBe(0)
+        expect(pocketRapids(tp, inp, CELL)).toEqual([])
         expect(cov.belowFloor).toBe(0)
         expect(cov.leftover).toBeLessThan(0.5)
         // + 1 mm² and 0.25 mm² per rest piece (the keep-outs' 8 sharp corners): their boundary

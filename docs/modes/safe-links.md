@@ -102,6 +102,7 @@ Inside an operation rapids run on the retract plane (`on` + `retractHeight`, [co
 - The generators' property "rapids only on the retract plane" (`testing/rules.ts`) stays for generator output; the linked program is checked by [the link properties](#verification-on-the-virtual-machine) instead.
 - With workholding this is where WH-C's hops over clamps live.
 - After phase 1 has run on the real machine ([Q94](#open-questions-for-the-user)).
+- **Pockets, in the generator (DF136, 2026-11-27):** the region pocket already does the part of this that matters most for long pocketing programs, from what its own levels above cleared rather than from the field: entries below the first level rapid to 0.5 mm over the level above, and a plain pocket's blocked links whose corridor (the tool + this doc's 1 mm radial margin) lies in its cleared roots cross at the level above + the retract height ([plan-v0.3.md § Low entries and links](plan-v0.3.md#low-entries-and-links-df136)). They are generator rapids, so the replay oracle checks them for collisions like any other; this pass is unchanged.
 
 ## Determinism and goldens
 
