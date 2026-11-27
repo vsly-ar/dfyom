@@ -3,7 +3,9 @@
 // then edited and saved again, and the design tool field lists it. The context link "Edit in
 // library" is not used here (plan mode); the leave prompt and conflicts are covered by component
 // tests. The Workholding tab (WL3): duplicate the built-in toe clamp, change a size, make it the
-// default. A tapered ball end mill (DF124 T3): typed in, read-outs and hint, saved and listed. Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
+// default. A tapered ball end mill (DF124 T3): typed in, read-outs (the groove width at 1 mm too) and
+// hint, saved and listed, then picked in a Line's tool field and an engraved pattern's Cut, whose
+// read-out shows its groove width (T3 follow-up). Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
 // docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -194,6 +196,7 @@ test('library window: a new tapered ball end mill, 1/8″ shank, R0.25 at 3.6° 
   await expect(editor.getByText('R 0.25 mm')).toBeVisible()
   await expect(editor.getByText('7.2° included')).toBeVisible()
   await expect(editor.getByText('Cone reaches Ø 3.175 mm at 21.5 mm.')).toBeVisible()
+  await expect(editor.getByText('Cuts a groove 0.6 mm wide at 1 mm deep.')).toBeVisible()
   await input(editor, 'Taper angle (per side)').focus()
   await expect(
     editor.getByRole('img', { name: 'Tool drawing: taper angle highlighted' }),
@@ -215,6 +218,45 @@ test('library window: a new tapered ball end mill, 1/8″ shank, R0.25 at 3.6° 
   await expect(input(editor, 'Taper angle (per side)')).toHaveValue('3.6')
   await expect(input(editor, 'Shank diameter')).toHaveValue('1/8 in')
   await expect(input(editor, 'Large end diameter')).toHaveValue('1/8 in')
+
+  // T3 follow-up: picked in a Line's tool field in Design, and its groove width in the engraved
+  // pattern's read-out (its Cut is the owned Line's tool field)
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  await page.bringToFront()
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Tapered')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const add = async (group: string, item: string) => {
+    await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+    await page
+      .getByRole('menu')
+      .getByRole('group', { name: group })
+      .getByRole('menuitem', { name: item })
+      .click()
+  }
+  const pickTapered = async () => {
+    const combo = inspector.getByRole('combobox', { name: 'Tool' })
+    await combo.click()
+    await page
+      .getByRole('listbox')
+      .getByRole('option', { name: /^Tapered ball R0\.25 3\.6°/ })
+      .click()
+    await expect(combo).toHaveText(/Tapered ball R0\.25 3\.6°/)
+  }
+  await add('Operations', 'Line')
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await pickTapered()
+  await add('Features', 'Engraved pattern')
+  await expect(inspector.getByRole('heading', { name: 'Engraved pattern 1' })).toBeVisible()
+  await pickTapered()
+  // the deepest groove (1 mm by default) of an R0.25 3.6° is 0.6 mm wide (the Library's read-out)
+  await expect(inspector.locator('[data-engraving-readout]')).toContainText('grooves ≤ 0.6 mm wide')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

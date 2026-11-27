@@ -21,7 +21,7 @@ import {
 import type { MachineValuesDTO } from '../../../core/library/machine.dto'
 import type { StockValuesDTO } from '../../../core/library/stock.dto'
 import type { WorkholdingType, WorkholdingValuesDTO } from '../../../core/library/workholding.dto'
-import { taperHeights, Tool } from '../../../core/library/tool'
+import { taperedGrooveWidth, taperHeights, Tool } from '../../../core/library/tool'
 import type { CuttingPresetDTO, ToolType, ToolValuesDTO } from '../../../core/library/tool.dto'
 import {
   itemUnitSystem,
@@ -284,10 +284,17 @@ function lengthText(mm: number, units: UnitSystem, places: number): string {
 export const CONE_MISMATCH = { over: 1.5, under: 0.5 } as const
 
 /**
+ * DF124 T3 follow-up: the depth of the groove width read-out (mm): 1 mm, 0.04″ (1.016 mm) in inches.
+ */
+export const GROOVE_READ_DEPTH = { mm: 1, inch: 1.016 } as const
+
+/**
  * The read-outs of a tapered ball end mill's fields, as field notes (empty for other types or
  * values that do not load): the ball's radius at the tip, the included angle at the taper angle,
  * where the cone reaches the large end (`taperHeights`) at the large end, and the Q153 hint at the
  * flute length when cone and flutes do not fit (a hint, never an error: real bits differ).
+ * DF124 T3 follow-up: the large end also reads out the width of a groove cut 1 mm (0.04″) deep,
+ * from the core's `taperedGrooveWidth` (the Line's and the engraved pattern's formula).
  */
 export function taperedNotes(
   v: ToolDraft,
@@ -313,10 +320,17 @@ export function taperedNotes(
   if (tip === undefined || a === undefined || dc === undefined || !(a > 0 && a < 90 && tip < dc))
     return out
   const h = taperHeights(tip, a, dc).largeEnd
-  out.diameter = note(
-    'coneReaches',
-    m.coneReaches(lengthText(dc, units, 3), lengthText(h, units, 1)),
-  )
+  const depth = GROOVE_READ_DEPTH[units]
+  out.diameter = [
+    ...note('coneReaches', m.coneReaches(lengthText(dc, units, 3), lengthText(h, units, 1))),
+    ...note(
+      'grooveWidth',
+      m.grooveWidth(
+        lengthText(taperedGrooveWidth(tip, a, dc, depth), units, 2),
+        lengthText(depth, units, 1),
+      ),
+    ),
+  ]
   if (
     lcf !== undefined &&
     lcf > 0 &&

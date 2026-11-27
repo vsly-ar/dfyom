@@ -494,6 +494,10 @@ describe('Library window', () => {
     expect(await within(editor()).findByText('R 0.25 mm')).toBeInTheDocument()
     expect(within(editor()).getByText('7.2° included')).toBeInTheDocument()
     expect(within(editor()).getByText('Cone reaches Ø 3.175 mm at 21.5 mm.')).toBeInTheDocument()
+    // T3 follow-up: the groove width at 1 mm (the core's `taperedGrooveWidth`)
+    expect(
+      within(editor()).getByText('Cuts a groove 0.6 mm wide at 1 mm deep.'),
+    ).toBeInTheDocument()
     expect(within(editor()).queryByText(/the angle per side\?/)).toBeNull()
     // Q153: 3.6° included typed as 1.8° per side: the cone runs past the flutes, a hint only
     await user.clear(angle)

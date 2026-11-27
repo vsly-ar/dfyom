@@ -20,7 +20,9 @@
 // item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary);
 // X2-6: toe clamps drag along their edge (`WorkholdingOverlay.clamps`, snapped by `snapClampAt`);
 // a drop commits one `plan.workholding.set` with the whole list and is held until the plan
-// re-reads it (docs/modes/workholding.md#toe-clamp-drag-x2-6).
+// re-reads it (docs/modes/workholding.md#toe-clamp-drag-x2-6). DF122: while an operation cut after
+// its roughing, or that roughing, is selected, its rest region (`RunScene.rest`,
+// docs/modes/roughing.md#plan-viewport-rest-shading).
 import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
@@ -62,6 +64,7 @@ import {
   pointsWithAdded,
   setupPlacement,
   setupZeroOf,
+  shownRest,
   lengthText,
 } from './model'
 import {
@@ -439,6 +442,8 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     const shifted = shiftOverlay(moved, setupZeroOf(setup, info))
     const workholding =
       shifted === undefined ? undefined : clamps === undefined ? shifted : { ...shifted, clamps }
+    // DF122: the selected owner's (or its roughing's) rest region
+    const rest = shownRest(plan, setup, selected, data.toolpaths)
     return {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
@@ -453,6 +458,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(flipAxes.length === 0 ? {} : { flipAxes }),
       ...(aids === undefined ? {} : { aids }),
       ...(workholding === undefined ? {} : { workholding }),
+      ...(rest === undefined ? {} : { rest: { patch: rest.patch, level: rest.level } }),
     }
   }, [
     data,

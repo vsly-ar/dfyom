@@ -66,7 +66,7 @@ const colour = (c: Rgb) => new Color().setRGB(c[0], c[1], c[2], SRGBColorSpace)
 const ring = (pts: readonly P[]) => pts.map((p) => new Vector2(p[0], p[1]))
 
 /** The patch as three.js shapes (holes as paths). */
-function patchShapes(patch: readonly ZRefPolygon[]): Shape[] {
+export function patchShapes(patch: readonly ZRefPolygon[]): Shape[] {
   return patch
     .filter((p) => p.outer.length >= 3)
     .map((p) => {
