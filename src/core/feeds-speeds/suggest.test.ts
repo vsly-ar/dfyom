@@ -340,6 +340,26 @@ describe('suggestCutting: engagement and chip thinning', () => {
     expect(at.display.unwrap().fz).toBeCloseTo(0.02, 9)
   })
 
+  it('DF123: a 15° engraving V-bit at a shallow depth: tiny De, the spindle clamp, a modest feed', () => {
+    // Ø3.175, 15°, 0.5 mm deep: De = 2 · 0.5 · tan 7.5° = 0.132 mm, fz scaled by De / 3.175
+    const v15 = vbit({ diameter: len('3.175'), angle: deg('15') })
+    const v60 = vbit({ diameter: len('3.175'), angle: deg('60') })
+    const de = Math.tan((7.5 * Math.PI) / 180)
+    const machine = limits({ maxSpeed: 24_000, rigidity: 'rigidMill' })
+    const at = (t: Tool) =>
+      suggest({ tool: t, engagement: { kind: 'chamfer', depth: 0.5 }, machine })
+    const s = at(v15)
+    const s60 = at(v60)
+    expect(s.display.unwrap().dCalc).toBeCloseTo(de, 9)
+    expect(value(s.spindleSpeed)).toBe(24_000)
+    expect(value(s60.spindleSpeed)).toBe(24_000)
+    // chip load (and so the feed at the clamped speed) in proportion to De: never above a 60° bit's
+    const ratio = de / (2 * 0.5 * Math.tan(Math.PI / 6))
+    expect(s.display.unwrap().fz / s60.display.unwrap().fz).toBeCloseTo(ratio, 9)
+    expect(value(s.feedRate) / value(s60.feedRate)).toBeCloseTo(ratio, 9)
+    expect(value(s.feedRate)).toBeLessThan(150) // mm/min in aluminium: a light engraving feed
+  })
+
   it('chamfer engagement needs a chamfer mill, and a chamfer mill a chamfer engagement', () => {
     expect(codes(suggest({ engagement: { kind: 'chamfer', depth: 1 } }))).toEqual(['feeds.noData'])
     expect(codes(suggest({ tool: vbit() }))).toEqual(['feeds.noData'])

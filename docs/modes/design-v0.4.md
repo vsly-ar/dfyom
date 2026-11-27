@@ -137,12 +137,12 @@ A chamfer operation cuts a conical bevel at the **mouth** of an earlier round op
 
 An amendment to [library.md § Tool](../architecture/library.md#tool), applied with task C1 (that doc stays the owner of the field table):
 
-| Field              | Kind   | Rule                    | Why                                                                |
-| ------------------ | ------ | ----------------------- | ------------------------------------------------------------------ |
-| `type`             | –      | `chamferMill`           | Chamfer operations; later engraving and V-carving                  |
-| `diameter` (DC)    | length | > 0                     | Largest cutting diameter                                           |
-| `angle` (included) | angle  | 30°–150°                | Must match the chamfer angle; a V-bit of 90° is a 90° chamfer mill |
-| `tipDiameter`      | length | ≥ 0, < DC (0 = pointed) | Smallest cutting diameter; the tool cannot cut below its tip       |
+| Field              | Kind   | Rule                                                                               | Why                                                                |
+| ------------------ | ------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `type`             | –      | `chamferMill`                                                                      | Chamfer operations; later engraving and V-carving                  |
+| `diameter` (DC)    | length | > 0                                                                                | Largest cutting diameter                                           |
+| `angle` (included) | angle  | 10°–150° (30° until [DF123](../plans/hardening.md#intake-user-feedback-goes-here)) | Must match the chamfer angle; a V-bit of 90° is a 90° chamfer mill |
+| `tipDiameter`      | length | ≥ 0, < DC (0 = pointed)                                                            | Smallest cutting diameter; the tool cannot cut below its tip       |
 
 Lengths, flutes, material and presets as for other types. Generalized: `{ kind: 'generalized', type: 'chamferMill', diameter, angle }`, standard sizes 90° × 6/12 mm, 1/4″/1/2″. Feeds use the **effective diameter** at the cut depth ([feeds-speeds.md](../architecture/feeds-speeds.md), amendment in [plan-v0.4.md](plan-v0.4.md#feeds-for-chamfer-mills)). The Library window gets the type's form and drawing (task U4); the B22 V-bit icon is wired as the type's icon (C1).
 

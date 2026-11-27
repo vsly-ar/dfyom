@@ -168,6 +168,35 @@ describe('DFM', () => {
     expect(checks(lineOf([curve], 3, 3, ball), 2.5)).toContainEqual(['dfm.lineTooDeep', 'warning'])
   })
 
+  it('DF123: a 15° V-bit cuts to its flute length when that is shorter than its cone', () => {
+    const v15: LineCutter = { kind: 'vBit', diameter: 3.175, angle: 15, tipDiameter: 0 }
+    // the cone is 1.5875 / tan 7.5° = 12.06 mm tall; the flutes 6 mm
+    expect(vBitEdgeHeight(v15)).toBeCloseTo(1.5875 / Math.tan((7.5 * Math.PI) / 180), 9)
+    const withFlutes = (op: LineGeometry, fluteLength: number) =>
+      parameterChecks(
+        { stock: STOCK, operations: [op] },
+        {
+          tools: [],
+          unitSystem: 'metric',
+          operationTools: {
+            line1: {
+              tool: { type: 'chamferMill', diameter: 3.175, angle: 15, fluteLength },
+              label: '15° V-bit',
+              generalized: false,
+              locked: true,
+            },
+          },
+        },
+      ).find((w) => w.code === 'dfm.lineTooDeep')
+    expect(withFlutes(lineOf([curve], 0.5, 7, v15), 6)?.params).toMatchObject({ depth: 7, cuts: 6 })
+    expect(withFlutes(lineOf([curve], 0.5, 5, v15), 6)).toBeUndefined()
+    // no flute length known (a generalized tool): the cone's height
+    expect(checks(lineOf([curve], 0.5, 7, v15))).toEqual([])
+    expect(checks(lineOf([curve], 0.5, 13, v15))).toContainEqual(['dfm.lineTooDeep', 'warning'])
+    // the groove at 1 mm: 2 × tan 7.5° = 0.263 mm
+    expect(grooveWidth(v15, 1)).toBeCloseTo(2 * Math.tan((7.5 * Math.PI) / 180), 9)
+  })
+
   it('dfm.lineShallow (info) under 0.05 mm', () => {
     expect(checks(lineOf([curve], 0.03, 1))).toEqual([['dfm.lineShallow', 'info']])
   })

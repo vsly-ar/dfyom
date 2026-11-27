@@ -59,7 +59,7 @@ describe('Tool', () => {
     expect(issues({ ...flat(), pointAngle: deg('118') })).toEqual([['pointAngle', 'notAllowed']])
   })
 
-  it('a chamfer mill needs an angle of 30°–150° and a tip 0 ≤ dt < DC; only it stores them', () => {
+  it('a chamfer mill needs an angle of 10°–150° and a tip 0 ≤ dt < DC; only it stores them', () => {
     const chamfer = {
       ...flat(),
       type: 'chamferMill',
@@ -76,7 +76,10 @@ describe('Tool', () => {
     expect(expectOk(load({ ...chamfer, tipDiameter: len('0') })).tipDiameterMm).toBe(0)
     expect(expectOk(load(flatTip)).toDTO()).toEqual(flatTip)
     expect(issues({ ...chamfer, angle: undefined })).toEqual([['angle', 'required']])
-    expect(issues({ ...chamfer, angle: deg('29') })).toEqual([['angle', 'range']])
+    // DF123 (TG #407): engraving V-bits of 10°, 15°, 20° load; under 10° does not
+    for (const a of ['10', '15', '20'])
+      expect(expectOk(load({ ...chamfer, angle: deg(a) })).angle.unwrap().canonical).toBe(Number(a))
+    expect(issues({ ...chamfer, angle: deg('9.9') })).toEqual([['angle', 'range']])
     expect(issues({ ...chamfer, angle: deg('151') })).toEqual([['angle', 'range']])
     expect(expectOk(load({ ...chamfer, angle: deg('150') })).angle.unwrap().canonical).toBe(150)
     expect(issues({ ...chamfer, tipDiameter: len('12') })).toEqual([['tipDiameter', 'range']])

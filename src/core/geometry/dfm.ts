@@ -311,8 +311,8 @@ export const LINE_SHALLOW = 0.05
 
 /**
  * A Line's findings (engraved-patterns.md § DFM): `dfm.lineTooDeep` when its deepest point is
- * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2), an end
- * mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm,
+ * beyond the cutter's cutting length (a V-bit's edge height (DC − dt) / 2 / tan(α/2), at most
+ * its flute length when known; an end mill's flute length; the marker at the deepest place), `dfm.lineShallow` (info) under 0.05 mm,
  * `dfm.lineMerge` (E4) where two grooves leave a wall under 0.3 mm (markers at up to 10 places).
  */
 function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[] {
@@ -340,7 +340,16 @@ function lineChecks(op: Op<'line'>, own: OperationTool | undefined): DfmWarning[
     )
   }
   const deepest = lineMaxDepth(op)
-  const cuts = op.cutter.kind === 'vBit' ? vBitEdgeHeight(op.cutter) : own?.tool.fluteLength
+  // a V-bit cuts to its cone's height or its flute length, whichever is shorter: a sharp
+  // engraving bit's cone (15°, Ø3.175: 12 mm) is often longer than its flutes (DF123)
+  const flutes = own?.tool.fluteLength
+  const edge = vBitEdgeHeight(op.cutter)
+  const cuts =
+    edge === undefined
+      ? flutes
+      : flutes === undefined || own?.tool.type !== 'chamferMill'
+        ? edge
+        : Math.min(edge, flutes)
   if (cuts !== undefined && deepest > cuts + EPSILON) {
     const at = deepestPoint(op)
     out.push(

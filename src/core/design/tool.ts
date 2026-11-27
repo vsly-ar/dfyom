@@ -21,7 +21,7 @@ export interface GeneralizedTool {
   readonly diameter: Quantity
   /** RE: bull nose only, 0 < RE < DC/2. */
   readonly cornerRadius: Option<Quantity>
-  /** Included angle: chamfer mill only (required), 30°–150°; a generalized one is pointed. */
+  /** Included angle: chamfer mill only (required), 10°–150°; a generalized one is pointed. */
   readonly angle: Option<Quantity>
 }
 

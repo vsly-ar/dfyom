@@ -19,7 +19,7 @@ export const isEndMillType = (t: ToolType): boolean =>
   t === 'flatEndMill' || t === 'bullNoseEndMill' || t === 'ballEndMill'
 
 /** Included angle range of a chamfer mill / V-bit (docs/modes/design-v0.4.md#chamfer-mill-tool-type). */
-export const CHAMFER_MILL_ANGLE = { min: 30, max: 150 } as const
+export const CHAMFER_MILL_ANGLE = { min: 10, max: 150 } as const
 
 export const TOOL_MATERIALS = ['carbide', 'hss', 'other'] as const
 export type ToolMaterial = (typeof TOOL_MATERIALS)[number]
@@ -58,7 +58,7 @@ export const ToolValuesDtoSchema = z.object({
   shankDiameter: quantityDto('length').optional(),
   fluteCount: quantityDto('scalar').describe('NOF: whole number ≥ 1'),
   pointAngle: quantityDto('angle').optional().describe('SIG: drill only, 0° < SIG < 180°'),
-  angle: quantityDto('angle').optional().describe('Included angle: chamferMill only, 30°–150°'),
+  angle: quantityDto('angle').optional().describe('Included angle: chamferMill only, 10°–150°'),
   tipDiameter: quantityDto('length')
     .optional()
     .describe('chamferMill only: 0 ≤ tip < DC; absent = pointed'),
