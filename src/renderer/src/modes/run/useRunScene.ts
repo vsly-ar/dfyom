@@ -9,7 +9,9 @@
 // operations (`plan.warning.list`) drawn as the program moves, so playback follows the tool.
 // An external gCode file (DF93) draws its own moves instead (`fileMoves`, work coordinates, no
 // setup frame). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
-// marker (docs/modes/run-goto.md#preview). `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
+// marker (docs/modes/run-goto.md#preview). DF129 RC6: after an interrupted run, a ghost tool at
+// its last seen position and the toolpath before it dimmed (docs/modes/run-recovery.md#implementation-rc6).
+// `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
 // docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppMode } from '../../../../core/modes'
@@ -141,10 +143,20 @@ export function useRunScene(mode: AppMode): RunScene | null {
         : skippedSegments(lines, startLines, startLine, level),
     [lines, startLines, startLine, level],
   )
+  // RC6: the interrupted run's last seen position (its work coordinates), while no run streams
+  const lastSeen = job === undefined ? status.lastRun?.interruption?.lastReport?.wpos : undefined
+  const ghost = useMemo(
+    (): readonly [number, number, number] | undefined =>
+      lastSeen === undefined ? undefined : [lastSeen[0], lastSeen[1], lastSeen[2] + level],
+    [lastSeen?.[0], lastSeen?.[1], lastSeen?.[2], level],
+  )
   let done = 0
   if (lines !== null) {
     if (job === undefined && start !== undefined) {
       done = skipped
+    } else if (ghost !== undefined) {
+      // the remaining toolpath from where it stopped stays live
+      done = advancePlayback(lines, 0, ghost)
     } else if (job !== undefined && tool !== null) {
       if (cursor.current.jobId !== job.jobId) cursor.current = { jobId: job.jobId, done: 0 }
       cursor.current.done = advancePlayback(lines, cursor.current.done, tool)
@@ -209,9 +221,10 @@ export function useRunScene(mode: AppMode): RunScene | null {
             ...(envelope === undefined ? {} : { envelope }),
             ...(zRef === undefined ? {} : { zRef }),
             ...(goTo === undefined ? {} : { goTo }),
+            ...(ghost === undefined ? {} : { ghost }),
           }
         : null,
-    [active, lines, done, tool, frame, envelope, zRef, goTo],
+    [active, lines, done, tool, frame, envelope, zRef, goTo, ghost],
   )
 }
 

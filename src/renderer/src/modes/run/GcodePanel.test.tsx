@@ -6,7 +6,9 @@ import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { RunProgram } from '../../../../core/run/service'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
-import { GcodePanelView, GCODE_ROW_PX } from './GcodePanel'
+import type { Interruption } from '../../../../core/run/interruption'
+import { closedStatus } from '../../../../core/run/service'
+import { GcodePanelView, GCODE_ROW_PX, interruptedRange } from './GcodePanel'
 import {
   lineState,
   MAX_SCROLL_PX,
@@ -268,5 +270,54 @@ describe('GcodePanelView', () => {
     expect(list.querySelector('[data-line="11"]')).toHaveAttribute('data-lead-in', '')
     expect(list.querySelector('[data-line="12"]')).not.toHaveAttribute('data-lead-in')
     expect(screen.queryByRole('menuitem')).toBeNull()
+  })
+
+  it("marks an interrupted run's lines and starts there (DF129 RC6)", async () => {
+    renderUi(
+      <GcodePanelView
+        program={{ state: 'ready', value: program(60) }}
+        run={undefined}
+        interrupted={{ from: 45, to: 47, sent: 50 }}
+        state={{ open: true, height: 12, follow: true }}
+        onChange={() => {}}
+      />,
+    )
+    const region = screen.getByRole('region', { name: 'gCode' })
+    expect(within(region).getByText('Interrupted at lines 45–47')).toBeInTheDocument()
+    const list = within(region).getByRole('list', { name: 'Program lines' })
+    expect(list).toHaveAccessibleDescription(/where the run was interrupted/)
+    expect(list.querySelector('[aria-current="location"]')?.getAttribute('data-line')).toBe('45')
+    expect(list.querySelector('[data-line="44"]')).toHaveAttribute('data-state', 'done')
+    expect(list.querySelector('[data-line="47"]')).toHaveAttribute('data-state', 'interrupted')
+    expect(list.querySelector('[data-line="50"]')).toHaveAttribute('data-state', 'sent')
+    expect(list.querySelector('[data-line="51"]')).toHaveAttribute('data-state', 'pending')
+    await expectNoAxeViolations()
+  })
+
+  it("the range in the original program or past a resumed run's lead-in (DF129 RC6)", () => {
+    const i = {
+      reason: 'appCrashed',
+      at: '2026-11-27T10:05:00.000Z',
+      startedAt: '2026-11-27T10:00:00.000Z',
+      lines: 60,
+      sent: 50,
+      acknowledged: 47,
+      executing: 45,
+      executingFrom: 'estimate',
+      workZero: { start: [0, 0, 0], last: [0, 0, 0] },
+      spindle: { dir: 'off', rpm: 0 },
+      resumedRun: { fromLine: 40, leadIn: 5 },
+    } satisfies Interruption
+    const status = {
+      ...closedStatus(),
+      lastRun: { jobId: 'run-1', outcome: 'failed' as const, interruption: i },
+    }
+    // the original program (restored at launch): the lines as they are
+    expect(interruptedRange(status, program(60))).toEqual({ from: 45, to: 47, sent: 50 })
+    // the streamed program behind a lead-in: original 45 is streamed 45 − 40 + 1 + 5 = 11
+    const streamed = { ...program(30), sections: [{ fromLine: 1, label: 'Lead-in' }] }
+    expect(interruptedRange(status, streamed)).toEqual({ from: 11, to: 13, sent: 16 })
+    // nothing while a run streams, nor without a record
+    expect(interruptedRange({ ...closedStatus() }, program(60))).toBeUndefined()
   })
 })

@@ -74,7 +74,20 @@ export const RunJournalSchema = z.object({
      * length, so its lines map back to the original program (docs/modes/run-recovery.md#implementation-rc5).
      */
     resumed: z
-      .object({ programHash: z.string().max(100).exactOptional(), fromLine: Line, leadIn: Line })
+      .object({
+        programHash: z.string().max(100).exactOptional(),
+        fromLine: Line,
+        leadIn: Line,
+        /** DF129 RC6: a plan's operation lines in the original program (the launch's suggestion). */
+        operationStarts: z.array(Line).readonly().exactOptional(),
+      })
+      .exactOptional(),
+    /**
+     * DF129 RC6: a plan run's project (id, and its file once saved), for "Open project" after a
+     * crash (docs/modes/run-recovery.md#implementation-rc6).
+     */
+    project: z
+      .object({ id: z.string().max(200), path: z.string().max(4096).exactOptional() })
       .exactOptional(),
     lines: Line,
     sections: z.array(z.object({ fromLine: Line, label: z.string().max(500) })).readonly(),
@@ -163,6 +176,12 @@ export type UsbIdentity = NonNullable<RunJournal['machine']['usb']>
  */
 export interface RunJournalPort {
   save(journal: RunJournal): void
+  /**
+   * DF129 RC6: keeps a copy of the run's original program next to the journal (written once at
+   * the start, before the start's journal), so a launch after a crash can suggest where to resume
+   * without the project or the file (docs/modes/run-recovery.md#implementation-rc6).
+   */
+  saveProgram?(lines: readonly string[]): void
   /** DF129 RC5: removes the journal after any queued save ("Dismiss" in the recovery panel). */
   discard?(): void
 }
@@ -352,8 +371,14 @@ export class RunRecorder {
                   : { programHash: start.origin.programHash }),
                 fromLine: start.origin.resumed.fromLine,
                 leadIn: start.origin.resumed.leadIn,
+                ...(start.origin.resumed.operationStarts === undefined
+                  ? {}
+                  : { operationStarts: [...start.origin.resumed.operationStarts] }),
               },
             }),
+        ...(about !== undefined && 'plan' in about && about.project !== undefined
+          ? { project: { ...about.project } }
+          : {}),
         lines: program.lines.length,
         sections: program.sections.map((s) => ({ ...s })),
         toolChanges: this.changes.map((c) => ({ ...c })),

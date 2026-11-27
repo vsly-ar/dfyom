@@ -92,6 +92,11 @@ export const IPC = {
    */
   runRecovery: 'dfyom:run.recovery',
   /**
+   * Main → renderer: DF129 RC6 the first window at launch shows the recovery panel of a run the
+   * last session left interrupted (Run mode). Renderer only (docs/modes/run-recovery.md#implementation-rc6).
+   */
+  runShowRecovery: 'dfyom:run.showRecovery',
+  /**
    * Renderer → main (invoke): run an external gCode file (DF93): the dialog unless a path is
    * given, then the window without a project that shows it (`RunFileOpened`, or null if cancelled).
    * Doc: docs/modes/run.md#run-an-external-g-code-file-df93
@@ -493,6 +498,11 @@ export interface PreloadApi {
      * Q171); null when done, else the refusal (docs/modes/run-recovery.md#implementation-rc5).
      */
     recovery(action: RunRecoveryAction): Promise<AppErrorData | null>
+    /**
+     * DF129 RC6: main asks this window (the first at launch) to show the recovery panel of a run
+     * the last session left interrupted; queued until subscribed. Returns the unsubscribe.
+     */
+    onShowRecovery(listener: () => void): () => void
   }
   /**
    * One command, query or session tool by registry name, through this window's session (the same

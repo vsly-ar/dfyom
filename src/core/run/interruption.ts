@@ -9,7 +9,7 @@
  * Doc: docs/modes/run-recovery.md#agent-api, #implementation-rc5
  */
 import { z } from 'zod'
-import { Vec3Schema } from './host/protocol'
+import { PortSchema, TARGET_KINDS, Vec3Schema } from './host/protocol'
 import type { RunJournal } from './journal'
 import { resumePoints, scanProgram, suggestResume, type ResumePoint } from './recovery'
 
@@ -35,6 +35,49 @@ const PointSchema = z.object({
   kind: z.enum(['operation', 'pass']),
   label: z.string().exactOptional(),
 })
+
+/** What a file run's file is at launch: its hash unchanged, changed, or no longer at its path. */
+export const LAUNCH_FILE_STATES = ['same', 'changed', 'missing'] as const
+export type LaunchFileState = (typeof LAUNCH_FILE_STATES)[number]
+
+/**
+ * DF129 RC6: an interruption read from the run journal at launch (the app or the computer died
+ * during the run, or the app was quit after an interruption): the connection to come back to
+ * (never opened by itself, Q158), the project or file the run was from and whether it is still
+ * there, and whether the kept program copy was found (the suggestion needs it).
+ * Doc: docs/modes/run-recovery.md#implementation-rc6
+ */
+export const LaunchSchema = z.object({
+  machine: z.object({
+    target: z.enum(TARGET_KINDS),
+    port: PortSchema.exactOptional(),
+    usb: z
+      .object({
+        serialNumber: z.string().exactOptional(),
+        vendorId: z.string().exactOptional(),
+        productId: z.string().exactOptional(),
+      })
+      .exactOptional(),
+  }),
+  /** A plan run's project: its id, its file once saved, and whether that file is gone. */
+  project: z
+    .object({ id: z.string(), path: z.string().exactOptional(), missing: z.boolean() })
+    .exactOptional(),
+  /** A plan run's plan and setup, by name. */
+  plan: z
+    .object({
+      planName: z.string(),
+      setupName: z.string(),
+      setup: z.number().int(),
+      setups: z.number().int(),
+    })
+    .exactOptional(),
+  /** A file run's file at its path (Q170: it resumes by line only while `same`). */
+  file: z.enum(LAUNCH_FILE_STATES).exactOptional(),
+  /** The kept copy of the program was found with the journal's hash (else no suggestion). */
+  program: z.boolean(),
+})
+export type LaunchInfo = z.output<typeof LaunchSchema>
 
 /** `lastRun.interruption` (docs/modes/run-recovery.md#agent-api). Lines: the original program's. */
 export const InterruptionSchema = z.object({
@@ -76,6 +119,13 @@ export const InterruptionSchema = z.object({
   /** The suggested resume point (Q160) and the operation start it belongs to ("safest"). */
   suggestion: PointSchema.exactOptional(),
   safest: PointSchema.exactOptional(),
+  /**
+   * DF129 RC6: the interrupted run itself started at a line: that line and its lead-in's length,
+   * to find the original lines in the streamed program (the gCode panel's range).
+   */
+  resumedRun: z.object({ fromLine: z.number().int(), leadIn: z.number().int() }).exactOptional(),
+  /** DF129 RC6: read from the run journal at launch. */
+  launch: LaunchSchema.exactOptional(),
 })
 export type Interruption = z.output<typeof InterruptionSchema>
 
@@ -203,5 +253,21 @@ export function interruptionOf(
     ...(hash === undefined ? {} : { programHash: hash }),
     ...(suggestion === undefined ? {} : { suggestion: pointOf(suggestion) }),
     ...(s === undefined ? {} : { safest: pointOf(s.safest) }),
+    ...(resumed === undefined
+      ? {}
+      : { resumedRun: { fromLine: resumed.fromLine, leadIn: resumed.leadIn } }),
   }
+}
+
+/**
+ * Line `line` (1-based) of the original program in the program a run streamed: shifted past the
+ * lead-in of a run that started at a line; undefined for a line before that start (not streamed).
+ */
+export function streamedLine(
+  line: number,
+  resumed: { readonly fromLine: number; readonly leadIn: number } | undefined,
+): number | undefined {
+  if (resumed === undefined) return line
+  if (line < resumed.fromLine) return undefined
+  return line - resumed.fromLine + 1 + resumed.leadIn
 }

@@ -18,7 +18,7 @@ import {
   registerRunRecoveryIpc,
   utilityHostFactory,
 } from './machine/electron'
-import { createRunJournalStore, loadRunJournal } from './persistence/run-journal'
+import { createRunJournalStore, readLaunchRecord } from './persistence/run-journal'
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { libraryHandlesMenuAction } from './library-context'
@@ -281,16 +281,18 @@ void app.whenReady().then(async () => {
   // a utility process started by run.connection.open; it is `services.machine` of every project
   // dispatcher. Its status is pushed to renderers.
   // DF129: the journal of real runs in the app data, and the power-save blocker while they stream
-  // (docs/modes/run-recovery.md#what-dfyom-keeps). The last run's journal is read now; the
-  // recovery panel after a crash (RC6) shows it.
+  // (docs/modes/run-recovery.md#what-dfyom-keeps). The last run's journal is read now: an
+  // interrupted run (a crash: `appCrashed`) is the recovery panel's record again (RC6, below).
   const runJournal = createRunJournalStore({
     appData: app.getPath('userData'),
     log: log.child({ scope: 'run.journal' }),
   })
-  void loadRunJournal(app.getPath('userData'), log).then((j) => {
-    if (j !== undefined && j.state === 'interrupted')
-      log.info({ reason: j.reason, jobId: j.job.jobId }, 'interrupted run journal found')
-  })
+  const launchRun = await readLaunchRecord(app.getPath('userData'), log)
+  if (launchRun !== undefined)
+    log.info(
+      { reason: launchRun.lastRun.interruption?.reason, jobId: launchRun.lastRun.jobId },
+      'interrupted run journal found',
+    )
   // DF129 RC4: the setting, once the settings store exists (below)
   let autoReconnect = (): boolean => true
   const machine = createMachineClient({
@@ -304,6 +306,8 @@ void app.whenReady().then(async () => {
     autoReconnect: () => autoReconnect(),
   })
   machine.onStatus(pushRunStatus)
+  // DF129 RC6: the interrupted run found at launch (docs/modes/run-recovery.md#implementation-rc6)
+  if (launchRun !== undefined) machine.restoreLaunch(launchRun)
   const gcodeFiles = createGcodeFiles()
   const created = await createAppHost({
     appData: app.getPath('userData'),
@@ -506,7 +510,15 @@ void app.whenReady().then(async () => {
   host.onProjectOpened((key, source) => {
     if (source.kind === 'agent') sessions.open(key)
   })
-  sessions.open()
+  const first = sessions.open()
+  // DF129 RC6: the first window shows the recovery panel of a run interrupted by a crash (Run mode)
+  if (machine.status().lastRun?.interruption?.launch !== undefined) {
+    const send = () => {
+      if (!first.isDestroyed()) first.webContents.send(IPC.runShowRecovery)
+    }
+    if (loaded.has(first)) send()
+    else first.webContents.once('did-finish-load', send)
+  }
   app.on('activate', () => {
     // the licences window alone is not an app window
     if (BrowserWindow.getAllWindows().every((w) => licences.isLicences(w))) sessions.open()

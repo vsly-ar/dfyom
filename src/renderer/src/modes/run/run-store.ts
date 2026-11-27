@@ -9,6 +9,8 @@ import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { TimeScale } from '../../../../core/run/clock'
+import { matchPort } from '../../../../core/run/host/reconnect'
+import type { LaunchInfo } from '../../../../core/run/interruption'
 import type { ResumeFinding, ResumePoint } from '../../../../core/run/recovery'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
@@ -331,6 +333,12 @@ export interface RunState {
   reconnect(action: 'cancel' | 'simulate'): Promise<void>
   /** DF129 RC5: the recovery panel's main-side actions; a refusal shows as the action error. */
   recovery(action: RunRecoveryAction): Promise<void>
+  /**
+   * DF129 RC6: "Connect to …" after a crash: the journal's connection (the virtual machine, or the
+   * serial port by path or USB serial number), the run's plan when this window has it. False when
+   * the port is not listed (nothing opened). Doc: docs/modes/run-recovery.md#implementation-rc6
+   */
+  connectRecovery(machine: LaunchInfo['machine'], planId: string | undefined): Promise<boolean>
   /** DF129 RC5: the panel's own state for the interruption of `jobId`. */
   setRecoveryUi(jobId: string, patch: Partial<Omit<RecoveryUi, 'jobId'>>): void
   /**
@@ -674,6 +682,21 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       async recovery(action) {
         const error = await bridge.run.recovery(action)
         set({ actionError: error ?? undefined })
+      },
+      async connectRecovery(machine, planId) {
+        const plan = planId === undefined ? {} : { planId }
+        const port = machine.port
+        if (machine.target === 'virtual' || port === undefined) {
+          set({ connectTo: 'virtual', ...plan })
+          await get().connect()
+          return true
+        }
+        await get().scanPorts()
+        const path = matchPort(get().ports ?? [], { path: port.path, ...machine.usb })
+        if (path === undefined) return false
+        set({ connectTo: 'serial', portPath: path, baud: port.baud, ...plan })
+        await get().connect()
+        return true
       },
       setRecoveryUi: (jobId, patch) =>
         set((s) => {

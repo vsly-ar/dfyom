@@ -7,13 +7,24 @@
 // There, "Run gCode file…" and the recent files open an external gCode file, whose card and
 // "Start run" then take the run section (DF93). Run and Overrides are `InspectorGroup`s (the
 // inspectors' group header style, DF110 S6); Reset has no title, only the rule above it.
+// DF129 RC6: the Position header's menu, "The machine lost power…" while idle (Q171).
 // Doc: docs/modes/run.md#run-without-a-project-df80, #run-an-external-g-code-file-df93
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress,
 // docs/conventions/inspector-layout.md#group-header-style
-import { useId } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, EmptyState, InspectorGroup, PanelHeader, Progress } from '../../ui'
+import {
+  Icon,
+  IconButton,
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  InspectorGroup,
+  Menu,
+  PanelHeader,
+  Progress,
+} from '../../ui'
 import { useShell } from '../../shell/ShellContext'
 import { AlignmentPanel } from './AlignmentPanel'
 import { Dro } from './Dro'
@@ -35,6 +46,58 @@ const RunIcon = (
     <path data-accent="" d="M6.5 5.5v5l4-2.5z" />
   </svg>
 )
+
+/**
+ * DF129 RC6 (Q171): the Position header's menu, "The machine lost power…" while connected, homed
+ * and idle: confirmed, then the position counts as lost (home before moving). The dialog opens
+ * once the menu has closed, as the jog section's Go to (RunNavigator's JogMenu).
+ */
+function PositionMenu({
+  gate,
+  onPowerLost,
+}: {
+  gate: string | null
+  onPowerLost: () => void
+}): React.JSX.Element {
+  const r = runMessages.recovery
+  const chosen = useRef(false)
+  const [ask, setAsk] = useState(false)
+  return (
+    <>
+      <Menu
+        label={r.positionMenu}
+        align="end"
+        onCloseAutoFocus={(e) => {
+          if (!chosen.current) return
+          chosen.current = false
+          e.preventDefault()
+          setAsk(true)
+        }}
+        items={[
+          {
+            label: r.powerLostItem,
+            description: r.powerLostItemHint,
+            disabledReason: gate ?? undefined,
+            onSelect: () => {
+              chosen.current = true
+            },
+          },
+        ]}
+      >
+        <IconButton label={r.positionMenu} icon={<Icon name="more" />} />
+      </Menu>
+      <ConfirmDialog
+        open={ask}
+        onOpenChange={setAsk}
+        destructive={false}
+        title={r.powerLostTitle}
+        description={r.powerLostDescription}
+        confirmLabel={r.powerLostConfirm}
+        onConfirm={onPowerLost}
+      />
+    </>
+  )
+}
 
 /** `doc` undefined: no project (DF80). */
 export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element {
@@ -84,7 +147,19 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
 
   return (
     <>
-      <PanelHeader title={runMessages.dro.title} />
+      <PanelHeader
+        title={runMessages.dro.title}
+        actions={
+          <PositionMenu
+            gate={
+              isConnected(status) && status.homed && job === undefined && status.state === 'Idle'
+                ? null
+                : runMessages.recovery.powerLostNotNow
+            }
+            onPowerLost={() => void a.recovery('powerLost')}
+          />
+        }
+      />
       <div className={styles['panel']}>
         <Dro
           status={status}
