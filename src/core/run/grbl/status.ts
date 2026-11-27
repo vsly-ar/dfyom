@@ -288,3 +288,8 @@ export function alarmText(code: number): string {
 
 /** Alarms after which the machine position is lost or must be re-homed (`homed` becomes false). */
 export const POSITION_ALARMS: ReadonlySet<number> = new Set([1, 2, 3, 6, 7, 8, 9, 10])
+
+/** The limit switches a `Pn:` field says are pressed (`X`, `Y`, `Z`), in that order (DF134). */
+export function limitSwitches(pins: string | undefined): ('X' | 'Y' | 'Z')[] {
+  return (['X', 'Y', 'Z'] as const).filter((a) => pins?.includes(a) === true)
+}

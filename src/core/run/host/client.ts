@@ -57,6 +57,7 @@ import {
   type HostStatus,
   type JobControlAction,
   type MachineAction,
+  type SimulatedInput,
   type MainMessage,
   type TargetKind,
 } from './protocol'
@@ -467,6 +468,25 @@ export class MachineClient implements MachineService {
     return r.isErr() && r.unwrapErr().code === 'machine.connection'
       ? Ok(undefined)
       : r.map(() => undefined)
+  }
+
+  /**
+   * DF134: a limit switch (`x`/`y`/`z`) or the safety door of the virtual machine pressed or
+   * released, for practising the alarm flow. Renderer only (no command, no agent tool).
+   * Doc: docs/modes/run-machine.md#after-a-hard-limit-df134
+   */
+  async simulateInput(input: SimulatedInput, pressed: boolean): AsyncAppResult<void> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    if (this.conn.target !== 'virtual')
+      return fail('run.state', 'only the virtual machine can simulate an input', {
+        where: `${WHERE}.simulateInput`,
+      })
+    const r = await this.request({
+      type: 'machine',
+      requestId: '',
+      action: { kind: 'simulateInput', input, pressed },
+    })
+    return r.map(() => undefined)
   }
 
   alignmentStep(): AlignmentStep | undefined {

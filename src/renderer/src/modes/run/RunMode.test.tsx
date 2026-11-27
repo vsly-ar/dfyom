@@ -1210,6 +1210,67 @@ describe('Run mode', () => {
     expect(nav.queryByRole('region', { name: 'Alarm' })).toBeNull()
   })
 
+  // DF134 (dogfood): a limit switch hit while cleaning after a run; Reset (immediate) has to lead
+  // on to Home or Unlock, and a switch still pressed is named
+  it('after Reset (immediate) from a hard limit: Home recommended or Unlock; a pressed switch is named (DF134)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const nav = within(t.nav())
+    const text = 'Hard limit triggered. Machine position is likely lost.'
+    t.machine.push({ state: 'Alarm', homed: false, alarm: { code: 1, text } })
+    expect(nav.getByRole('button', { name: 'Unlock' })).toBeDisabled()
+    expect(nav.getByRole('button', { name: 'Home' })).toBeDisabled()
+    // reset done, the switch still pressed: release it first
+    t.machine.push({ state: 'Alarm', alarm: { code: 1, text, reset: true }, pins: 'X' })
+    let panel = nav.getByRole('region', { name: 'Alarm' })
+    expect(
+      within(panel).getByRole('heading', { name: 'Alarm 1: reset done, still locked' }),
+    ).toBeInTheDocument()
+    expect(within(panel).getByRole('listitem').textContent).toMatch(
+      /^The X limit switch is still pressed\. Release it, then home\./,
+    )
+    expect(within(panel).getByText('Inputs active: X limit switch')).toBeInTheDocument()
+    expect(nav.getByRole('button', { name: 'Home' })).toBeDisabled()
+    expect(nav.getByText('Release the X limit switch first.')).toBeInTheDocument()
+    expect(nav.getByRole('button', { name: 'Unlock' })).toBeEnabled()
+    await expectNoAxeViolations(t.container)
+    // released: Home (recommended, the primary) or Unlock, one line why
+    const released = { ...t.machine.status }
+    delete released.pins
+    t.machine.status = released
+    t.machine.push({ state: 'Alarm' })
+    panel = nav.getByRole('region', { name: 'Alarm' })
+    expect(within(panel).getByRole('listitem').textContent).toMatch(
+      /^Home the machine \(recommended\): a hard limit stops the motors at once/,
+    )
+    expect(within(panel).queryByText(/Inputs active/)).toBeNull()
+    expect(nav.getByRole('button', { name: 'Home' })).toBeEnabled()
+    expect(nav.getByRole('button', { name: 'Unlock' })).toBeEnabled()
+    await t.user.click(nav.getByRole('button', { name: 'Unlock' }))
+    await t.user.click(screen.getByRole('button', { name: 'Unlock' }))
+    await waitFor(() => expect(t.callsOf('run.machine.unlock')).toHaveLength(1))
+    await expectNoAxeViolations(t.container)
+  })
+
+  it('the safety door outside a run: close it, then Reset (immediate) (DF134)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const nav = within(t.nav())
+    t.machine.push({ state: 'Door:1', pins: 'D' })
+    let panel = nav.getByRole('region', { name: 'Safety door' })
+    expect(within(panel).getByRole('heading', { name: 'Safety door open' })).toBeInTheDocument()
+    expect(within(panel).getByText('Inputs active: safety door')).toBeInTheDocument()
+    const closed = { ...t.machine.status }
+    delete closed.pins
+    t.machine.status = closed
+    t.machine.push({ state: 'Door:0' })
+    panel = nav.getByRole('region', { name: 'Safety door' })
+    expect(within(panel).getByText(/^Reset \(immediate\) to continue/)).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+    t.machine.push({ state: 'Idle' })
+    expect(nav.queryByRole('region', { name: 'Safety door' })).toBeNull()
+  })
+
   it('probes Z with the touch plate after a confirmation (M4)', async () => {
     const none = await renderRun()
     await connectAndHome(none)

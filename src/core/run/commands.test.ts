@@ -1366,7 +1366,10 @@ describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, ()
   /** Opens the loopback port (UI), finalizes the plan, homes, places G54 and starts the run. */
   async function realRun(emulator: LoopbackOptions['emulator'] = {}) {
     const t = await setup({
-      serial: (settings) => ({ emulator: { settings, ...emulator }, timeScale: 'max' }),
+      serial: (settings) => ({
+        emulator: { ...emulator, settings: { ...settings, ...emulator.settings } },
+        timeScale: 'max',
+      }),
     })
     expectOk(
       await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
@@ -1448,6 +1451,96 @@ describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, ()
       jobId: string
     }
     expectErrCode(await r.t.d.job(jobId).unwrap().result, 'run.state')
+  })
+
+  // DF134 (dogfood): a limit switch hit while cleaning after a completed run; Reset (immediate)
+  // did nothing visible and Unlock stayed disabled until a reconnect
+  it('a hard limit after a completed run: reset clears the critical alarm, unlock or home, G54 kept, the record stays done', async () => {
+    const r = await realRun({ settings: { 21: 1 } })
+    const { t } = r
+    await r.advance(() => false)
+    expectOk(await r.result)
+    expect(t.client.runRecord()?.state).toBe('done')
+    const workZero = t.status().workZero
+    // the switch pressed and let go while idle: ALARM:1, critical (GRBL answers nothing)
+    r.port().limitPin('x', true)
+    expect(await waitFor(() => t.status().alarm?.code === 1)).toBe(true)
+    expect(t.status()).toMatchObject({ homed: false, alarm: { code: 1 } })
+    expect(t.status().alarm?.reset).toBeUndefined()
+    expectErrCode(await t.run('run.machine.unlock', {}, ui), 'run.state')
+    r.port().limitPin('x', false)
+    // Reset (immediate): GRBL restarts locked ('$H'|'$X' to unlock); the alarm is no longer critical
+    expectOk(await t.run('run.machine.reset', {}, ui))
+    expect(await waitFor(() => t.status().alarm?.reset === true)).toBe(true)
+    expect(await waitFor(() => t.status().state === 'Alarm')).toBe(true)
+    expect(t.status()).toMatchObject({ homed: false, alarm: { code: 1, reset: true } })
+    expect(t.status().pins).toBeUndefined()
+    // overrides are no longer refused, unlock works and keeps the work zero
+    expectOk(await t.run('run.override.set', { feed: 'reset' }, ui))
+    expectOk(await t.run('run.machine.unlock', {}, ui))
+    expect(await waitFor(() => t.status().state === 'Idle')).toBe(true)
+    expect(t.status().alarm).toBeUndefined()
+    expect(t.status().workZero).toEqual(workZero)
+    // homing (recommended) keeps it too
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    expect(t.status()).toMatchObject({ homed: true, workZero })
+    // the completed run's record is not an interruption
+    expect(t.client.runRecord()?.state).toBe('done')
+    expect(t.status().lastRun?.interruption).toBeUndefined()
+  })
+
+  it('a hard limit with the switch still pressed after the reset: Pn shows it, homing waits for its release', async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings: { ...settings, 21: 1 } }, timeScale: 'max' }),
+    })
+    expectOk(
+      await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
+    )
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    const port = t.serial!.opened[0]!
+    port.limitPin('y', true)
+    expect(await waitFor(() => t.status().alarm?.code === 1)).toBe(true)
+    expectOk(await t.run('run.machine.reset', {}, ui))
+    // GRBL checks the limits at init: locked, `[MSG:Check Limits]`, the pin in every report
+    expect(await waitFor(() => t.status().pins === 'Y')).toBe(true)
+    expect(t.status()).toMatchObject({ state: 'Alarm', alarm: { code: 1, reset: true } })
+    // homing on a pressed switch could take the wrong switch for home: refused with the switch named
+    const blocked = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    const refused = expectErrCode(await t.d.job(blocked.jobId).unwrap().result, 'run.state')
+    expect(refused.message).toContain('the Y limit switch is still pressed')
+    expect(refused.issues[0]?.rule).toBe('limitPressed')
+    port.limitPin('y', false)
+    expect(await waitFor(() => t.status().pins === undefined)).toBe(true)
+    const again = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(again.jobId).unwrap().result)
+    expect(t.status()).toMatchObject({ homed: true, state: 'Idle' })
+    expect(t.status().alarm).toBeUndefined()
+  })
+
+  it('the virtual machine simulates a limit switch and the door (DF134); a real one refuses', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings }, timeScale: 'max' }) })
+    expectOk(await t.open())
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    // the virtual machine has hard limits on ($21=1)
+    expectOk(await t.client.simulateInput('z', true))
+    expect(await waitFor(() => t.status().alarm?.code === 1)).toBe(true)
+    expectOk(await t.client.simulateInput('z', false))
+    expectOk(await t.run('run.machine.reset', {}, ui))
+    expect(await waitFor(() => t.status().alarm?.reset === true)).toBe(true)
+    expectOk(await t.run('run.machine.unlock', {}, ui))
+    expect(await waitFor(() => t.status().state === 'Idle')).toBe(true)
+    expectOk(await t.client.simulateInput('door', true))
+    expect(await waitFor(() => t.status().state === 'Door:1' && t.status().pins === 'D')).toBe(true)
+    expectOk(await t.client.simulateInput('door', false))
+    expect(await waitFor(() => t.status().state === 'Door:0')).toBe(true)
+    expectOk(await t.run('run.connection.close', {}, ui))
+    expectOk(
+      await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
+    )
+    expectErrCode(await t.client.simulateInput('x', true), 'run.state')
   })
 
   it('a probe miss at a tool change keeps the run waiting: unlock, probe again, continue', async () => {

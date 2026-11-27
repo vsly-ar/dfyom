@@ -250,6 +250,11 @@ export interface SenderStatus {
   readonly overrides?: Overrides
   /** `Ln:`: the `N` number executing (a controller built with line numbers only, DF129). */
   readonly line?: number
+  /**
+   * `Pn:` of this report: the input pins active now (`XYZ` limits, `P` probe, `D` door, `H` hold,
+   * `R` reset, `S` cycle start); absent when none (DF134, docs/architecture/grbl.md#status-reports).
+   */
+  readonly pins?: string
 }
 
 export type SenderEvent =
@@ -1069,6 +1074,7 @@ export class GrblSender {
       ...(report.buffer === undefined ? {} : { buffer: report.buffer }),
       ...(this.overrides === undefined ? {} : { overrides: this.overrides }),
       ...(report.line === undefined ? {} : { line: report.line }),
+      ...(report.pins === undefined || report.pins === '' ? {} : { pins: report.pins }),
     }
     for (const l of [...this.statusListeners]) l(this.latest)
     if (this.lostAcknowledgement(report)) return

@@ -33,7 +33,7 @@ import {
   type ToolChangeInfo,
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
-import { alarmText, POSITION_ALARMS } from '../grbl/status'
+import { alarmText, limitSwitches, POSITION_ALARMS } from '../grbl/status'
 import { overrideLimits, overrideSteps } from '../override'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
@@ -113,7 +113,7 @@ interface Connection {
    * (docs/modes/z-reference.md#dfyom-run).
    */
   zeroLevel: number
-  alarm?: { readonly code: number; readonly text: string } | undefined
+  alarm?: { readonly code: number; readonly text: string; readonly reset?: true } | undefined
   lastMessage?: string | undefined
   job?: Job | undefined
   /** From the controller's `$$` at connect; undefined when it reports no travel. */
@@ -133,6 +133,8 @@ interface Connection {
   readonly inches: boolean
   /** DF129: the virtual machine's cable pulled ("Simulate a lost connection"); virtual only. */
   readonly unplug?: (() => void) | undefined
+  /** DF134: a hook applied to the virtual machine's emulator at the current time; virtual only. */
+  readonly controllerSide?: ((act: (e: GrblEmulator) => void) => void) | undefined
   /** gCode that restores the modal state a failed probe left (sent after `$X`/`$H`, M4). */
   restoreModes?: readonly string[] | undefined
 }
@@ -282,6 +284,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
       ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
+      ...(s?.pins === undefined ? {} : { pins: s.pins }),
       ...(conn.laserMode ? { laserMode: true as const } : {}),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
       ...(conn.envelope === undefined
@@ -361,7 +364,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   }
 
   async function connectVirtual(target: VirtualTarget): Promise<AppResult<ConnectedInfo>> {
-    const settings: Record<number, number> = {}
+    // DF134: hard limits on ($21=1) as on a router's controller, so a simulated limit switch alarms
+    const settings: Record<number, number> = { 21: 1 }
     for (const [k, v] of Object.entries(target.settings)) settings[Number(k)] = v
     const created = GrblEmulator.create({
       settings,
@@ -386,6 +390,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       undefined,
       emu,
       () => transport.unplug('simulated'),
+      (act) => transport.controllerSide(act),
     )
     if (c.isErr() || target.prepare === undefined || conn === undefined) return c
     const prepared = await prepare(conn, target.prepare.workZero)
@@ -404,6 +409,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     port: { path: string; baud: number } | undefined,
     emulator?: GrblEmulator,
     unplug?: () => void,
+    controllerSide?: (act: (e: GrblEmulator) => void) => void,
   ): Promise<AppResult<ConnectedInfo>> {
     const info = await sender.connect()
     connecting = false
@@ -426,6 +432,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       emulator,
       inches: info.unwrap().settings['13'] === 1,
       unplug,
+      controllerSide,
     }
     conn = c
     lastPosted = undefined
@@ -543,6 +550,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
 
   const machineState = (c: Connection) => c.sender.status?.state ?? 'Unknown'
 
+  /** ALARM:1/2 not yet followed by a reset: GRBL answers nothing (docs/modes/run-v0.1.md). */
+  const inCriticalAlarm = (c: Connection) =>
+    c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2) && c.alarm.reset !== true
+
   async function machine(action: MachineAction): Promise<AppResult<unknown>> {
     const c = conn
     if (c === undefined) return notConnected()
@@ -554,6 +565,21 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         if (c.job !== undefined) return stateError('cannot home during a run', state)
         if (state !== 'Idle' && state !== 'Alarm')
           return stateError(`cannot home in state ${state}`, state)
+        {
+          // DF134: homing on a pressed limit switch takes it for home (or, wired in parallel with
+          // the axis's other end, the wrong end): release it first, or unlock and jog off it
+          const pressed = limitSwitches(c.sender.status?.pins)
+          if (pressed.length > 0)
+            return fail(
+              'run.state',
+              `the ${pressed.join(', ')} limit switch${pressed.length > 1 ? 'es are' : ' is'} still pressed: release it first, or unlock and jog the axis off it`,
+              {
+                where: 'machineHost.machine',
+                data: { state, pins: c.sender.status?.pins ?? '' },
+                issues: [{ path: [], rule: 'limitPressed', message: 'release the limit switch' }],
+              },
+            )
+        }
         return home(c)
       case 'unlock': {
         // at a tool-change wait only a probe alarm can be pending (run-machine.md#probing-and-re-zero-m4)
@@ -628,6 +654,19 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         // the sender reports the closed port: `connectionLost` follows, as for a real cable
         c.unplug()
         return Ok(undefined)
+      case 'simulateInput': {
+        if (c.controllerSide === undefined)
+          return fail('run.state', 'only the virtual machine can simulate an input', {
+            where: 'machineHost.machine',
+            data: { state },
+          })
+        const { input, pressed } = action
+        c.controllerSide((e) =>
+          input === 'door' ? e.setDoorPin(pressed) : e.setLimitPin(input, pressed),
+        )
+        status.now()
+        return Ok(undefined)
+      }
       case 'forgetHoming':
         if (jobBusy) return stateError('not while a run is going', state)
         c.homed = false
@@ -841,7 +880,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           },
         ],
       })
-    if (c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2))
+    if (inCriticalAlarm(c))
       return stateError('the controller is in a critical alarm: reset it first', machineState(c))
     const sent = c.sender.realtime(byte)
     if (sent.isErr()) return sent
@@ -872,7 +911,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           },
         ],
       })
-    if (c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2))
+    if (inCriticalAlarm(c))
       return stateError('the controller is in a critical alarm: reset it first', machineState(c))
     for (let round = 0; round < OVERRIDE_ROUNDS; round++) {
       const steps = overrideSteps(c.sender.status?.overrides?.[a.which], a.percent, range, limits)
@@ -1174,6 +1213,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         break
       case 'reset':
         c.jogEnd = undefined
+        // DF134: a reset ends a critical alarm (GRBL then waits locked for `$H` or `$X`); the
+        // alarm stays shown until one of them, with the reset noted
+        if (c.alarm !== undefined && c.alarm.reset !== true) c.alarm = { ...c.alarm, reset: true }
         // a controller that restarted on its own into Alarm (power glitch, USB reset) lost its
         // position: home again before a run; a banner followed by Idle kept it (DF87 follow-up,
         // docs/modes/run-machine.md#real-machine-run-rules)

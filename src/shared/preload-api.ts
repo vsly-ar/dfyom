@@ -12,6 +12,7 @@ import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunProgram, RunStatus } from '../core/run/service'
 import type { RunJournal } from '../core/run/journal'
+import type { SimulatedInput } from '../core/run/host/protocol'
 import type { LibraryTabKind } from '../core/library/item'
 import type { LibraryChange } from '../core/library/library'
 import type { UnitSystem } from '../core/project/document'
@@ -86,6 +87,12 @@ export const IPC = {
    * null. Renderer only (RC5's recovery panel; agents read `run.status.get`).
    */
   runRecord: 'dfyom:run.record',
+  /**
+   * Renderer → main (invoke): DF134 a virtual machine input (`x`/`y`/`z` limit switch, `door`)
+   * pressed or released; null or the refusal. Renderer only (practice and end-to-end tests).
+   * Doc: docs/modes/run-machine.md#after-a-hard-limit-df134
+   */
+  runSimulateInput: 'dfyom:run.simulateInput',
   /**
    * Renderer → main (invoke): DF129 RC5 the recovery panel's actions (`RunRecoveryAction`): null
    * when done, else the refusal (`AppErrorData`). Renderer only.
@@ -498,6 +505,12 @@ export interface PreloadApi {
      * Q171); null when done, else the refusal (docs/modes/run-recovery.md#implementation-rc5).
      */
     recovery(action: RunRecoveryAction): Promise<AppErrorData | null>
+    /**
+     * DF134: the virtual machine's limit switch (`x`/`y`/`z`) or safety door pressed or released;
+     * null when done, else the refusal (a real machine). Renderer only; no UI yet (practice and
+     * end-to-end tests, docs/modes/run-machine.md#after-a-hard-limit-df134).
+     */
+    simulateInput(input: SimulatedInput, pressed: boolean): Promise<AppErrorData | null>
     /**
      * DF129 RC6: main asks this window (the first at launch) to show the recovery panel of a run
      * the last session left interrupted; queued until subscribed. Returns the unsubscribe.

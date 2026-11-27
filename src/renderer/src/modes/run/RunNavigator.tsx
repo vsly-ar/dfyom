@@ -28,11 +28,18 @@ import {
   Select,
   StatusChip,
 } from '../../ui'
-import { AlarmPanel, LostConnectionWarning, ReconnectStatus } from './AlarmPanel'
+import { AlarmPanel, DoorPanel, LostConnectionWarning, ReconnectStatus } from './AlarmPanel'
 import { JogPad, useJogControls, useMachineJog } from './JogPad'
 import { planLabel } from '../plan/model'
 import { useLibraryItems } from '../plan/usePlan'
-import { actionText, goToOpenGate, isConnected, needsHoming, runGates } from './machine-state'
+import {
+  actionText,
+  goToOpenGate,
+  isConnected,
+  isResetAlarm,
+  needsHoming,
+  runGates,
+} from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
@@ -403,7 +410,10 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           <Button
             size="lg"
             // the next step while GRBL's start-up lock holds (DF46): one primary in the panel
-            {...(needsHoming(status) ? { variant: 'primary' as const } : {})}
+            // DF134: also after a reset from a hard or soft limit (Home recommended over Unlock)
+            {...(needsHoming(status) || isResetAlarm(status)
+              ? { variant: 'primary' as const }
+              : {})}
             icon={<Icon name="home" />}
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}
@@ -497,6 +507,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
 
       {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
       <AlarmPanel status={status} />
+      <DoorPanel status={status} />
       <LostConnectionWarning status={status} />
       <ReconnectStatus status={status} onStop={() => void a.reconnect('cancel')} />
       {actionError ? (

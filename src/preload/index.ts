@@ -113,6 +113,8 @@ const api: PreloadApi = {
     record: () => ipcRenderer.invoke(IPC.runRecord) as Promise<RunJournal | null>,
     recovery: (action) =>
       ipcRenderer.invoke(IPC.runRecovery, action) as Promise<AppErrorData | null>,
+    simulateInput: (input, pressed) =>
+      ipcRenderer.invoke(IPC.runSimulateInput, input, pressed) as Promise<AppErrorData | null>,
     onShowRecovery(listener) {
       showRecovery.listener = listener
       if (showRecovery.queued) {

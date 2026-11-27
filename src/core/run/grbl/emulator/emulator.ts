@@ -197,6 +197,8 @@ export class GrblEmulator {
   /** Door pin open (test hook); `0x84` alone has no pin, so the door counts as closed. */
   private doorAjar = false
   private doorAfterJog = false
+  /** Limit pins held closed (DF134 test hook), in `Pn:` order. */
+  private readonly limitPins = new Set<'X' | 'Y' | 'Z'>()
   /** Touch plate top (MPos Z); undefined = none. */
   private plate: number | undefined
   private probing: Probing | undefined
@@ -378,6 +380,23 @@ export class GrblEmulator {
     this.criticalAlarm(1)
     this.sample()
     this.noteState()
+  }
+
+  /**
+   * Fault hook (DF134): a limit switch is pressed (`true`) or released. GRBL's limit pins raise an
+   * interrupt on every change: with hard limits on (`$21=1`) a change outside Alarm (and outside a
+   * homing cycle, which uses the switches) is a hard limit as `triggerHardLimit()`; in Alarm GRBL
+   * ignores it, so a switch released after the alarm (or before the reset) raises nothing. A
+   * pressed pin shows in status reports as `Pn:X`/`Y`/`Z`
+   * (docs/architecture/grbl.md#fault-injection).
+   */
+  setLimitPin(axis: 'x' | 'y' | 'z', pressed: boolean): void {
+    const pin = axis.toUpperCase() as 'X' | 'Y' | 'Z'
+    if (this.limitPins.has(pin) === pressed) return
+    if (pressed) this.limitPins.add(pin)
+    else this.limitPins.delete(pin)
+    if (this.settings.get(21) && this.state !== 'Alarm' && this.state !== 'Home')
+      this.triggerHardLimit()
   }
 
   /**
@@ -1059,9 +1078,14 @@ export class GrblEmulator {
   }
 
   private banner(): void {
+    // GRBL 1.1 protocol_main_loop() with CHECK_LIMITS_AT_INIT (default): a limit pin still
+    // pressed with hard limits on locks the controller (DF134)
+    const checkLimits = this.settings.get(21) !== 0 && this.limitPins.size > 0
+    if (checkLimits) this.state = 'Alarm'
     if (this.silent) return
     this.output.push('\r\n')
     this.emit(BANNER)
+    if (checkLimits) this.emit('[MSG:Check Limits]')
     if (this.state === 'Alarm') this.emit("[MSG:'$H'|'$X' to unlock]")
   }
 
@@ -1096,6 +1120,8 @@ export class GrblEmulator {
         this.state = 'Check'
         this.emit('[MSG:Enabled]')
       } else if (this.state === 'Alarm') {
+        // GRBL refuses to unlock while the safety door is open (STATUS_CHECK_DOOR)
+        if (this.doorAjar) return respond(STATUS.checkDoor)
         this.emit('[MSG:Caution: Unlocked]')
         this.state = 'Idle'
       }
@@ -1110,6 +1136,7 @@ export class GrblEmulator {
     if (c === 'H') {
       if (!this.settings.get(22)) return respond(STATUS.settingDisabled)
       if (text.length !== 2) return respond(STATUS.invalidStatement)
+      if (this.doorAjar) return respond(STATUS.checkDoor)
       return this.home(line)
     }
     if (c === 'I') {
@@ -1260,6 +1287,9 @@ export class GrblEmulator {
     }
     if (mask & 2) parts.push(`Bf:${this.planner.free},${RX_BUFFER_SIZE - this.rx.length}`)
     parts.push(`FS:${this.rateText(this.speed() * 60)},${fixed(this.spindleRpm(), 0)}`)
+    // GRBL 1.1 report_realtime_status(): `Pn:` after `FS` (probe, limits, then the control pins)
+    const pins = `${[...this.limitPins].sort().join('')}${this.doorAjar ? 'D' : ''}`
+    if (pins !== '') parts.push(`Pn:${pins}`)
     if (this.reportWco > 0) this.reportWco--
     else {
       this.reportWco = busy ? 29 : 9
