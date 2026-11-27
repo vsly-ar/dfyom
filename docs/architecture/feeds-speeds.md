@@ -310,7 +310,7 @@ Only programs whose aluminium feeds come from the calculator change; the shipped
 
 ## Recommended presets on the plan machine (hardening DF139)
 
-Status: draft (design only; [Q211–Q215](#questions-for-the-user-df139) open) · Plan: [hardening DF139](../plans/hardening.md) · Finding: [X3 F5](../research/2026-11-27-x3-agent-rerun.md#f5-s3-feeds-recommended-presets-trip-their-own-checks)
+Status: accepted by delegation D87 ([Q211–Q215](#questions-for-the-user-df139) take their recommendations) · Plan: [hardening DF139](../plans/hardening.md) · Finding: [X3 F5](../research/2026-11-27-x3-agent-rerun.md#f5-s3-feeds-recommended-presets-trip-their-own-checks)
 
 **Problem.** A [recommended preset](library.md#recommended-presets) stores the calculator's values for **no particular machine** (lowest rigidity, no spindle, feed or power limit), because a library tool serves every machine. In a plan, plan mode's machine checks and the [final-value check](#final-value-check) then judge those values against the plan machine, and the plan's own recommendation warns: in the X3 rerun every hardwood operation on a 500 W spindle had `feeds.powerExceeded` (0.34–0.71 kW against 0.3 kW available), and the chamfer mill's plunge of 2,286 mm/min tripped the `plan.machine` Z max (1,500). A plan built only from the app's recommendations is never clean, and an agent cannot tell this noise from real warnings. The user's first aluminium cut ([DF131](#hobby-metal-cutting-hardening-df131)) showed why the answer must lower values and never raise them: on a weak router, too much is what breaks the cut.
 
