@@ -4,9 +4,12 @@
 // pocket (its tool's run) while the pocket's row carries the "rest" chip; the program exports.
 // With DFYOM_R2_DIR set it also captures light and dark renders of the open accordion and the
 // plan list there (review captures, not asserted). R4: the same for a through outside profile
-// (its floor margin is the Skin; captures with DFYOM_R4_DIR). Windows stay hidden (app.fixture.ts).
+// (its floor margin is the Skin; captures with DFYOM_R4_DIR). R5: Make Clones… on a roughed
+// pocket; both instances rough (the roughings in one Ø 8 run, both pockets with the rest chip).
+// Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2,
-// docs/modes/roughing.md#implementation-r4, docs/conventions/ui.md
+// docs/modes/roughing.md#implementation-r4, docs/modes/roughing.md#implementation-r5,
+// docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -282,5 +285,108 @@ test('roughing R4: a through outside profile roughs above its skin, rest chip, e
   expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
   expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
   expect(program.indexOf('(Profile 1 - roughing)')).toBeLessThan(program.indexOf('(Profile 1)'))
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('roughing R5: Make Clones on a roughed pocket, both instances rough, export', async ({
+  dfyom,
+}) => {
+  test.setTimeout(180_000)
+  await dfyom.app.evaluate(({ dialog }, dir) => {
+    dialog.showSaveDialog = ((...args: unknown[]) => {
+      const o = (args.at(-1) ?? {}) as { defaultPath?: string }
+      const name = (o.defaultPath ?? 'out.nc').split(/[\\/]/).at(-1)!
+      return Promise.resolve({ canceled: false, filePath: `${dir}/${name}` })
+    }) as typeof dialog.showSaveDialog
+  }, dfyom.dataDir)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  for (const d of [3, 8]) {
+    const added = await page.evaluate(
+      ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+      ['library.tool.add', { values: flat(d) }] as const,
+    )
+    expect(added.ok, JSON.stringify(added)).toBe(true)
+  }
+
+  // ── a 160 × 72 × 12 part with a 30 × 30 pocket, 6 deep, R 1.5 corners, roughing on ────────
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Roughing clones')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '160')
+  await setField(setup, 'Width (Y)', '72')
+  await setField(setup, 'Thickness (Z)', '12')
+  await stock.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
+  await navigator.getByRole('button', { name: 'Add pocket' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  await setField(inspector, 'Length (X)', '30')
+  await setField(inspector, 'Width (Y)', '30')
+  await setField(inspector, 'Depth', '6')
+  await setField(inspector, 'Corner radius', '1.5')
+  await inspector.getByRole('button', { name: /^Roughing/ }).click()
+  await inspector.getByRole('switch', { name: 'Roughing' }).click()
+  await expect(inspector.getByRole('switch', { name: 'Roughing' })).toBeChecked()
+
+  // ── Make Clones… from the roughed pocket's row menu (hidden until R5) ─────────────────────
+  const pocketRow = navigator.getByRole('button', { name: /^Pocket 1, with roughing/ })
+  await pocketRow.click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: 'Actions for Pocket 1' })).toBeVisible()
+  await page.getByRole('menuitem', { name: 'Make Clones…' }).click()
+  await expect(inspector.getByText('New Clones')).toBeVisible()
+  await expect(inspector.getByText(/instances? ·/)).toHaveText(
+    '1 + 1 clone = 2 instances · 0 skipped',
+  )
+  await inspector.getByRole('button', { name: 'Make clones' }).click()
+  await expect(navigator.getByRole('button', { name: /^Clones 1, ×2/ })).toBeVisible()
+  // the instance repeats the roughing (read-only, in the pocket's group)
+  await navigator.getByRole('button', { name: /^Clones 1, ×2/ }).press('ArrowRight')
+  await navigator.getByRole('button', { name: /^\d+ clones?$/ }).click()
+  await navigator.getByRole('button', { name: 'Clone 2', exact: true }).click()
+  await expect(inspector.getByTestId('instance-roughing')).toContainText('Roughing: ')
+
+  // ── Plan: both roughings (one Ø 8 run), then both pockets on their rest ───────────────────
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const start = page.getByRole('dialog', { name: 'Plan the part' })
+  await start.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
+  await setField(newMachine, 'Travel Z', '100')
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
+  await start.getByRole('button', { name: 'Create plan' }).click()
+  await expect(start).toBeHidden()
+  const list = navigator
+    .getByRole('list', { name: 'Setups in machining order' })
+    .getByRole('list', { name: 'Plan operations in machining order' })
+  const rows = list.getByRole('button', { name: /^Pocket 1/ })
+  await expect(rows).toHaveCount(4)
+  await expect(rows.nth(0)).toContainText('Pocket 1 · roughing')
+  await expect(rows.nth(1)).toContainText('Pocket 1 · roughing · 2')
+  await expect(rows.nth(2).getByTitle('Cuts only what Pocket 1 · roughing left')).toBeVisible()
+  await expect(rows.nth(3).getByTitle('Cuts only what Pocket 1 · roughing · 2 left')).toBeVisible()
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await navigator
+    .getByRole('button', { name: /^Export (.* )?gCode…$/ })
+    .first()
+    .click()
+  await expect(page.getByRole('dialog', { name: 'gCode exported' })).toBeVisible({
+    timeout: 30_000,
+  })
+  const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
+  const program = readFileSync(join(dfyom.dataDir, file), 'utf8')
+  // two tools, one change: the Ø 8 roughs both pockets, the Ø 3 cuts both rests
+  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
+  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
+  expect(program).not.toContain('(Tool 3:')
+  expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeGreaterThan(-1)
+  expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeLessThan(program.indexOf('(Pocket 1)'))
   expect(dfyom.rendererErrors).toEqual([])
 })

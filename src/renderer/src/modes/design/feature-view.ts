@@ -577,7 +577,15 @@ export function clonesSource(
           (n) => n.id === id || (n.kind === 'feature' && n.ops.some((o) => o.id === id)),
         ),
     )
-  const op = part.dto.operations.find((o) => o.id === selected)
+  const picked = part.dto.operations.find((o) => o.id === selected)
+  // DF122 R5: a roughing operation's row clones its owner (the roughing comes with it)
+  const op =
+    picked !== undefined &&
+    (picked.kind === 'pocket' || picked.kind === 'profile') &&
+    picked.roughingOf !== undefined &&
+    picked.featureId === undefined
+      ? (part.dto.operations.find((o) => o.id === picked.roughingOf) ?? picked)
+      : picked
   const featureId = op !== undefined ? op.featureId : selected
   const feature = part.dto.features?.find((f) => f.id === featureId)
   if (feature !== undefined) {

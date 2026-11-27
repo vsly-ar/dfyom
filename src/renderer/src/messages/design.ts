@@ -363,6 +363,8 @@ export const designMessages = {
       duplicateNote: 'This position is on an earlier instance: nothing is cut here.',
       cloneOf: 'Clone of',
       followsTool: (name: string) => `Follows ${name}’s tool.`,
+      /** DF122 R5: an instance's roughing, shown in its owner's group (roughing.md § Implementation (R5)). */
+      instanceRoughing: (summary: string) => `Roughing: ${summary}`,
       instanceGroup: (op: string, n: number) => `${op} · ${n}`,
       readOnly: (clones: string) => `Part of ${clones}: change it in the source or the Clones.`,
       instanceRow: (n: number, state: 'clone' | 'skipped' | 'duplicate') =>

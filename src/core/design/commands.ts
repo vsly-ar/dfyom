@@ -1314,27 +1314,6 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         if (owned.isErr()) return owned
       }
       const l = loaded.unwrap()
-      // DF122: roughing on a Clones source comes with R5 (the source's span stays contiguous)
-      const roughingArg = (args as { roughing?: unknown }).roughing
-      if (roughingArg !== undefined && roughingArg !== null && roughingArg !== false) {
-        const outer = nestingFeature(l.part.operations, l.features, args.operationId)
-        if (outer !== undefined)
-          return fail(
-            'design.featureOwned',
-            `${args.operationId} is nested in ${outer.feature.name}; roughing a Clones source comes later`,
-            {
-              issues: [
-                {
-                  path: ['roughing'],
-                  rule: 'roughingNested',
-                  message: `nested in ${outer.feature.name}`,
-                  params: { featureId: outer.feature.id },
-                },
-              ],
-              where,
-            },
-          )
-      }
       const adjusted: Adjusted[] = []
       const settled = applyUpdate(
         spec,

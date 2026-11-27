@@ -316,3 +316,56 @@ describe('roughing on profiles in the Design UI (DF122 R4)', () => {
     expect(within(insp()).queryByRole('button', { name: /^Roughing/ })).toBeNull()
   }, 30_000) // a full App render with several edits; slow under the check-under-load criterion
 })
+
+// DF122 R5: Make Clones… is offered again on a roughed pocket (its roughing comes with it), the
+// Clones' Source nests the roughing row under its pocket, an instance shows its roughing
+describe('roughing repeats in Clones (DF122 R5)', () => {
+  it('Make Clones on a roughed pocket: both rough; the source nests its roughing; the instance shows it', async () => {
+    const { user, part } = await renderPart(async (d, id) => {
+      await run(d, 'design.pocket.add', {
+        partId: id,
+        shape: { kind: 'rectangle', center: ['20', '30'], length: '24', width: '20' },
+        depth: '4',
+        roughing: true,
+      })
+      await run(d, 'design.operation.tool.set', {
+        partId: id,
+        operationId: 'pocket1_roughing',
+        tool: flat('8'),
+      })
+    })
+    // the roughing row offers Make Clones… of its owner as well; here: the pocket's row
+    const row = await within(nav()).findByRole('button', { name: /^Pocket 1, with roughing/ })
+    await user.pointer({ keys: '[MouseRight]', target: row })
+    const menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Make Clones…' }))
+    // the draft's Source lists the pocket only: its roughing comes with it
+    await within(insp()).findByRole('button', { name: 'Make clones' })
+    expect(within(insp()).queryByText('Pocket 1 · roughing')).toBeNull()
+    await user.click(within(insp()).getByRole('button', { name: 'Make clones' }))
+    await waitFor(() =>
+      expect(part().operations.map((o) => o.id)).toEqual([
+        'pocket1_roughing',
+        'pocket1',
+        'clones1_2_pocket1_roughing',
+        'clones1_2_pocket1',
+      ]),
+    )
+    // the Clones' Source: the pocket row with its roughing nested
+    const clones = await within(nav()).findByRole('button', { name: /^Clones 1, ×/ })
+    clones.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(
+      await within(nav()).findByRole('button', { name: /^Pocket 1, with roughing/ }),
+    ).toBeInTheDocument()
+    // an instance: its roughing in the pocket's group (the source roughing's tool)
+    await user.click(within(nav()).getByRole('button', { name: /^\d+ clones?$/ }))
+    await user.click(within(nav()).getByRole('button', { name: 'Clone 2' }))
+    expect(await within(insp()).findByText('Pocket 1 · 2')).toBeInTheDocument()
+    expect(within(insp()).queryByText('Pocket 1 · roughing · 2')).toBeNull()
+    expect(within(insp()).getByTestId('instance-roughing')).toHaveTextContent(
+      'Roughing: Ø 8 mm · walls auto · floor 0',
+    )
+    await expectNoAxeViolations()
+  }, 30_000) // a full App render with several edits; slow under the check-under-load criterion
+})
