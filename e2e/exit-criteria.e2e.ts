@@ -252,7 +252,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   const gcode = readFileSync(files.gcode, 'utf8')
   const lineCount = gcode.trimEnd().split('\n').length
   await expect(exported.getByText(`${lineCount} lines`)).toBeVisible()
-  expect(gcode).toMatch(/\(DFYOM TOOL CHANGE \d+: Drill 6, 6 mm drill\)/)
+  expect(gcode).toMatch(/\(DFYOM TOOL CHANGE \d+: Drill 6, 6 mm drill, min stickout [\d.]+ mm\)/)
   await exported.getByRole('button', { name: 'Close' }).click()
   await expect(exported).toBeHidden()
 

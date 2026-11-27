@@ -181,8 +181,8 @@ test('roughing: turn it on for a pocket, see the pass in the Plan list, export',
   const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
   const program = readFileSync(join(dfyom.dataDir, file), 'utf8')
   // the roughing's Ø 8 first, then the pocket's Ø 3 for the rest
-  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
-  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
+  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm, min stickout ')
+  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm, min stickout ')
   expect(program.indexOf('(Pocket 1 - roughing)')).toBeLessThan(program.indexOf('(Pocket 1)'))
   expect(dfyom.rendererErrors).toEqual([])
 })
@@ -282,8 +282,8 @@ test('roughing R4: a through outside profile roughs above its skin, rest chip, e
   })
   const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
   const program = readFileSync(join(dfyom.dataDir, file), 'utf8')
-  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
-  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
+  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm, min stickout ')
+  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm, min stickout ')
   expect(program.indexOf('(Profile 1 - roughing)')).toBeLessThan(program.indexOf('(Profile 1)'))
   expect(dfyom.rendererErrors).toEqual([])
 })
@@ -383,8 +383,8 @@ test('roughing R5: Make Clones on a roughed pocket, both instances rough, export
   const file = readdirSync(dfyom.dataDir).find((f) => f.endsWith('.nc'))!
   const program = readFileSync(join(dfyom.dataDir, file), 'utf8')
   // two tools, one change: the Ø 8 roughs both pockets, the Ø 3 cuts both rests
-  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm)')
-  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm)')
+  expect(program).toContain('(Tool 1: Flat 8, dia 8 mm, min stickout ')
+  expect(program).toContain('(Tool 2: Flat 3, dia 3 mm, min stickout ')
   expect(program).not.toContain('(Tool 3:')
   expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeGreaterThan(-1)
   expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeLessThan(program.indexOf('(Pocket 1)'))
