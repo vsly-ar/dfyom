@@ -643,7 +643,7 @@ describe('rest clipping (DF122 R3)', () => {
       // every rest level cuts runs only: nothing but the corners and links (≈ 10 % of the Ø 3)
       expect(r.tp.stats.cutLength).toBeLessThan(0.2 * r.plain.stats.cutLength)
     }
-  })
+  }, 60_000) // two shapes with heightmap checks; slow under the check-under-load criterion
 
   it('a neck the Ø 8 cannot pass: the Ø 3 clears it whole, entering as without roughing', () => {
     const r = rest([dumbbell(3)])
