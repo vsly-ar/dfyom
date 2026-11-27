@@ -452,6 +452,20 @@ describe('plan.workholding.set', () => {
       items: [{ id: 'wh4', kind: 'toeClamp', edge: 'uMin' }],
     })) as { items: { summary: string }[] }
     expect(moved.items[0]!.summary).toBe('left Y30 grip 10 top Z20')
+    // DF138 F3 (X3): an item with an id needs no kind; only the given parameters change
+    const along = (await s.run('plan.workholding.set', {
+      planId,
+      setupId,
+      items: [{ id: 'wh4', at: '15' }],
+    })) as { items: { summary: string }[] }
+    expect(along.items[0]!.summary).toBe('left Y15 grip 10 top Z20')
+    const noKind = await s.failWith(
+      'plan.workholding.set',
+      { planId, setupId, items: [{ at: '15' }] },
+      'input.malformed',
+    )
+    expect(noKind.issues[0]).toMatchObject({ path: ['items', 0, 'kind'], rule: 'required' })
+    expect(noKind.issues[0]!.message).toContain('a new item needs kind (toeClamp, vise')
   })
 
   it('refuses unknown ids, parameters of another kind, both items and copyFrom, and invariants', async () => {

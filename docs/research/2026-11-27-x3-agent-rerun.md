@@ -91,11 +91,15 @@ Severity follows [hardening.md Q54](../plans/hardening.md#questions-for-the-user
 
 ### F1 (S2, workholding): `auto: "toeClamps"` ignores the tool holder
 
+**Fixed in hardening DF138** (2026-11-27): the automatic placement keeps the nut and the body clear at each operation's stickout; when only the holder blocks, the refusal names the stickout per operation that makes room, or that the tool is too short ([workholding.md W6-J](../modes/workholding.md#automatic-arrangement-w6)).
+
 - **Evidence:** on Top, `auto` placed four clamps "clear of the generated toolpaths" (X42, X208, front and back). The same result listed 4 `plan.workholding.collision` errors, rule `holder`: the ER11 nut hits every clamp during the outline's deep passes.
 - **Effect:** the automatic placement produces a plan that cannot be exported once the machine has a holder. The agent has to place clamps by trial: here 3 placements and 2 stickout edits. The working placement turned up only because the agent reasoned about the outline's superellipse corners.
 - **Fix:** make `auto` keep the clamps clear of the tool's collision envelope at the planned stickout (nut and body, [tool-holder.md § Collision envelope](../modes/tool-holder.md#collision-envelope)), not just of the tool cylinder. Or have it report that no placement fits and say what stickout one would need.
 
 ### F2 (S2, AX/safety): the collision's remedy is not checked against the tool
+
+**Fixed in hardening DF138:** stickout remedies stop at OAL − 3 × shank Ø; beyond it the message says the tool is too short and to move the item or use a longer tool ([plan-v0.1.md § Minimum stickout](../modes/plan-v0.1.md#minimum-stickout-hardening-df130)). A suggested clamp move with a distance is not given.
 
 - **Evidence:** "chuck the tool with at least 69.5 mm out or move the item" for a tool with OAL 75 mm and LCF 45 mm. A 69.5 mm stickout leaves 5.5 mm in the collet.
 - **Effect:** an agent that takes the first remedy literally makes an unsafe setup.
@@ -103,10 +107,14 @@ Severity follows [hardening.md Q54](../plans/hardening.md#questions-for-the-user
 
 ### F3 (S3, AX/schema): `plan_workholding_set` item with an id still requires `kind`
 
+**Fixed in hardening DF138:** `kind` is optional for an item with an id; a new item without it is refused with rule `required` and the kinds.
+
 - **Evidence:** the description says "An item with id keeps it (omitted parameters stay)". `[{ id: "wh1", at: "15" }]` was refused with `items.0.kind: Invalid option: expected one of "toeClamp"|…` for each item. The same items with `kind` worked.
 - **Fix:** either make `kind` optional when `id` names an existing item, or say "an item with id and kind keeps it". The refusal should also say "items with an id still need kind".
 
 ### F4 (S3, AX): profile `on` must be a stock face, and the refusal has no next step
+
+**Fixed in hardening DF138:** the refusal lists the stock faces and says "use on stock.bottom and add facing1.floor's depth below it (1 mm) to depth"; design-llm-first.md's wording follows the stock-face rule. A floor as a profile's `on` stays refused.
 
 - **Evidence:** `design_profile_add { on: "facing1.floor", side: outside, depth: "4.185" }` → `on: must be a stock face (onSurface)`. Pockets and holes take an earlier floor. [design-llm-first.md](../modes/design-llm-first.md#partial-depth-profiles) words the steps as "from the bottom, 1.77 and 4.19 mm deep", which reads as from the faced floor.
 - **Fix:**
@@ -115,6 +123,8 @@ Severity follows [hardening.md Q54](../plans/hardening.md#questions-for-the-user
   - Align the doc's wording with the stock-face rule.
 
 ### F5 (S3, feeds): recommended presets trip their own checks
+
+**Partly fixed in hardening DF138:** the chip load range allows 0.1 % for rounding, so `feeds.rubbing` at 0.076194 vs 0.0762 is gone. **Deferred:** power and Z max in recommended presets (library presets resolve without the plan machine; [feeds-speeds.md § Final-value check](../architecture/feeds-speeds.md#final-value-check)).
 
 - **Evidence**, with all presets `recommended: true` for hardwood:
   - **`feeds.rubbing` on 5 operations:** chip load 0.076194 against the data minimum 0.0762. The recommended feed is rounded to a whole 2,743 mm/min, which puts it under the minimum.
@@ -127,26 +137,36 @@ Severity follows [hardening.md Q54](../plans/hardening.md#questions-for-the-user
 
 ### F6 (S3, G-code): 70-character line cap cuts names and the M0 prompt
 
+**Fixed in hardening DF138:** header tool lines keep the whole name and move Z0 and the stickout to a second line; the M0 drops the type word before the surface ([grbl.md § Pause messages](../architecture/grbl.md#pause-messages-hardening-df63)).
+
 - **Evidence:** `x3-1-bottom.nc` header lines read `(Tool 2: Flat, dia 2 mm, Z0 on Face bottom floor, min stickout 10 mm)` and `(Tool 3: C, dia 6.35 mm, …)`. The names are "Flat 2" and "Chamfer 82". The tool-change prompt reads `M0 ;Install T3 Chamfer 82, 6.35 mm chamfer, then zero Z`, while T2's prompt says "then zero Z on Face bottom floor". The longest line is exactly 70 characters.
 - **Effect:** the name is the part that gets cut, not the optional text after it. The prompt a sender shows at the pause loses the surface to zero on. The comment lines above it still say it.
 - **Fix:** shorten the optional parts first ("min stickout", "Z0 on …"). Never cut a tool name. Or put the Z0 surface on its own line before the M0.
 
 ### F7 (S3, AX): `plan_operation_update` returns `{}`
 
+**Fixed in hardening DF138:** the result is the operation's stickout, minimum stickout and findings now, with the plan's counts by severity (not a delta).
+
 - **Evidence:** setting `stickout: "58"` returned `{"value":{}}`, so the result did not say whether the 4 holder collisions and the `shortStickout` warning were resolved. A 7.2 KB `plan_warning_list` was needed to find out.
 - **Fix:** return the findings delta of the touched setup (added, removed), as design edits return their DFM delta and `plan_workholding_set` returns its findings.
 
 ### F8 (S3, design): a section with sharp corners gets no tool
+
+**Fixed in hardening DF138 (the second option):** `dfm.noFittingTool` for sharp corners points to `roundInside` and `design_operation_tool_set`. The auto choice still leaves such an operation without a tool.
 
 - **Evidence:** the cavity from `design_shape_import` (`sharpCount: 2`) got `dfm.noFittingTool` and no tool. The agent locked Flat 6 long and then kept a permanent `dfm.toolUnfit` warning. The plan itself handles the same corners as a `plan.check cornerRadius` warning, and the deviation check gives them the `toolRadius` cause.
 - **Fix:** for sharp corners alone, let the auto choice pick the largest tool that fits otherwise and report the corners once, as the plan does. Or have `dfm.noFittingTool` point to `roundInside` on the import or to `design_operation_tool_set`.
 
 ### F9 (S3, AX): `dfm.retainedRemoved` always blames the remover
 
+**Fixed in hardening DF138:** "…; or, when profile2 must stay, make profile1's tabs thicker (tabs.thickness)".
+
 - **Evidence:** "Outer step (profile2) lowers tabs 1–4 from 8 mm to 3.81 mm …; change Outer step (profile2): make it shallower or move it off the tabs". The step is reference geometry and cannot change. The real choice is thicker tabs, or accepting the 3.81 mm that remains.
 - **Fix:** offer both: "… or make the tabs thicker (Outline profile1 tabs.thickness)".
 
 ### F10 (S3, run): stale progress label while waiting at a tool change
+
+**Fixed in hardening DF138:** the progress naming the wait goes out before the phase ([llm-api.md § A2](../architecture/llm-api.md#a2-jobwait-at-operator-waits)).
 
 - **Evidence:** `job_wait` waiting at tool change 3 still reported `progress.done: 789` and the drilling's label ("Base screw - drill x 4 · tool 2"). The `waiting` block was correct.
 - **Fix:** update `progress` when the run reaches a wait.

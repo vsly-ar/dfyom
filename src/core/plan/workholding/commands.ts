@@ -11,7 +11,7 @@ import { fieldContext } from '../../design/operation'
 import { ItemIdSchema, NAME_MAX } from '../../library/item'
 import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Quantity } from '../../quantity/quantity'
-import { PlanWarningSchema, type PlanWarning } from '../checks'
+import { PlanWarningSchema, tooShortText, usableStickout, type PlanWarning } from '../checks'
 import type { Services } from '../../commands/context'
 import { findPlanDTO, loadPlanDTO, type LoadedPlan } from '../plan'
 import {
@@ -48,7 +48,7 @@ import {
 } from './items'
 import { footprintBounds, obstacles } from './obstacles'
 import { setupStock, setupWorkholding } from './setup'
-import { arrangeToeClamps, type EdgeRoom } from './arrange'
+import { arrangeToeClamps, stickoutForRoom, type EdgeRoom } from './arrange'
 import { wasteTest } from './held'
 import { setupZero } from '../alignment'
 import { nextSnapshotId } from '../build'
@@ -77,7 +77,8 @@ const Src = z.string().min(1).max(256)
 export const WorkholdingItemArgSchema = z.object({
   id: z.string().min(1).max(32).optional(),
   name: z.string().min(1).max(NAME_MAX).optional(),
-  kind: z.enum(WORKHOLDING_KINDS),
+  // DF138 F3: optional with an id (the item keeps its kind); a new item needs it
+  kind: z.enum(WORKHOLDING_KINDS).optional(),
   edge: z.enum(EDGES).optional(),
   at: Src.optional(),
   width: Src.optional(),
@@ -98,7 +99,10 @@ export const WorkholdingItemArgSchema = z.object({
   sacrificial: z.boolean().optional(),
   libraryItemId: ItemIdSchema.optional(),
 })
-export type WorkholdingItemArg = z.output<typeof WorkholdingItemArgSchema>
+/** An item arg with its kind known (given, or the existing item's). */
+export type WorkholdingItemArg = z.output<typeof WorkholdingItemArgSchema> & {
+  readonly kind: WorkholdingKind
+}
 
 /** The parameters each kind takes besides id, name and kind. */
 const PARAMS: Readonly<Record<WorkholdingKind, readonly string[]>> = {
@@ -112,7 +116,7 @@ const PARAMS: Readonly<Record<WorkholdingKind, readonly string[]>> = {
 const ALL_PARAMS = [...new Set(Object.values(PARAMS).flat())]
 
 const ITEMS_HELP =
-  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue, holds pieces cut free. An item with id keeps it (omitted parameters stay). libraryItemId: place that library device (its sizes; a differing size detaches).'
+  'The whole list (replaces it), setup frame (X0 Y0 front-left of the up face, Z0 on it). toeClamp: edge (uMin left, uMax right, vMin front, vMax back), at (centre along the edge, default middle), width 30, grip 10 (onto the stock), reach 50 (beyond the edge), top 25 (above Z0). vise: axis u|v (jaws close along it), protrusion 5 (stock above the jaws), jawLength 150, jawThickness 20, soft. screw: center [x, y], headDiameter 8, top 0. block: center, length, width, rotation 0, bottom (default the table), top. base: type spoilboard|fixturePlate. surface: type tape|vacuum|glue, holds pieces cut free. An item with id keeps it (kind and omitted parameters stay). libraryItemId: place that library device (its sizes; a differing size detaches).'
 
 /** The parsed item, or issues at `items.<n>.<param>`. */
 function parseItem(
@@ -487,8 +491,8 @@ export const workholdingSet = defineCommand({
       const mine = new Map((setup.workholding ?? []).map((i) => [i.id, i]))
       const taken: string[] = []
       items = []
-      for (const [n, arg] of args.items.entries()) {
-        if (arg.id !== undefined && !mine.has(arg.id)) {
+      for (const [n, given] of args.items.entries()) {
+        if (given.id !== undefined && !mine.has(given.id)) {
           issues.push({
             path: ['items', n, 'id'],
             rule: 'unknownItem',
@@ -496,6 +500,17 @@ export const workholdingSet = defineCommand({
           })
           continue
         }
+        // DF138 F3: an item with an id keeps its kind when the call leaves it out
+        const kind = given.kind ?? (given.id === undefined ? undefined : mine.get(given.id)?.kind)
+        if (kind === undefined) {
+          issues.push({
+            path: ['items', n, 'kind'],
+            rule: 'required',
+            message: `a new item needs kind (${WORKHOLDING_KINDS.join(', ')})`,
+          })
+          continue
+        }
+        const arg: WorkholdingItemArg = { ...given, kind }
         if (arg.id !== undefined && items.some((i) => i.id === arg.id)) {
           issues.push({ path: ['items', n, 'id'], rule: 'duplicate', message: 'listed twice' })
           continue
@@ -749,7 +764,7 @@ function autoItems(
   const waste = wasteTest(plan, setup, port, margin)
   // with waste on this face the grip stays in it, where a facing goes round the clamps (WH-D)
   const cutting = waste === undefined ? pairs : pairs.filter((p) => p.input.kind !== 'facing')
-  const arrangement = arrangeToeClamps({
+  const arrangeInput = {
     stock: h.stock,
     operations: checkOperations(cutting, setupZero(plan, setup, port)),
     clearanceZ: h.clearance,
@@ -758,7 +773,50 @@ function autoItems(
     others: obstacles(kept.map(resolveItem), h.stock),
     ...(waste === undefined ? {} : { inWaste: waste }),
     step: units === 'mm' ? 1 : 25.4 / 16,
-  })
+  }
+  const found = arrangeToeClamps(arrangeInput)
+  // DF138 F1: blocked only by the collet nut or spindle body: say which stickouts make room
+  const room = 'clamps' in found ? undefined : stickoutForRoom(arrangeInput)
+  // the exact check clears that placement at the planned stickouts already: take it
+  const arrangement =
+    room !== undefined && room.stickouts.size === 0 ? { clamps: room.clamps } : found
+  if (room !== undefined && room.stickouts.size > 0) {
+    const stickouts = [...room.stickouts].map(([id, need]) => {
+      const pair = cutting.find((p) => p.input.planOperationId === id)
+      const label = planOpLabel(plan.dto.design.part, {
+        designOperationIds: pair?.input.operations.map((x) => x.id) ?? [],
+      })
+      const usable = pair === undefined ? undefined : usableStickout(pair.input.tool)
+      const text =
+        units === 'mm'
+          ? `${Math.ceil(need * 10 - 1e-6) / 10} mm`
+          : `${Math.ceil((need / 25.4) * 100 - 1e-6) / 100}"`
+      return { id, label, need, usable, text }
+    })
+    const short = stickouts.filter((s) => s.usable !== undefined && s.need > s.usable.max + 1e-6)
+    const needs = stickouts.map((s) => `${s.label} chucked at least ${s.text} out`).join(', ')
+    const fix =
+      short.length > 0
+        ? `${short.map((s) => `${s.label}: ${tooShortText(s.usable!)}`).join('; ')}: use a longer tool, place the clamps by hand (items) or hold the stock with a vise, screws or tape`
+        : 'set the stickout (plan_operation_update) and arrange again, or place them by hand (items)'
+    return fail(
+      'plan.workholding',
+      `Four ${what} do not fit in ${setup.name} clear of the collet nut and spindle body at the planned stickouts; they fit with ${needs}: ${fix}`,
+      {
+        issues: stickouts.map((s) => ({
+          path: ['auto'],
+          rule: 'holderRoom',
+          message: `${s.label} needs ${s.text}`,
+          params: {
+            planOperationId: s.id,
+            neededStickout: s.need,
+            ...(s.usable === undefined ? {} : { maxStickout: s.usable.max }),
+          },
+        })),
+        where,
+      },
+    )
+  }
   if (!('clamps' in arrangement))
     return fail(
       'plan.workholding',

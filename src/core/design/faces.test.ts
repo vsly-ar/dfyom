@@ -177,6 +177,10 @@ describe('`on` for every kind and constraints along the normal', () => {
         ],
       },
     })
+    // DF138 F4 (X3): the refusal names the next step: the floor's stock face and its depth
+    expect(e.issues[0]!.message).toContain(
+      "a profile starts from the stock; use on stock.side[1] and add pocket1.floor's depth below it (5 mm) to depth",
+    )
   })
 
   it('depth limits use the stock extent along n (T, L or W)', async () => {

@@ -8,13 +8,17 @@
  * back by the work zero before they come here, `checkOperations`). The search is conservative:
  * the clamp's keep-out is taken as its rectangle grown by a square (not a round) of the tool
  * radius plus the margin, so a placement it accepts passes the exact `checkWorkholding`.
+ * With a holder (DF132) the collet nut and the spindle body keep the margin too, each where its
+ * bottom (tip Z + its height above the tip at the operation's stickout) is below the clamp top +
+ * margin (hardening DF138 F1).
  */
 import type { Vec2 } from '../../geometry/model'
 import type { Move, Vec3 } from '../../toolpath/model'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../../toolpath/stats'
-import type { CheckOperation } from './check'
-import { acrossEdge, edgeLength, type Edge, type SetupStock } from './items'
-import { footprintBounds, type Prism } from './obstacles'
+import { checkWorkholding, type CheckOperation } from './check'
+import { toolEnvelope } from './envelope'
+import { acrossEdge, edgeLength, type Edge, type ResolvedItem, type SetupStock } from './items'
+import { footprintBounds, obstacles, type Prism } from './obstacles'
 
 /** The clamp every automatic placement uses (mm). */
 export interface ClampSize {
@@ -95,7 +99,9 @@ function arcChords(from: Vec3, m: Extract<Move, { kind: 'arc' }>): { pts: Vec3[]
 
 /**
  * Every move part that a clamp of `top` could meet: below its top + margin, not a link at the
- * clearance height (links rise above the clamps with the clearance they raise, WH-C).
+ * clearance height (links rise above the clamps with the clearance they raise, WH-C). Each part
+ * of the tool's envelope (the tool; with a holder the nut and the body, DF138 F1) counts where its
+ * bottom is below the clamp top + margin, grown by its own radius.
  */
 function sweptSegments(input: ArrangeInput): Segment[] {
   const { margin, clearanceZ } = input
@@ -103,7 +109,7 @@ function sweptSegments(input: ArrangeInput): Segment[] {
   const out: Segment[] = []
   let pos: Vec3 | undefined
   for (const op of input.operations) {
-    const R = Math.max(op.tool.diameter, op.tool.shankDiameter ?? 0) / 2
+    const parts = toolEnvelope(op.tool, op.tool.stickout, op.tool.holder)
     for (const raw of op.moves) {
       const moves: Exclude<Move, { kind: 'drill' }>[] =
         raw.kind === 'drill'
@@ -117,12 +123,14 @@ function sweptSegments(input: ArrangeInput): Segment[] {
         pos = m.to
         const cut = m.kind !== 'rapid'
         if (!cut && start[2] >= clearanceZ - EPS && m.to[2] >= clearanceZ - EPS) continue
-        const keep = R + (cut ? margin : 2 * margin)
-        if (m.kind === 'arc') {
-          const { pts, slack } = arcChords(start, m)
-          for (let k = 0; k + 1 < pts.length; k++)
-            push(out, pts[k]!, pts[k + 1]!, keep + slack, zTop)
-        } else push(out, start, m.to, keep, zTop)
+        const chords = m.kind === 'arc' ? arcChords(start, m) : { pts: [start, m.to], slack: 0 }
+        for (const part of parts) {
+          // the tool keeps two margins on rapids (no `close` warning); the nut and body one
+          const keep =
+            part.radius + (part.part === 'tool' && !cut ? 2 * margin : margin) + chords.slack
+          for (let k = 0; k + 1 < chords.pts.length; k++)
+            push(out, chords.pts[k]!, chords.pts[k + 1]!, keep, zTop - part.zFrom)
+        }
       }
     }
   }
@@ -329,4 +337,77 @@ export function arrangeToeClamps(input: ArrangeInput): Arrangement {
       return { edge, fits: r.fits, free: runs(r.free(), step) }
     }),
   }
+}
+
+/** A holder placement found with longer stickouts (DF138 F1). */
+export interface StickoutRoom {
+  /** Where the four clamps fit with `stickouts`. */
+  readonly clamps: readonly PlacedClamp[]
+  /**
+   * The stickout (mm, not rounded) each operation needs for them, only the operations whose
+   * collet nut or spindle body hits a clamp at its planned stickout.
+   */
+  readonly stickouts: ReadonlyMap<string, number>
+}
+
+/** The operations with every holder operation's stickout lengthened (mm). */
+function lengthened(input: ArrangeInput, extra: number): ArrangeInput {
+  return {
+    ...input,
+    operations: input.operations.map((o) =>
+      o.tool.holder === undefined || o.tool.stickout === undefined
+        ? o
+        : { ...o, tool: { ...o.tool, stickout: o.tool.stickout + extra } },
+    ),
+  }
+}
+
+/**
+ * DF138 F1: when four clamps do not fit clear of the collet nut and spindle body at the planned
+ * stickouts, the stickouts with which they do: the least extra length (to 0.1 mm, the same for
+ * every holder operation) that lets `arrangeToeClamps` place them, then per operation the exact
+ * stickout the collision check needs at that placement (its `needed`, `STICKOUT_CLEARANCE`
+ * above the clamps), at least the planned one + the extra. Undefined when the clamps do not fit
+ * clear of the tool alone either (or no operation runs in a holder).
+ */
+export function stickoutForRoom(input: ArrangeInput): StickoutRoom | undefined {
+  if (!input.operations.some((o) => o.tool.holder !== undefined && o.tool.stickout !== undefined))
+    return undefined
+  const fits = (extra: number) => {
+    const r = arrangeToeClamps(lengthened(input, extra))
+    return 'clamps' in r ? r.clamps : undefined
+  }
+  // far enough that no nut or body comes below the clamps: the tool alone decides
+  let hi = 1000
+  if (fits(hi) === undefined) return undefined
+  let lo = 0
+  while (hi - lo > 0.1) {
+    const mid = (lo + hi) / 2
+    if (fits(mid) === undefined) lo = mid
+    else hi = mid
+  }
+  const clamps = fits(hi)!
+  const items: ResolvedItem[] = clamps.map((c, k) => ({
+    id: `auto${k}`,
+    name: '',
+    kind: 'toeClamp',
+    edge: c.edge,
+    at: c.at,
+    ...input.clamp,
+  }))
+  const exact = checkWorkholding({
+    operations: input.operations,
+    prisms: [...input.others, ...obstacles(items, input.stock)],
+    margin: input.margin,
+    clearanceZ: Math.max(input.clearanceZ, input.clamp.top + input.margin),
+  })
+  const stickouts = new Map<string, number>()
+  for (const c of exact.collisions) {
+    if (c.kind !== 'holder' || c.needed === undefined) continue
+    const op = input.operations.find((o) => o.planOperationId === c.planOperationId)
+    const planned = op?.tool.stickout ?? 0
+    const need = Math.max(c.needed, planned + hi, stickouts.get(c.planOperationId) ?? 0)
+    stickouts.set(c.planOperationId, need)
+  }
+  return { clamps, stickouts }
 }

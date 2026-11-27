@@ -145,7 +145,10 @@ describe('the first hardwood cut (DF73–DF76, DF130)', () => {
     expect(short[0]!.message).toContain(
       'stickout 31.7 mm is shorter than the 35.6 mm the deepest cut (30.54 mm) needs',
     )
-    expect(short[0]!.message).toContain('chuck the tool with at least 35.6 mm out')
+    // DF138 F2: 35.6 mm is beyond the 50 mm tool's usable 31 mm (19 mm, 3 × the 1/4" shank, held)
+    expect(short[0]!.message).toContain(
+      'the tool is too short for that (50 mm long, at most 31 mm out with 19 mm (3 × shank Ø) in the collet): use a longer tool',
+    )
     // chucked at 36 mm: quiet
     await c.s.run('plan.operation.update', {
       planId: c.planId,

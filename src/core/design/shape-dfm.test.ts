@@ -160,6 +160,10 @@ describe('the auto tool choice for shapes', () => {
       'dfm.noFittingTool',
     ])
     expect(r.warnings[0]).toMatchObject({ severity: 'info', params: { by: 5 } })
+    // DF138 F8 (X3): the sharp corners name the two ways on
+    expect(r.warnings.find((w) => w.code === 'dfm.noFittingTool')!.message).toContain(
+      'round the sharp inside corners (roundInside on design_shape_import, or a corner radius on the shape) or choose a tool (design_operation_tool_set',
+    )
   })
 })
 

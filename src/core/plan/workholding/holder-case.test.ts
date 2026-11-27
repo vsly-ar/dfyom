@@ -271,6 +271,47 @@ describe('the minimum stickout with the clamp under the ER11 nut (DF132 H3)', ()
   })
 })
 
+// hardening DF138 (X3 findings F1, F2): the automatic clamps keep the holder clear, and a
+// stickout remedy never goes beyond the tool's usable length (OAL − 3 × shank Ø)
+describe('auto clamps and stickout remedies with the holder (DF138 F1, F2)', () => {
+  const generate = async (s: Awaited<ReturnType<typeof holderCase>>['s'], planId: string) => {
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+  }
+
+  it('F1: at a 7 mm stickout the Ø52 body sweeps 28 mm round the pocket: auto places the clamps clear of it', async () => {
+    const { s, planId, planOperationId, warnings } = await holderCase(
+      { preset: 'er11' },
+      { toolpaths: true },
+    )
+    await s.run('plan.operation.update', { planId, planOperationId, stickout: '7' })
+    await generate(s, planId)
+    const setupId = s.plan(planId).setups[0]!.id
+    await s.run('plan.workholding.set', { planId, setupId, auto: 'toeClamps' })
+    await generate(s, planId)
+    expect(
+      warnings().filter((w) => w.code === 'plan.workholding.collision' && w.rule === 'holder'),
+    ).toEqual([])
+  })
+
+  it('F2: a needed stickout beyond OAL − 3 × shank Ø says the tool is too short instead', async () => {
+    const { s, planId, planOperationId } = await holderCase({ preset: 'er11' })
+    const short = (
+      (await s.run('library.tool.add', {
+        values: libraryInput({ ...flat6(), name: 'Flat 6 short', overallLength: len('40') }),
+      })) as { id: string }
+    ).id
+    await s.run('plan.tool.assign', { planId, planOperationId, toolLibraryItemId: short })
+    const hit = expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.check')
+    // 36 mm needed, 40 − 18 = 22 mm usable
+    expect(hit.message).toContain(
+      'the tool is too short for that (40 mm long, at most 22 mm out with 18 mm (3 × shank Ø) in the collet): move the item further from the cut or use a longer tool',
+    )
+    expect(hit.message).not.toContain('chuck the tool')
+  })
+})
+
 // DF132 H4: the holder floor in the links (tool-holder.md#travel-links-at-clearance). Two small
 // pockets of one tool run, far from the clamp, linked along X18: the Ø6 tool passes 7 mm from the
 // clamp's pad (X−18–10), the ER11 nut (Ø19, 20 mm out) would pass over its 25 mm top.

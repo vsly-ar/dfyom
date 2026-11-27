@@ -207,13 +207,21 @@ class Writer {
       const s = needed.get(b.number)
       const stickout = s === undefined ? '' : this.minStickout(s)
       // DF69: a reference off the up face is named (the run where the tool first comes in)
-      if (b.zRef !== undefined && !b.zRef.top) {
-        const tail = `, dia ${d} ${p.units}, Z0 on ${b.zRef.label}${stickout}`
-        this.lines.push(`(${fitName(`Tool ${b.number}: `, b.tool.name, tail, MAX_LINE_BYTES - 2)})`)
-      } else if (stickout !== '') {
-        const tail = `, dia ${d} ${p.units}${stickout}`
-        this.lines.push(`(${fitName(`Tool ${b.number}: `, b.tool.name, tail, MAX_LINE_BYTES - 2)})`)
-      } else this.comment(`Tool ${b.number}: ${b.tool.name}, dia ${d} ${p.units}`)
+      const z0 = b.zRef !== undefined && !b.zRef.top ? `, Z0 on ${b.zRef.label}` : ''
+      const head = `Tool ${b.number}: `
+      const dia = `, dia ${d} ${p.units}`
+      const room = MAX_LINE_BYTES - 2
+      const whole = (tail: string) => fitName(head, b.tool.name, tail, 999).length <= room
+      if (z0 === '' && stickout === '') this.comment(`${head}${b.tool.name}${dia}`)
+      else if (whole(dia + z0 + stickout))
+        this.lines.push(`(${fitName(head, b.tool.name, dia + z0 + stickout, room)})`)
+      else {
+        // DF138 F6: the name is never cut for the optional facts; they go on a second line
+        const first = stickout !== '' && whole(dia + stickout) ? dia + stickout : dia
+        this.lines.push(`(${fitName(head, b.tool.name, first, room)})`)
+        const rest = [first === dia ? stickout : '', z0].filter((t) => t !== '')
+        this.comment(`Tool ${b.number} ${rest.map((t) => t.slice(2)).join(', ')}`)
+      }
     }
     this.comment(`Generator: ${this.opts.generator}`)
     this.modes()
@@ -406,10 +414,21 @@ class Writer {
     const room = MAX_LINE_BYTES - head.length
     // DF69: the surface on the pause message when the whole name still fits (before the stickout)
     const surface = zRef !== undefined && !zRef.top ? ` on ${zRef.label}` : ''
+    // DF138 F6: the type word goes before the surface or the stickout does when the name already
+    // says it ("Chamfer 82, 6.35 mm chamfer" → "Chamfer 82, 6.35 mm")
+    const typed = TYPE_WORD[tool.type]
+    const bare = `, ${this.coord(tool.diameter)} ${this.p.units}${this.taper(tool)}`
+    const short = tool.name.toLowerCase().includes(typed) ? bare : spec
     const tails = [
       `${spec}${stickout}, then zero Z${surface}`,
+      `${short}${stickout}, then zero Z${surface}`,
       `${spec}, then zero Z${surface}`,
+      `${short}, then zero Z${surface}`,
       `${spec}${stickout}, then zero Z`,
+      `${short}${stickout}, then zero Z`,
+      `${spec}, then zero Z`,
+      // the marker line above keeps the type: the name before the type word
+      `${bare}, then zero Z`,
     ]
     const tail = tails.find((t) => whole(verb, t, room)) ?? `${spec}, then zero Z`
     this.lines.push(head + fitName(verb, tool.name, tail, room))

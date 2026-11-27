@@ -91,7 +91,7 @@ describe('design.warning.list', () => {
       code: 'dfm.noFittingTool',
       severity: 'warning',
       message:
-        'Pocket 1 (pocket1): no tool fits, not even the 1 mm flat end mill: cornerRadius 0 mm < tool radius 0.5 mm',
+        'Pocket 1 (pocket1): no tool fits, not even the 1 mm flat end mill: cornerRadius 0 mm < tool radius 0.5 mm: round the sharp inside corners (roundInside on design_shape_import, or a corner radius on the shape) or choose a tool (design_operation_tool_set; the corners keep its radius)',
       operation: 'pocket1',
       parameter: 'tool',
       params: {

@@ -48,7 +48,7 @@ import {
 } from '../../toolpath/testing/fixtures'
 import { exportGrbl, type ExportOperation, type GrblExport } from '../export'
 import { exportInput, operation, OPTS, testMachine, testPartExport } from '../post.fixture'
-import type { Block, MachiningProgram } from '../program'
+import type { Block, MachiningProgram, ProgramTool, ProgramZRef } from '../program'
 import { formatNumber } from './format'
 import { postGrbl, postGrblLines, type PostOptions } from './post'
 
@@ -954,17 +954,19 @@ describe('postGrbl', () => {
       ),
     )
     // the header: the largest over the tool's runs, rounded up to 0.1 mm
-    // (the header line always has it: a long name is cut there)
+    // (DF138 F6: the name is never cut for it: a second line carries what does not fit)
     expect(lines.filter((l) => /^\(Tool \d/.test(l))).toEqual([
       '(Tool 1: Flat 6, dia 6 mm, min stickout 12.4 mm)',
-      '(Tool 2: Wexme 1/4 inch single flute, dia 6 mm, min stickout 25.6 mm)',
+      '(Tool 2: Wexme 1/4 inch single flute upcut, dia 6 mm)',
+      '(Tool 2 min stickout 25.6 mm)',
     ])
     expect(lines.filter((l) => l.startsWith('(DFYOM') || l.startsWith('M0'))).toEqual([
       '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 5.7 mm)',
       'M0 ;Install T1 Flat 6, 6 mm flat, min stickout 5.7 mm, then zero Z',
-      // the whole name and the stickout do not fit: the name wins
+      // the whole name and the stickout do not fit: the name wins (DF138 F6: on the M0 line the
+      // type word goes before the name is cut; the marker keeps it)
       '(DFYOM TOOL CHANGE 2: Wexme 1/4 inch single flute upcut, 6 mm flat)',
-      'M0 ;Install T2 Wexme 1/4 inch single flute, 6 mm flat, then zero Z',
+      'M0 ;Install T2 Wexme 1/4 inch single flute upcut, 6 mm, then zero Z',
       // per run: the second run of tool 1 needs more
       '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 12.4 mm)',
       'M0 ;Install T1 Flat 6, 6 mm flat, min stickout 12.4 mm, then zero Z',
@@ -1020,6 +1022,46 @@ describe('postGrbl', () => {
     for (const l of lines) expect(l.length).toBeLessThanOrEqual(70)
     // a loaded first tool does not pause: no reason line for it
     expect(run(true).filter((l) => l.includes('must clear'))).toHaveLength(1)
+  })
+
+  // hardening DF138 F6 (X3): the 70-byte cap cut "Flat 2" to "Flat" and "Chamfer 82" to "C" in
+  // the header, and the chamfer's M0 lost the surface to zero on
+  it('tool names are never cut for the optional facts (header second line, M0 type word first)', () => {
+    const floor: ProgramZRef = { label: 'Face bottom floor', level: -1, at: [5, 5], top: false }
+    const change = (number: number, name: string, type: ProgramTool['type'], d: number): Block => ({
+      kind: 'toolChange',
+      number,
+      tool: { name, diameter: d, type, stickoutNeeded: 10 },
+      zRef: floor,
+    })
+    const lines = expectOk(
+      postGrblLines(
+        program([
+          change(1, 'Flat 6 long', 'flatEndMill', 6),
+          spin(),
+          rapid(1, 2, 10),
+          change(2, 'Flat 2', 'flatEndMill', 2),
+          spin(),
+          rapid(1, 2, 10),
+          change(3, 'Chamfer 82', 'chamferMill', 6.35),
+          spin(),
+          rapid(1, 2, 10),
+        ]),
+        OPTS,
+      ),
+    )
+    expect(lines.filter((l) => /^\(Tool \d/.test(l))).toEqual([
+      '(Tool 1: Flat 6 long, dia 6 mm, min stickout 10 mm)',
+      '(Tool 1 Z0 on Face bottom floor)',
+      '(Tool 2: Flat 2, dia 2 mm, min stickout 10 mm)',
+      '(Tool 2 Z0 on Face bottom floor)',
+      '(Tool 3: Chamfer 82, dia 6.35 mm, min stickout 10 mm)',
+      '(Tool 3 Z0 on Face bottom floor)',
+    ])
+    expect(lines.filter((l) => l.startsWith('M0'))).toContain(
+      'M0 ;Install T3 Chamfer 82, 6.35 mm, then zero Z on Face bottom floor',
+    )
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(70)
   })
 
   it('pauses for the first tool when it is not loaded; no dwell with spinUpSeconds 0', () => {

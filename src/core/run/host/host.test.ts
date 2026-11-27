@@ -302,6 +302,16 @@ describe('machine host', () => {
       toolChange: { n: 2, name: '3 mm flat' },
     })
     expect(lastStatus(h)?.job).toMatchObject({ jobId: 'j1', phase: 'toolChange' })
+    // DF138 F10 (X3): the progress before the phase message already names the wait (not the
+    // last section's label, throttled behind it)
+    const seen = h.out.slice(before) as { type: string; phase?: string; label?: string }[]
+    const at = seen.findIndex((m) => m.type === 'phase' && m.phase === 'toolChange')
+    expect(
+      seen
+        .slice(0, at)
+        .filter((m) => m.type === 'progress')
+        .at(-1)?.label,
+    ).toBe('Tool change 2: 3 mm flat')
     // jog and zero while the tool change waits; not while streaming
     const z0 = lastStatus(h)!.mpos[2]
     expectOk(

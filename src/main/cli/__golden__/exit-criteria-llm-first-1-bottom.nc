@@ -14,7 +14,8 @@
 (Units: mm)
 (Tool 1: Long flat 6, dia 6 mm, min stickout 10.2 mm)
 (Tool 2: Flat 2, dia 2 mm, Z0 on Facing 1 floor, min stickout 10 mm)
-(Tool 3: Chamfe, dia 12 mm, Z0 on Facing 1 floor, min stickout 8.8 mm)
+(Tool 3: Chamfer 82, dia 12 mm, min stickout 8.8 mm)
+(Tool 3 Z0 on Facing 1 floor)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54

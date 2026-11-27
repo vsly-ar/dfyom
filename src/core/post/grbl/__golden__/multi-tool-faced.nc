@@ -65,7 +65,7 @@ Y20
 (Z0 for tool 3: Facing 1 floor, 0.50 below the stock top)
 (Touch off Z here, X30 Y20: set Z0 on that surface)
 (DFYOM TOOL CHANGE 3: 6 mm flat end mill, 6 mm flat)
-M0 ;Install T3 6 mm flat end mill, 6 mm flat, then zero Z
+M0 ;Install T3 6 mm flat end mill, 6 mm, then zero Z on Facing 1 floor
 G90 G94 G17 G21
 G54
 G0 Z10.5
