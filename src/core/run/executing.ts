@@ -33,7 +33,7 @@ export interface ProgramTrace {
 }
 
 /** A gCode line as GRBL's protocol loop reads it: no comments, spaces or lower case. */
-function normalize(raw: string): string {
+export function normalize(raw: string): string {
   let out = ''
   let comment = false
   for (const ch of raw) {

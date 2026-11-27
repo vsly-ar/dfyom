@@ -11,7 +11,13 @@ import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowFactory, type WindowSessions } from './ipc'
 import { startLogging } from './logging/electron'
 import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
-import { pushRunStatus, registerRunProgramIpc, utilityHostFactory } from './machine/electron'
+import {
+  keepAwake,
+  pushRunStatus,
+  registerRunProgramIpc,
+  utilityHostFactory,
+} from './machine/electron'
+import { createRunJournalStore, loadRunJournal } from './persistence/run-journal'
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { libraryHandlesMenuAction } from './library-context'
@@ -273,12 +279,25 @@ void app.whenReady().then(async () => {
   // The app instance's one machine connection (docs/modes/run-v0.1.md#processes): the host runs in
   // a utility process started by run.connection.open; it is `services.machine` of every project
   // dispatcher. Its status is pushed to renderers.
+  // DF129: the journal of real runs in the app data, and the power-save blocker while they stream
+  // (docs/modes/run-recovery.md#what-dfyom-keeps). The last run's journal is read now; the
+  // recovery panel after a crash (RC6) shows it.
+  const runJournal = createRunJournalStore({
+    appData: app.getPath('userData'),
+    log: log.child({ scope: 'run.journal' }),
+  })
+  void loadRunJournal(app.getPath('userData'), log).then((j) => {
+    if (j !== undefined && j.state === 'interrupted')
+      log.info({ reason: j.reason, jobId: j.job.jobId }, 'interrupted run journal found')
+  })
   const machine = createMachineClient({
     factory: utilityHostFactory(MACHINE_UTILITY_ENTRY_PATH),
     log,
     logLevel: level,
     forward,
     proc: 'utility',
+    journal: runJournal,
+    keepAwake: keepAwake(),
   })
   machine.onStatus(pushRunStatus)
   const gcodeFiles = createGcodeFiles()
@@ -592,6 +611,7 @@ void app.whenReady().then(async () => {
       await appState.flush()
       await host.shutdown()
       await machine.shutdown(3000)
+      await runJournal.flush()
       workers.terminate()
     })().finally(() => {
       stopped = true

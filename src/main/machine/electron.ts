@@ -1,6 +1,6 @@
 // The machine host in an Electron utility process (the app; ADR 0016), and the run-status push
 // to renderers. Doc: docs/modes/run-v0.1.md#processes, #status
-import { BrowserWindow, ipcMain, utilityProcess } from 'electron'
+import { BrowserWindow, ipcMain, powerSaveBlocker, utilityProcess } from 'electron'
 import type { MachineClient, MachineHostFactory } from '../../core/run/host/client'
 import type { RunProgram, RunStatus } from '../../core/run/service'
 import { IPC, RUN_STATUS_IPC_CHANNEL } from '../../shared/preload-api'
@@ -31,6 +31,22 @@ export function registerRunProgramIpc(
       ? (machine.program(jobId) ?? null)
       : null,
   )
+}
+
+/**
+ * DF129: keeps the computer from sleeping while a run streams on a real connection (system sleep
+ * suspends USB, a classic cause of mid-job disconnects); `prevent-app-suspension` lets the
+ * display sleep (docs/modes/run-recovery.md#what-can-go-wrong-and-how-dfyom-notices).
+ */
+export function keepAwake(): (on: boolean) => void {
+  let id: number | undefined
+  return (on) => {
+    if (on && id === undefined) id = powerSaveBlocker.start('prevent-app-suspension')
+    else if (!on && id !== undefined) {
+      powerSaveBlocker.stop(id)
+      id = undefined
+    }
+  }
 }
 
 /** Pushes every status change to all windows (renderers subscribe through the preload). */

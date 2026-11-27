@@ -42,6 +42,7 @@ import {
 } from '../executing'
 import { PLANNER_BLOCKS } from '../grbl/emulator/planner'
 import { reconcileStep, type AlignmentStep } from '../alignment'
+import { RunRecorder, type RunJournal, type RunJournalPort } from '../journal'
 import {
   ControllerInfoSchema,
   HostMessage,
@@ -81,6 +82,19 @@ export interface MachineClientOptions {
   readonly onLog?: (batch: readonly unknown[]) => void
   /** Epoch ms for `job.startedAt` (default `Date.now`). */
   readonly now?: () => number
+  /**
+   * DF129: writes the run journal of jobs on a real connection (atomic, latest wins); absent =
+   * none (headless tests, the virtual machine keeps only the in-memory record).
+   * Doc: docs/modes/run-recovery.md#what-dfyom-keeps
+   */
+  readonly journal?: RunJournalPort
+  /** DF129: SHA-256 (hex) of a program's text for the journal; absent = not hashed. */
+  readonly hashProgram?: (text: string) => string
+  /**
+   * DF129: keeps the computer awake while a job streams on a real connection (`true` at the
+   * start, `false` at the end; Electron `powerSaveBlocker` in the app).
+   */
+  readonly keepAwake?: (on: boolean) => void
 }
 
 interface Host {
@@ -155,9 +169,11 @@ function programmedAt(job: Job, line: number): { programmed?: ProgrammedRates } 
   return { programmed: { feed: job.rates.feed[i] ?? 0, spindle: job.rates.spindle[i] ?? 0 } }
 }
 
-/** The host's job status without the estimate's input (`ackedAtReport`, DF84). */
-function statusJob(j: NonNullable<HostStatus['job']>): Omit<typeof j, 'ackedAtReport'> {
-  const { ackedAtReport: _input, ...rest } = j
+/** The host's job status without the estimate's inputs (`ackedAtReport` DF84, `reportedLine` DF129). */
+function statusJob(
+  j: NonNullable<HostStatus['job']>,
+): Omit<typeof j, 'ackedAtReport' | 'reportedLine'> {
+  const { ackedAtReport: _input, reportedLine: _ln, ...rest } = j
   return rest
 }
 
@@ -195,6 +211,11 @@ export class MachineClient implements MachineService {
   private job: Job | undefined
   /** The run that ended last (M5): kept until the next run starts, across connections. */
   private lastRun: LastRun | undefined
+  /**
+   * DF129: the record of the current or last job (docs/modes/run-recovery.md#what-dfyom-keeps);
+   * `journaled`: written to the run journal (a real connection).
+   */
+  private record: { recorder: RunRecorder; jobId: string; journaled: boolean } | undefined
   /** DF84: the last run's program, kept until the next run starts (renderer only). */
   private lastProgram: RunProgram | undefined
   /** DF84: planner blocks when empty: the largest `Bf` free count seen on this connection. */
@@ -326,6 +347,25 @@ export class MachineClient implements MachineService {
     return this.lastProgram?.jobId === jobId ? this.lastProgram : undefined
   }
 
+  /**
+   * DF129: the record of the current job, or of the last one until the next starts (a copy);
+   * RC5's recovery panel reads it. Doc: docs/modes/run-recovery.md#what-dfyom-keeps
+   */
+  runRecord(): RunJournal | undefined {
+    return this.record?.recorder.snapshot()
+  }
+
+  /** DF129: writes the record to the journal when `due` and the job is journaled. */
+  private journal(due: boolean): void {
+    const r = this.record
+    if (due && r?.journaled === true) this.opts.journal?.save(r.recorder.snapshot())
+  }
+
+  /** DF129: the record's update for the current job `jobId`, if it is the recorded one. */
+  private recorder(jobId: string | undefined): RunRecorder | undefined {
+    return jobId !== undefined && this.record?.jobId === jobId ? this.record.recorder : undefined
+  }
+
   /** DF84: traces the job's program in slices, a macrotask each, while it is the current job. */
   private traceSlices(job: Job): void {
     if (this.job !== job || job.tracer.step(TRACE_SLICE)) return
@@ -351,6 +391,20 @@ export class MachineClient implements MachineService {
     job.executing = {
       line: Math.max(e.line, before?.line ?? 0),
       block: Math.max(e.block, before?.block ?? -1),
+    }
+  }
+
+  /** DF129: how job `jobId` ended, into its record; the journal's last write; awake no longer. */
+  private recordEnd(jobId: string, r: AppResult<RunSummary>): void {
+    const rec = this.recorder(jobId)
+    if (rec === undefined) return
+    const due = rec.end(
+      r.isOk() ? { ok: true } : { ok: false, code: r.unwrapErr().code },
+      this.now(),
+    )
+    if (this.record?.journaled === true) {
+      this.journal(due)
+      this.opts.keepAwake?.(false)
     }
   }
 
@@ -477,6 +531,7 @@ export class MachineClient implements MachineService {
       startedAt: new Date(this.now()).toISOString(),
       end: (r) => {
         this.ended(job, r)
+        this.recordEnd(jobId, r)
         resolveEnd(r)
       },
       about,
@@ -498,6 +553,27 @@ export class MachineClient implements MachineService {
       operations: about !== undefined && 'operations' in about ? about.operations : [],
     }
     this.traceSlices(job)
+    const previous = this.record
+    const serial = this.conn.target === 'serial'
+    this.record = {
+      jobId,
+      journaled: false,
+      recorder: new RunRecorder({
+        jobId,
+        program,
+        about,
+        machine: {
+          target: this.conn.target,
+          port: this.conn.port,
+          machineKey: this.conn.machineKey,
+          envelope: this.hostStatus?.envelope,
+        },
+        workZero: expect.workZero,
+        programHash: this.opts.hashProgram?.(program.lines.join('\n')),
+        arcTolerance: this.conn.settings?.['12'],
+        now: this.now(),
+      }),
+    }
     const r = await this.request({
       type: 'jobStart',
       requestId: '',
@@ -512,7 +588,16 @@ export class MachineClient implements MachineService {
     this.release(jobId)
     if (r.isErr()) {
       if (this.job === job) this.job = undefined
+      // a refused start ran nothing: the last run's record stays
+      if (this.record?.jobId === jobId) this.record = previous
       return Err(r.unwrapErr())
+    }
+    // DF129: a real run is journaled from its start (replacing the last journal) and keeps the
+    // computer awake until it ends (docs/modes/run-recovery.md#what-dfyom-keeps)
+    if (serial && this.record?.jobId === jobId && this.record.recorder.state === 'running') {
+      this.record.journaled = true
+      this.opts.keepAwake?.(true)
+      this.journal(true)
     }
     return Ok({ ended })
   }
@@ -624,19 +709,27 @@ export class MachineClient implements MachineService {
         this.hostStatus = m.status
         if (m.status.buffer !== undefined)
           this.plannerCapacity = Math.max(this.plannerCapacity, m.status.buffer.blocks)
-        if (this.job !== undefined) this.estimate(this.job, m.status)
+        if (this.job !== undefined) {
+          this.estimate(this.job, m.status)
+          const rec = this.recorder(this.job.jobId)
+          if (rec !== undefined && m.status.job?.jobId === this.job.jobId)
+            this.journal(rec.status(m.status, this.job.executing?.line, this.now()))
+        }
         this.step = reconcileStep(this.step, this.status())
         this.notify()
         return
       case 'progress':
         if (this.job?.jobId === m.jobId) {
           this.job.done = m.done
+          this.journal(this.recorder(m.jobId)?.progress(m.done, this.now()) === true)
           this.job.listener.progress({ done: m.done, total: m.total, label: m.label })
         }
         return
       case 'phase':
         if (this.job?.jobId === m.jobId && WAIT_OR_STREAM.includes(m.phase))
           this.job.atToolChange = m.phase === 'toolChange'
+        if (this.job?.jobId === m.jobId)
+          this.journal(this.recorder(m.jobId)?.phase(m.phase, this.now()) === true)
         if (this.job?.jobId === m.jobId)
           this.job.listener.phase({
             phase: m.phase,
@@ -660,6 +753,7 @@ export class MachineClient implements MachineService {
         if (m.kind === 'connectionLost') {
           // the host has dropped the connection: closed here too, and a fresh host next time
           this.log.warn({ ...m.data }, 'machine connection lost')
+          this.recorder(this.job?.jobId)?.flag('connectionLost')
           this.markLost()
           host.expectExit = true
           this.conn = undefined
@@ -670,6 +764,9 @@ export class MachineClient implements MachineService {
           this.notify()
           return
         }
+        // DF129: a restart DFYOM did not cause while a job streams ends it as interrupted
+        if (m.kind === 'reset' && m.data['expected'] === false)
+          this.recorder(this.job?.jobId)?.flag('controllerReset')
         if (m.kind === 'alarm') this.log.warn({ kind: m.kind, ...m.data }, 'machine event')
         else this.log.debug({ kind: m.kind, ...m.data }, 'machine event')
         return
@@ -685,6 +782,7 @@ export class MachineClient implements MachineService {
     if (!host.expectExit && this.conn !== undefined) {
       this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
       this.markLost()
+      this.recorder(this.job?.jobId)?.flag('hostExit')
     }
     this.drop(host, e)
     this.conn = undefined

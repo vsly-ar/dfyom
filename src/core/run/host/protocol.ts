@@ -128,6 +128,8 @@ export const HostStatusSchema = z.object({
       sent: z.number().int().exactOptional(),
       /** DF84: lines acknowledged when the last status report (its `Bf`, its position) arrived. */
       ackedAtReport: z.number().int().exactOptional(),
+      /** DF129: GRBL's `Ln:` (the `N` number executing) in the last report, when it sends one. */
+      reportedLine: z.number().int().exactOptional(),
       toolChange: ToolChangeSchema.exactOptional(),
       /** In `programPause`: which pause (1-based) `run.job.continue` ends. */
       pause: z.number().int().exactOptional(),
