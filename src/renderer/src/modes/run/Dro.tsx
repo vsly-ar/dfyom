@@ -2,14 +2,17 @@
 // (--text-dro), plus feed and spindle; "—" until the machine is homed (DF46, the position is
 // unknown before). DF88: a "0" button by each axis letter sets that axis' work zero ("Set X
 // zero"; the former navigator's "Zero X/Y/Z"), and the live G54 shows under the table. DF128:
-// each coordinate is a button that opens the Go to dialog on its frame and axis.
+// each coordinate is a button that opens the Go to dialog on its frame and axis. DF140: the zero
+// button reads "=0", and a "→0" button after each work coordinate goes to that axis's work zero
+// through the Go to dialog (safe order, workholding guard); both have tooltips saying what they do.
 // Doc: docs/conventions/ui.md#run-mode-safety-ui (DRO), #jog-position-and-probing-df88,
-// docs/modes/run-goto.md#what-the-user-does;
+// docs/modes/run-goto.md#what-the-user-does, #go-to-work-zero-per-axis-df140;
 // look: ui-design-system.html (.dro)
 import { useId } from 'react'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
+import { Tooltip } from '../../ui'
 import { formatFeed, formatLength, isConnected, positionKnown } from './machine-state'
 import type { Axis, GoToRequest } from './run-store'
 import styles from './Run.module.css'
@@ -22,6 +25,7 @@ export function Dro({
   units,
   zero,
   goTo,
+  goZero,
 }: {
   status: RunStatus
   units: UnitSystem
@@ -29,6 +33,11 @@ export function Dro({
   zero?: { gate: string | null; onZero: (axis: Axis) => void }
   /** DF128: the coordinates as Go to buttons: why they cannot open it now, and the action. */
   goTo?: { gate: string | null; onGoTo: (request: GoToRequest) => void }
+  /**
+   * DF140: the "→0" buttons after the work coordinates: why they cannot move now (the Go to
+   * dialog's Go gate: Idle, homed, no run job, spindle off), and the action.
+   */
+  goZero?: { gate: string | null; onGoZero: (axis: Axis) => void }
 }): React.JSX.Element {
   const unit = m.units[units]
   const known = positionKnown(status)
@@ -40,6 +49,8 @@ export function Dro({
   const zeroDisabled = zero !== undefined && zero.gate !== null
   const goWhyId = useId()
   const goDisabled = goTo !== undefined && goTo.gate !== null
+  const goZeroWhyId = useId()
+  const goZeroDisabled = goZero !== undefined && goZero.gate !== null
   /** A coordinate: plain text, or the Go to button of its frame and axis (DF128). */
   const value = (mm: number, axis: (typeof AXES)[number], frame: GoToRequest['frame']) =>
     goTo === undefined ? (
@@ -80,22 +91,39 @@ export function Dro({
                 <span className={styles['droAxisCell']}>
                   {axis}
                   {zero === undefined ? null : (
-                    <button
-                      type="button"
-                      className={styles['droZero']}
-                      aria-label={m.setZero(axis)}
-                      disabled={zeroDisabled}
-                      {...(zeroDisabled ? { 'aria-describedby': whyId } : {})}
-                      onClick={() => zero.onZero(axis.toLowerCase() as Axis)}
-                    >
-                      {m.zero}
-                    </button>
+                    <Tooltip content={m.setZeroTip(axis)}>
+                      <button
+                        type="button"
+                        className={styles['droZero']}
+                        aria-label={m.setZero(axis)}
+                        disabled={zeroDisabled}
+                        {...(zeroDisabled ? { 'aria-describedby': whyId } : {})}
+                        onClick={() => zero.onZero(axis.toLowerCase() as Axis)}
+                      >
+                        {m.zero}
+                      </button>
+                    </Tooltip>
                   )}
                 </span>
               </th>
               <td className={styles['droWork']} aria-label={`${m.workLabel} ${axis}`}>
                 {value(status.wpos[i]!, axis, 'work')}
                 <small aria-hidden="true">{unit}</small>
+                {goZero === undefined ? null : (
+                  <Tooltip content={m.goZeroTip(axis)}>
+                    <button
+                      type="button"
+                      className={styles['droZero']}
+                      data-dro-go-zero=""
+                      aria-label={m.goZero(axis)}
+                      disabled={goZeroDisabled}
+                      {...(goZeroDisabled ? { 'aria-describedby': goZeroWhyId } : {})}
+                      onClick={() => goZero.onGoZero(axis.toLowerCase() as Axis)}
+                    >
+                      {m.goZeroLabel}
+                    </button>
+                  </Tooltip>
+                )}
               </td>
               <td className={styles['droMachine']} aria-label={`${m.machineLabel} ${axis}`}>
                 {value(status.mpos[i]!, axis, 'machine')}
@@ -116,6 +144,11 @@ export function Dro({
       {goDisabled ? (
         <span id={goWhyId} className={styles['srOnly']}>
           {goTo.gate}
+        </span>
+      ) : null}
+      {goZeroDisabled ? (
+        <span id={goZeroWhyId} className={styles['srOnly']}>
+          {goZero.gate}
         </span>
       ) : null}
       <dl className={styles['droMeta']}>

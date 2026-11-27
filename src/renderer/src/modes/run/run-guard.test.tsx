@@ -351,6 +351,28 @@ describe('Go to and the dialogs’ moves through the workholding guard (DF133 RW
     })
   })
 
+  it('DF140: the DRO’s →0 onto the clamp stops at the finding (nothing sent) until Go anyway', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.midX, c.midY, c.top + 20])
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const dro = screen.getByRole('table', { name: 'Position' })
+    await t.user.click(within(dro).getByRole('button', { name: 'Go to work Z zero' }))
+    await waitFor(() => expect(goTo().querySelector('[data-guard-finding]')).not.toBeNull())
+    expect(goTo().querySelector('[data-guard-finding]')).toHaveTextContent(
+      /^Step 1 \(down to Z 0\.000\) hits Toe clamp 1/,
+    )
+    expect(t.jogs()).toEqual([])
+    expect(goButton()).toBeDisabled()
+    await t.user.click(anywayBox())
+    await t.user.click(goButton())
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    expect(t.jogs()[0]).toEqual({
+      to: [c.midX + G54[0], c.midY + G54[1], G54[2]],
+      feed: expect.any(Number),
+    })
+  })
+
   it('Jog past once also covers the next Go to (no checkbox), and only that one', async () => {
     const t = await renderGuard()
     const c = await clamp(t)

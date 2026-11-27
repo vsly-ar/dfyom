@@ -487,12 +487,22 @@ export const runMessages = {
     unknown: '—',
     unknownHint: 'Position unknown until homed.',
     /** DF88: the per-axis zero buttons in the table. */
-    zero: '0',
+    zero: '=0',
     setZero: (axis: string) => `Set ${axis} zero`,
+    /** DF140: the tooltips say exactly what each button does. */
+    setZeroTip: (axis: string) =>
+      `Set ${axis} zero: the current ${axis} position becomes work ${axis} 0 (G54). Nothing moves.`,
+    /** DF140: go to the work zero of one axis (docs/modes/run-goto.md#go-to-work-zero-per-axis-df140). */
+    goZeroLabel: '→0',
+    goZero: (axis: string) => `Go to work ${axis} zero`,
+    goZeroTip: (axis: string) =>
+      axis === 'Z'
+        ? 'Go to work Z 0: moves Z only, down or up to the work zero. The machine moves.'
+        : `Go to work ${axis} 0: raises Z to the safe height first if it is lower, then moves ${axis} only; Z stays up. The machine moves.`,
     /** DF128: a coordinate's Go to button. */
     goTo: (axis: string, value: string, frame: 'work' | 'machine') =>
       `Go to: ${axis} ${value} ${frame}`,
-    workZeroHint: 'Set the work zero (G54) per axis at the current tool position with its 0.',
+    workZeroHint: 'Set the work zero (G54) per axis at the current tool position with its =0.',
   },
 
   /**

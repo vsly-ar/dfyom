@@ -45,6 +45,7 @@ describe('settings store', () => {
       skipHomeConfirm: [],
       autoReconnect: true,
       jogFeed: {},
+      jogStep: {},
       inspectorGroups: {},
       inspectorTabs: {},
     })

@@ -38,7 +38,7 @@ import { pauseMessage } from './RunDialogs'
 import { CutMarksNote } from './CutMarks'
 import { RecoveryPanel } from './RecoveryPanel'
 import { RunFileSection } from './RunFile'
-import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
+import { activeJob, goToGate, goToOpenGate, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
 import { useRunWorkholding } from './useRunWorkholding'
 import styles from './Run.module.css'
@@ -173,6 +173,10 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
           units={units}
           zero={{ gate: gates.workZero, onZero: (axis) => void a.setWorkZero([axis]) }}
           goTo={{ gate: goToOpenGate(status), onGoTo: a.openGoTo }}
+          goZero={{
+            gate: goToGate(status),
+            onGoZero: (axis) => a.openGoTo({ frame: 'work', axis, zero: true }),
+          }}
         />
         {workholding?.line === undefined ? null : (
           <p

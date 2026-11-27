@@ -11,6 +11,7 @@ import { resumePoints, resumeProgram, scanProgram } from '../../../../core/run/r
 import { prepareGcodeFile } from '../../../../core/run/gcode-file'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply } from '../../../../shared/preload-api'
+import { DEFAULT_SETTINGS, type AppSettings } from '../../../../shared/settings'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
@@ -221,6 +222,8 @@ async function renderRun(
     points?: boolean
     /** DF135 Q199: every top-level operation marked already cut; the plan in this status. */
     allCut?: 'draft' | 'settledDesign'
+    /** DF140: the app settings the window starts with (a restart). */
+    settings?: (machineId: string) => Partial<AppSettings>
   } = {},
 ) {
   const s = await planSetup()
@@ -254,7 +257,7 @@ async function renderRun(
       setupId: s.plan(planId).setups.at(-1)!.id,
       points: [{ name: 'Back right', source: { corner: 'top back right' } }],
     })
-  const bridge = createFakeBridge()
+  const bridge = createFakeBridge({ ...DEFAULT_SETTINGS, ...opts.settings?.(s.machineId) })
   bridge.bind(s.d)
   const machine = scriptMachine(bridge) as Machine & {
     job: (phase: NonNullable<RunStatus['job']>['phase'], extra?: object) => Partial<RunStatus>
@@ -271,7 +274,7 @@ async function renderRun(
   // a serial port is the default (DF101); these tests run the virtual machine unless they choose
   await r.user.click(within(nav()).getByRole('radio', { name: 'Virtual machine' }))
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
-  return { ...r, bridge, shell, machine, nav, callsOf, plan: () => s.plan(planId) }
+  return { ...r, bridge, shell, machine, nav, callsOf, plan: () => s.plan(planId), s }
 }
 
 const machineGroup = () => screen.queryByRole('group', { name: 'Machine' })
@@ -401,6 +404,39 @@ describe('Run mode', () => {
     expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 10, 0], feed: 2200 })
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog Z−' }))
     expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 0, -10], feed: 1000 })
+  })
+
+  it('remembers the jog step and feed per machine across restarts (DF140)', async () => {
+    const t = await renderRun({ plate: '10' })
+    await t.user.click(within(t.nav()).getByRole('radio', { name: '50 mm' }))
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ jogStep: { [t.s.machineId]: { step: 50 } } })
+    t.unmount()
+    // a restart: the window starts from the saved settings
+    const r = await renderRun({
+      plate: '10',
+      settings: (id) => ({
+        jogStep: { [id]: { step: 2.5, custom: 2.5 } },
+        jogFeed: { [id]: 1500 },
+      }),
+    })
+    const presets = within(r.nav()).getByRole('radiogroup', { name: 'Jog step presets' })
+    expect(within(presets).queryByRole('radio', { checked: true })).toBeNull()
+    expect(within(r.nav()).getByRole('textbox', { name: 'Custom jog step (mm)' })).toHaveValue(
+      '2.5',
+    )
+    expect(within(r.nav()).getByRole('slider', { name: 'Jog feed' })).toHaveAttribute(
+      'aria-valuetext',
+      '1500 mm/min',
+    )
+    await connectAndHome(r)
+    await r.user.click(within(r.nav()).getByRole('button', { name: 'Jog X+' }))
+    expect(r.callsOf('run.machine.jog').at(-1)).toEqual({ by: [2.5, 0, 0], feed: 1500 })
+  })
+
+  it('without a library machine the jog step is remembered app-wide (DF140)', async () => {
+    const t = await renderRun()
+    await t.user.click(within(t.nav()).getByRole('radio', { name: '5 mm' }))
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ jogStep: { '*': { step: 5 } } })
   })
 
   it('unlock asks first: the position is not known until homed', async () => {

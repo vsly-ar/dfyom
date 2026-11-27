@@ -407,6 +407,55 @@
   grid-area: 2 / 1;
 }
 
+/* DF140: the videogame and arrow-key styles lay the pad out like their keys: Z on the left,
+   Y+ over X− Y− X+ (W over A S D, ↑ over ← ↓ →) */
+.jogPad[data-layout='keys']:not([data-z-only]) {
+  grid-template-columns: var(--control-lg) var(--space-3) repeat(3, var(--control-lg));
+  grid-template-rows: repeat(2, var(--control-lg));
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .zPlus {
+  grid-area: 1 / 1;
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .zMinus {
+  grid-area: 2 / 1;
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .yPlus {
+  grid-area: 1 / 4;
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .xMinus {
+  grid-area: 2 / 3;
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .yMinus {
+  grid-area: 2 / 4;
+}
+.jogPad[data-layout='keys']:not([data-z-only]) .xPlus {
+  grid-area: 2 / 5;
+}
+
+/* DF140: the button's hotkey as a small gray key cap in its top-right corner (a single key) */
+.jogPad > button {
+  position: relative;
+}
+.jogKey {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 13px;
+  padding: 0 2px;
+  border-radius: 2px;
+  background: var(--bg-active);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+.jogPad > button:disabled .jogKey {
+  color: var(--text-faint);
+}
+
 /* DRO */
 .dro {
   display: grid;
@@ -437,7 +486,7 @@
   white-space: nowrap;
 }
 
-/* DF88: the axis letter and its "0" (set this axis' work zero) */
+/* DF88: the axis letter and its "=0" (set this axis' work zero; "0" until DF140) */
 .droAxisCell {
   display: inline-flex;
   align-items: center;
@@ -501,6 +550,8 @@
 }
 
 .droWork {
+  /* DF140: room between the axis's "=0" and a three-digit value */
+  padding-left: var(--space-1);
   font-size: var(--text-dro);
   line-height: var(--lh-dro);
   font-weight: var(--weight-medium);
@@ -1816,4 +1867,10 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* DF140: "→0" after the work coordinate (and its unit): go to this axis's work zero */
+.droWork [data-dro-go-zero] {
+  margin-left: var(--space-1);
+  vertical-align: middle;
 }

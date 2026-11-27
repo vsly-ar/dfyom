@@ -291,6 +291,75 @@ describe('Go to (DF128)', () => {
   })
 })
 
+// Hardening DF140: "=0" sets an axis's work zero, "→0" goes to it through Go to.
+// Spec: docs/modes/run-goto.md#go-to-work-zero-per-axis-df140
+describe('the DRO’s =0 and →0 (DF140)', () => {
+  const goZero = (t: T, axis: string) =>
+    within(t.dro()).getByRole('button', { name: `Go to work ${axis} zero` })
+
+  it('=0 and →0 per axis, with tooltips saying what they do; →0 disabled with why', async () => {
+    const t = await renderRun()
+    const setX = within(t.dro()).getByRole('button', { name: 'Set X zero' })
+    expect(setX).toHaveTextContent('=0')
+    expect(goZero(t, 'X')).toHaveTextContent('→0')
+    expect(goZero(t, 'X')).toBeDisabled()
+    expect(goZero(t, 'X')).toHaveAccessibleDescription('Connect to a machine first.')
+    await connectAndHome(t)
+    for (const axis of ['X', 'Y', 'Z']) expect(goZero(t, axis)).toBeEnabled()
+    act(() => goZero(t, 'Z').focus())
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Go to work Z 0: moves Z only, down or up to the work zero. The machine moves.',
+    )
+    act(() => goZero(t, 'X').focus())
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent(
+        'Go to work X 0: raises Z to the safe height first if it is lower, then moves X only; Z stays up. The machine moves.',
+      ),
+    )
+    act(() => setX.focus())
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent(
+        'Set X zero: the current X position becomes work X 0 (G54). Nothing moves.',
+      ),
+    )
+    await expectNoAxeViolations()
+    // the Go to gate: not while jogging, not with the spindle on
+    t.push({ state: 'Jog' })
+    expect(goZero(t, 'X')).toHaveAccessibleDescription('The machine is still jogging.')
+    t.push({ state: 'Idle', spindle: 12000 })
+    expect(goZero(t, 'Y')).toHaveAccessibleDescription('Stop the spindle first.')
+    expect(t.callsOf('run.machine.jog')).toEqual([])
+  })
+
+  it('→0 X from inside the stock: up to the safe height, then X alone; Z stays up; arrival closes', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(goZero(t, 'X'))
+    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(2))
+    const jogs = t.callsOf('run.machine.jog') as { to: number[]; feed: number }[]
+    const safe = jogs[0]!.to[2]!
+    expect(safe).toBeGreaterThan(-80)
+    expect(jogs).toEqual([
+      { to: [-300, -200, safe], feed: 2000 },
+      { to: [-250, -200, safe], feed: 2000 },
+    ])
+    // the Go to dialog follows the move, its fields at the target
+    expect(field('X').value).toBe('0.000')
+    expect(within(dialog()).getByRole('status')).toHaveTextContent('Moving: step 1 of 2')
+    t.push({ state: 'Idle', mpos: [-250, -200, safe], wpos: [0, -50, safe + 80] })
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+  })
+
+  it('→0 Z moves Z alone, one step', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    t.push({ mpos: [-300, -200, -60], wpos: [-50, -50, 20] })
+    await t.user.click(goZero(t, 'Z'))
+    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(1))
+    expect(t.callsOf('run.machine.jog')).toEqual([{ to: [-300, -200, -80], feed: 2000 }])
+  })
+})
+
 describe('Go to (DF128 GT2)', () => {
   it('publishes the planned steps for the 3D path as the fields change, and clears them on close', async () => {
     const t = await renderRun()

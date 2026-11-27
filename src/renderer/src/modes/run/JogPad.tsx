@@ -11,9 +11,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
+import { NO_MACHINE_KEY, type JogKeyStyle } from '../../../../shared/settings'
 import { useSettings } from '../../shell/ShellContext'
-import { Button, Slider } from '../../ui'
+import { Button, Slider, Tooltip } from '../../ui'
 import { useLibraryItems } from '../plan/usePlan'
+import { jogKeyHint, keyLayout } from './jog-keys'
 import { createJogPress, type JogPressHandlers } from './jog-press'
 import { JogStepPicker } from './JogStepPicker'
 import {
@@ -55,6 +57,11 @@ export interface JogControls {
   /** "Stop jog": jog cancel. */
   cancel(): void
   /**
+   * DF140: the jog hotkey style (the app setting): the buttons' key badges and tooltips, and the
+   * 2-row key layout for the videogame and arrow-key styles. Absent: no keys shown.
+   */
+  readonly keys?: JogKeyStyle
+  /**
    * DF133 RW3: the workholding guard while it is on (the notice line is reserved then): its
    * notice and "Jog past once" (offered after a stop). Absent: no guard, no line.
    */
@@ -70,19 +77,29 @@ export function useMachineJog(doc: ProjectDoc | undefined): MachineJog {
   return machineJog(plan, machines, machineId)
 }
 
-/** The window's jog step and feed (the feed remembered per machine) and its jog actions. */
+/**
+ * The window's jog step and feed and its jog actions. Both are remembered in the app settings per
+ * library machine (`jogFeed`, `jogStep`), under `*` while no machine is known (hardening DF140,
+ * docs/conventions/ui.md#jog-pad-df140), so they come back after a restart.
+ */
 export function useJogControls(doc: ProjectDoc | undefined): JogControls {
   const store = useRunStore()
   const units = useRunUnits(doc)
-  const step = useRun((s) => s.jogStep)
-  const custom = useRun((s) => s.jogCustom)
+  const windowStep = useRun((s) => s.jogStep)
+  const windowCustom = useRun((s) => s.jogCustom)
   const windowFeed = useRun((s) => s.jogFeed)
   const feeds = useSettings((s) => s.settings.jogFeed)
+  const steps = useSettings((s) => s.settings.jogStep)
   const update = useSettings((s) => s.update)
+  const keys = useSettings((s) => s.settings.jogKeys)
   const machine = useMachineJog(doc)
+  const key = machine.key ?? NO_MACHINE_KEY
   const feedRange = jogFeedRange(units, machine.maxFeed)
-  const stored = (machine.key === undefined ? undefined : feeds[machine.key]) ?? windowFeed
+  const stored = feeds[key] ?? windowFeed
   const feed = clampJogFeed(stored ?? JOG_FEED_DEFAULT, feedRange)
+  const storedStep = steps[key]
+  const step = storedStep?.step ?? windowStep
+  const custom = storedStep === undefined ? windowCustom : storedStep.custom
   const feedOf = (axis: Axis) =>
     axis === 'z' && machine.maxZ !== undefined ? Math.min(feed, machine.maxZ) : feed
   const a = store.getState()
@@ -92,15 +109,22 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
   const stopped = notice?.kind === 'stopped' || notice?.kind === 'blocked'
   return {
     units,
+    keys,
     step: stepMm,
     custom,
     feed,
     feedRange,
-    setStep: a.setJogStep,
-    setCustom: a.setJogCustom,
+    setStep: (mm) => {
+      a.setJogStep(mm)
+      update({ jogStep: { [key]: { step: mm, ...(custom === undefined ? {} : { custom }) } } })
+    },
+    setCustom: (mm) => {
+      a.setJogCustom(mm)
+      update({ jogStep: { [key]: { step: mm, custom: mm } } })
+    },
     setFeed: (f) => {
       a.setJogFeed(f)
-      if (machine.key !== undefined) update({ jogFeed: { [machine.key]: f } })
+      update({ jogFeed: { [key]: f } })
     },
     jog: (axis, sign) => void a.jog(axis, sign * stepMm, feedOf(axis)),
     holdStart: (axis, sign) => void a.jogHoldStart(axis, sign, feedOf(axis)),
@@ -186,13 +210,17 @@ export function JogPad({
     const id = `${axis}${dir}`
     const mine = () => press.active()?.id === id
     const describedBy = disabled ? `${hintId} ${reasonId}` : hintId
-    return (
+    const name = m.jogButton(axis.toUpperCase(), dir)
+    // DF140: the hotkey in the tooltip (every style), a key cap for a single key
+    const key = jogKeyHint(controls.keys ?? 'off', axis, sign)
+    const jogButton = (
       <Button
-        key={id}
         size="lg"
         className={styles[area]}
-        aria-label={m.jogButton(axis.toUpperCase(), dir)}
+        aria-label={name}
         aria-describedby={describedBy}
+        {...(key === undefined ? {} : { 'aria-keyshortcuts': key.aria })}
+        data-jog-dir={id}
         disabled={disabled}
         data-holding={holding === id ? '' : undefined}
         onPointerDown={(e) => {
@@ -227,14 +255,27 @@ export function JogPad({
       >
         <span className={styles['jogAxis']}>{axis.toUpperCase()}</span>
         <span className={styles['jogDir']}>{dir}</span>
+        {key?.badge === undefined ? null : (
+          <span className={styles['jogKey']} aria-hidden="true" data-jog-key="">
+            {key.badge}
+          </span>
+        )}
       </Button>
+    )
+    return (
+      <Tooltip key={id} content={name} {...(key === undefined ? {} : { shortcut: key.text })}>
+        {jogButton}
+      </Tooltip>
     )
   }
 
   const feed = dragFeed ?? controls.feed
   const feedText = `${formatFeed(feed, units)} ${runMessages.dro.feedUnits[units]}`
   return (
-    <div className={styles['jog']} data-jog-pad="">
+    // DF140: a pointer press leaves no focus on a pad button (direction, step, Stop jog, Jog past
+    // once), so the next jog key (Space: Z+) jogs instead of pressing that button again; a button
+    // reached with Tab keeps its focus, and Enter/Space press it (docs/conventions/ui.md#jog-pad-df140)
+    <div className={styles['jog']} data-jog-pad="" onClick={dropPointerFocus}>
       <JogStepPicker
         units={units}
         step={controls.step}
@@ -263,7 +304,11 @@ export function JogPad({
           }}
         />
       </div>
-      <div className={styles['jogPad']} data-z-only={zOnly ? '' : undefined}>
+      <div
+        className={styles['jogPad']}
+        data-z-only={zOnly ? '' : undefined}
+        data-layout={keyLayout(controls.keys) ? 'keys' : undefined}
+      >
         {zOnly
           ? null
           : [
@@ -294,6 +339,16 @@ export function JogPad({
       ) : null}
     </div>
   )
+}
+
+/**
+ * DF140: after a pointer click (`detail` > 0) on a button inside the jog pad, the button gives up
+ * the focus; a keyboard click (`detail` 0: Enter, Space, a screen reader) keeps it.
+ */
+export function dropPointerFocus(e: React.MouseEvent): void {
+  if (e.detail === 0 || !(e.target instanceof Element)) return
+  const button = e.target.closest('button')
+  if (button !== null && e.currentTarget.contains(button)) button.blur()
 }
 
 /**

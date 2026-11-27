@@ -135,3 +135,25 @@ export function goToSeconds(
   const min = steps.reduce((t, s, i) => t + lengths[i]! / (s.axis === 'z' ? feed.z : feed.xy), 0)
   return Math.ceil(min * 60 - 1e-9)
 }
+
+/**
+ * Hardening DF140: the work-frame target of the DRO's "→0" (go to the work zero of one axis):
+ * that axis at 0, the others where they are. X or Y never lowers Z: Z goes to the higher of the
+ * current Z and the safe height, so with `goToMoves` the tool rises to the safe height (when
+ * below it) before X/Y and stays there, never back down beside the zero. Z moves Z alone.
+ * Doc: docs/modes/run-goto.md#go-to-work-zero-per-axis-df140
+ */
+export function goToZeroTarget(p: {
+  /** The work position (WPos), mm. */
+  readonly wpos: Vec3
+  /** The work offset (MPos − WPos), mm. */
+  readonly wco: Vec3
+  readonly axis: 'x' | 'y' | 'z'
+  /** The safe height (machine Z, mm, `goToSafeZ`). */
+  readonly safeZ: number
+}): Vec3 {
+  const [x, y, z] = p.wpos
+  if (p.axis === 'z') return [x, y, 0]
+  const zUp = Math.max(z, p.safeZ - p.wco[2])
+  return p.axis === 'x' ? [0, y, zUp] : [x, 0, zUp]
+}
