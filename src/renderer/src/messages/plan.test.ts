@@ -217,4 +217,18 @@ describe('plan status texts', () => {
     expect(planMessages.warnings.count(0, 0)).toBe('0 warnings')
     expect(planMessages.warnings.count(1, 2)).toBe('1 error, 2 warnings')
   })
+
+  it('DF136 H2: the thin-wall hint in the project units', () => {
+    const w = finding({
+      code: 'plan.thinWallFinish',
+      severity: 'info',
+      message: 'x',
+      rule: 'thinWallFinish',
+      field: 'strategy.finishStepdown',
+      params: { web: 1.5, what: 'webs', finishStepdown: 10, suggested: 3 },
+    })
+    expect(findingText(w)).toBe(
+      'The webs are 1.50 mm thin and finished in levels of 10.00 mm: a thin wall bends under a full-height pass. Finish in steps of at most 3.00 mm.',
+    )
+  })
 })

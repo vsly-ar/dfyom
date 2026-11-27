@@ -16,10 +16,18 @@
 // docs/conventions/inspector-layout.md#s4-implementation-notes, docs/modes/roughing.md#implementation-r2
 // H1 (docs/modes/pattern-presets.md#implementation-h1): Margin's "Per side" splits it into Across
 // and Along (`margin: [u, v]`); straight fins read out as a heatsink; the Presets dialog's
-// heatsink step applies the fields and the slot tool as one gesture.
+// heatsink step applies the fields and the slot tool as one gesture. H2: pin fins read out as pins
+// ("49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"); the dialog's current heatsink card starts its
+// step from the pattern's sizes.
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
-import { straightFinsReadout, type FinsFields } from '../../../../core/design/pattern/heatsink'
+import {
+  pinsReadout,
+  straightFinsReadout,
+  type FinsFields,
+  type FinsReadout,
+  type PinsReadout,
+} from '../../../../core/design/pattern/heatsink'
 import type { PatternFacts } from '../../../../core/design/pattern/layout'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
 import { chainBounds } from '../../../../core/geometry/2d/model'
@@ -54,7 +62,9 @@ import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
 import {
   PatternPresetsDialog,
+  PIN_CARD,
   PRESET_GROUP_KEY,
+  type CurrentHeatsink,
   useFlatEndMills,
   type Group,
 } from './PatternPresetsDialog'
@@ -103,7 +113,10 @@ const exactOf = (q: unknown): number | undefined => {
   return e === undefined ? undefined : Number(e.num) / Number(e.den)
 }
 
-/** The pattern's fields as the heatsink read-out reads them (H1); undefined: not straight fins. */
+/**
+ * The pattern's fields as the heatsink read-outs read them (H1 straight fins, H2 pins); undefined:
+ * not a heatsink.
+ */
 function finsFields(
   feature: FeatureDTO,
   facts: PatternFacts,
@@ -118,6 +131,7 @@ function finsFields(
   if (depth === undefined || c['round'] === true) return undefined
   const length = exactOf(c['length'])
   const width = exactOf(c['width'])
+  const diameter = exactOf(c['diameter'])
   return {
     cell:
       c.kind === 'rectangle' && length !== undefined && width !== undefined
@@ -128,7 +142,9 @@ function finsFields(
             cornerRadius: exactOf(c['cornerRadius']) ?? 0,
             rotation: exactOf(c['rotation']) ?? 0,
           }
-        : { kind: 'other' },
+        : c.kind === 'circle' && diameter !== undefined
+          ? { kind: 'circle', diameter }
+          : { kind: 'other' },
     lattice: String(feature['lattice']),
     alternate: feature['alternate'] === 'flip' ? 'flip' : 'none',
     invert: feature['invert'] === true,
@@ -141,6 +157,31 @@ function finsFields(
     margin: [mu ?? 0, mv ?? 0],
     thickness,
   }
+}
+
+/** H2: the heatsink card a pattern is, with its sizes in the step's terms (mm). */
+function currentCard(
+  f: FinsFields,
+  fins: FinsReadout | undefined,
+  pins: PinsReadout | undefined,
+): CurrentHeatsink | undefined {
+  if (fins !== undefined && f.cell.kind === 'rectangle')
+    return {
+      id: 'straightFins',
+      values: {
+        fin: fins.fin,
+        slot: Math.min(f.cell.length, f.cell.width),
+        height: fins.height,
+        // the preset's wall is across the fins; the margin along them is 0
+        wall: Math.max(f.margin[0], f.margin[1]),
+      },
+    }
+  if (pins !== undefined)
+    return {
+      id: PIN_CARD[pins.kind],
+      values: { pin: pins.pin, channel: pins.channel, height: pins.height },
+    }
+  return undefined
 }
 
 /** The cell as `design.pattern.update` takes it: its sources, `changes` applied. */
@@ -411,6 +452,9 @@ export function PatternInspector({
         }
   const ff = facts === undefined ? undefined : finsFields(feature, facts, thickness)
   const fins = ff === undefined ? undefined : straightFinsReadout(ff)
+  // H2: pin fins read out as pins; the dialog's current card starts its step from these sizes
+  const pins = ff === undefined || fins !== undefined ? undefined : pinsReadout(ff)
+  const currentHeatsink = ff === undefined ? undefined : currentCard(ff, fins, pins)
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -434,11 +478,20 @@ export function PatternInspector({
                     fins.ratio,
                     fins.base === undefined ? undefined : lengthSource(fins.base, units),
                   )
-                : p.readoutFull(
-                    facts.cells,
-                    facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
-                    facts.dropped,
-                  )}
+                : pins !== undefined
+                  ? p.pinsReadout(
+                      pins.pins,
+                      lengthSource(pins.pin, units),
+                      pins.kind !== 'square',
+                      lengthSource(pins.height, units),
+                      pins.ratio,
+                      pins.base === undefined ? undefined : lengthSource(pins.base, units),
+                    )
+                  : p.readoutFull(
+                      facts.cells,
+                      facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
+                      facts.dropped,
+                    )}
           </p>
           <PatternPresetsDialog
             feature={feature}
@@ -446,7 +499,7 @@ export function PatternInspector({
             heatsink={{
               face: heatsinkFace,
               units,
-              current: fins !== undefined,
+              current: currentHeatsink,
               tools: flatEndMills,
               lastGroup: ui.getState().steps[PRESET_GROUP_KEY] as Group | undefined,
               onGroup: (g) => ui.getState().rememberStep(PRESET_GROUP_KEY, g),

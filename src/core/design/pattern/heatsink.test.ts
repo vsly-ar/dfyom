@@ -3,6 +3,9 @@
 // value byte-equal to today, the exact fit of 11 slots in 37 mm; the Straight fins step (count,
 // even-count origin shift, the args of one update, the read-out) and the slot/tool notes (Q206);
 // `dfm.patternTallWeb` at 1:8 ± ε.
+// H2 (docs/modes/pattern-presets.md#implementation-h2): the pin-fin steps (counts against the
+// layout, the origin shift, the args, the pin read-out, the channel note and suggestion) and
+// `dfm.patternTallWeb` on islands at 1:8 ± ε.
 import { describe, expect, it } from 'vitest'
 import { regionArea } from '../../geometry/2d/model'
 import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
@@ -11,7 +14,14 @@ import { designSetup } from '../design.fixture'
 import { resolveDefinition } from '../shape'
 import type { ShapeItem } from '../shape.dto'
 import {
+  channelCut,
+  PIN_LATTICE,
+  pinFins,
+  pinFinsArgs,
+  pinsReadout,
   slotCut,
+  suggestedChannel,
+  type PinKind,
   straightFins,
   straightFinsArgs,
   straightFinsReadout,
@@ -231,5 +241,170 @@ describe('dfm.patternTallWeb', () => {
     const w = await fins('12.1')
     expect(w?.parameter).toBe('depth')
     expect(w?.params).toMatchObject({ web: 1.5, depth: 12.1, ratio: 8.1, suggestedDepth: 12 })
+  })
+})
+
+describe('pin fins steps (H2)', () => {
+  const STEP = {
+    kind: 'square' as PinKind,
+    pin: 3,
+    channel: 2.5,
+    height: 8,
+    across: 40,
+    along: 40,
+    thickness: 14,
+  }
+
+  it('the worked example: 7 × 7 = 49 square pins, border 2, 1:2.7, base 6', () => {
+    expect(pinFins(STEP)).toEqual({
+      pins: 49,
+      grid: [7, 7],
+      pitch: 5.5,
+      border: 2,
+      ratio: 2.7,
+      base: 6,
+    })
+    expect(pinFins({ ...STEP, kind: 'round' })).toMatchObject({ pins: 49, grid: [7, 7] })
+    // staggered: half a pitch along u fits 3 × 6 + 4 × 7 = 46, not 45 centred
+    const st = pinFins({ ...STEP, kind: 'staggered' })!
+    expect(st).toMatchObject({ pins: 46, border: 2, origin: [22.75, 20] })
+    expect(st.grid).toBeUndefined()
+  })
+
+  it('agrees with the layout for every kind and a few faces', () => {
+    for (const kind of ['square', 'round', 'staggered'] as const)
+      for (const [across, along] of [
+        [40, 40],
+        [37, 52],
+        [25.5, 30],
+      ] as const) {
+        const step = { ...STEP, kind, across, along }
+        const l = pinFins(step)!
+        const cell: ShapeItem<number> =
+          kind === 'square'
+            ? { ...SLOT, length: 3, width: 3 }
+            : { kind: 'circle', op: 'add', center: [0, 0], diameter: 3 }
+        const p = resolve({
+          cell: [cell],
+          cellRotation: 0,
+          lattice: PIN_LATTICE[kind],
+          spacing: { gap: 2.5 },
+          boundary: { min: [0, 0], max: [across, along] },
+          margin: 0,
+          invert: true,
+          ...(l.origin === undefined ? {} : { origin: [l.origin[0], l.origin[1]] }),
+        })
+        expect(p.cells, `${kind} ${across} × ${along}`).toBe(l.pins)
+      }
+  })
+
+  it('an even count moves the origin half a pitch on that axis', () => {
+    // 6 pins across 34 mm (6·3 + 5·2.5 = 30.5), 7 along 40
+    expect(pinFins({ ...STEP, across: 34 })).toMatchObject({
+      pins: 42,
+      grid: [6, 7],
+      origin: [19.75, 20],
+      border: 1.75,
+    })
+    expect(pinFins({ ...STEP, across: 2 })).toBeUndefined()
+    expect(pinFins({ ...STEP, channel: 0 })).toBeUndefined()
+  })
+
+  it('fills the fields in one update: inverted, margin 0, gap = channel', () => {
+    expect(pinFinsArgs(STEP, pinFins(STEP)!)).toEqual({
+      cell: {
+        kind: 'rectangle',
+        length: '3 mm',
+        width: '3 mm',
+        cornerRadius: '0 mm',
+        rotation: '0°',
+      },
+      lattice: 'square',
+      spacing: { gap: '2.5 mm' },
+      alternate: 'none',
+      angle: '0°',
+      origin: null,
+      boundary: null,
+      margin: '0 mm',
+      fit: 'whole',
+      invert: true,
+      through: false,
+      depth: '8 mm',
+    })
+    const st = { ...STEP, kind: 'staggered' as const }
+    expect(pinFinsArgs(st, pinFins(st)!)).toMatchObject({
+      cell: { kind: 'circle', diameter: '3 mm' },
+      lattice: 'staggered',
+      origin: ['22.75 mm', '20 mm'],
+    })
+  })
+
+  it('reads a pattern back as pin fins, else not', () => {
+    const fields: FinsFields = {
+      cell: { kind: 'rectangle', length: 3, width: 3, cornerRadius: 0, rotation: 0 },
+      lattice: 'square',
+      alternate: 'none',
+      invert: true,
+      through: false,
+      gap: 2.5,
+      angle: 0,
+      depth: 8,
+      cells: 49,
+      area: { min: [0, 0], max: [40, 40] },
+      margin: [0, 0],
+      thickness: 14,
+    }
+    expect(pinsReadout(fields)).toEqual({
+      kind: 'square',
+      pins: 49,
+      pin: 3,
+      channel: 2.5,
+      height: 8,
+      ratio: 2.7,
+      base: 6,
+    })
+    const round = { ...fields, cell: { kind: 'circle', diameter: 3 } as const }
+    expect(pinsReadout(round)?.kind).toBe('round')
+    expect(pinsReadout({ ...round, lattice: 'staggered' })?.kind).toBe('staggered')
+    expect(pinsReadout({ ...round, lattice: 'hex' })).toBeUndefined()
+    expect(pinsReadout({ ...fields, lattice: 'staggered' })).toBeUndefined()
+    expect(pinsReadout({ ...fields, invert: false })).toBeUndefined()
+    expect(
+      pinsReadout({ ...fields, cell: { ...fields.cell, width: 2 } as FinsFields['cell'] }),
+    ).toBeUndefined()
+    // the straight-fins read-out does not take pins
+    expect(straightFinsReadout(fields)).toBeUndefined()
+  })
+
+  it('says how a tool cuts the channel and suggests Ø + 0.5', () => {
+    expect(channelCut(2, 2, 0.2)).toBe('twice')
+    expect(channelCut(2.5, 2, 0.2)).toBe('finishing')
+    expect(channelCut(2.2, 2, 0.2)).toBe('thinFinish')
+    expect(channelCut(1.5, 2, 0.2)).toBe('tooWide')
+    expect(suggestedChannel(2)).toBe(2.5)
+    expect(suggestedChannel(3.175)).toBe(3.675)
+  })
+})
+
+describe('dfm.patternTallWeb on pins', () => {
+  /** Square pins of `pin` at `depth` on a 40 × 40 × 20 block. */
+  async function pinsAt(pin: number, depth: string) {
+    const s = await block()
+    const step = { kind: 'square' as const, pin, channel: 2.5, height: 8, across: 40, along: 40 }
+    await s.run('design.pattern.add', { partId: s.partId })
+    const out = (await s.run('design.pattern.update', {
+      partId: s.partId,
+      featureId: 'pattern1',
+      ...pinFinsArgs(step, pinFins(step)!),
+      depth,
+    })) as { warnings: { code: string; parameter?: string; params?: object }[] }
+    return out.warnings.find((w) => w.code === 'dfm.patternTallWeb')
+  }
+
+  it('warns above 1:8 at Cell (the island), not at 1:8', async () => {
+    expect(await pinsAt(2, '16')).toBeUndefined()
+    const w = await pinsAt(2, '16.2')
+    expect(w?.parameter).toBe('cell')
+    expect(w?.params).toMatchObject({ island: true, depth: 16.2, ratio: 8.1, suggestedDepth: 16 })
   })
 })

@@ -211,6 +211,54 @@ export const ICON_SET = {
       { d: 'M9.35 1.5v13', a: true },
     ],
   },
+  // H2 (pattern-presets.md § UI): the pin-fin presets in top view, 3 × 3 pins (staggered 2-3-2
+  // rows), the centre pin the accent.
+  'pins-square': {
+    label: 'Square pin fins',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { rect: [2.25, 2.25, 2.5, 2.5, 0.3] },
+      { rect: [6.75, 2.25, 2.5, 2.5, 0.3] },
+      { rect: [11.25, 2.25, 2.5, 2.5, 0.3] },
+      { rect: [2.25, 6.75, 2.5, 2.5, 0.3] },
+      { rect: [11.25, 6.75, 2.5, 2.5, 0.3] },
+      { rect: [2.25, 11.25, 2.5, 2.5, 0.3] },
+      { rect: [6.75, 11.25, 2.5, 2.5, 0.3] },
+      { rect: [11.25, 11.25, 2.5, 2.5, 0.3] },
+      { rect: [6.75, 6.75, 2.5, 2.5, 0.3], a: true },
+    ],
+  },
+  'pins-round': {
+    label: 'Round pin fins',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { circle: [3.5, 3.5, 1.4] },
+      { circle: [8, 3.5, 1.4] },
+      { circle: [12.5, 3.5, 1.4] },
+      { circle: [3.5, 8, 1.4] },
+      { circle: [12.5, 8, 1.4] },
+      { circle: [3.5, 12.5, 1.4] },
+      { circle: [8, 12.5, 1.4] },
+      { circle: [12.5, 12.5, 1.4] },
+      { circle: [8, 8, 1.4], a: true },
+    ],
+  },
+  'pins-staggered': {
+    label: 'Staggered pin fins',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { circle: [5.75, 3.6, 1.4] },
+      { circle: [10.25, 3.6, 1.4] },
+      { circle: [3.5, 8, 1.4] },
+      { circle: [12.5, 8, 1.4] },
+      { circle: [5.75, 12.4, 1.4] },
+      { circle: [10.25, 12.4, 1.4] },
+      { circle: [8, 8, 1.4], a: true },
+    ],
+  },
   // Engraved patterns E3 (engraved-patterns.md § UI): three wavy grooves across the face, the
   // middle one the accent; strokes only, as the Groove's line work.
   engraving: {

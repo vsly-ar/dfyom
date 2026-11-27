@@ -130,9 +130,26 @@ export function StrategyGroup({
   // S5: entry details, allowance, finish stepdown and overshoot are rarely changed: a More row
   // (inspector-layout.md § Per-inspector target layout), open while a problem is in it
   const rare = keys.filter((k) => RARE_KEYS.has(k))
+  // DF136 H2 (Q208): the thin-wall hint opens it too (its fix is the point)
   const rareProblem = findings.some(
-    (w) => w.severity !== 'info' && rare.some((k) => w.field === `strategy.${k}`),
+    (w) =>
+      (w.severity !== 'info' || w.code === 'plan.thinWallFinish') &&
+      rare.some((k) => w.field === `strategy.${k}`),
   )
+  /** Q208: the thin-wall hint's fix sets the finish stepdown it suggests. */
+  const withFixes = (key: StrategyKey, messages: FieldMessage[]): FieldMessage[] => {
+    if (key !== 'finishStepdown' || readOnly) return messages
+    const hint = findings.find((w) => w.code === 'plan.thinWallFinish')
+    const suggested = hint?.params?.['suggested']
+    if (typeof suggested !== 'number') return messages
+    const q = strategyQuantity('finishStepdown', suggested, units)
+    if (q === undefined) return messages
+    return messages.map((m) =>
+      m.id.startsWith('plan.thinWallFinish:')
+        ? { ...m, fix: { label: s.useStep(q.source), onApply: () => set(key, q.source) } }
+        : m,
+    )
+  }
   const field = (key: StrategyKey) => {
     const resolved = view.strategy[key]
     const label = s.labels[key]
@@ -195,7 +212,7 @@ export function StrategyGroup({
           resolved={typeof resolved === 'number' ? resolved : undefined}
           units={units}
           readOnly={readOnly}
-          findings={fieldMessages(findings, `strategy.${key}`)}
+          findings={withFixes(key, fieldMessages(findings, `strategy.${key}`, units))}
           onSet={(v, gesture) => set(key, v, gesture)}
           onCancelGesture={onCancelGesture}
         />

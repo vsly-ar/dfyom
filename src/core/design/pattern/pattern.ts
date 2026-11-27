@@ -867,6 +867,21 @@ function webAt(port: Region2dPort, input: WebInput, limit: number): PatternWeb |
   return byLimit.get(limit)
 }
 
+/**
+ * H2 (Q208): the narrowest web (inverted: island) of a pattern's owned shape when under `limit`,
+ * measured as `dfm.patternThinWeb` (cached per resolved layout and limit); undefined when none is
+ * or the shape does not resolve. The plan's thin-wall finishing hint.
+ */
+export function patternWebUnder(
+  featureId: string,
+  shapes: readonly ShapeDTO[],
+  port: Region2dPort,
+  limit: number,
+): PatternWeb | undefined {
+  const input = patternFacts(featureId, shapes, port)?.webInput
+  return input === undefined ? undefined : webAt(port, input, limit)
+}
+
 /** Fin height over the narrowest web (or pin) above which a web is tall (Q205: one limit). */
 export const PATTERN_TALL_WEB_RATIO = 8
 

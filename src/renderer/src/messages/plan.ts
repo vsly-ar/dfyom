@@ -758,6 +758,8 @@ export const planMessages = {
       defaultTag: 'Default',
       entered: 'Entered by you.',
       useDefault: 'Use default',
+      /** H2 (Q208): the thin-wall hint's fix at Finish stepdown. */
+      useStep: (step: string) => `Use ${step}`,
     },
     calc: {
       show: 'Show calculation',
@@ -952,6 +954,14 @@ export function findingText(
       if (profile === undefined || setup === undefined || next === undefined)
         return sentence(message)
       return `${capital(names.design(profile))} cuts through in setup ${names.setup(setup)} before setup ${names.setup(next)}: held only by its tabs while re-fixtured.`
+    }
+    // DF136 H2 (Q208): thin webs or pins finished in deep levels
+    case 'plan.thinWallFinish': {
+      const [web, steps, suggested] = [p['web'], p['finishStepdown'], p['suggested']]
+      if (typeof web !== 'number' || typeof steps !== 'number' || typeof suggested !== 'number')
+        return sentence(message)
+      const what = p['what'] === 'pins' ? 'pins' : 'webs'
+      return `The ${what} are ${lengthText(web, units)} thin and finished in levels of ${lengthText(steps, units)}: a thin wall bends under a full-height pass. Finish in steps of at most ${lengthText(suggested, units)}.`
     }
     // DF122: a roughing wall margin under the pocket's finishing allowance
     case 'plan.roughingWallThin': {

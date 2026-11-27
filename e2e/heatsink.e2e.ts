@@ -3,16 +3,18 @@
 // parameter step (fins 1.5, slots 2, 10 high, wall 1.5, the library's Ø 2 picked as the slot
 // tool); Apply fills the pattern and sets the tool in one undo step, and the inspector reads it
 // as a heatsink: "11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm". With
-// DFYOM_H1_DIR set it captures light and dark renders of the step and the part (review captures).
-// Windows stay hidden (app.fixture.ts).
-// Docs: docs/modes/pattern-presets.md#implementation-h1, docs/conventions/ui.md
+// DFYOM_H1_DIR (or DFYOM_HEATSINK_DIR) set it captures light and dark renders of the step and the
+// part (review captures). H2: square pin fins the same way (3 × 3 pins, channel 2.5, 8 high:
+// "49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm"). Windows stay hidden (app.fixture.ts).
+// Docs: docs/modes/pattern-presets.md#implementation-h1, docs/modes/pattern-presets.md#implementation-h2,
+// docs/conventions/ui.md
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { PreloadApi } from '../src/shared/preload-api'
 import { expect, test } from './app.fixture'
 
-const SHOTS = process.env['DFYOM_H1_DIR']
+const SHOTS = process.env['DFYOM_HEATSINK_DIR'] ?? process.env['DFYOM_H1_DIR']
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -127,4 +129,87 @@ test('heatsink: straight fins through the Presets dialog', async ({ dfyom }) => 
   await page.keyboard.press('ControlOrMeta+z')
   await expect(readout).toHaveText(/^\d+ cells/)
   await expect(inspector.getByText('Flat 2 x 12')).toHaveCount(0)
+})
+
+test('heatsink: square pin fins through the Presets dialog (H2)', async ({ dfyom }) => {
+  test.setTimeout(150_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (SHOTS !== undefined) await page.setViewportSize({ width: 1440, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const call = (name: string, args: object) =>
+    page.evaluate(([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a), [
+      name,
+      args,
+    ] as const)
+  const added = await call('library.tool.add', {
+    values: {
+      name: 'Flat 2 x 12',
+      type: 'flatEndMill',
+      diameter: '2',
+      fluteLength: '12',
+      overallLength: '50',
+      fluteCount: '2',
+      toolMaterial: 'carbide',
+      presets: [],
+    },
+  })
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Pin heatsink')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '40')
+  await setField(setup, 'Width (Y)', '40')
+  await setField(setup, 'Thickness (Z)', '14')
+  await stock.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Features' })
+    .getByRole('menuitem', { name: 'Pattern', exact: true })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Pattern 1' })).toBeVisible()
+  const readout = inspector.locator('[data-pattern-readout]')
+  await expect(readout).toHaveText(/^\d+ cells/)
+
+  // ── Presets… → Heatsink → Square pin fins: the parameter step ─────────────────────────────
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  const presets = page.getByRole('dialog', { name: 'Pattern presets' })
+  await presets.getByRole('radio', { name: 'Heatsink' }).click()
+  await expect(presets.locator('[data-preset]')).toHaveCount(4)
+  await shoot(page, 'h2-cards')
+  await presets.getByRole('radio', { name: 'Square pin fins' }).click()
+  const step = presets.locator('[data-heatsink-step="squarePins"]')
+  await expect(step).toBeVisible()
+  await expect(presets.locator('[data-heatsink-readout]')).toHaveText(
+    '49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm · channels 2.5 mm · border 2 mm',
+  )
+  await expect(presets.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 2 x 12/)
+  await expect(step).toContainText('Finishing pass round every pin.')
+  await shoot(page, 'h2-step')
+  await presets.getByRole('button', { name: 'Apply' }).click()
+  await expect(presets).toBeHidden()
+
+  // ── the pattern reads as pins; the pocket's tool is the Ø 2; no finding ────────────────────
+  await expect(readout).toHaveText('49 pins 3 mm · 8 mm high (1:2.7) · base 6 mm')
+  await expect(inspector.getByText('Flat 2 x 12').first()).toBeVisible()
+  await expect(page.getByText('0 warnings')).toBeVisible()
+  await shoot(page, 'h2-part')
+  // reopening lands on the current card
+  await inspector.getByRole('button', { name: 'Presets…' }).click()
+  await expect(presets.getByRole('radio', { name: 'Square pin fins' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await page.keyboard.press('Escape')
+  await expect(presets).toBeHidden()
+  // one undo step takes back the fields and the tool
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(readout).toHaveText(/^\d+ cells/)
 })

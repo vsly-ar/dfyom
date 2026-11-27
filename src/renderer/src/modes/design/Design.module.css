@@ -2145,8 +2145,10 @@
 .heatsinkReadout {
   margin: 0;
   padding: 6px 8px;
+  /* H2: the read-out stands off the dialog in light mode too (the field fill is the dialog's) */
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-field);
+  background: var(--bg-chrome);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }

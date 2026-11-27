@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { opsOf, planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
-import { createFakeBridge } from '../../test/bridge'
+import { createFakeBridge, WINDOW_SOURCE, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { openInspectorMore, openInspectorTab } from '../../test/inspector'
 
@@ -28,12 +28,16 @@ vi.mock('../../viewport/Scene', () => ({
 const planOp = (s: PlanSetup, planId: string, design: string) =>
   opsOf(s.plan(planId)).find((o) => o.designOperationIds[0] === design)!
 
-async function renderPlan(setup?: (s: PlanSetup, planId: string) => Promise<void>) {
+async function renderPlan(
+  setup?: (s: PlanSetup, planId: string) => Promise<void>,
+  onBridge?: (bridge: FakeBridge, s: PlanSetup, planId: string) => void,
+) {
   const s = await planSetup()
   const planId = await s.create({ machineLibraryItemId: s.machineId })
   await setup?.(s, planId)
   const bridge = createFakeBridge()
   bridge.bind(s.d)
+  onBridge?.(bridge, s, planId)
   const shell = createShell(bridge)
   shell.ui.getState().setMode('plan')
   const r = renderUi(
@@ -118,6 +122,54 @@ describe('Plan inspector: strategy', () => {
     await t.user.click(g.getByRole('button', { name: 'Use default' }))
     await waitFor(() => expect(t.strategyOf('pocket1').finishAllowance).toBeUndefined())
     await g.findByLabelText('Finish stepdown', { selector: 'input' })
+  })
+
+  it('DF136 H2 (Q208): the thin-wall hint at Finish stepdown opens More; its fix sets 3 mm', async () => {
+    // the hint needs a pattern and the 2D port: injected into the real warning list here (its
+    // core rule is tested in plan/heatsink-pins-toolpaths.test.ts)
+    const t = await renderPlan(undefined, (bridge, s, planId) => {
+      const op = planOp(s, planId, 'pocket1')
+      bridge.handle('plan.warning.list', async (args) => {
+        const r = await s.d.queryAsync('plan.warning.list', args, WINDOW_SOURCE)
+        const value = r.unwrap().value as { warnings: unknown[] }
+        return {
+          ok: true,
+          revision: s.d.revision,
+          value: {
+            ...value,
+            warnings: [
+              ...value.warnings,
+              {
+                code: 'plan.thinWallFinish',
+                severity: 'info',
+                message: 'pattern1: pins of 3 mm are finished in levels of 8 mm',
+                planOperationId: op.id,
+                field: 'strategy.finishStepdown',
+                rule: 'thinWallFinish',
+                params: {
+                  feature: 'pattern1',
+                  web: 3,
+                  what: 'pins',
+                  finishStepdown: 8,
+                  suggested: 3,
+                },
+              },
+            ],
+          },
+        }
+      })
+    })
+    const group = await t.open('Pocket 1')
+    const g = within(group)
+    await g.findByText(/The pins are 3.00 mm thin and finished in levels of 8.00 mm/)
+    await t.user.click(g.getByRole('button', { name: /^Use 3/ }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toContainEqual(
+        expect.objectContaining({
+          strategy: { finishStepdown: expect.stringMatching(/^3(\.0+)? mm$/) },
+        }),
+      ),
+    )
   })
 
   it('drilling: the cycle offers what fits the tool; a cycle that no longer fits has "Use default"', async () => {
