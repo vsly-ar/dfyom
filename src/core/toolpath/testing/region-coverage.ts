@@ -6,10 +6,12 @@
  * rest of the region is **rest** material and must stay; a cut more than tol outside the region
  * (walls, islands) is a **gouge**. Test-only.
  */
-import type { Vec2 } from '../../geometry/model'
+import type { Vec2, Vec3 } from '../../geometry/model'
 import { chainBounds, regionLoops, type Loop, type Region } from '../../geometry/2d/model'
 import { flattenLoop, segmentGrid } from '../../geometry/2d/testing/oracles'
 import type { Toolpath, ToolpathTool } from '../model'
+import { LINK_RADIAL_MARGIN } from '../links'
+import { SLOT_CLEARANCE } from '../region-pocket'
 import { Heightmap, samples, steps } from './oracles'
 
 export interface Coverage {
@@ -202,6 +204,82 @@ export function airCut(
   return { cutting, air, plunges }
 }
 
+/** Margins `rapidClearance` checks (mm). */
+export interface RapidMargins {
+  /** Rapids wholly at or above this Z are not checked beyond collision (the retract plane). */
+  readonly retractZ: number
+  /** A rapid down below `retractZ` ends at least this over the material under the tool. */
+  readonly vertical: number
+  /** A horizontal rapid below `retractZ` passes at least this over the material… */
+  readonly horizontal: number
+  /** …under the tool's disc grown by this. */
+  readonly radial: number
+}
+
+/**
+ * Rapids against the material the toolpath (after `before`) has left when they run (DF136 low
+ * entries and links inside a pocket): no rapid enters material (the tool's exact profile, from
+ * the tip up); a rapid down below the retract plane ends at least `vertical` over the material
+ * in its own column; a horizontal rapid below it passes at least `horizontal` over every cell
+ * within the tool's radius + `radial`. Both margins less one cell (the heightmap's raster).
+ * Returns the failures. Test-only.
+ */
+export function rapidClearance(
+  tp: Toolpath,
+  tool: ToolpathTool,
+  size: { length: number; width: number },
+  margins: RapidMargins,
+  opts: {
+    readonly before?: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[]
+    readonly cell?: number
+    /** The heightmap's (0, 0) in toolpath coordinates. */
+    readonly origin?: Vec2
+    /** The stock top's Z in toolpath coordinates (the heightmap starts flat there). */
+    readonly top?: number
+    /** The heightmap to cut (`size` and `cell` unused), to read the result afterwards. */
+    readonly heightmap?: Heightmap
+  } = {},
+): string[] {
+  const { before = [], origin = [0, 0], top = 0 } = opts
+  const hm = opts.heightmap ?? new Heightmap(size.length, size.width, opts.cell ?? 0.1)
+  const cell = hm.cell
+  const at = (p: Vec3, dz = 0): Vec3 => [p[0] - origin[0], p[1] - origin[1], p[2] - top + dz]
+  const sweep = (t: ToolpathTool, x: Toolpath) => {
+    for (const s of steps(x))
+      if (s.move.kind !== 'rapid') for (const p of samples(s, cell)) hm.stamp(t, at(p))
+  }
+  for (const b of before) sweep(b.tool, b.tp)
+  const grown = {
+    ...tool,
+    diameter: tool.diameter + 2 * Math.max(0, margins.radial - cell),
+  }
+  const out: string[] = []
+  const fmt = (p: Vec3) => p.map((n) => n.toFixed(3)).join(',')
+  for (const s of steps(tp)) {
+    const m = s.move
+    if (m.kind !== 'rapid') {
+      for (const p of samples(s, cell)) hm.stamp(tool, at(p))
+      continue
+    }
+    const pts = samples(s, cell)
+    const hit = pts.find((p) => hm.probe(tool, at(p)) > 1e-6)
+    if (hit !== undefined) {
+      out.push(`rapid into material at ${fmt(hit)}`)
+      continue
+    }
+    const horizontal = Math.hypot(m.to[0] - s.from[0], m.to[1] - s.from[1]) > 1e-9
+    if (horizontal) {
+      if (Math.min(s.from[2], m.to[2]) >= margins.retractZ - 1e-9) continue
+      const low = pts.find((p) => hm.probe(grown, at(p, -(margins.horizontal - cell))) > 1e-6)
+      if (low !== undefined) out.push(`low rapid within the margins at ${fmt(low)}`)
+    } else if (m.to[2] < s.from[2] && m.to[2] < margins.retractZ - 1e-9) {
+      if (hm.probe(tool, at(m.to, -(margins.vertical - 1e-6))) > 1e-6)
+        out.push(`rapid down to ${fmt(m.to)}: less than ${margins.vertical} over the material`)
+    }
+  }
+  return out
+}
+
 /** Loops moved so their bounding box starts at (margin, margin), and the heightmap size. */
 export function placeLoops(
   loops: readonly Loop[],
@@ -222,4 +300,37 @@ export function placeLoops(
     loops: moved,
     size: { length: b.max[0] - b.min[0] + 2 * margin, width: b.max[1] - b.min[1] + 2 * margin },
   }
+}
+
+/**
+ * `rapidClearance` of a region pocket's toolpath over its own stock (flat at `onZ`, the region's
+ * box + 10 mm), with the generator's margins: the entry clearance down, the retract height and
+ * the safe-links radial margin across; `before`: the cuts that ran first (a roughing). Test-only.
+ */
+export function pocketRapids(
+  tp: Toolpath,
+  inp: {
+    readonly tool: ToolpathTool
+    readonly heights: { readonly retractHeight: number }
+    readonly operation: { readonly region: Region; readonly onZ: number }
+  },
+  cell = 0.1,
+  before: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[] = [],
+): string[] {
+  const box = chainBounds(inp.operation.region.pieces.flatMap((p) => p.outer.elements))
+  if (box === undefined) return []
+  const pad = 10
+  const origin: Vec2 = [box.min[0] - pad, box.min[1] - pad]
+  return rapidClearance(
+    tp,
+    inp.tool,
+    { length: box.max[0] - box.min[0] + 2 * pad, width: box.max[1] - box.min[1] + 2 * pad },
+    {
+      retractZ: inp.operation.onZ + inp.heights.retractHeight,
+      vertical: SLOT_CLEARANCE,
+      horizontal: inp.heights.retractHeight,
+      radial: LINK_RADIAL_MARGIN,
+    },
+    { cell, origin, top: inp.operation.onZ, before },
+  )
 }

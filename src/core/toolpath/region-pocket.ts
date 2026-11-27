@@ -34,6 +34,7 @@ import {
   type Seg,
 } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
+import { LINK_RADIAL_MARGIN } from './links'
 import {
   deepestPoint,
   linkInside,
@@ -77,7 +78,11 @@ export interface RegionPocketOperation {
   readonly slots?: readonly SlotPass[] | undefined
 }
 
-/** Above the level just cut, a slot is entered by a rapid down to this height over it (mm). */
+/**
+ * Above the level just cut, a slot, and every entry whose column that level already cleared, is
+ * entered by a rapid down to this height over it (mm).
+ * Doc: docs/modes/plan-v0.3.md#low-entries-and-links-df136
+ */
 export const SLOT_CLEARANCE = 0.5
 
 /**
@@ -271,12 +276,54 @@ export function generateRegionPocket(
     const p = b.position
     return p === undefined ? undefined : [p[0], p[1]]
   }
-  /** Up to the retract plane (if below it) and over to `p` on it. */
-  const goTo = (p: Vec2) => {
+  // DF136 low entries (docs/modes/plan-v0.3.md#low-entries-and-links-df136): at a level whose levels above cut the same paths, every entry point lies
+  // on a path those levels cut (a ring, a helix circle, a run) or in the roughed air, so its
+  // column is clear down to the level above: the tool rapids to `entryZ` there and plunges,
+  // ramps or helixes only the last SLOT_CLEARANCE. `linkZ`: a blocked link whose straight corridor
+  // (the tool's disc + the safe-links radial margin) lies in what the levels above cleared
+  // crosses at the level above + the retract height (+ the corner radius: a bull nose's scallops)
+  // instead of on the retract plane. Undefined: from the retract plane, as before.
+  let entryZ: number | undefined
+  let linkZ: number | undefined
+  // the roots shrunk by the radial margin: tool positions whose disc + margin lies in the sweep of
+  // the rings (every point of the roots is within reach of a ring, `clearingStep`)
+  let lowArea: { region: Region; rings: Seg[][] } | undefined
+  const lowLink = (p: Vec2, q: Vec2): boolean => {
+    if (lowArea === undefined) {
+      // an offset error only keeps every link on the retract plane (the safe side)
+      const none: Region = { pieces: [] }
+      const region = port.offset(roots, LINK_RADIAL_MARGIN).unwrapOr(none)
+      lowArea = { region, rings: regionLoops(region).map((l) => loopRing(l)) }
+    }
+    if (lowArea.region.pieces.length === 0) return false
+    return (
+      port.contains(lowArea.region, p) &&
+      port.contains(lowArea.region, q) &&
+      linkInside(port, lowArea.region, lowArea.rings, p, q)
+    )
+  }
+  /**
+   * Up to the retract plane (if below it) and over to `p` on it; with `low`, a link from below
+   * `linkZ` whose corridor the levels above cleared crosses at `linkZ` instead.
+   */
+  const goTo = (p: Vec2, low = false) => {
     const pos = b.position
-    if (pos === undefined) b.rapid(at(p, heights.clearanceHeight))
-    else if (pos[2] < retract) b.rapid([pos[0], pos[1], retract])
-    b.rapid(at(p, retract))
+    if (pos === undefined) {
+      b.rapid(at(p, heights.clearanceHeight))
+      b.rapid(at(p, retract))
+      return
+    }
+    const z =
+      low && linkZ !== undefined && pos[2] <= linkZ + 1e-9 && lowLink([pos[0], pos[1]], p)
+        ? linkZ
+        : retract
+    if (pos[2] < z) b.rapid([pos[0], pos[1], z])
+    b.rapid(at(p, z))
+  }
+  /** `goTo(p)` for an entry at the current level, then a rapid down to `entryZ` if set. */
+  const approach = (p: Vec2) => {
+    goTo(p, true)
+    if (entryZ !== undefined && b.position![2] > entryZ + 1e-9) b.rapid(at(p, entryZ))
   }
   const cutRing = (ring: readonly Seg[], z: number, f = feed) => {
     for (const s of flat(ring, z)) b.seg(s, f)
@@ -303,7 +350,7 @@ export function generateRegionPocket(
         sweep: cw ? -2 * Math.PI : 2 * Math.PI,
       }
       const turns = Math.max(1, Math.ceil((top - z) / (2 * Math.PI * helixRadius * tan) - 1e-9))
-      goTo(start)
+      approach(start)
       b.line(at(start, top), cutting.plungeRate)
       for (const s of slope(Array<Seg>(turns).fill(circle), top, z)) b.seg(s, feed)
       for (const s of flat([circle], z)) b.seg(s, feed) // flatten the helix floor
@@ -318,7 +365,7 @@ export function generateRegionPocket(
     const p = here === undefined ? undefined : ringClosest(outer, here)
     const ring = p === undefined ? outer : ringFrom(outer, p.index, p.u)
     const s0 = ringStart(ring)
-    goTo(s0)
+    approach(s0)
     if (allowed.includes('ramp') && segsLength(ring) >= tool.diameter - EPSILON) {
       b.line(at(s0, top), cutting.plungeRate)
       const { walked, lap } = walkRing(ring, (top - z) / tan)
@@ -358,7 +405,7 @@ export function generateRegionPocket(
       if (safe !== undefined) b.line(at(s0, z), feed)
       else {
         // blocked link (or first ring of the level): retract, rapid, plunge (T-I)
-        goTo(s0)
+        approach(s0)
         b.line(at(s0, z), cutting.plungeRate)
       }
       cutRing(ring, z)
@@ -462,7 +509,7 @@ export function generateRegionPocket(
           const s0 = ringStart(item.run.segs)
           if (clear(s0)) b.line(at(s0, z), feed)
           else {
-            goTo(s0)
+            approach(s0)
             b.line(at(s0, z), cutting.plungeRate)
           }
           cutRing(item.run.segs, z)
@@ -487,13 +534,13 @@ export function generateRegionPocket(
           const air = airOf(item.node)
           const q = air === undefined ? undefined : ringClosest(ring, air)
           if (air !== undefined && q !== undefined) {
-            goTo(air)
+            approach(air)
             b.line(at(air, z), cutting.plungeRate)
             const r = ringFrom(ring, q.index, q.u)
             b.line(at(ringStart(r), z), feed)
             cutRing(r, z)
           } else {
-            goTo(s0)
+            approach(s0)
             b.line(at(s0, z), cutting.plungeRate)
             cutRing(from, z)
           }
@@ -570,10 +617,19 @@ export function generateRegionPocket(
   const rest = op.restAfter
   const levelTree = (z: number): readonly RingNode[] =>
     rest === undefined || z >= op.onZ - rest.floorDepth - 1e-9 ? tree : fullTree
+  // DF136 low entries: the paths of the first level cut, the same at every level after it while
+  // the tree and the clipping stay the same (they change once, below the roughing's floor)
+  let firstMode: string | undefined
   // DF108: rest machining may leave no ring to cut (the roughing cleared every node)
   for (const [k, z] of roughZ.entries()) {
     const nodes = levelTree(z)
     if (nodes.length === 0 && slots.length === 0) continue
+    const mode = nodes !== tree ? 'full' : clipped !== undefined ? 'clipped' : 'tree'
+    const same = firstMode === mode
+    firstMode ??= mode
+    entryZ = same && top + SLOT_CLEARANCE < retract ? top + SLOT_CLEARANCE : undefined
+    const lz = top + heights.retractHeight + tool.cornerRadius
+    linkZ = same && rest === undefined && lz < retract - 1e-9 ? lz : undefined
     if (nodes === tree) leaves = treeLeaves.unwrap()
     else {
       if (fullLeaves === undefined) {
@@ -622,6 +678,8 @@ export function generateRegionPocket(
     b.rapid([pos[0], pos[1], retract])
     top = z
   }
+  entryZ = undefined
+  linkZ = undefined
 
   if (finishing) {
     b.pass('finish')
@@ -658,6 +716,11 @@ export function generateRegionPocket(
       const ring0 = loops.splice(bi, 1)[0]!
       const lead = finishLead(port, ring0, wall, roots, R, a, cw)
       goTo(lead.start)
+      // DF136: a lead start in the roots is cleared down to the floor by every roughing level
+      // (its disc lies in their sweep; + the corner radius for a bull nose's scallops)
+      const low = finishZ[0]! + SLOT_CLEARANCE + tool.cornerRadius
+      if (rest === undefined && low < retract - 1e-9 && port.contains(roots, lead.start))
+        b.rapid(at(lead.start, low))
       for (const [k, z] of finishZ.entries()) {
         const s = pass(roughZ.length + k)
         if (s.isErr()) return Err(s.unwrapErr())

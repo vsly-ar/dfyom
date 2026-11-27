@@ -39,7 +39,13 @@ import {
 import { findRestMaterial } from '../geometry/2d/rest-material'
 import { arcSweep } from './stats'
 import { bullNose, cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
-import { airCut, heightDifference, placeLoops, regionCoverage } from './testing/region-coverage'
+import {
+  airCut,
+  heightDifference,
+  placeLoops,
+  pocketRapids,
+  regionCoverage,
+} from './testing/region-coverage'
 import { steps as walk } from './testing/oracles'
 import { cuttingLevels, stepsWithin, violations } from './testing/rules'
 
@@ -149,21 +155,37 @@ const twoIslands = (): Loop[] => [
   hole(rect(70, 25, 30, 30, 4)),
 ]
 
-/** Generic rules with the tool centre inside the wall's tool-centre region below the top. */
-function checkRules(inp: RegionPocketInput, tp: Toolpath): string[] {
+/**
+ * Generic rules with the tool centre inside the wall's tool-centre region below the top; rapids
+ * below the retract plane (DF136 low entries and links) checked against the material instead.
+ */
+function checkRules(
+  inp: RegionPocketInput,
+  tp: Toolpath,
+  before?: readonly { tool: ToolpathTool; tp: Toolpath }[],
+): string[] {
   const wall = port.offset(inp.operation.region, inp.tool.diameter / 2 - 1e-4).unwrap()
   const floor = inp.operation.onZ - inp.operation.depth
-  return violations(tp, {
-    feedRate: inp.cutting.feedRate,
-    plungeRate: inp.cutting.plungeRate,
-    rampAngle: inp.strategy.rampAngle,
-    retractZ: inp.operation.onZ + inp.heights.retractHeight,
-    clearanceZ: inp.heights.clearanceHeight,
-    targetZ: floor,
-    contains: (p: Vec3) =>
-      p[2] > inp.operation.onZ + 1e-9 ||
-      (p[2] >= floor - 1e-9 && port.contains(wall, [p[0], p[1]])),
-  })
+  // a rest pocket's rapids need the roughing that ran before it
+  const rapids =
+    inp.operation.restAfter === undefined || before !== undefined
+      ? pocketRapids(tp, inp, 0.2, before)
+      : []
+  return [
+    ...rapids,
+    ...violations(tp, {
+      feedRate: inp.cutting.feedRate,
+      plungeRate: inp.cutting.plungeRate,
+      rampAngle: inp.strategy.rampAngle,
+      retractZ: inp.operation.onZ + inp.heights.retractHeight,
+      lowRapids: true,
+      clearanceZ: inp.heights.clearanceHeight,
+      targetZ: floor,
+      contains: (p: Vec3) =>
+        p[2] > inp.operation.onZ + 1e-9 ||
+        (p[2] >= floor - 1e-9 && port.contains(wall, [p[0], p[1]])),
+    }),
+  ]
 }
 
 /** Lifts to the retract plane inside each rough pass, the level's final lift not counted. */
@@ -530,7 +552,7 @@ describe('roughing and rest machining (DF108)', () => {
     expect(rest.stats.cutLength).toBeLessThan(0.7 * plain.stats.cutLength)
     // the finishing ring stays: the walls get the small tool's finish
     expect(rest.passes.some((p) => p.kind === 'finish')).toBe(true)
-    expect(checkRules(restIn.inp, rest)).toEqual([])
+    expect(checkRules(restIn.inp, rest, [{ tool: D6, tp: roughTp }])).toEqual([])
     // both passes together: nothing the Ø 2 reaches is left above the floor, no gouge
     const c0 = port.offset(r.region, 1).unwrap()
     const cov = regionCoverage(r.region, c0, rest, D2, r.size, -2, 0.1, 0.01, undefined, [
@@ -555,7 +577,7 @@ describe('roughing and rest machining (DF108)', () => {
     const plain = generateRegionPocket(pocket(D2, {}).inp, port).unwrap()
     expect(rest.stats.cutLength).toBeGreaterThan(full.stats.cutLength)
     expect(rest.stats.cutLength).toBeLessThan(plain.stats.cutLength)
-    expect(checkRules(restIn.inp, rest)).toEqual([])
+    expect(checkRules(restIn.inp, rest, [{ tool: D6, tp: roughTp }])).toEqual([])
     const c0 = port.offset(r.region, 1).unwrap()
     const cov = regionCoverage(r.region, c0, rest, D2, r.size, -2, 0.1, 0.01, undefined, [
       { tool: D6, tp: roughTp },
@@ -613,7 +635,7 @@ describe('rest clipping (DF122 R3)', { timeout: 60_000 }, () => {
     return {
       tp,
       plain,
-      rules: checkRules(restIn, tp),
+      rules: checkRules(restIn, tp, before),
       cov: regionCoverage(region, c0, tp, D3, size, -depth, cell, 0.01, undefined, before),
       diff: heightDifference(size, [...before, { tool: D3, tp }], [{ tool: D3, tp: plain }], cell),
       air: airCut(tp, D3, size, before, cell),

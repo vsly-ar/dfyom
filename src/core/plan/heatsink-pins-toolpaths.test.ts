@@ -21,7 +21,10 @@ import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import { exportPlan } from '../post/plan-export'
 import { streamProgram } from '../run/grbl/sender.fixture'
 import { createToolpathCache } from '../toolpath/cache'
-import type { Toolpath } from '../toolpath/model'
+import type { Move, Toolpath } from '../toolpath/model'
+import { endMill } from '../toolpath/testing/fixtures'
+import { Heightmap } from '../toolpath/testing/oracles'
+import { airCut, rapidClearance, type RapidMargins } from '../toolpath/testing/region-coverage'
 import type { PlanWarning } from './checks'
 import { loadPlan } from './plan'
 import { opsOf, planSetup } from './plan.fixture'
@@ -62,6 +65,24 @@ const FLAT2 = {
       stepover: len('0.8'),
     },
   ],
+}
+
+/** The pocket's margins (DF136): entries 0.5 over the level above, links 2 + 1 radial. */
+const MARGINS: RapidMargins = { retractZ: 2, vertical: 0.5, horizontal: 2, radial: 1 }
+const D2 = endMill(2, 12)
+/** Plunge entries into uncut material at a 2 mm stepdown: 48 leaves a level × 4 (before DF136 too). */
+const PLUNGES = 192
+
+/** A toolpath moved by (dx, dy): the heightmap oracles start at (0, 0). */
+function shifted(tp: Toolpath, dx: number, dy: number): Toolpath {
+  const move = (m: Move): Move => {
+    if (m.kind === 'drill') return { ...m, at: [m.at[0] + dx, m.at[1] + dy] }
+    const to: [number, number, number] = [m.to[0] + dx, m.to[1] + dy, m.to[2]]
+    return m.kind === 'arc'
+      ? { ...m, to, center: [m.center[0] + dx, m.center[1] + dy] }
+      : { ...m, to }
+  }
+  return { ...tp, passes: tp.passes.map((p) => ({ ...p, moves: p.moves.map(move) })) }
 }
 
 const svcs = () => ({
@@ -129,60 +150,92 @@ async function toolpathOf(s: Awaited<ReturnType<typeof pins>>['s']) {
 }
 
 describe('heatsink presets H2 exit', () => {
-  it('square pins: 7 × 7 = 49, border 2, 9 272 mm³, every pin finished, machine', async () => {
-    const { s, svc, out, layout, after } = await pins('square')
-    expect(layout).toMatchObject({ pins: 49, grid: [7, 7], border: 2, ratio: 2.7, base: 6 })
-    expect(layout.origin).toBeUndefined()
-    expect(out.cells).toBe(49)
-    expect(after).toEqual([])
+  // heavy: a 47 000-line program streamed through the virtual machine and swept on a heightmap
+  // (≈ 5 s idle)
+  it(
+    'square pins: 7 × 7 = 49, border 2, 9 272 mm³, every pin finished, machine',
+    { timeout: 60_000 },
+    async () => {
+      const { s, svc, out, layout, after } = await pins('square')
+      expect(layout).toMatchObject({ pins: 49, grid: [7, 7], border: 2, ratio: 2.7, base: 6 })
+      expect(layout.origin).toBeUndefined()
+      expect(out.cells).toBe(49)
+      expect(after).toEqual([])
 
-    // removed volume (1 600 − 49 × 9) × 8 = 9 272 mm³
-    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
-    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
-    expect(Math.abs(40 * 40 * 14 - solid.volume - 9272) / 9272).toBeLessThan(0.002)
+      // removed volume (1 600 − 49 × 9) × 8 = 9 272 mm³
+      const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+      const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+      expect(Math.abs(40 * 40 * 14 - solid.volume - 9272) / 9272).toBeLessThan(0.002)
 
-    const { planId, warnings, tp } = await toolpathOf(s)
-    expect(warnings.filter((w) => w.severity === 'error')).toEqual([])
-    expect(warnings.filter((w) => w.code === 'plan.restMaterial')).toEqual([])
-    // Q208: 3 mm pins finished in one 8 mm level: the hint, at Finish stepdown
-    const hint = warnings.find((w) => w.code === 'plan.thinWallFinish')
-    expect(hint).toMatchObject({ severity: 'info', field: 'strategy.finishStepdown' })
-    expect(hint?.params).toMatchObject({ web: 3, finishStepdown: 8, suggested: 3 })
+      const { planId, warnings, tp } = await toolpathOf(s)
+      expect(warnings.filter((w) => w.severity === 'error')).toEqual([])
+      expect(warnings.filter((w) => w.code === 'plan.restMaterial')).toEqual([])
+      // Q208: 3 mm pins finished in one 8 mm level: the hint, at Finish stepdown
+      const hint = warnings.find((w) => w.code === 'plan.thinWallFinish')
+      expect(hint).toMatchObject({ severity: 'info', field: 'strategy.finishStepdown' })
+      expect(hint?.params).toMatchObject({ web: 3, finishStepdown: 8, suggested: 3 })
 
-    // down to the 8 mm floor; a finishing ring round every pin
-    const moves = tp.passes.flatMap((p) => p.moves).flatMap((m) => (m.kind === 'drill' ? [] : [m]))
-    expect(Math.min(...moves.map((m) => m.to[2]))).toBeCloseTo(-8, 9)
-    const finish = tp.passes.filter((p) => p.kind === 'finish').flatMap((p) => p.moves)
-    const centres = Array.from({ length: 7 }, (_, i) => 3.5 + i * 5.5)
-    for (const u of centres)
-      for (const v of centres) {
-        // the tool centre runs round the pin at R from its sides
-        const near = finish.filter(
-          (m) =>
-            m.kind !== 'drill' &&
-            Math.abs(m.to[0] - u) <= 1.5 + 1 + 1e-6 &&
-            Math.abs(m.to[1] - v) <= 1.5 + 1 + 1e-6 &&
-            Math.max(Math.abs(m.to[0] - u), Math.abs(m.to[1] - v)) >= 1.5 + 1 - 1e-6,
-        )
-        expect(near.length, `pin at ${u}, ${v}`).toBeGreaterThanOrEqual(4)
-      }
+      // down to the 8 mm floor; a finishing ring round every pin
+      const moves = tp.passes
+        .flatMap((p) => p.moves)
+        .flatMap((m) => (m.kind === 'drill' ? [] : [m]))
+      expect(Math.min(...moves.map((m) => m.to[2]))).toBeCloseTo(-8, 9)
+      const finish = tp.passes.filter((p) => p.kind === 'finish').flatMap((p) => p.moves)
+      const centres = Array.from({ length: 7 }, (_, i) => 3.5 + i * 5.5)
+      for (const u of centres)
+        for (const v of centres) {
+          // the tool centre runs round the pin at R from its sides
+          const near = finish.filter(
+            (m) =>
+              m.kind !== 'drill' &&
+              Math.abs(m.to[0] - u) <= 1.5 + 1 + 1e-6 &&
+              Math.abs(m.to[1] - v) <= 1.5 + 1 + 1e-6 &&
+              Math.max(Math.abs(m.to[0] - u), Math.abs(m.to[1] - v)) >= 1.5 + 1 - 1e-6,
+          )
+          expect(near.length, `pin at ${u}, ${v}`).toBeGreaterThanOrEqual(4)
+        }
 
-    const e = expectOk(await exportPlan(s.d.doc, planId, svc))
-    const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
-    const run = await streamProgram(e.lines, machine)
-    expect(run.lines).toBe(e.lines.length)
-    // the plan’s time (recorded in pattern-presets.md § Implementation (H2)): ≈ 453 min, 100 m of
-    // cut; 234 min of it are entries plunged from the retract plane (a known issue there)
-    expect(tp.stats.estimatedSeconds / 60).toBeGreaterThan(400)
-    expect(tp.stats.estimatedSeconds / 60).toBeLessThan(500)
-    expect(tp.stats.cutLength).toBeGreaterThan(95_000)
-    expect(tp.stats.cutLength).toBeLessThan(105_000)
-  })
+      const e = expectOk(await exportPlan(s.d.doc, planId, svc))
+      const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+      const run = await streamProgram(e.lines, machine)
+      expect(run.lines).toBe(e.lines.length)
+      // the plan's time (recorded in pattern-presets.md § Implementation (H2)): ≈ 264 min, 79 m of
+      // cut; 453 min and 100 m before DF136's low entries (every helix fed down from the retract plane)
+      expect(tp.stats.estimatedSeconds / 60).toBeGreaterThan(240)
+      expect(tp.stats.estimatedSeconds / 60).toBeLessThan(290)
+      expect(tp.stats.cutLength).toBeGreaterThan(75_000)
+      expect(tp.stats.cutLength).toBeLessThan(84_000)
+
+      // DF136 safety on a heightmap of the 40 × 40 block (0.2 mm cells, its (0, 0) 5 mm out so the
+      // open border fits): no rapid into material, every low entry ≥ 0.5 mm over the level above,
+      // no gouge into a pin, nothing below the floor
+      const hm = new Heightmap(50, 50, 0.2)
+      expect(rapidClearance(tp, D2, hm, MARGINS, { origin: [-5, -5], heightmap: hm })).toEqual([])
+      let gouge = 0
+      let below = 0
+      for (let j = 0; j < hm.ny; j++)
+        for (let i = 0; i < hm.nx; i++) {
+          const [x, y] = hm.center(i, j)
+          const z = hm.z[j * hm.nx + i]!
+          if (z < -8 - 1e-9) below++
+          // a pin: 3 × 3 at 3.5 + 5.5 k (+ 5), less 0.02 mm (the cells along its sides)
+          const pin =
+            centres.some((u) => Math.abs(x - 5 - u) < 1.48) &&
+            centres.some((v) => Math.abs(y - 5 - v) < 1.48)
+          if (pin && z < -0.02) gouge++
+        }
+      expect(below).toBe(0)
+      expect(gouge).toBe(0)
+    },
+  )
 
   it('golden: the same square pins at a 2 mm stepdown (4 levels keep the file small)', async () => {
     const { s, svc } = await pins('square', { stepdown: '2' })
-    const { planId, warnings } = await toolpathOf(s)
+    const { planId, warnings, tp } = await toolpathOf(s)
     expect(warnings.filter((w) => w.severity === 'error')).toEqual([])
+    // DF136: plunges into uncut material are only the leaves too small for a helix or a ramp
+    // (one level each), as many as before the low entries (0.1 mm cells, moved by 5 mm)
+    expect(airCut(shifted(tp, 5, 5), D2, { length: 50, width: 50 }, [], 0.1).plunges).toBe(PLUNGES)
     const e = expectOk(await exportPlan(s.d.doc, planId, svc))
     await expect(e.lines.join('\n') + '\n').toMatchFileSnapshot(
       '__golden__/heatsink-pins-square.nc',

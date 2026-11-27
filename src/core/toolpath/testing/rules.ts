@@ -11,6 +11,11 @@ export interface PathRules {
   readonly rampAngle?: number
   /** Rapids move horizontally only at or above this Z. */
   readonly retractZ: number
+  /**
+   * Rapids may run below `retractZ` (DF136: a pocket's low entries and links over what its
+   * levels above cleared); the test checks them against material with `rapidClearance` instead.
+   */
+  readonly lowRapids?: boolean
   readonly clearanceZ: number
   /** The operation's final depth: the deepest feed move must reach exactly this Z. */
   readonly targetZ: number
@@ -45,7 +50,8 @@ export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[]
     if (m.kind === 'rapid') {
       const horizontal = Math.hypot(m.to[0] - from[0], m.to[1] - from[1]) > 1e-9
       const low = horizontal ? Math.min(from[2], m.to[2]) : m.to[2]
-      if (!inDrill && low < rules.retractZ - 1e-9) out.push(`rapid below retract: ${where}`)
+      if (!inDrill && rules.lowRapids !== true && low < rules.retractZ - 1e-9)
+        out.push(`rapid below retract: ${where}`)
       return
     }
     if (m.feed > rules.feedRate + 1e-9) out.push(`feed above feed rate: ${where}`)

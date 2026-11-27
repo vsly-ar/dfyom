@@ -17,7 +17,7 @@ import {
 } from './region-profile'
 import { cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
 import { render } from './testing/oracles'
-import { placeLoops } from './testing/region-coverage'
+import { placeLoops, pocketRapids } from './testing/region-coverage'
 import { bracket, hook, slot, svgBracket, triangle, twoIslands } from './testing/region-fixtures'
 import { violations } from './testing/rules'
 
@@ -92,12 +92,14 @@ function rules(
   floor: number,
   rampAngle: number,
   contains: (p: Vec3) => boolean,
+  lowRapids = false,
 ): string[] {
   return violations(tp, {
     feedRate: i.cutting.feedRate,
     plungeRate: i.cutting.plungeRate,
     rampAngle,
     retractZ: onZ + i.heights.retractHeight,
+    lowRapids,
     clearanceZ: i.heights.clearanceHeight,
     targetZ: floor,
     contains,
@@ -119,7 +121,8 @@ describe('golden files: region pockets', () => {
       const inp = pocketInput(loops, depth)
       const tp = generateRegionPocket(inp, port).unwrap()
       const wall = port.offset(inp.operation.region, 3 - 1e-4).unwrap()
-      expect(rules(tp, inp, 0, -depth, 3, inRegion(wall, 0, -depth))).toEqual([])
+      expect(rules(tp, inp, 0, -depth, 3, inRegion(wall, 0, -depth), true)).toEqual([])
+      expect(pocketRapids(tp, inp)).toEqual([])
       await expect(render(tp)).toMatchFileSnapshot(`__golden__/${name}.txt`)
     })
 
