@@ -29,7 +29,9 @@ export function useJogGuardSync(): void {
         stock: { length: stock.length, width: stock.width },
       },
       zero: wh.zero,
+      clearance: wh.holding.clearance,
       names: Object.fromEntries(wh.holding.items.map((i) => [i.id, i.name])),
+      ...(wh.staleZero === undefined ? {} : { staleZero: wh.staleZero }),
     })
   }, [store, wh])
 }

@@ -209,6 +209,8 @@ describe('live clearance and colours (DF133 RW5)', () => {
     // under 2 × margin: amber
     over(t, c.top, 1.5 * c.margin)
     await waitFor(() => expect(chip()).toHaveAttribute('data-clearance', 'close'))
+    // RW6: the amber chip says "Close", not "Clear"
+    expect(chip()).toHaveTextContent(`Close: ${1.5 * c.margin} mm to ${c.name} (tool)`)
     expect(said()).toHaveTextContent(`Close to ${c.name}.`)
     const screwSolid = () => probe.run!.workholding!.solids.find((x) => x.itemId === c.id)!
     await waitFor(() => expect(screwSolid().close).toBe(true))

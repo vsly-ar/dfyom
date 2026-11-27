@@ -60,6 +60,7 @@ async function renderGuard(withItems = true) {
   bridge.handle('run.status.get', () => ok(status))
   bridge.handle('run.machine.jog', () => ok({}))
   bridge.handle('run.machine.jogCancel', () => ok({}))
+  bridge.handle('run.align.goto', () => ok({ current: 'zero', target: [0, 0] }))
   const push = (patch: Partial<RunStatus>) => {
     status = { ...status, ...patch }
     act(() => bridge.emitRunStatus(status))
@@ -86,7 +87,8 @@ async function renderGuard(withItems = true) {
   // connected, homed, G54 set, a 10 mm step
   push({ ...OPEN, homed: true, workZero: [...G54], envelope: structuredClone(envelope) as never })
   act(() => run().getState().setJogStep(10))
-  return { ...r, s, push, at, run, jogs, nav }
+  const aligns = () => bridge.calls.filter((c) => c.name === 'run.align.goto').map((c) => c.args)
+  return { ...r, s, push, at, run, jogs, aligns, nav }
 }
 
 type T = Awaited<ReturnType<typeof renderGuard>>
@@ -428,5 +430,75 @@ describe('recovery and the workholding guard (DF133 RW5)', () => {
     })
     expect(sent).toBe(false)
     expect(t.jogs()).toHaveLength(1)
+  })
+})
+
+describe('setup change and alignment pointer moves (DF133 RW6)', () => {
+  it('after a setup change the items are outlined and the guard off until the work zero changes', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.minX - 20, c.midY, 5])
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const line = () => document.querySelector('[data-workholding-trust]')
+    await waitFor(() => expect(line()).toHaveAttribute('data-workholding-trust', 'trusted'))
+    // a run ended with this setup next: the store keeps the G54 of that moment
+    const setupId = t.run().getState().guardSetup!.key.split(':')[1]!
+    act(() =>
+      t.run().setState({ setupChange: setupId, setupChangeOpen: true, setupChangeZero: [...G54] }),
+    )
+    await waitFor(() => expect(line()).toHaveAttribute('data-workholding-trust', 'zeroStale'))
+    expect(line()).toHaveTextContent(
+      'New setup: set its work zero to check jogs against the workholding.',
+    )
+    expect(document.querySelector('[data-clearance]')).toBeNull()
+    const prompt = await screen.findByRole('dialog', { name: /^Setup change: setup 1/ })
+    expect(prompt.querySelector('[data-setup-change-guard]')).toHaveTextContent(
+      'Clamps outlined: jogs are not checked against them until you set this setup’s work zero.',
+    )
+    await expectNoAxeViolations()
+    // the guard is off: today's step, even toward the clamp
+    act(() => t.run().getState().setJogStep(50))
+    await t.user.click(within(prompt).getByRole('button', { name: 'Jog X+' }))
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    expect(t.jogs()[0]).toEqual({ by: [50, 0, 0], feed: expect.any(Number) })
+    // the new zero is set (any G54 change): solid and guarded again, the snapshot dropped
+    t.push({ workZero: [G54[0], G54[1], G54[2] - 1] })
+    await waitFor(() => expect(line()).toHaveAttribute('data-workholding-trust', 'trusted'))
+    expect(prompt.querySelector('[data-setup-change-guard]')).toBeNull()
+    expect(t.run().getState().setupChangeZero).toBeUndefined()
+  })
+
+  it('the alignment pointer’s jogs go through the guard: a pass below a clamp’s top is not sent', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    const setupId = t.run().getState().guardSetup!.key.split(':')[1]!
+    /** The tip at work position `w` with work zero `g54`, Idle. */
+    type V = readonly [number, number, number]
+    const tip = (g54: V, w: V) =>
+      t.push({
+        state: 'Idle',
+        workZero: [...g54],
+        wpos: [...w],
+        mpos: [w[0] + g54[0], w[1] + g54[1], w[2] + g54[2]],
+      })
+    // beyond the clamp from the zero, below its top
+    const w = [2 * c.midX, 2 * c.midY, 5] as const
+    // a high work zero: the machine top (−0.5) caps the clearance height below the clamp's top
+    tip([G54[0], G54[1], -10], w)
+    await act(() => t.run().getState().alignGoto(setupId, 'zero'))
+    await waitFor(() =>
+      expect(notice(t)).toHaveTextContent(/^Not moved: the .* within the margin of Toe clamp 1\.$/),
+    )
+    expect(t.aligns()).toHaveLength(0)
+    // Jog past once covers it, and is used up
+    act(() => t.run().getState().jogPastOnce())
+    await act(() => t.run().getState().alignGoto(setupId, 'zero'))
+    expect(t.aligns()).toHaveLength(1)
+    expect(t.run().getState().pastOnceUntil).toBeUndefined()
+    // the usual case: the clearance height clears the clamp, sent as before
+    tip(G54, w)
+    await act(() => t.run().getState().alignGoto(setupId, 'zero'))
+    expect(t.aligns()).toHaveLength(2)
+    expect(t.aligns()[1]).toEqual({ planId: expect.any(String), setupId, to: 'zero' })
   })
 })

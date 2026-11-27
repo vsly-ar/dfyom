@@ -33,6 +33,13 @@ export interface JogGuardSetup {
   readonly zero: readonly [number, number]
   /** Item names by id ("Toe clamp 2"). */
   readonly names: Readonly<Record<string, string>>
+  /**
+   * RW6: the G54 at the start of a setup change to this setup: while the controller still
+   * reports it, the new setup's zero is not set and the guard is off (the items outlined).
+   */
+  readonly staleZero?: Vec3
+  /** RW6: the setup's clearance height (mm above Z0) the alignment pointer travels at. */
+  readonly clearance?: number
 }
 
 /** The jog notice (reserved line in the jog pads, DF34). */
@@ -53,7 +60,14 @@ export const SETTLE_MS = 400
 /** A queued jog's end is forgotten when an Idle report comes this long (ms) after it was sent. */
 export const JOG_END_STALE_MS = 1000
 
-/** Q184: homed, G54 set (not 0 0 0), a setup with items and a tool, the switch on. */
+/** RW6: the setup's zero is not set yet: G54 is still the one the setup change began with. */
+export const zeroStale = (workZero: RunStatus['workZero'], staleZero: Vec3 | undefined): boolean =>
+  staleZero !== undefined && workZero.every((v, i) => v === staleZero[i])
+
+/**
+ * Q184: homed, G54 set (not 0 0 0) and, after a setup change, set again (RW6), a setup with items
+ * and a tool, the switch on.
+ */
 export function guardActive(
   status: RunStatus,
   setup: JogGuardSetup | undefined,
@@ -64,7 +78,8 @@ export function guardActive(
     !off &&
     status.connection.state === 'open' &&
     status.homed &&
-    !status.workZero.every((v) => v === 0)
+    !status.workZero.every((v) => v === 0) &&
+    !zeroStale(status.workZero, setup.staleZero)
   )
 }
 

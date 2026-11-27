@@ -28,6 +28,7 @@ import {
   type JogRequest,
 } from '../../../../core/run/guarded-jog'
 import type { Vec3 } from '../../../../core/toolpath/model'
+import { entryTo, pointerMoves } from '../../../../core/run/alignment'
 import {
   arrived,
   contactItem,
@@ -229,6 +230,12 @@ export interface RunState {
    */
   readonly setupChange: string | undefined
   readonly setupChangeOpen: boolean
+  /**
+   * DF133 RW6: the work zero (G54) when the setup change began, until it changes: the new
+   * setup's items are outlined and the guard off meanwhile (they would stand at the old setup's
+   * zero; docs/modes/run-workholding.md#implementation-rw6).
+   */
+  readonly setupChangeZero: Vec3 | undefined
   /**
    * DF78 (Q107, assumed): bumped when the setup-change prompt hands over to the docked alignment
    * panel, which then takes the focus.
@@ -706,6 +713,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setupId: undefined,
       setupChange: undefined,
       setupChangeOpen: false,
+      setupChangeZero: undefined,
       alignFocus: 0,
       timeScale: 1,
       connectTo: 'serial',
@@ -1016,6 +1024,50 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       async alignGoto(setupId, to) {
         const planId = get().planId
         if (planId === undefined || planId === NO_PLAN) return
+        // DF133 RW6: the pointer's jogs (main plans them, `pointerMoves`) through the guard as
+        // `moveTo`'s are, for the guard's own setup; "Jog past once" covers and is used up by them
+        const s = get()
+        const now = Date.now()
+        const past = s.pastOnceUntil !== undefined && now <= s.pastOnceUntil
+        if (s.pastOnceUntil !== undefined) disarmPastOnce()
+        const g = s.guardSetup
+        if (
+          guardActive(s.status, g, s.guardOff) &&
+          !past &&
+          g.key === `${planId}:${setupId}` &&
+          g.clearance !== undefined
+        ) {
+          const step = s.status.alignment
+          const target =
+            step !== undefined && step.planId === planId && step.setupId === setupId
+              ? entryTo(step, to)?.target
+              : to === 'zero'
+                ? ([0, 0] as const)
+                : undefined
+          if (target !== undefined) {
+            const from = jogStart(s.status, queued?.end, cancelAt, now)
+            if (from === undefined) {
+              set({ guardNotice: { kind: 'moving' } })
+              return
+            }
+            const moves = pointerMoves(
+              { mpos: from, workZero: s.status.workZero, zeroLevel: s.status.zeroLevel },
+              target,
+              g.clearance,
+            )
+            const hit = moveGuard(
+              s.status,
+              g,
+              from,
+              moves.map((m) => m.to),
+            )
+            if (hit !== undefined) {
+              set({ guardNotice: { kind: 'blocked', item: hit.item, contact: hit.hit.contact } })
+              return
+            }
+            if (s.guardNotice !== undefined) set({ guardNotice: undefined })
+          }
+        }
         await call('run.align.goto', { planId, setupId, to })
       },
       alignTick: async (change) => void (await call('run.align.tick', change)),
@@ -1200,6 +1252,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
             setupId: next.setupId,
             setupChange: next.setupId,
             setupChangeOpen: true,
+            setupChangeZero: [...store.getState().status.workZero] as Vec3,
           })
       })
     }
@@ -1227,6 +1280,13 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       store.setState({ settingsCheck: undefined })
     if (status.connection.state === 'closed' && store.getState().setupChange !== undefined)
       store.setState({ setupChange: undefined, setupChangeOpen: false })
+    // DF133 RW6: the new setup's zero is set (any G54 change), or the setup change is over
+    const was = store.getState().setupChangeZero
+    if (
+      was !== undefined &&
+      (store.getState().setupChange === undefined || status.workZero.some((v, i) => v !== was[i]))
+    )
+      store.setState({ setupChangeZero: undefined })
     const job = status.job
     if (job !== undefined && store.getState().jobId !== job.jobId) {
       // a run started elsewhere (another window, an agent): follow it too

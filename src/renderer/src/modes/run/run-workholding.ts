@@ -30,18 +30,22 @@ import { isConnected } from './machine-state'
  * What the Run scene knows about the items' place (run-workholding.md § Trust):
  * `noItems` the setup has no clamps, vise, screws or blocks; `disconnected` and `notHomed` the
  * items outlined at the plan's zero; `zeroUnset` homed but G54 never set (0 0 0): hidden;
+ * `zeroStale` (RW6) a setup change began and G54 is still the previous setup's: outlined;
  * `trusted` homed with G54 set: solid.
  */
-export type WorkholdingTrust = 'noItems' | 'disconnected' | 'notHomed' | 'zeroUnset' | 'trusted'
+export type WorkholdingTrust =
+  'noItems' | 'disconnected' | 'notHomed' | 'zeroUnset' | 'zeroStale' | 'trusted'
 
 export function workholdingTrust(
   status: Pick<RunStatus, 'connection' | 'homed' | 'workZero'>,
   hasItems: boolean,
+  zeroStale = false,
 ): WorkholdingTrust {
   if (!hasItems) return 'noItems'
   if (!isConnected(status as RunStatus)) return 'disconnected'
   if (!status.homed) return 'notHomed'
   if (status.workZero.every((v) => v === 0)) return 'zeroUnset'
+  if (zeroStale) return 'zeroStale'
   return 'trusted'
 }
 

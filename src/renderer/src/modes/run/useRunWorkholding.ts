@@ -15,6 +15,8 @@ import { useReplica } from '../../shell/ShellContext'
 import { loadedPlanOf } from '../plan/model'
 import { activeJob } from './machine-state'
 import { runSetup } from './plan-info'
+import type { Vec3 } from '../../../../core/toolpath/model'
+import { zeroStale } from './run-guard'
 import { useRun } from './run-store'
 import {
   guardTool,
@@ -36,6 +38,8 @@ export interface RunWorkholding {
   readonly line?: string
   /** The line is a warning (the guard switched off). */
   readonly warn?: true
+  /** RW6: the G54 a setup change to this setup began with, while it is still set (the guard's). */
+  readonly staleZero?: Vec3
 }
 
 const g = runMessages.guard
@@ -46,6 +50,7 @@ export const trustLine: Readonly<Record<WorkholdingTrust, string | undefined>> =
   disconnected: undefined,
   notHomed: g.notHomed,
   zeroUnset: g.zeroUnset,
+  zeroStale: g.zeroStale,
   trusted: g.trusted,
 }
 
@@ -73,8 +78,18 @@ export function useRunWorkholding(): RunWorkholding | undefined {
       zero: [zero[0], zero[1]] as const,
     }
   }, [doc, plan, setupId])
+  // RW6: after a setup change to this setup, until G54 changes (outlined, the guard off)
+  const setupChange = useRun((s) => s.setupChange)
+  const changeZero = useRun((s) => s.setupChangeZero)
+  const staleZero = base !== undefined && setupChange === base.setup.id ? changeZero : undefined
   const trust =
-    base === undefined ? undefined : workholdingTrust(status, base.holding.prisms.length > 0)
+    base === undefined
+      ? undefined
+      : workholdingTrust(
+          status,
+          base.holding.prisms.length > 0,
+          zeroStale(status.workZero, staleZero),
+        )
   const n = useRun((s) => s.spindleTool)
   const off = useRun((s) => s.guardOff)
   const zUnset = useRun((s) => s.zUnset)
@@ -84,7 +99,12 @@ export function useRunWorkholding(): RunWorkholding | undefined {
   )
   return useMemo(() => {
     if (base === undefined || trust === undefined) return undefined
-    const head = { ...base, trust, ...(tool === undefined ? {} : { tool }) }
+    const head = {
+      ...base,
+      trust,
+      ...(tool === undefined ? {} : { tool }),
+      ...(staleZero === undefined ? {} : { staleZero }),
+    }
     if (trust === 'trusted' && off) return { ...head, line: g.off, warn: true as const }
     // a setup without a tool: nothing to check with, the RW1 line says so
     const line =
@@ -96,5 +116,5 @@ export function useRunWorkholding(): RunWorkholding | undefined {
             : g.trusted
         : trustLine[trust]
     return { ...head, ...(line === undefined ? {} : { line }) }
-  }, [base, trust, tool, off, zUnset])
+  }, [base, trust, tool, off, zUnset, staleZero])
 }
