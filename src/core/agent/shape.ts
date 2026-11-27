@@ -401,6 +401,14 @@ export class ResultShaper {
               ]),
             )
           : null
+        // DF139: recommended preset values lowered to the plan machine, { field: { from, reason } }
+        const adapted = isObj(listed?.['feeds'])
+          ? Object.fromEntries(
+              Object.entries(listed['feeds'] as Obj).flatMap(([k, f]) =>
+                isObj(f) && isObj(f['adapted']) ? [[k, f['adapted']]] : [],
+              ),
+            )
+          : {}
         const own = findings.filter((f) => f['planOperationId'] === id)
         return {
           id,
@@ -411,6 +419,7 @@ export class ResultShaper {
           ...(cut.has(id) ? { alreadyCut: true } : {}),
           tool: nameOf(o['tool']),
           feeds,
+          ...(Object.keys(adapted).length > 0 ? { adapted } : {}),
           seconds,
           toolpath:
             path === null || path === undefined
