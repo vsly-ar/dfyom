@@ -114,4 +114,90 @@ describe('PatternPresetsDialog (DF107)', () => {
     await user.click(screen.getByRole('radio', { name: 'Speaker grille' }))
     expect(onApply).toHaveBeenCalledWith(PATTERN_PRESETS.find((x) => x.id === 'speakerGrille'))
   })
+
+  describe('Heatsink group (pattern-presets.md H1)', () => {
+    const tools = [
+      { id: 'flat1', name: 'Flat 1', diameter: 1, fluteLength: 4 },
+      { id: 'flat2', name: 'Flat 2 x 12', diameter: 2, fluteLength: 12 },
+      { id: 'flat3', name: 'Flat 3', diameter: 3, fluteLength: 12 },
+    ]
+    /** Not a preset (gap 7): the dialog opens on the last group used. */
+    const custom = { ...honeycomb, spacing: { gap: mm(7) } } as unknown as FeatureDTO
+    const setup = (over: { current?: boolean; lastGroup?: 'heatsink' } = {}) => {
+      const apply = vi.fn()
+      const onGroup = vi.fn()
+      const r = renderUi(
+        <PatternPresetsDialog
+          feature={over.lastGroup === undefined ? honeycomb : custom}
+          onApply={() => {}}
+          heatsink={{
+            face: { across: 40, along: 40, thickness: 14 },
+            units: 'mm',
+            current: over.current ?? false,
+            tools,
+            lastGroup: over.lastGroup,
+            onGroup,
+            apply,
+          }}
+        />,
+      )
+      return { ...r, apply, onGroup }
+    }
+
+    it('opens the step from the card; read-out, slot note, tool ≤ slot; Escape goes back', async () => {
+      const { user, onGroup } = setup()
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      // the current preset (Honeycomb) is decorative: the dialog opens there
+      expect(document.querySelectorAll('[data-preset]')).toHaveLength(PATTERN_PRESETS.length)
+      await user.click(screen.getByRole('radio', { name: 'Heatsink' }))
+      expect(onGroup).toHaveBeenCalledWith('heatsink')
+      const card = screen.getByRole('radio', { name: 'Straight fins' })
+      expect(card).toHaveTextContent('fins 1.5 mm · slots 2 mm · 10 mm high')
+      await user.click(card)
+      const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+      expect(dialog.querySelector('[data-heatsink-readout]')).toHaveTextContent(
+        '11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm · walls 1.5 mm',
+      )
+      expect(dialog).toHaveTextContent('Slot = tool: one pass per level.')
+      expect(within(dialog).getByRole('combobox', { name: 'Tool' })).toHaveTextContent(
+        'Flat 2 x 12',
+      )
+      await expectNoAxeViolations(dialog)
+      await user.keyboard('{Escape}')
+      expect(screen.getByRole('radio', { name: 'Straight fins' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('Apply sends the fields and the tool once and closes; 1 mm fins warn tall', async () => {
+      const { user, apply } = setup({ lastGroup: 'heatsink' })
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      await user.click(screen.getByRole('radio', { name: 'Straight fins' }))
+      const fin = screen.getByRole('combobox', { name: 'Fin thickness' })
+      await user.clear(fin)
+      await user.type(fin, '1{Enter}')
+      const dialog = screen.getByRole('dialog', { name: 'Pattern presets' })
+      expect(dialog).toHaveTextContent('1:10')
+      expect(dialog).toHaveTextContent('Fins taller than 8 × their thickness')
+      await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(apply).toHaveBeenCalledTimes(1)
+      const [args, tool] = apply.mock.calls[0]!
+      expect(tool).toBe('flat2')
+      expect(args).toMatchObject({
+        spacing: { gap: '1 mm' },
+        margin: ['1.5 mm', '0 mm'],
+        depth: '10 mm',
+      })
+    })
+
+    it('opens on Heatsink when the pattern is straight fins', async () => {
+      const { user } = setup({ current: true })
+      await user.click(screen.getByRole('button', { name: 'Presets…' }))
+      expect(screen.getByRole('radio', { name: 'Straight fins' })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      )
+    })
+  })
 })

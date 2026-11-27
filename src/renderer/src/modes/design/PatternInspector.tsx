@@ -14,8 +14,13 @@
 // Doc: docs/modes/patterns.md#ui, docs/conventions/ui.md#pattern-inspector-p1,
 // docs/modes/patterns.md#implementation-p4, docs/modes/patterns.md#implementation-df107df109,
 // docs/conventions/inspector-layout.md#s4-implementation-notes, docs/modes/roughing.md#implementation-r2
+// H1 (docs/modes/pattern-presets.md#implementation-h1): Margin's "Per side" splits it into Across
+// and Along (`margin: [u, v]`); straight fins read out as a heatsink; the Presets dialog's
+// heatsink step applies the fields and the slot tool as one gesture.
 import { useMemo, useState } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
+import { straightFinsReadout, type FinsFields } from '../../../../core/design/pattern/heatsink'
+import type { PatternFacts } from '../../../../core/design/pattern/layout'
 import { patternFacts } from '../../../../core/design/pattern/pattern'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { DfmWarning } from '../../../../core/geometry/model'
@@ -26,9 +31,11 @@ import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import { useRegion2d, useShell } from '../../shell/ShellContext'
 import {
+  Button,
   ErrorMessage,
   Field,
   InspectorGroup,
+  newGestureId,
   PanelHeader,
   QuantityInput,
   SegmentedControl,
@@ -45,7 +52,12 @@ import { operationUnits, warningFeatureField } from './feature-view'
 import { NameField } from './NameField'
 import { placeErrors, refusalText, type FieldError } from './OperationFields'
 import { MiniOutline, shapeLoops } from './ShapePicker'
-import { PatternPresetsDialog } from './PatternPresetsDialog'
+import {
+  PatternPresetsDialog,
+  PRESET_GROUP_KEY,
+  useFlatEndMills,
+  type Group,
+} from './PatternPresetsDialog'
 import { adjustedNote, RoundField } from './RoundField'
 import { ToolField } from './ToolField'
 import { RoughingGroup } from './RoughingGroup'
@@ -85,6 +97,52 @@ type CellRecord = { kind: CellKind; shapeId?: string; across?: string } & Record
 const sourceOf = (q: unknown): string | undefined =>
   (q as QuantityDTO | undefined)?.source ?? undefined
 
+/** A stored quantity's exact value (mm, °). */
+const exactOf = (q: unknown): number | undefined => {
+  const e = (q as QuantityDTO | undefined)?.exact
+  return e === undefined ? undefined : Number(e.num) / Number(e.den)
+}
+
+/** The pattern's fields as the heatsink read-out reads them (H1); undefined: not straight fins. */
+function finsFields(
+  feature: FeatureDTO,
+  facts: PatternFacts,
+  thickness: number | undefined,
+): FinsFields | undefined {
+  const c = feature['cell'] as CellRecord
+  const b = chainBounds(facts.area.pieces.flatMap((x) => x.outer.elements))
+  if (b === undefined) return undefined
+  const m = feature['margin'] as QuantityDTO | [QuantityDTO, QuantityDTO] | undefined
+  const [mu, mv] = Array.isArray(m) ? m.map(exactOf) : [exactOf(m), exactOf(m)]
+  const depth = exactOf(feature['depth'])
+  if (depth === undefined || c['round'] === true) return undefined
+  const length = exactOf(c['length'])
+  const width = exactOf(c['width'])
+  return {
+    cell:
+      c.kind === 'rectangle' && length !== undefined && width !== undefined
+        ? {
+            kind: 'rectangle',
+            length,
+            width,
+            cornerRadius: exactOf(c['cornerRadius']) ?? 0,
+            rotation: exactOf(c['rotation']) ?? 0,
+          }
+        : { kind: 'other' },
+    lattice: String(feature['lattice']),
+    alternate: feature['alternate'] === 'flip' ? 'flip' : 'none',
+    invert: feature['invert'] === true,
+    through: feature['through'] === true,
+    gap: exactOf((feature['spacing'] as { gap?: QuantityDTO }).gap),
+    angle: exactOf(feature['angle']) ?? 0,
+    depth,
+    cells: facts.cells,
+    area: { min: [b.min[0], b.min[1]], max: [b.max[0], b.max[1]] },
+    margin: [mu ?? 0, mv ?? 0],
+    thickness,
+  }
+}
+
 /** The cell as `design.pattern.update` takes it: its sources, `changes` applied. */
 function cellArgs(cell: CellRecord, changes: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = { kind: cell.kind }
@@ -113,6 +171,8 @@ export function PatternInspector({
   const { ui } = useShell()
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const [errors, setErrors] = useState<FieldError[]>([])
+  const [perSideOn, setPerSide] = useState(false)
+  const flatEndMills = useFlatEndMills()
   const units = part.units
 
   const cell = feature['cell'] as CellRecord
@@ -331,6 +391,26 @@ export function PatternInspector({
   const clip = feature['fit'] === 'clip'
   const inverted = feature['invert'] === true
   const chamferProblem = problemAt(['chamfer', 'chamfer.width', 'chamfer.angle', 'chamfer.side'])
+  // H1: the margin per side, the face for the heatsink step and the heatsink read-out
+  const marginPair = Array.isArray(feature['margin'])
+    ? (feature['margin'] as [QuantityDTO, QuantityDTO])
+    : undefined
+  const marginSource = (i: 0 | 1): string =>
+    sourceOf(marginPair === undefined ? feature['margin'] : marginPair[i]) ?? '0'
+  const stock = part.loaded?.stock
+  const onStock = feature.on === 'stock.top' || feature.on === 'stock.bottom'
+  const own = (part.dto.shapes ?? []).find((s) => s.id === `${feature.id}_cells`)?.pattern
+  const thickness = onStock && stock !== undefined ? stock.thickness.canonical : undefined
+  const heatsinkFace =
+    own === undefined
+      ? undefined
+      : {
+          across: own.boundary.max[0] - own.boundary.min[0],
+          along: own.boundary.max[1] - own.boundary.min[1],
+          thickness,
+        }
+  const ff = facts === undefined ? undefined : finsFields(feature, facts, thickness)
+  const fins = ff === undefined ? undefined : straightFinsReadout(ff)
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={feature.name} itemId={feature.id} />
@@ -345,15 +425,48 @@ export function PatternInspector({
           <p className={styles['muted']} data-pattern-readout>
             {facts === undefined
               ? ''
-              : p.readoutFull(
-                  facts.cells,
-                  facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
-                  facts.dropped,
-                )}
+              : fins !== undefined
+                ? p.finsReadout(
+                    fins.slots,
+                    fins.fins,
+                    lengthSource(fins.fin, units),
+                    lengthSource(fins.height, units),
+                    fins.ratio,
+                    fins.base === undefined ? undefined : lengthSource(fins.base, units),
+                  )
+                : p.readoutFull(
+                    facts.cells,
+                    facts.web === undefined ? undefined : lengthSource(facts.web.width, units),
+                    facts.dropped,
+                  )}
           </p>
           <PatternPresetsDialog
             feature={feature}
             onApply={(preset) => void update({ ...preset.args }, 'cell')}
+            heatsink={{
+              face: heatsinkFace,
+              units,
+              current: fins !== undefined,
+              tools: flatEndMills,
+              lastGroup: ui.getState().steps[PRESET_GROUP_KEY] as Group | undefined,
+              onGroup: (g) => ui.getState().rememberStep(PRESET_GROUP_KEY, g),
+              apply: (args, toolId) =>
+                void (async () => {
+                  // the fields and the slot tool: two commands, one gesture, one undo step
+                  const gesture = newGestureId()
+                  await update(args, 'cell', gesture)
+                  if (toolId === undefined || pocketOp === undefined) return
+                  await call(
+                    'design.operation.tool.set',
+                    {
+                      partId: part.dto.id,
+                      operationId: pocketOp.id,
+                      tool: { kind: 'specific', toolLibraryItemId: toolId },
+                    },
+                    { gesture },
+                  )
+                })(),
+            }}
           />
         </div>
 
@@ -614,9 +727,40 @@ export function PatternInspector({
                   }),
                 ),
               ]}
-          {quantityField('margin', p.margin, 'length', feature['margin'], (margin) => ({
-            margin,
-          }))}
+          {marginPair === undefined && !perSideOn ? (
+            quantityField('margin', p.margin, 'length', feature['margin'], (margin) => ({
+              margin,
+            }))
+          ) : (
+            <>
+              {([0, 1] as const).map((i) =>
+                quantityField(
+                  `margin.${i}`,
+                  i === 0 ? p.marginAcross : p.marginAlong,
+                  'length',
+                  marginPair?.[i] ?? feature['margin'],
+                  (source) => ({
+                    margin: i === 0 ? [source, marginSource(1)] : [marginSource(0), source],
+                  }),
+                ),
+              )}
+            </>
+          )}
+          <div className={styles['perSideRow']}>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-margin-per-side
+              onClick={() => {
+                if (marginPair === undefined) return setPerSide((x) => !x)
+                // back to one margin: the across value for both
+                setPerSide(false)
+                void update({ margin: marginSource(0) }, 'margin')
+              }}
+            >
+              {marginPair === undefined && !perSideOn ? p.marginPerSide : p.marginPerSideOff}
+            </Button>
+          </div>
           {more(
             'area',
             [p.fit, p.invertShort],
@@ -829,6 +973,7 @@ type PatternPath =
   | `boundary.center.${0 | 1}`
   | 'boundary.rotation'
   | 'margin'
+  | `margin.${0 | 1}`
   | 'depth'
   | 'chamfer.width'
   | 'chamfer.angle'
@@ -849,6 +994,8 @@ const PATTERN_STEP: Record<PatternPath, StepKind> = {
   'boundary.center.1': 'xy',
   'boundary.rotation': 'rotation',
   margin: 'xy',
+  'margin.0': 'xy',
+  'margin.1': 'xy',
   depth: 'depth',
   'chamfer.width': 'small',
   'chamfer.angle': 'angle',

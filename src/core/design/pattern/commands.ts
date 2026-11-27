@@ -23,6 +23,7 @@ import {
   type PatternBoundary,
   type PatternChamfer,
   type PatternCell,
+  type PatternMargin,
   type PatternSpacing,
 } from './pattern'
 
@@ -77,7 +78,9 @@ const params = {
     .describe(
       'Closed shape (keep-outs: its subtract items), box centre at center; null = face (on a pattern floor: its cells)',
     ),
-  margin: Src.describe('Uncut border inside the boundary; default 5 mm / 3/16"'),
+  margin: z
+    .union([Src, PointArg])
+    .describe('Uncut border inside the boundary, or [u, v]; default 5 mm / 3/16"'),
   fit: z.enum(['whole', 'clip']).describe('clip: cut cells at the border (slivers dropped)'),
   invert: z.boolean().describe('Cells stand as islands'),
   depth: Src.describe('Below on; default 1 mm / 1/32"'),
@@ -105,6 +108,9 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
   ...patternSpec,
   params,
   required: [],
+  // the heatsink recipe (pattern-presets.md § Agent API, Q210: no preset argument)
+  addSummary:
+    'Add a pattern feature at the end of the part; it creates its operations. Heatsink fins: cell rectangle (length = face, width = slot, rotation 90°), square lattice, gap = fin, margin [wall, 0]; pins: invert.',
   // listed as sketches: the full args are add's (tools/list budget, P2)
   updateParams: {
     cell: listedAs('object', 'design.pattern.add cell'),
@@ -220,11 +226,14 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
         side: c.side ?? old?.side ?? 'top',
       })
     }
-    const len = (
-      key: 'margin' | 'depth',
-      old: Quantity | undefined,
-      def: 'patternMargin' | 'patternDepth',
-    ) => f.pick(key, 'length', a[key], old, def)
+    // H1: `[u, v]` (docs/modes/pattern-presets.md#model-changes); a value not given keeps the old
+    const margin = (): PatternMargin => {
+      const m = a.margin
+      if (Array.isArray(m))
+        return [f.q('margin.0', 'length', m[0]), f.q('margin.1', 'length', m[1])] as const
+      if (m === undefined && prev !== undefined) return prev.margin
+      return f.pick('margin', 'length', m, undefined, 'patternMargin')
+    }
     return {
       kind: 'pattern',
       id,
@@ -240,10 +249,10 @@ const spec: FeatureCommandSpec<typeof params, Pattern> = {
       spacing: spacing(),
       alternate: a.alternate ?? prev?.alternate ?? 'none',
       boundary: boundary(),
-      margin: len('margin', prev?.margin, 'patternMargin'),
+      margin: margin(),
       fit: a.fit ?? prev?.fit ?? 'whole',
       invert: a.invert ?? prev?.invert ?? false,
-      depth: len('depth', prev?.depth, 'patternDepth'),
+      depth: f.pick('depth', 'length', a.depth, prev?.depth, 'patternDepth'),
       through: a.through ?? prev?.through ?? false,
       // DF122: true / { wall, floor } / false (docs/modes/roughing.md#patterns)
       ...patternRoughing(a.roughing, prev, (path, src) => f.q(path, 'length', src)),

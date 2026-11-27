@@ -206,6 +206,61 @@ export const designMessages = {
             : [dropped === 1 ? '1 sliver dropped' : `${dropped} slivers dropped`]),
         ].join(' · '),
       noShapes: 'No closed shapes in the part yet',
+      /** H1 (pattern-presets.md § UI): Margin split into the two directions of the face. */
+      marginPerSide: 'Per side',
+      marginPerSideOff: 'One margin',
+      marginAcross: 'Margin across (U)',
+      marginAlong: 'Margin along (V)',
+      /** H1: the Presets dialog's groups. */
+      presetGroupLabel: 'Preset group',
+      presetGroups: { decorative: 'Decorative', heatsink: 'Heatsink' } as Record<string, string>,
+      heatsinkDescription:
+        'Fills the cell, lattice, gap, margin and depth from fin sizes, and sets the slot tool. Nothing stays linked.',
+      heatsinkNames: { straightFins: 'Straight fins' } as Record<string, string>,
+      heatsinkDescriptions: {
+        straightFins: 'Parallel slots across the face, open at both ends.',
+      } as Record<string, string>,
+      heatsinkNumbers: (fin: string, slot: string, height: string) =>
+        `fins ${fin} · slots ${slot} · ${height} high`,
+      /** The parameter step. */
+      fin: 'Fin thickness',
+      slot: 'Slot width',
+      finHeight: 'Fin height',
+      wall: 'Outer wall',
+      slotTool: 'Tool',
+      slotToolNone: 'No flat end mill ≤ the slot in the library',
+      slotCut: {
+        onePass: 'Slot = tool: one pass per level.',
+        finishing: 'Finishing pass on both walls.',
+        thinFinish: 'Finishing pass on both walls, thinner than the allowance.',
+        tooWide: 'The tool is wider than the slot.',
+      } as Record<string, string>,
+      fluteNote: (depth: string, flute: string, short: boolean) =>
+        short
+          ? `${depth} deep needs ≥ ${depth} of flute; this tool has ${flute}: the shank rubs the fins.`
+          : `${depth} deep, ${flute} of flute.`,
+      chipsNote: 'Blow the chips out of the slots (air blast or mist); 1–2 flutes.',
+      noFit: 'No slot fits: make the face wider, or the fins, slots or wall smaller.',
+      apply: 'Apply',
+      back: 'Back',
+      /** "11 slots · 12 fins 1.5 mm · 10 mm high (1:6.7) · base 4 mm" (the heatsink read-out). */
+      finsReadout: (
+        slots: number,
+        fins: number,
+        fin: string,
+        height: string,
+        ratio: number,
+        base: string | undefined,
+      ) =>
+        [
+          slots === 1 ? '1 slot' : `${slots} slots`,
+          `${fins} fins ${fin}`,
+          `${height} high (1:${ratio})`,
+          ...(base === undefined ? [] : [`base ${base}`]),
+        ].join(' · '),
+      finsWalls: (wall: string) => `walls ${wall}`,
+      tallFins: (ratio: number) =>
+        `Fins taller than 8 × their thickness (1:${ratio}) chatter and bend.`,
     },
     /** The row menu's actions (dogfood DF16). */
     chamfer: 'Chamfer',

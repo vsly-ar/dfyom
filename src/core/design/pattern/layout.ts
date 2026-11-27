@@ -376,7 +376,8 @@ export function resolvePattern(
   let pieces: RegionPiece[] = []
   if (p.invert === true) {
     // our own sharp corners (the margin's rectangle, cells meeting the boundary) are rounded
-    const round = fragments.length > 0 || (rect && p.margin > 0)
+    const [mu, mv] = marginUV(p.margin)
+    const round = fragments.length > 0 || (rect && (mu > 0 || mv > 0))
     const holes = invertCells(port, areaRegion, cellAt, whole, wholeFlips, fragments, round)
     if (holes.isErr()) return holes
     pieces = holes.unwrap()
@@ -419,6 +420,32 @@ export function resolvePattern(
 
 const round = (x: number) => Math.round(x * 1000) / 1000
 
+/** The margin as `[u, v]` (one value: the same on both axes). H1: docs/modes/pattern-presets.md#model-changes */
+export const marginUV = (m: PatternRecord['margin']): Vec2 => (typeof m === 'number' ? [m, m] : m)
+
+/**
+ * The region shrunk by the margin: one value is today's round offset (records stay byte-equal);
+ * `[u, v]` (H1) erodes it by an axis-aligned box of half-sizes u, v: the intersection of the region
+ * and its copies moved by ±u along u, then the same by ±v along v. Exact for convex regions and
+ * for keep-outs and notches at least u (v) wide along that axis.
+ */
+function shrinkBy(port: Region2dPort, r: Region, m: PatternRecord['margin']): AppResult<Region> {
+  if (typeof m === 'number') return m > 0 ? port.offset(r, m) : Ok(r)
+  let out: AppResult<Region> = Ok(r)
+  for (const d of [
+    [m[0], 0],
+    [0, m[1]],
+  ] as const) {
+    if (!(Math.max(d[0], d[1]) > 0)) continue
+    out = out.andThen((x) =>
+      port
+        .intersect(x, translateRegion(x, [d[0], d[1]]))
+        .andThen((y) => port.intersect(y, translateRegion(x, [-d[0], -d[1]]))),
+    )
+  }
+  return out
+}
+
 /** The region opened by `PATTERN_SLIVER / 2`: sharp convex corners rounded, thin parts gone. */
 function opening(port: Region2dPort, r: Region): AppResult<Region> {
   return port
@@ -435,11 +462,11 @@ function areaOf(
   p: PatternDefinition,
   resolveCell: (def: Def) => CellResult,
 ): AppResult<{ region: Region; rect: boolean }> {
-  const m = p.margin
+  const [mu, mv] = marginUV(p.margin)
   if (p.floor !== undefined) return stackedArea(port, p, p.floor, resolveCell)
   if (p.area === undefined) {
-    const lo: Vec2 = [p.boundary.min[0] + m, p.boundary.min[1] + m]
-    const hi: Vec2 = [p.boundary.max[0] - m, p.boundary.max[1] - m]
+    const lo: Vec2 = [p.boundary.min[0] + mu, p.boundary.min[1] + mv]
+    const hi: Vec2 = [p.boundary.max[0] - mu, p.boundary.max[1] - mv]
     if (!(hi[0] > lo[0] && hi[1] > lo[1])) return Ok({ region: { pieces: [] }, rect: true })
     return Ok({ region: rectRegion(lo, hi), rect: true })
   }
@@ -456,8 +483,7 @@ function areaOf(
     p.area.center[0] - (tb.min[0] + tb.max[0]) / 2,
     p.area.center[1] - (tb.min[1] + tb.max[1]) / 2,
   ])
-  if (!(m > 0)) return Ok({ region: placed, rect: false })
-  return port.offset(placed, m).map((region) => ({ region, rect: false }))
+  return shrinkBy(port, placed, p.margin).map((region) => ({ region, rect: false }))
 }
 
 /**
@@ -476,7 +502,7 @@ function stackedArea(
   const b = below.unwrap()
   if (b.kind !== 'region' || b.region.pieces.length === 0)
     return Ok({ region: { pieces: [] }, rect: false })
-  const shrunk = p.margin > 0 ? port.offset(b.region, p.margin) : Ok(b.region)
+  const shrunk = shrinkBy(port, b.region, p.margin)
   if (shrunk.isErr() || p.area === undefined)
     return shrunk.map((region) => ({ region, rect: false }))
   const own = areaOf(port, { ...p, floor: undefined }, resolveCell)

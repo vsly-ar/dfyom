@@ -200,6 +200,17 @@ export const RegionPocketInputSchema: z.ZodType<RegionPocketInput> = z.object({
         floorDepth: z.number(),
       })
       .optional(),
+    // H1: the slot rule's slots (geometry/slots.ts)
+    slots: z
+      .array(
+        z.object({
+          a: Vec2Schema,
+          b: Vec2Schema,
+          openA: z.boolean(),
+          openB: z.boolean(),
+        }),
+      )
+      .optional(),
   }),
   strategy: PocketStrategySchema,
 })

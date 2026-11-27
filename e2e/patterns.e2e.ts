@@ -74,7 +74,8 @@ test('patterns: add a pattern, change its lattice and cell', async ({ dfyom }) =
   await inspector.getByRole('button', { name: 'Presets…' }).click()
   // DF107: a dialog of preview cards, one radio group; every card draws its lattice
   const presets = page.getByRole('dialog', { name: 'Pattern presets' })
-  const cards = presets.getByRole('radio')
+  // H1: the cards' radio group (the group control above it is another)
+  const cards = presets.getByRole('radiogroup', { name: 'Pattern presets' }).getByRole('radio')
   await expect(cards).toHaveCount(13)
   for (const card of await cards.all())
     await expect(card.locator('svg path').first()).toBeAttached()

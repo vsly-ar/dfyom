@@ -109,6 +109,13 @@ export interface PatternBoundary {
 
 export type PatternFit = 'whole' | 'clip'
 
+/** H1: one margin all round, or `[u, v]` (face frame). */
+export type PatternMargin = Quantity | readonly [Quantity, Quantity]
+
+/** The margin's values `[u, v]` (one value on both axes). */
+export const marginPair = (m: PatternMargin): readonly [Quantity, Quantity] =>
+  m instanceof Quantity ? [m, m] : m
+
 export type PatternAlternate = 'none' | 'flip'
 
 /** Which cell edges are chamfered (P5: bottom edges of through cells from a flipped setup). */
@@ -135,8 +142,12 @@ export interface Pattern extends FeatureBase {
   readonly alternate: PatternAlternate
   /** None = the `on` face's rectangle (P2: a named closed shape, keep-outs its subtract items). */
   readonly boundary: Option<PatternBoundary>
-  /** The uncut border inside the boundary (≥ 0). */
-  readonly margin: Quantity
+  /**
+   * The uncut border inside the boundary (≥ 0); H1: or `[u, v]` in the face frame (a wall across
+   * straight fins and 0 along them, so the slots run out of both ends).
+   * Doc: docs/modes/pattern-presets.md#model-changes
+   */
+  readonly margin: PatternMargin
   /** Cells crossing the boundary less the margin: left out (`whole`) or cut (`clip`). */
   readonly fit: PatternFit
   /** The pocket clears the boundary less the margin minus the cells (islands). */
@@ -215,7 +226,7 @@ const PatternDtoSchema = FeatureDtoSchema.extend({
   boundary: z
     .object({ shapeId: z.string(), center: z.tuple([length(), length()]), rotation: angle() })
     .optional(),
-  margin: length(),
+  margin: z.union([length(), z.tuple([length(), length()])]),
   fit: z.enum(['whole', 'clip']).optional(),
   invert: z.boolean().optional(),
   depth: length(),
@@ -256,7 +267,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       : [q(d.spacing.pitch[0], 'spacing', 'pitch', 0), q(d.spacing.pitch[1], 'spacing', 'pitch', 1)]
   const originQs =
     d.origin === undefined ? [] : [q(d.origin[0], 'origin', 0), q(d.origin[1], 'origin', 1)]
-  const rest = [q(d.angle, 'angle'), q(d.margin, 'margin'), q(d.depth, 'depth')]
+  const rest = [q(d.angle, 'angle'), q(d.depth, 'depth')]
+  const marginQs = Array.isArray(d.margin)
+    ? [q(d.margin[0], 'margin', 0), q(d.margin[1], 'margin', 1)]
+    : [q(d.margin, 'margin')]
   const ch = d.chamfer
   const chamferQs =
     ch === undefined ? [] : [q(ch.width, 'chamfer', 'width'), q(ch.angle, 'chamfer', 'angle')]
@@ -276,8 +290,10 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
     collect(rest),
     collect(boundaryQs),
     collect(chamferQs),
+    collect(marginQs),
   ]).map((all) => {
-    const [cq, s, o, rest3, bq, chq] = all as [
+    const [cq, s, o, rest3, bq, chq, mq] = all as [
+      Quantity[],
       Quantity[],
       Quantity[],
       Quantity[],
@@ -285,7 +301,8 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
       Quantity[],
       Quantity[],
     ]
-    const [ang, margin, depth] = rest3
+    const [ang, depth] = rest3
+    const margin: PatternMargin = mq.length === 2 ? [mq[0]!, mq[1]!] : mq[0]!
     const [rot, a, b, r] = cq
     const cell: PatternCell =
       c.kind === 'circle'
@@ -329,7 +346,7 @@ function patternFromDTO(raw: FeatureDTO): AppResult<Pattern> {
         bd === undefined
           ? None
           : Some({ shapeId: bd.shapeId, center: [bq[0]!, bq[1]!] as const, rotation: bq[2]! }),
-      margin: margin!,
+      margin,
       fit: d.fit ?? 'whole',
       invert: d.invert ?? false,
       depth: depth!,
@@ -408,7 +425,7 @@ function patternToDTO(p: Pattern): FeatureDTO {
           },
         }
       : {}),
-    margin: p.margin.toDTO(),
+    margin: p.margin instanceof Quantity ? p.margin.toDTO() : p.margin.map((m) => m.toDTO()),
     ...(p.fit === 'clip' ? { fit: 'clip' } : {}),
     ...(p.invert ? { invert: true } : {}),
     depth: p.depth.toDTO(),
@@ -466,7 +483,12 @@ function patternInvariants(p: Pattern): Issue[] {
       ? 'the bottom edges are chamfered from the opposite stock face: the pattern must be on a stock face'
       : 'only through cells have a bottom edge: turn on Through or chamfer the top edges',
   )
-  check(p.margin.exact.compare(ZERO) >= 0, ['margin'], 'nonNegative', 'must be 0 or more')
+  if (p.margin instanceof Quantity)
+    check(p.margin.exact.compare(ZERO) >= 0, ['margin'], 'nonNegative', 'must be 0 or more')
+  else
+    p.margin.forEach((m, i) =>
+      check(m.exact.compare(ZERO) >= 0, ['margin', i], 'nonNegative', 'must be 0 or more'),
+    )
   if (p.spacing.kind === 'gap') positive(p.spacing.gap, 'spacing', 'gap')
   else {
     positive(p.spacing.pitch[0], 'spacing', 'pitch', 0)
@@ -697,7 +719,10 @@ export function patternRecord(
           },
         }
       : {}),
-    margin: p.margin.canonical,
+    margin:
+      p.margin instanceof Quantity
+        ? p.margin.canonical
+        : [p.margin[0].canonical, p.margin[1].canonical],
     ...(p.fit === 'clip' ? { fit: 'clip' as const } : {}),
     ...(p.invert ? { invert: true as const } : {}),
     ...(p.through ? { through: true as const } : {}),
@@ -812,6 +837,7 @@ function patternWarnings(
       },
     })
   }
+  out.push(...tallWebOf(p, facts, geometry.region2d))
   out.push(...chamferMeetsOf(p, facts, geometry.region2d, _stock))
   const chords = regionLoops(contour.region).reduce(
     (s, l) => s + flattenLoop(l, 'shrink').points.length,
@@ -834,6 +860,60 @@ function patternWarnings(
 /** `patternWeb` at a limit, cached per resolved layout (its facts are cached with it). */
 const websAt = new WeakMap<WebInput, Map<number, PatternWeb | undefined>>()
 
+function webAt(port: Region2dPort, input: WebInput, limit: number): PatternWeb | undefined {
+  let byLimit = websAt.get(input)
+  if (byLimit === undefined) websAt.set(input, (byLimit = new Map()))
+  if (!byLimit.has(limit)) byLimit.set(limit, patternWeb(port, input, limit))
+  return byLimit.get(limit)
+}
+
+/** Fin height over the narrowest web (or pin) above which a web is tall (Q205: one limit). */
+export const PATTERN_TALL_WEB_RATIO = 8
+
+/**
+ * H1 (Q205): `dfm.patternTallWeb` when the depth is more than `PATTERN_TALL_WEB_RATIO` times the
+ * narrowest web (inverted: island), measured as `dfm.patternThinWeb` with the limit at depth / 8
+ * (cached per limit). At Depth (inverted: Cell); suggests the depth at 8 × web and the web
+ * (gap or pin) at depth / 8. Through patterns are not fins: none.
+ * Doc: docs/modes/pattern-presets.md#dfm-heatsinks-in-aluminium
+ */
+function tallWebOf(
+  p: Pattern,
+  facts: PatternFacts | undefined,
+  port: Region2dPort | undefined,
+): DfmWarning[] {
+  const input = facts?.webInput
+  // a web already under 1 mm is dfm.patternThinWeb's
+  if (p.through || input === undefined || port === undefined || facts?.web !== undefined) return []
+  const depth = p.depth.canonical
+  const web = webAt(port, input, depth / PATTERN_TALL_WEB_RATIO)
+  if (web === undefined || web.width <= 0) return []
+  const ratio = Math.round((depth / web.width) * 10) / 10
+  const suggestedDepth = Math.floor(PATTERN_TALL_WEB_RATIO * web.width * 100) / 100
+  const gap = Math.ceil((depth / PATTERN_TALL_WEB_RATIO) * 100) / 100
+  const [where, what] = web.island ? ['the pins are', 'pins'] : ['the fins are', 'fins (gap)']
+  return [
+    {
+      code: 'dfm.patternTallWeb',
+      severity: 'warning',
+      message: `${p.name}: ${where} ${depth} mm high on ${web.width} mm (1:${ratio}), over 1:${PATTERN_TALL_WEB_RATIO}; a depth of ${suggestedDepth} mm or ${what} of ${gap} mm keep 1:${PATTERN_TALL_WEB_RATIO}`,
+      operation: p.id,
+      parameter: web.island ? 'cell' : 'depth',
+      params: {
+        feature: p.id,
+        web: web.width,
+        depth,
+        ratio,
+        limit: PATTERN_TALL_WEB_RATIO,
+        island: web.island,
+        at: web.at,
+        suggestedDepth,
+        gap,
+      },
+    },
+  ]
+}
+
 /**
  * P3: `dfm.chamferMeets` of the owned chamfer when the bevels of two cells meet: the narrowest web
  * (inverted: island) under twice the chamfer's width, measured as `dfm.patternThinWeb` (exact for
@@ -851,11 +931,7 @@ function chamferMeetsOf(
   if (p.chamfer.isNone() || input === undefined || port === undefined) return []
   const { width: w, side } = p.chamfer.unwrap()
   const width = w.canonical
-  const limit = 2 * width
-  let byLimit = websAt.get(input)
-  if (byLimit === undefined) websAt.set(input, (byLimit = new Map()))
-  if (!byLimit.has(limit)) byLimit.set(limit, patternWeb(port, input, limit))
-  const web = byLimit.get(limit)
+  const web = webAt(port, input, 2 * width)
   if (web === undefined) return []
   const roles =
     side === 'both'

@@ -561,6 +561,8 @@ export const DFM_WARNING_CODES = [
   'dfm.patternEmpty',
   'dfm.patternHeavy',
   'dfm.patternThinWeb',
+  // heatsink presets H1: docs/modes/pattern-presets.md#dfm-heatsinks-in-aluminium
+  'dfm.patternTallWeb',
   // split parts 4a (`operation` = the split id, `params.rule` the rule): docs/modes/split-parts.md#dfm-near-a-split
   'design.split',
 ] as const

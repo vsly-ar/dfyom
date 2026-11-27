@@ -24,6 +24,7 @@ import { findRestMaterial, type RestPiece } from './2d/rest-material'
 import type { OperationGeometry, StockGeometry, Vec2 } from './model'
 import { ON_EDGE, openReach, openRegion, opensStock } from './open-sides'
 import { pocketRegion, profileChain, shapeOutline } from './outline'
+import { slotSplit } from './slots'
 import type { FaceWaste } from './waste'
 
 /**
@@ -182,7 +183,7 @@ const openByGeometry = new WeakMap<OperationGeometry, Map<string, ShapeMeasure>>
  * The measures of a pocket with open sides (DF61): the tool enters from beyond the stock edge,
  * so every tool fits (`fits` true, `narrowest` Infinity, as for an outside profile), and the rest
  * material is what the tool leaves of the open region (`openRegion` with `openReach`) inside the
- * stock face. Corners on the stock edge or beyond it are dropped (the tool reaches them from
+ * stock face, less the slots the slot rule cuts (geometry/slots.ts, H1). Corners on the stock edge or beyond it are dropped (the tool reaches them from
  * outside; DF53's `openCorner` already drops those far enough outside); bounds stay the shape's.
  */
 function openMeasure(
@@ -210,8 +211,15 @@ function openMeasure(
     rest(r: number) {
       const known = restMemo.get(r)
       if (known !== undefined) return known
-      const pieces = openRegion(port, pocketRegion(op).region, face, openReach(r, 0))
-        .andThen((open) => findRestMaterial(port, open, r))
+      // H1 slot rule: slots as wide as the tool are cut along their centre line, nothing left
+      const { region } = slotSplit(pocketRegion(op).region, 2 * (r + FIT_SLACK), 0, face)
+      const pieces = (
+        region.pieces.length === 0
+          ? Ok([])
+          : openRegion(port, region, face, openReach(r, 0)).andThen((open) =>
+              findRestMaterial(port, open, r),
+            )
+      )
         .unwrapOr([])
         .filter((p) => inFace(p.at))
         .map((p): RestPiece => ({ area: p.area, at: [p.at[0] - cu, p.at[1] - cv] }))

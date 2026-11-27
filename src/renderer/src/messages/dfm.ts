@@ -200,6 +200,11 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       : `The web between cells is only ${L(p['web'])} (under ${L(p['limit'])}): it may break. ${
           p['gap'] === undefined ? 'Widen the pitch.' : `Use a gap of at least ${L(p['gap'])}.`
         }`,
+  // heatsink presets H1 (pattern-presets.md § DFM)
+  'dfm.patternTallWeb': (p, L) =>
+    p['island'] === true
+      ? `The pins are ${L(p['depth'])} high on ${L(p['web'])} (1:${num(p['ratio'])}, over 1:${num(p['limit'])}): they may chatter or bend while cut. Make the pins at least ${L(p['gap'])} or the depth at most ${L(p['suggestedDepth'])}.`
+      : `The fins are ${L(p['depth'])} high on a ${L(p['web'])} web (1:${num(p['ratio'])}, over 1:${num(p['limit'])}): they may chatter or bend while cut. Use a depth of at most ${L(p['suggestedDepth'])} or fins (the gap) of at least ${L(p['gap'])}.`,
   // v0.4 chamfer (design-v0.4.md § Chamfer operation)
   'dfm.chamferTooDeep': (p, L, name) => {
     const edge = name.item(String(p['edgeOf']))

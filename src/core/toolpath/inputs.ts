@@ -16,6 +16,7 @@ import {
 } from '../geometry/model'
 import type { EdgeChamferOperation } from './edge-chamfer'
 import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
+import { slotSplit } from '../geometry/slots'
 import type { MaterialBand } from '../geometry/through-depth'
 import { pocketRegion, profileChain } from '../geometry/outline'
 import { regionArea, type Region } from '../geometry/2d/model'
@@ -458,12 +459,25 @@ export function toGeneratorInputs(
           // DF122: a roughing pocket with a floor margin stops that much above the floor (or the
           // stock bottom: no breakthrough)
           const roughFloor = input.roughingFloor
-          const placed =
+          const deep =
             roughFloor !== undefined
               ? { ...outline, depth: left - roughFloor }
               : op.through === true && s.kind === 'pocket'
                 ? { ...outline, depth: left + (s.breakthrough ?? 0) }
                 : outline
+          // H1 slot rule: slots exactly as wide as the tool are taken out of the region (before
+          // its open region is built) and cut along their centre lines; not with workholding
+          // keep-outs or a partly cleared region (those keep the rings), nor in v0.1 shapes
+          const slotted =
+            region2d !== undefined &&
+            op.roughing !== true &&
+            input.keepOut === undefined &&
+            input.material?.partial === undefined &&
+            !isAnalyticOperation(op)
+              ? slotSplit(deep.region, tool.diameter, s.finishAllowance, stock)
+              : undefined
+          const slots = slotted === undefined || slotted.slots.length === 0 ? undefined : slotted
+          const placed = slots === undefined ? deep : { ...deep, region: slots.region }
           const R = tool.diameter / 2
           const reach = openReach(R, s.finishAllowance)
           // DF108: a roughing pocket, and its pocket's rest machining after it (DF122: down to
@@ -471,6 +485,7 @@ export function toGeneratorInputs(
           const after = input.restAfter
           const rest = {
             ...(op.roughing === true ? { roughing: true as const } : {}),
+            ...(slots === undefined ? {} : { slots: slots.slots }),
             ...(after === undefined
               ? {}
               : {
@@ -484,7 +499,10 @@ export function toGeneratorInputs(
           }
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
           // tool runs past the edge there
-          const open = region2d !== undefined && opensStock(region2d, placed.region, stock)
+          const open =
+            region2d !== undefined &&
+            placed.region.pieces.length > 0 &&
+            opensStock(region2d, placed.region, stock)
           // WH-D: the clearing goes around the workholding (no partial-cover split then)
           if (region2d !== undefined && input.keepOut !== undefined) {
             const whole = open
