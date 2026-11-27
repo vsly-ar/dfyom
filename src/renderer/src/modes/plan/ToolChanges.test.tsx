@@ -117,6 +117,31 @@ describe('Tool changes (DF66)', () => {
     await expectNoAxeViolations(t.inspector())
   })
 
+  // DF130: docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+  it('shows each run’s minimum stickout: its deepest operation’s, rounded up to 0.1 mm', async () => {
+    const t = await renderTop()
+    const rows = (
+      t.s.query('plan.operation.list', { planId: t.planId }) as {
+        operations: { id: string; stickoutNeeded: number | null }[]
+      }
+    ).operations
+    const needed = (ids: readonly string[]) =>
+      Math.max(...ids.map((id) => rows.find((r) => r.id === id)!.stickoutNeeded!))
+    const top = t.top().operations
+    // the drill run: Drilling 1 and Drillings 3+4; the largest of the two
+    const drill = needed([top[1]!.id, top[2]!.id])
+    expect(drill).toBeGreaterThan(5)
+    const shown = (mm: number) => `Needs ≥ ${Math.ceil(mm * 10 - 1e-6) / 10} mm stickout`
+    await waitFor(() => expect(t.runs()[1]).toHaveTextContent(shown(drill)))
+    expect(t.runs()[0]).toHaveTextContent(shown(needed([top[0]!.id])))
+    expect(t.runs()[4]).toHaveTextContent(shown(needed([top[5]!.id])))
+    const text = within(t.runs()[1]!).getByText(shown(drill))
+    expect(text).toHaveAttribute(
+      'title',
+      'Deepest cut of this tool run + 5 mm for the collet nut: chuck the tool with at least this much out.',
+    )
+  })
+
   it('moves a run as a block with Alt+↑/↓ and by its grip, one move each', async () => {
     const t = await renderTop()
     const [, drill1] = t.top().operations

@@ -930,6 +930,52 @@ describe('postGrbl', () => {
     )
   })
 
+  it('the minimum stickout (DF130): header max per tool, marker and M0 only while the whole name fits', () => {
+    const change = (number: number, name: string, stickoutNeeded: number): Block => ({
+      kind: 'toolChange',
+      number,
+      tool: { name, diameter: 6, type: 'flatEndMill', stickoutNeeded },
+    })
+    const opts = { ...OPTS, firstToolLoaded: false }
+    const lines = expectOk(
+      postGrblLines(
+        program([
+          change(1, 'Flat 6', 5.7),
+          spin(),
+          rapid(1, 2, 10),
+          change(2, 'Wexme 1/4 inch single flute upcut', 25.51),
+          spin(),
+          rapid(1, 2, 10),
+          change(1, 'Flat 6', 12.31),
+          spin(),
+          rapid(1, 2, 10),
+        ]),
+        opts,
+      ),
+    )
+    // the header: the largest over the tool's runs, rounded up to 0.1 mm
+    // (the header line always has it: a long name is cut there)
+    expect(lines.filter((l) => /^\(Tool \d/.test(l))).toEqual([
+      '(Tool 1: Flat 6, dia 6 mm, min stickout 12.4 mm)',
+      '(Tool 2: Wexme 1/4 inch single flute, dia 6 mm, min stickout 25.6 mm)',
+    ])
+    expect(lines.filter((l) => l.startsWith('(DFYOM') || l.startsWith('M0'))).toEqual([
+      '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 5.7 mm)',
+      'M0 ;Install T1 Flat 6, 6 mm flat, min stickout 5.7 mm, then zero Z',
+      // the whole name and the stickout do not fit: the name wins
+      '(DFYOM TOOL CHANGE 2: Wexme 1/4 inch single flute upcut, 6 mm flat)',
+      'M0 ;Install T2 Wexme 1/4 inch single flute, 6 mm flat, then zero Z',
+      // per run: the second run of tool 1 needs more
+      '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 12.4 mm)',
+      'M0 ;Install T1 Flat 6, 6 mm flat, min stickout 12.4 mm, then zero Z',
+    ])
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(70)
+    const inch = program([change(1, 'Flat 6', 25.51), spin()], { units: 'in' })
+    expect(expectOk(postGrblLines(inch, opts)).find((l) => l.startsWith('(Tool 1'))).toBe(
+      '(Tool 1: Flat 6, dia 0.2362 in, min stickout 1.01 in)',
+    )
+  })
+
   it('pauses for the first tool when it is not loaded; no dwell with spinUpSeconds 0', () => {
     const lines = expectOk(
       postGrblLines(program([tool(), spin(), rapid(1, 2, 10)]), {

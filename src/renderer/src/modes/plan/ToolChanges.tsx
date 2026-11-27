@@ -9,6 +9,7 @@
 // a menu of the eligible surfaces with "Default" on top (`plan.operation.update { zRef }` on the
 // run's first operation); a `plan.zRef` finding of the run shows its icon beside it. Hovering
 // "Z from" or focusing a row shows that run's reference in the viewport (`previewZRef`).
+// DF130: each run's minimum stickout under its operations ("Needs ≥ 25.5 mm stickout").
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
 import { useRef, useState, type KeyboardEvent } from 'react'
@@ -17,7 +18,9 @@ import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/
 import {
   carriedTool,
   runLinkSavings,
+  runStickoutNeeded,
   setupToolChanges,
+  shownStickout,
   toolRuns,
 } from '../../../../core/plan/tool-runs'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -102,6 +105,9 @@ const zValue = (c: ZRefCandidateView, units: UnitSystem): string =>
   m.zValue(c.label, lengthSource(c.level, units).replace(/^-/, '−'))
 
 const NO_LINKS: readonly LoweredLinkView[] = []
+
+/** "25.5 mm" or '1.01"' as `lengthSource` writes lengths (already rounded up, DF130). */
+const stickoutText = (v: number, inch: boolean): string => (inch ? `${v}"` : `${v} mm`)
 
 const SEVERITY_RANK: Readonly<Record<string, number>> = { error: 3, warning: 2, info: 1 }
 
@@ -252,6 +258,7 @@ export function ToolChanges({
   const store = usePlanStore()
   const zRefs = usePlanState((s) => s.data?.zRefs)
   const warnings = usePlanState((s) => s.data?.warnings)
+  const opRows = usePlanState((s) => s.data?.operations)
   const lowered = usePlanState(
     (s) => s.data?.links.find((l) => l.setupId === setup.id)?.links?.lowered,
   )
@@ -321,6 +328,13 @@ export function ToolChanges({
           const seconds = runSeconds(run.operations, setup, toolpaths, lowered ?? NO_LINKS)
           const names = run.operations.map((o) => planOperationName(plan, o))
           const isCarried = i === 0 && carried !== undefined && before !== undefined
+          // DF130: the run's minimum stickout, rounded up as the program writes it
+          const needed =
+            run.tool === undefined
+              ? undefined
+              : runStickoutNeeded(
+                  run.operations.map((o) => opRows?.find((r) => r.id === o.id)?.stickoutNeeded),
+                )
           return (
             <li
               key={run.operations.map((o) => o.id).join('+')}
@@ -356,6 +370,13 @@ export function ToolChanges({
                   {tool.meta !== '' ? <span className={styles['meta']}>{tool.meta}</span> : null}
                 </span>
                 <span className={styles['ops']}>{names.join(', ')}</span>
+                {needed === undefined ? null : (
+                  <span className={styles['stickout']} title={m.stickoutTitle}>
+                    {m.stickout(
+                      stickoutText(shownStickout(needed, units === 'inch'), units === 'inch'),
+                    )}
+                  </span>
+                )}
                 {zRun(run.operations[0]!.id) === undefined ? null : (
                   <ZFrom
                     planId={plan.id}

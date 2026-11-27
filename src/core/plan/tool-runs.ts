@@ -59,3 +59,21 @@ export function runLinkSavings(
   for (const l of lowered) if (own.has(l.index) && own.has(l.index - 1)) saved += l.savedSeconds
   return saved
 }
+
+/**
+ * A tool run's minimum stickout (mm, hardening DF130): the largest of its operations' (the
+ * operator chucks the tool once per tool change); undefined when none is known (no tool).
+ * Doc: docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+ */
+export function runStickoutNeeded(
+  needed: readonly (number | null | undefined)[],
+): number | undefined {
+  let max: number | undefined
+  for (const v of needed) if (typeof v === 'number' && (max === undefined || v > max)) max = v
+  return max
+}
+
+/** The minimum stickout as shown (DF130): rounded up to 0.1 mm, or 0.01 in in inch units. */
+export function shownStickout(mm: number, inch: boolean): number {
+  return inch ? Math.ceil((mm / 25.4) * 100 - 1e-6) / 100 : Math.ceil(mm * 10 - 1e-6) / 10
+}

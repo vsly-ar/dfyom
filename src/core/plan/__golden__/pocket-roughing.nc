@@ -8,14 +8,14 @@
 (Tool stays within the stock outline)
 (Keep clamps below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 8, dia 8 mm)
-(Tool 2: Flat 3, dia 3 mm)
+(Tool 1: Flat 8, dia 8 mm, min stickout 13 mm)
+(Tool 2: Flat 3, dia 3 mm, min stickout 13 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Pocket 1 - roughing)
-(DFYOM TOOL CHANGE 1: Flat 8, 8 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 8, 8 mm flat, min stickout 13 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm
@@ -182,7 +182,7 @@ Z10
 M5
 X5 Y25
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 3, 3 mm flat)
+(DFYOM TOOL CHANGE 2: Flat 3, 3 mm flat, min stickout 13 mm)
 M0 ;Stop spindle, install T2 Flat 3, 3 mm flat, then zero Z
 G90 G94 G17 G21
 G54

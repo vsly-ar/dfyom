@@ -10,7 +10,13 @@ import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
 import { withoutOperationName } from '../plan/labels'
-import { runLinkSavings, setupToolChanges, toolRuns } from '../plan/tool-runs'
+import {
+  runLinkSavings,
+  runStickoutNeeded,
+  setupToolChanges,
+  shownStickout,
+  toolRuns,
+} from '../plan/tool-runs'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
 import type { UnitSystem } from '../project/document'
@@ -394,10 +400,15 @@ export class ResultShaper {
           )
         const z = zRefOf.get(r.operations[0]!.id)
         const at = z?.['at'] as [number, number] | undefined
+        // DF130: the run's minimum stickout (plan-v0.1.md#minimum-stickout-hardening-df130)
+        const needed = runStickoutNeeded(
+          r.operations.map((o) => ops.get(o.id)?.['stickoutNeeded'] as number | null | undefined),
+        )
         return {
           tool: nameOf(r.tool),
           operations: r.operations.map((o) => o.id),
           seconds,
+          stickoutNeeded: needed === undefined ? null : shownStickout(needed, inch),
           ...(z === undefined
             ? {}
             : {

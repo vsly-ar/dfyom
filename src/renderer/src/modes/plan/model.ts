@@ -439,6 +439,8 @@ export interface PlanOperationView {
   /** Auto mode (calculator): on, off (a preset is used), or unavailable with the reason. */
   readonly auto: 'on' | 'off' | { readonly unavailable: string }
   readonly stickout: number | null
+  /** Minimum stickout (mm, DF130): deepest cut + 5 mm for the collet nut; null without a tool. */
+  readonly stickoutNeeded?: number | null
   readonly feeds: Readonly<Record<FeedField, FeedView | null>>
   readonly chipLoad: number | null
   /** Resolved strategy parameters (mm, °), defaults included. */

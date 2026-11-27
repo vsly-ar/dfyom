@@ -9,14 +9,14 @@
 (Tool reaches past stock: left 13, right 13, front 8.1, back 8.1 mm)
 (Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 12, dia 12 mm)
-(Tool 2: Flat 6, dia 6 mm, Z0 on Facing 1 floor)
+(Tool 1: Flat 12, dia 12 mm, min stickout 45.5 mm)
+(Tool 2: Flat 6, dia 6 mm, Z0 on Facing 1 floor, min stickout 16 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat, min stickout 40.8 mm)
 M3 S12000
 (Set spindle to 12000 rpm)
 M0 ;Set spindle to 12000 rpm
@@ -5179,7 +5179,7 @@ X235 Y20
 (Z0 for tool 2: Facing 1 floor, 1.00 below the stock top)
 (Touch off Z here, X235 Y20: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat, min stickout 16 mm)
 M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
@@ -5348,7 +5348,7 @@ X235 Y20
 (Z0 for tool 1: Facing 1 floor, 1.00 below the stock top)
 (Touch off Z here, X235 Y20: set Z0 on that surface)
 (Stop the spindle)
-(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat, min stickout 45.5 mm)
 M0 ;Stop spindle, install T1 Flat 12, 12 mm flat, then zero Z
 G90 G94 G17 G21
 G54

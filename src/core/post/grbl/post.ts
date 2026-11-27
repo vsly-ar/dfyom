@@ -9,6 +9,7 @@
 import type { Issue } from '../../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import type { Vec3 } from '../../toolpath/model'
+import { shownStickout } from '../../plan/tool-runs'
 import type { Block, MachiningProgram, ProgramTool, ProgramZRef, SetupHeader } from '../program'
 import {
   commentLine,
@@ -194,13 +195,23 @@ class Writer {
     else this.setupComments(p.setup)
     this.comment(`Units: ${p.units === 'in' ? 'inch' : 'mm'}`)
     const seen = new Set<number>()
+    // DF130: a tool's minimum stickout over all its runs in the program
+    const needed = new Map<number, number>()
+    for (const b of p.blocks)
+      if (b.kind === 'toolChange' && b.tool.stickoutNeeded !== undefined)
+        needed.set(b.number, Math.max(needed.get(b.number) ?? 0, b.tool.stickoutNeeded))
     for (const b of p.blocks) {
       if (b.kind !== 'toolChange' || seen.has(b.number)) continue
       seen.add(b.number)
       const d = this.coord(b.tool.diameter)
+      const s = needed.get(b.number)
+      const stickout = s === undefined ? '' : this.minStickout(s)
       // DF69: a reference off the up face is named (the run where the tool first comes in)
       if (b.zRef !== undefined && !b.zRef.top) {
-        const tail = `, dia ${d} ${p.units}, Z0 on ${b.zRef.label}`
+        const tail = `, dia ${d} ${p.units}, Z0 on ${b.zRef.label}${stickout}`
+        this.lines.push(`(${fitName(`Tool ${b.number}: `, b.tool.name, tail, MAX_LINE_BYTES - 2)})`)
+      } else if (stickout !== '') {
+        const tail = `, dia ${d} ${p.units}${stickout}`
         this.lines.push(`(${fitName(`Tool ${b.number}: `, b.tool.name, tail, MAX_LINE_BYTES - 2)})`)
       } else this.comment(`Tool ${b.number}: ${b.tool.name}, dia ${d} ${p.units}`)
     }
@@ -362,18 +373,29 @@ class Writer {
     // Before the marker: the marker line must be followed directly by M0 (sender rule).
     if (!first && manual) this.comment('Stop the spindle')
     const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}${this.taper(tool)}`
-    this.lines.push(toolChangeMarker(number, tool.name, spec))
+    // DF130: the minimum stickout after the type, only while the whole name still fits
+    const stickout = tool.stickoutNeeded === undefined ? '' : this.minStickout(tool.stickoutNeeded)
+    const whole = (head: string, tail: string, room: number) =>
+      fitName(head, tool.name, tail, 999).length <= room
+    const markerHead = `DFYOM TOOL CHANGE ${number}: `
+    const markerSpec =
+      stickout !== '' && whole(markerHead, spec + stickout, MAX_LINE_BYTES - 2)
+        ? spec + stickout
+        : spec
+    this.lines.push(toolChangeMarker(number, tool.name, markerSpec))
     if (!pauses) return
     const head = `M0 ;`
     const verb = manual && !first ? `Stop spindle, install T${number} ` : `Install T${number} `
     const room = MAX_LINE_BYTES - head.length
-    // DF69: the surface on the pause message when the whole name still fits
-    const onSurface = `${spec}, then zero Z on ${zRef?.label ?? ''}`
-    const named =
-      zRef !== undefined && !zRef.top && fitName(verb, tool.name, onSurface, 999).length <= room
-    this.lines.push(
-      head + fitName(verb, tool.name, named ? onSurface : `${spec}, then zero Z`, room),
-    )
+    // DF69: the surface on the pause message when the whole name still fits (before the stickout)
+    const surface = zRef !== undefined && !zRef.top ? ` on ${zRef.label}` : ''
+    const tails = [
+      `${spec}${stickout}, then zero Z${surface}`,
+      `${spec}, then zero Z${surface}`,
+      `${spec}${stickout}, then zero Z`,
+    ]
+    const tail = tails.find((t) => whole(verb, t, room)) ?? `${spec}, then zero Z`
+    this.lines.push(head + fitName(verb, tool.name, tail, room))
     this.level = zRef?.level ?? 0
     // The user jogged and re-zeroed Z while paused: forget the position and modal motion/feed,
     // and go back to clearance in the new WCS before the spindle starts.
@@ -580,6 +602,12 @@ class Writer {
       this.pos[k] = v
       this.text[k] = this.coord(k === 2 ? v - this.level : v)
     })
+  }
+
+  /** `, min stickout 25.5 mm` (DF130): rounded up to 0.1 mm or 0.01 in. */
+  private minStickout(mm: number): string {
+    const inch = this.p.units === 'in'
+    return `, min stickout ${formatNumber(shownStickout(mm, inch), 2)} ${this.p.units}`
   }
 
   /** A length (mm) in text units. */

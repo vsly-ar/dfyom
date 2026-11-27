@@ -1493,6 +1493,10 @@ const operationList = defineQuery({
           'Auto mode (calculator): on, off (a preset is used) or unavailable (no data) with the reason',
         ),
         stickout: z.number().nullable().describe('mm'),
+        stickoutNeeded: z
+          .number()
+          .nullable()
+          .describe('mm: deepest cut + 5 mm collet nut; null without a tool'),
         feeds: z.object(
           Object.fromEntries(FEED_FIELDS.map((f) => [f, FeedValue])) as Record<
             FeedField,
@@ -1556,6 +1560,7 @@ const operationList = defineQuery({
           presetName: e.preset.mapOr(null, (p) => p.name),
           auto,
           stickout: e.stickout.unwrapOr(null as unknown as number),
+          stickoutNeeded: e.stickoutNeeded.unwrapOr(null as unknown as number),
           feeds,
           chipLoad: e.feeds.andThen((f) => f.chipLoad).unwrapOr(null as unknown as number),
           strategy: strategy as Record<string, number | string>,

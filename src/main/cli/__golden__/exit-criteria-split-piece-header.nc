@@ -9,5 +9,5 @@
 (Tool reaches past stock: left 7, right 7, front 1, back 1 mm)
 (Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 6 long, dia 6 mm)
+(Tool 1: Flat 6 long, dia 6 mm, min stickout 14.8 mm)
 (Generator: DFYOM)

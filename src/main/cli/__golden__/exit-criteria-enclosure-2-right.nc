@@ -9,13 +9,13 @@
 (Tool stays within the stock outline)
 (Keep clamps below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Drill 6, dia 6 mm)
+(Tool 1: Drill 6, dia 6 mm, min stickout 19 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1, Drilling 2)
-(DFYOM TOOL CHANGE 1: Drill 6, 6 mm drill)
+(DFYOM TOOL CHANGE 1: Drill 6, 6 mm drill, min stickout 19 mm)
 M3 S3000
 (Set spindle to 3000 rpm)
 M0 ;Set spindle to 3000 rpm

@@ -8,14 +8,14 @@
 (Tool stays within the stock outline)
 (Keep clamps below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Flat 3, dia 3 mm)
-(Tool 2: Chamfer 90 x 12, dia 12 mm)
+(Tool 1: Flat 3, dia 3 mm, min stickout 15.5 mm)
+(Tool 2: Chamfer 90 x 12, dia 12 mm, min stickout 10.1 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
 (Bolt hole 1 - counterbore)
-(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)
+(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat, min stickout 15.5 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm
