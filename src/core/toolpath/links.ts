@@ -30,6 +30,11 @@ export interface LinkOperation {
   readonly stickout?: number
   /** A tool change or another `M0` comes before it: it is entered from the clearance height. */
   readonly pauseBefore: boolean
+  /**
+   * The tool's own holder (DF132 H6, a library tool's override); absent = the setup's
+   * `LinkSettings.holder` (the machine's).
+   */
+  readonly holder?: LinkHolder
 }
 
 /** What the links read of the setup's workholding (`WorkholdingObstacles` in plan/workholding). */
@@ -82,10 +87,16 @@ export function holderFloor(
 const clampOf = (s: LinkSettings): number =>
   s.obstacles !== undefined ? -Infinity : (s.clampHeight ?? Infinity)
 
-/** The tool of a link: its radius and its stickout (the holder floor's; absent = none). */
+/**
+ * The tool of a link: its radius, and the holder and stickout of each of the two operations it
+ * joins (the holder floor keeps both above the items, H6; a stickout absent = no floor for it).
+ */
 interface LinkTool {
   readonly radius: number
-  readonly stickout: number | undefined
+  readonly holders: readonly {
+    readonly holder: LinkHolder | undefined
+    readonly stickout: number | undefined
+  }[]
 }
 
 /**
@@ -106,7 +117,8 @@ function linkFloor(
   const sa: [number, number] = [a[0] + zx, a[1] + zy]
   const sb: [number, number] = [b[0] + zx, b[1] + zy]
   const items = s.obstacles?.floorAlong(sa, sb, tool.radius) ?? -Infinity
-  return Math.max(need, items, holderFloor(s.obstacles, s.holder, sa, sb, tool.stickout))
+  const holders = tool.holders.map((h) => holderFloor(s.obstacles, h.holder, sa, sb, h.stickout))
+  return Math.max(need, items, ...holders)
 }
 
 export interface LinkSettings {
@@ -425,11 +437,14 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
         }
         let link = full
         if (field !== undefined && entry[2] < clearance - EPS) {
-          // one tool run: the shorter stickout of the two operations (each checks its own moves)
-          const stickouts = [prev.stickout, op.stickout].filter((v) => v !== undefined)
+          // one tool run: the nut and body of both operations, each with its stickout (the
+          // shorter one decides for one holder; H6: the safe envelope of both holders)
           const tool: LinkTool = {
             radius: op.tool.diameter / 2,
-            stickout: stickouts.length === 0 ? undefined : Math.min(...stickouts),
+            holders: [prev, op].map((o) => ({
+              holder: o.holder ?? s.holder,
+              stickout: o.stickout,
+            })),
           }
           const needFor = (clamp: number) => linkFloor(field!, exit, entry, tool, s, clamp)
           const levelFor = (need: number) =>

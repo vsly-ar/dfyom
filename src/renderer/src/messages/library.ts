@@ -242,6 +242,16 @@ export const libraryMessages = {
       flute === undefined ? 'Default' : `Default: ${flute}`,
     shankDiameter: 'Shank diameter',
     shankNote: 'Optional: the collet size.',
+    /** The tool's own holder in Details (tool-holder.md § Implementation (H6), DF132). */
+    holder: {
+      choice: 'Holder',
+      choiceNote:
+        "Only for a tool that sits in its own holder (an extension or a reducing collet): it replaces the machine's collet nut and body for this tool on every machine. Measure yours with a caliper.",
+      none: "Machine's holder",
+      noneDescription: 'The collet nut set on the machine',
+      /** The Details summary: "ER16 nut holder", "Measured holder". */
+      summary: (label: string) => `${label} holder`,
+    },
     fluteCount: 'Flutes',
     pointAngle: 'Point angle',
     angle: 'Included angle',

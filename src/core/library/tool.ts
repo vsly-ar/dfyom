@@ -5,7 +5,7 @@
  * Machine limits and the calculator (task 2.12) are not here: plan mode checks them.
  */
 import { construct, invariants } from '../../shared/model'
-import { collect, None, Some, type AppResult, type Option } from '../../shared/result'
+import { collect, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import {
@@ -22,6 +22,7 @@ import {
   toOption,
   type MaterialClass,
 } from './item'
+import { checkHolder, holderFromDTO, holderToDTO, type Holder } from './holder'
 import {
   CHAMFER_MILL_ANGLE,
   COATING_MAX,
@@ -148,6 +149,11 @@ export interface ToolProps {
   readonly taperAngle: Option<Quantity>
   readonly toolMaterial: Option<ToolMaterial>
   readonly coating: Option<string>
+  /**
+   * The tool's own collet nut and spindle body (an extension or a reducing holder); None = the
+   * machine's holder (`resolveHolder`, docs/modes/tool-holder.md#model, hardening DF132 H6).
+   */
+  readonly holder: Option<Holder>
   readonly presets: readonly CuttingPreset[]
 }
 
@@ -226,6 +232,7 @@ export class Tool implements ToolProps {
     readonly taperAngle: Option<Quantity>,
     readonly toolMaterial: Option<ToolMaterial>,
     readonly coating: Option<string>,
+    readonly holder: Option<Holder>,
     readonly presets: readonly CuttingPreset[],
   ) {
     invariants('Tool', (c) => {
@@ -358,6 +365,7 @@ export class Tool implements ToolProps {
         )
       }
       if (coating.isSome()) checkText(c, ['coating'], coating.unwrap(), 0, COATING_MAX)
+      if (holder.isSome()) checkHolder(c, ['holder'], holder.unwrap())
 
       // Cross-field rules (kinds compared only when both are lengths).
       const lengths = (...qs: Quantity[]) => qs.every((q) => q.kind === 'length')
@@ -394,6 +402,7 @@ export class Tool implements ToolProps {
       })
     })
     Object.freeze(presets)
+    if (holder.isSome()) Object.freeze(holder.unwrap())
     Object.freeze(this)
   }
 
@@ -418,6 +427,7 @@ export class Tool implements ToolProps {
           p.taperAngle,
           p.toolMaterial,
           p.coating,
+          p.holder.map((h) => ({ ...h })),
           [...p.presets],
         ),
     )
@@ -442,6 +452,10 @@ export class Tool implements ToolProps {
       angle: optionalQuantityFromDTO(dto.angle, 'angle'),
       tipDiameter: optionalQuantityFromDTO(dto.tipDiameter, 'tipDiameter'),
       taperAngle: optionalQuantityFromDTO(dto.taperAngle, 'taperAngle'),
+      holder:
+        dto.holder === undefined
+          ? Ok<Option<Holder>>(None)
+          : holderFromDTO(dto.holder, 'holder').map((h) => Some(h)),
       presets,
     }).andThen((q) =>
       Tool.create({
@@ -506,6 +520,7 @@ export class Tool implements ToolProps {
       ...optionalQuantityDTO('taperAngle', this.taperAngle),
       ...optionalField('toolMaterial', this.toolMaterial),
       ...optionalField('coating', this.coating),
+      ...optionalField('holder', this.holder.map(holderToDTO)),
       presets: this.presets.map((p) => p.toDTO()),
     } as ToolValuesDTO
   }

@@ -241,6 +241,30 @@ describe('library commands', () => {
     ])
   })
 
+  it("a tool's own holder from a preset id alone; issues below values.holder (DF132 H6)", async () => {
+    const { d } = await setup()
+    const { id } = await add(d, 'tool', {
+      ...libraryInput(flatEndMillValues()),
+      holder: { preset: 'er16' },
+    })
+    const got = expectOk(d.query('library.tool.get', { id }, agent)).value as {
+      holder: { preset: string; nutDiameter: { source: string } }
+    }
+    expect(got.holder).toMatchObject({ preset: 'er16', nutDiameter: { source: '32' } })
+    const bad = expectErrCode(
+      await d.dispatch(
+        'library.tool.add',
+        { values: { ...libraryInput(flatEndMillValues()), holder: { nutLength: '12' } } },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(bad.issues.map((i) => i.path.join('.'))).toEqual([
+      'values.holder.nutDiameter',
+      'values.holder.bodyDiameter',
+    ])
+  })
+
   it('stock variants (DF13): one level under a root stock; kept on update; block remove', async () => {
     const { d } = await setup()
     const root = await add(d, 'stock', libraryInput(stockValues()))

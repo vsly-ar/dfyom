@@ -33,6 +33,7 @@ import { machineKeyOf } from '../run/machine-key'
 import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
 import type { LinkSettings } from '../toolpath/links'
 import type { Toolpath } from '../toolpath/model'
+import { resolveHolder } from '../library/holder'
 import {
   checkOperations,
   holderSizes,
@@ -286,12 +287,15 @@ export async function exportPlan(
   // DF130: each tool run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130);
   // DF132 H3: with the clamp term over the final moves (tool-holder.md#minimum-stickout-gains-the-clamp-term)
   const needs = setupStickouts(plan, setup, checked, zero)
-  const holderName = plan.machine.andThen((m) => m.holder).map(holderSizes)
+  // H6: each operation's holder (its tool's own, else the machine's)
+  const holderOf = all.map((input) => resolveHolder(input.tool, plan.machine).map(holderSizes))
+  const ownHolder = all.map((input) => input.tool.holder.isSome())
   const runNeeded = toolRuns(
-    all.map((x) => ({
+    all.map((x, i) => ({
       tool: x.toolSnapshotId,
       needed: needs?.get(x.planOperationId)?.needed ?? x.stickoutNeeded,
       reason: needs?.get(x.planOperationId)?.reason,
+      holder: holderOf[i]!,
     })),
   )
   const runOf = runNeeded.flatMap((r) => {
@@ -304,12 +308,16 @@ export async function exportPlan(
         : {
             part: decides.part ?? ('nut' as const),
             item: decides.itemName ?? 'an item',
-            ...holderName.mapOr<{ holder?: string }>({}, (h) =>
-              h.name === undefined ? {} : { holder: h.name },
-            ),
+            // H6: the holder of the operation that decides (its tool's own or the machine's)
+            ...(r.operations
+              .find((o) => o.needed === needed)
+              ?.holder.mapOr<{ holder?: string }>({}, (h) =>
+                h.name === undefined ? {} : { holder: h.name },
+              ) ?? {}),
           }
     return r.operations.map(() => ({ needed, reason }))
   })
+  const programUnits = plan.machine.unwrap().programUnits
   const operations: ExportOperation[] = all.map((input, i) => {
     const { needed: stickoutNeeded, reason: stickoutReason } = runOf[i]!
     const { ids, label } = generated[i]!
@@ -341,6 +349,10 @@ export async function exportPlan(
         }),
         ...(stickoutNeeded === undefined ? {} : { stickoutNeeded }),
         ...(stickoutReason === undefined ? {} : { stickoutReason }),
+        // H6: the tool's own holder for the header (the machine's is the workholding line)
+        ...(ownHolder[i] && holderOf[i]!.isSome()
+          ? { holder: holderLine(holderOf[i]!.unwrap(), programUnits) }
+          : {}),
       },
       stickout: input.stickout,
       label,
@@ -367,7 +379,6 @@ export async function exportPlan(
       })),
     })
   const holding = setupWorkholding(setup, plan.stock)
-  const programUnits = plan.machine.unwrap().programUnits
   const exported = exportGrbl(
     {
       name: plan.dto.name,
@@ -410,9 +421,13 @@ export async function exportPlan(
                   }),
                   margin: holding.margin,
                   // DF132 H3: the holder the program was checked with (tool-holder.md#run-mode)
-                  ...holderName.mapOr<{ holder?: string }>({}, (h) => ({
-                    holder: holderLine(h, programUnits),
-                  })),
+                  // (H6: only while an operation runs in it; a tool's own holder is its line)
+                  ...plan.machine
+                    .andThen((m) => m.holder)
+                    .filter(() => ownHolder.some((own) => !own))
+                    .mapOr<{ holder?: string }>({}, (h) => ({
+                      holder: holderLine(holderSizes(h), programUnits),
+                    })),
                 },
           ),
           ...clampLine(settings),

@@ -872,6 +872,43 @@ describe('Library window', () => {
     await waitFor(() => expect(get('machine', id)).not.toHaveProperty('holder'))
   })
 
+  it("DF132 H6: a tool's own holder in Details: a preset fills the sizes, saved, named in the summary; Machine's holder removes it", async () => {
+    const { user, row, editor, get, flat6 } = await renderLibrary()
+    await user.click(row(/Flat 6/))
+    const ed = editor()
+    const details = () => within(ed).getByRole('button', { name: /^Details/ })
+    await user.click(details())
+    const choice = within(ed).getByRole('combobox', { name: 'Holder' })
+    expect(choice).toHaveTextContent("Machine's holder")
+    expect(within(ed).queryByLabelText('Nut diameter', { selector: 'input' })).toBeNull()
+    await user.click(choice)
+    await user.click(await screen.findByRole('option', { name: 'ER16 nut' }))
+    const field = (name: string) => within(ed).getByLabelText(name, { selector: 'input' })
+    await waitFor(() => expect(field('Nut diameter')).toHaveValue('32'))
+    expect(field('Nut length')).toHaveValue('18')
+    expect(field('Body diameter')).toHaveValue('65')
+    await user.click(field('Body diameter'))
+    expect(
+      within(ed).getByRole('img', { name: 'Holder drawing: Body diameter highlighted' }),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(within(ed).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect((get('tool', flat6) as unknown as { holder?: { preset: string } }).holder).toEqual(
+        expect.objectContaining({ preset: 'er16' }),
+      ),
+    )
+    // closed, the Details heading names the holder
+    await user.click(details())
+    expect(details()).toHaveTextContent('ER16 nut holder')
+    await user.click(details())
+    await user.click(choice)
+    await user.click(await screen.findByRole('option', { name: "Machine's holder" }))
+    expect(within(ed).queryByLabelText('Nut diameter', { selector: 'input' })).toBeNull()
+    await user.click(within(ed).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(get('tool', flat6)).not.toHaveProperty('holder'))
+  })
+
   it('offers Import $$… only for a saved machine without unsaved changes', async () => {
     const { user, editor } = await renderLibrary()
     await user.click(screen.getByRole('tab', { name: 'Machines' }))

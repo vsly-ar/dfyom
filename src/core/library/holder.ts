@@ -1,6 +1,6 @@
 /**
  * Tool holder: the collet nut and the spindle body above it, each a diameter (and the nut a
- * length), with the built-in presets. Part of the machine (and, in H6, of a tool's override).
+ * length), with the built-in presets. Part of the machine and of a tool's override (H6).
  * Doc: docs/modes/tool-holder.md#model
  */
 import type { InvariantChecker } from '../../shared/model'
@@ -192,4 +192,22 @@ export function holderEdited(dto: HolderDTO): boolean {
     if (v === undefined) return f === 'maxShank'
     return v.exact.num !== p[f].exact.num || v.exact.den !== p[f].exact.den
   })
+}
+
+/** Anything that may carry a holder: a library tool (its override) or a machine. */
+interface HolderCarrier {
+  readonly holder: Option<Holder>
+}
+
+/**
+ * The holder a tool runs in (DF132 H6, docs/modes/tool-holder.md#model): the tool's own override,
+ * else the machine's holder, else none (the WH-F cylinder). The override holds on every machine,
+ * also on a plan without one.
+ */
+export function resolveHolder(
+  tool: HolderCarrier | undefined,
+  machine: Option<HolderCarrier>,
+): Option<Holder> {
+  if (tool !== undefined && tool.holder.isSome()) return tool.holder
+  return machine.andThen((m) => m.holder)
 }

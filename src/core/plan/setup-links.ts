@@ -5,6 +5,7 @@
  * the findings `plan.links.clampHeightUnknown` and DF59's `clampsAboveClearance`.
  * Doc: docs/modes/safe-links.md#agent-api-and-settings
  */
+import type { Holder } from '../library/holder'
 import type { Machine } from '../library/machine'
 import { Quantity } from '../quantity/quantity'
 import type { Option } from '../../shared/result'
@@ -41,7 +42,8 @@ export function setupClampHeight(s: Pick<SetupDTO, 'clampHeight'>): number | und
 /**
  * The link settings of a setup (mm). With workholding items their obstacles bound the links and
  * the clamp height is ignored (it stays the fallback for a setup without items); with a holder on
- * the machine too, the nut and body stay above them (DF132 H4, `holderFloor`).
+ * the machine too, the nut and body stay above them (DF132 H4, `holderFloor`); a tool's own holder
+ * rides on its link operation (H6, `linkOperations`).
  */
 export function linkSettings(
   setup: SetupDTO,
@@ -79,26 +81,28 @@ export function linkSettings(
  */
 function linkHolder(machine: Option<Machine>, margin: number): { holder?: LinkHolder } {
   const h = machine.andThen((m) => m.holder)
-  if (h.isNone()) return {}
-  const { nutDiameter, nutLength, bodyDiameter } = h.unwrap()
+  return h.isNone() ? {} : { holder: linkHolderOf(h.unwrap(), margin) }
+}
+
+function linkHolderOf(h: Holder, margin: number): LinkHolder {
   return {
-    holder: {
-      nutDiameter: nutDiameter.canonical,
-      nutLength: nutLength.canonical,
-      bodyDiameter: bodyDiameter.canonical,
-      above: Math.max(margin, STICKOUT_CLEARANCE),
-    },
+    nutDiameter: h.nutDiameter.canonical,
+    nutLength: h.nutLength.canonical,
+    bodyDiameter: h.bodyDiameter.canonical,
+    above: Math.max(margin, STICKOUT_CLEARANCE),
   }
 }
 
 /**
  * The link operations of a setup: one per plan operation in machining order; a tool change, or a
- * spindle speed change on a manual spindle (its `M0`), pauses before it.
+ * spindle speed change on a manual spindle (its `M0`), pauses before it. With the workholding
+ * `margin` (items with prisms), a tool with its own holder (DF132 H6) carries it for the floor.
  */
 export function linkOperations(
   inputs: readonly PlanOperationInput[],
   toolpaths: readonly Toolpath[],
   machine: Option<Machine>,
+  margin?: number,
 ): LinkOperation[] {
   const manual = machine.mapOr(false, (m) => m.spindle.control === 'manual')
   return inputs.map((input, i) => {
@@ -108,6 +112,9 @@ export function linkOperations(
       toolpath: tp,
       tool: toolpathTool(input.tool, input.toolSnapshotId),
       stickout: input.stickout,
+      ...(margin === undefined || input.tool.holder.isNone()
+        ? {}
+        : { holder: linkHolderOf(input.tool.holder.unwrap(), margin) }),
       pauseBefore:
         before === undefined ||
         before.tool !== tp.tool ||
@@ -142,7 +149,10 @@ export function cachedSetupLinks(
     cache.set(key, hit)
     return hit.links
   }
-  const ops = machine === undefined ? [] : linkOperations(inputs, toolpaths, machine)
+  const ops =
+    machine === undefined
+      ? []
+      : linkOperations(inputs, toolpaths, machine, settings.obstacles?.margin)
   const links = planLinks(ops, settings)
   cache.delete(key)
   cache.set(key, { toolpaths: [...toolpaths], links })

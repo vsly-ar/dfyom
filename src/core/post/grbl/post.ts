@@ -253,6 +253,13 @@ class Writer {
     for (const line of w.items) this.comment(`Workholding: ${line}`)
     // DF132 H3: the holder the moves were checked with (docs/modes/tool-holder.md#run-mode)
     if (w.holder !== undefined) this.comment(`Holder: ${w.holder}`)
+    // H6: a tool with its own holder, once per tool number
+    const own = new Set<number>()
+    for (const b of this.p.blocks)
+      if (b.kind === 'toolChange' && b.tool.holder !== undefined && !own.has(b.number)) {
+        own.add(b.number)
+        this.comment(`Holder T${b.number}: ${b.tool.holder}`)
+      }
     const margin = formatNumber(Math.round(w.margin * this.units.perMm * 1000) / 1000, 3)
     this.comment(`Every move checked: ${margin} ${this.p.units} clear of the workholding`)
   }
