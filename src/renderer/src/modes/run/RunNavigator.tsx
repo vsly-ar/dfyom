@@ -40,7 +40,7 @@ import {
   needsHoming,
   runGates,
 } from './machine-state'
-import { runnablePlans } from './plan-info'
+import { firstRunSetup, runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
@@ -228,9 +228,14 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   useEffect(() => {
     if (manual && machineChosen !== machineId) store.getState().setMachine(machineChosen)
   }, [manual, machineChosen, machineId, store])
-  const setups =
-    chosen === undefined || manual || doc === undefined ? [] : (doc.plans[chosen]?.setups ?? [])
-  const setupChosen = setups.some((x) => x.id === setupId) ? setupId : setups[0]?.id
+  const chosenPlan = chosen === undefined || manual ? undefined : doc?.plans[chosen]
+  const setups = chosenPlan?.setups ?? []
+  // DF137: by default the first setup with a program (not cut in full)
+  const setupChosen = setups.some((x) => x.id === setupId)
+    ? setupId
+    : chosenPlan === undefined
+      ? undefined
+      : firstRunSetup(chosenPlan)?.id
 
   const connected = isConnected(status)
   // the serial port is the default choice (DF101): list the ports once, as choosing it does

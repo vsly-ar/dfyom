@@ -8,7 +8,8 @@
 // its touch-off spot (docs/modes/z-reference.md#dfyom-run). DF64 L3: the lowered links between
 // operations (`plan.warning.list`) drawn as the program moves, so playback follows the tool.
 // An external gCode file (DF93) draws its own moves instead (`fileMoves`, work coordinates, no
-// setup frame). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
+// setup frame). DF137: an already-cut operation (DF135) is not in the program, so its toolpath is
+// not drawn (docs/modes/cut-state.md#run-df137). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
 // marker (docs/modes/run-goto.md#preview). DF129 RC6: after an interrupted run, a ghost tool at
 // its last seen position and the toolpath before it dimmed; after a crash the interrupted plan's
 // toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6). DF133 RW1: the
@@ -79,7 +80,12 @@ export function useRunScene(mode: AppMode): RunScene | null {
     () => (plan ? setupPlacement(plan, setupId, units)?.frame : undefined),
     [plan, setupId, units],
   )
-  const [read, setRead] = useState<{ toolpaths: Toolpath[]; current: boolean } | null>(null)
+  const [read, setRead] = useState<{
+    toolpaths: Toolpath[]
+    /** The plan operation of each toolpath (DF137: the cut ones are left out after linking). */
+    ids: string[]
+    current: boolean
+  } | null>(null)
   // toolpaths generated meanwhile (the recovery's generation below, Plan mode, another window)
   const [generated, setGenerated] = useState(0)
   const [lowered, setLowered] = useState<readonly LoweredLinkView[]>([])
@@ -98,13 +104,16 @@ export function useRunScene(mode: AppMode): RunScene | null {
       ),
     ).then((replies) => {
       if (!live) return
-      const got = replies.flatMap((r) =>
-        r.ok ? [r.value as { toolpath: Toolpath | null; stale: boolean }] : [],
+      const got = replies.flatMap((r, i) =>
+        r.ok
+          ? [{ id: operations[i]!, ...(r.value as { toolpath: Toolpath | null; stale: boolean }) }]
+          : [],
       )
-      const toolpaths = got.flatMap((r) => (r.toolpath === null ? [] : [r.toolpath]))
+      const drawn = got.flatMap((r) => (r.toolpath === null ? [] : [r]))
       setRead({
-        toolpaths,
-        current: toolpaths.length === operations.length && got.every((r) => !r.stale),
+        toolpaths: drawn.map((r) => r.toolpath!),
+        ids: drawn.map((r) => r.id),
+        current: drawn.length === operations.length && got.every((r) => !r.stale),
       })
     })
     return () => {
@@ -151,13 +160,17 @@ export function useRunScene(mode: AppMode): RunScene | null {
 
   // the moves the program makes: the links applied when every toolpath of the setup is current
   // (they are computed from exactly those)
+  // (over every operation of the setup, as the export links them), then the already-cut ones left
+  // out: they are not in the program (DF137, docs/modes/cut-state.md#run-df137)
+  const cut = info?.cut
   const lines = useMemo((): ToolpathLines | null => {
     if (fileLines !== undefined) return fileToolpathLines(fileLines)
-    if (read === null || read.toolpaths.length === 0) return null
+    if (read === null) return null
     const linked =
       read.current && lowered.length > 0 ? linkedToolpaths(read.toolpaths, lowered) : read.toolpaths
-    return toolpathLines(linked)
-  }, [read, lowered, fileLines])
+    const program = linked.filter((_, i) => cut?.has(read.ids[i]!) !== true)
+    return program.length === 0 ? null : toolpathLines(program)
+  }, [read, lowered, fileLines, cut])
 
   // playback: a cursor that only moves forward during one run
   const cursor = useRef({ jobId: undefined as string | undefined, done: 0 })

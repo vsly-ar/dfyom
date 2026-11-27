@@ -28,6 +28,7 @@ import type { ProjectDoc } from '../project/document'
 import { commentLine } from '../post/grbl/format'
 import type { GrblExport } from '../post/export'
 import { exportPlan } from '../post/plan-export'
+import { cutTest } from '../plan/cut'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
 import { DEFAULT_SPIN_UP_SECONDS } from '../post/grbl/post'
@@ -508,7 +509,13 @@ function startChecks(
   // one program per setup (task E2)
   const chosen = chooseSetup(plan.unwrap().setups, setupId, where)
   if (chosen.isErr()) return Err(chosen.unwrapErr().withContext(where, { planId }))
-  const { setup, next } = chosen.unwrap()
+  const { setup } = chosen.unwrap()
+  // DF137: the next setup with a program; one cut in full has none (docs/modes/cut-state.md#run-df137)
+  const isCut = cutTest(plan.unwrap().design.part)
+  const setups = plan.unwrap().setups
+  const next = setups
+    .slice(setups.indexOf(setup) + 1)
+    .find((s) => s.operations.some((o) => !isCut(o)))
   const key = machineKeyOf(doc, planId, where)
   if (key.isErr()) return key
   if (key.unwrap() === undefined)
