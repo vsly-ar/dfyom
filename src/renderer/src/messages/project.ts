@@ -113,6 +113,8 @@ export const projectMessages = {
       /** DF88 (docs/conventions/ui.md#jog-hotkeys). */
       jog: (dir: string) => `Jog ${dir} (tap: one step, hold: until released)`,
       stopJog: 'Stop jogging',
+      /** DF128 GT2 (docs/modes/run-goto.md#keyboard). */
+      goTo: 'Go to coordinates…',
       jogOff: 'Jog keys are off (Settings → Jog keys)',
       newProject: 'New project',
       openProject: 'Open project',

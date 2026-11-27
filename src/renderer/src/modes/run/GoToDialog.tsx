@@ -5,6 +5,8 @@
 // `run.machine.jog { to, feed }` one after the other (GRBL queues them), the dialog follows them
 // and closes on arrival. While open the jog hotkeys are off (`goTo` in the run store). Escape
 // restores an edited field first, else closes, stopping the move (jog cancel) if one runs.
+// GT2: the listed steps go to the run store (`goToPreview`) for the 3D path; the dialog sits at
+// the bottom of the end edge without the dark scrim (`placement="end"`), so the view stays visible.
 // Doc: docs/modes/run-goto.md
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -180,7 +182,7 @@ function GoToOpen({
   const relativeId = useId()
   // focus goes back to the DRO value that opened the dialog (taken before the field's autofocus;
   // the dialog unmounts on close, so Radix cannot return it)
-  const [opener] = useState(() => document.activeElement)
+  const [opener] = useState(() => request.opener ?? document.activeElement)
   useEffect(
     () => () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
@@ -342,6 +344,17 @@ function GoToOpen({
   const feedUnit = runMessages.dro.feedUnits[units]
   const serial = status.connection.target === 'serial'
 
+  // GT2: the steps shown, drawn in the run scene as a dashed path to a target marker (by value,
+  // so a status report that moved nothing republishes nothing)
+  const previewKey = list.length === 0 ? '' : JSON.stringify([listFrom, ...list.map((st) => st.to)])
+  useEffect(() => {
+    const pts = previewKey === '' ? [] : (JSON.parse(previewKey) as Vec3[])
+    store
+      .getState()
+      .setGoToPreview(pts.length < 2 ? undefined : { from: pts[0]!, points: pts.slice(1) })
+  }, [previewKey, store])
+  useEffect(() => () => store.getState().setGoToPreview(undefined), [store])
+
   const stopAt: Vec3 | undefined =
     phase.kind !== 'stopped'
       ? undefined
@@ -352,6 +365,7 @@ function GoToOpen({
   return (
     <Dialog
       open
+      placement="end"
       onOpenChange={onOpenChange}
       title={m.title}
       description={m.description}

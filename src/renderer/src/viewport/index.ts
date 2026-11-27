@@ -19,6 +19,7 @@ export type { RestOverlay } from './RestLayer'
 export type { AlignmentMarker, AlignmentTarget, FlipAxisLine } from './AlignmentLayer'
 export type { AidDragPhase, AidHandle, AidOverlay } from './AidHandles'
 export type { ClampDrag, ClampDragPhase, ClampHandle, WorkholdingOverlay } from './WorkholdingLayer'
+export type { GoToOverlay } from './GoToPath'
 export { RunLayer, boxEdges, segmentColours, type RunEnvelope, type RunScene } from './RunLayer'
 export {
   advancePlayback,

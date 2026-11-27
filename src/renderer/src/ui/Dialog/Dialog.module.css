@@ -75,6 +75,30 @@
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
+/* DF128 GT2: at the bottom of the end edge, over the inspector's lower groups, the scrim clear: the
+   3D view (the Go to dialog's path preview) and the Position table above it stay visible */
+.overlay[data-placement='end'] {
+  background: transparent;
+  animation: none;
+}
+
+.content[data-placement='end'] {
+  left: auto;
+  top: auto;
+  right: var(--space-3);
+  bottom: 40px;
+  transform: none;
+  max-height: calc(100% - 64px - 40px);
+  animation: dialog-end-in var(--motion-slow) var(--ease-emphasized);
+}
+
+@keyframes dialog-end-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

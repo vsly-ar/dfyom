@@ -71,6 +71,11 @@ export interface MenuProps {
   onOpenChange?: (open: boolean) => void
   /** Modal by default (outside clicks only close it); the gallery shows menus non-modal. */
   modal?: boolean
+  /**
+   * When the closed menu would focus its trigger; `preventDefault()` keeps it from doing so (an item
+   * that opens a dialog opens it here, so the dialog's own focus is not taken back, DF128 GT2).
+   */
+  onCloseAutoFocus?: (e: Event) => void
 }
 
 export function Menu({
@@ -82,6 +87,7 @@ export function Menu({
   defaultOpen,
   onOpenChange,
   modal = true,
+  onCloseAutoFocus,
 }: MenuProps): React.JSX.Element {
   const container = usePortalContainer()
   return (
@@ -99,6 +105,7 @@ export function Menu({
           sideOffset={4}
           collisionPadding={8}
           {...(label ? { 'aria-label': label } : {})}
+          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         >
           <Entries p={DROPDOWN} items={items} />
         </DropdownMenu.Content>

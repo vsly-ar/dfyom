@@ -1,8 +1,9 @@
 // Go to coordinates (DF128) in the app against the fake bridge: the DRO values open the dialog on
 // their frame and axis, the fields start at the position, Enter sends the steps in the safe order,
 // the gates and findings, Escape restores a field / stops / closes, and the jog hotkeys stay off
-// while it is open.
-// Spec: docs/modes/run-goto.md (GT1)
+// while it is open. GT2: the planned steps published for the run scene's path, the "Go to…" item
+// in the jog section's menu and the `G` key, the placement at the end edge without a dark scrim.
+// Spec: docs/modes/run-goto.md (GT1, GT2)
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { planSetup } from '../../../../core/plan/plan.fixture'
@@ -12,7 +13,9 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { runMessages } from '../../messages/run'
 import { currentStep, parseGoToField } from './GoToDialog'
+import { runStoreOf } from './run-store'
 
 const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
 const envelope = { travel: [800, 600, 100] as const, homingMask: 0, pullOff: 1, softLimits: true }
@@ -64,7 +67,7 @@ async function renderRun() {
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const dro = () => screen.getByRole('table', { name: 'Position' })
-  return { ...r, nav, push, callsOf, dro, status: () => status }
+  return { ...r, nav, push, callsOf, dro, status: () => status, run: () => runStoreOf(bridge) }
 }
 
 type T = Awaited<ReturnType<typeof renderRun>>
@@ -285,6 +288,113 @@ describe('Go to (DF128)', () => {
     await t.user.click(goButton())
     expect(t.callsOf('run.machine.jog')).toEqual([])
     await expectNoAxeViolations()
+  })
+})
+
+describe('Go to (DF128 GT2)', () => {
+  it('publishes the planned steps for the 3D path as the fields change, and clears them on close', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(within(t.dro()).getByRole('button', { name: 'Go to: X -50.000 work' }))
+    // already there: no path
+    expect(t.run().getState().goToPreview).toBeUndefined()
+    await t.user.keyboard('0')
+    // machine coordinates: from the position, lifted to the safe height (stock top + the setup's
+    // clearance), across, down
+    await waitFor(() =>
+      expect(t.run().getState().goToPreview).toEqual({
+        from: [-300, -200, -82],
+        points: [
+          [-300, -200, -70],
+          [-250, -200, -70],
+          [-250, -200, -82],
+        ],
+      }),
+    )
+    // live: another target, another path; an invalid field, none
+    await t.user.clear(field('Z'))
+    await t.user.type(field('Z'), '20')
+    await waitFor(() =>
+      expect(t.run().getState().goToPreview?.points).toEqual([
+        [-300, -200, -60],
+        [-250, -200, -60],
+      ]),
+    )
+    await t.user.clear(field('Z'))
+    await t.user.type(field('Z'), 'abc')
+    await waitFor(() => expect(t.run().getState().goToPreview).toBeUndefined())
+    await t.user.click(within(dialog()).getByRole('button', { name: 'Cancel' }))
+    expect(t.run().getState().goToPreview).toBeUndefined()
+  })
+
+  it('sits at the end edge over a clear scrim, still modal', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(within(t.dro()).getByRole('button', { name: 'Go to: X -50.000 work' }))
+    expect(dialog()).toHaveAttribute('data-placement', 'end')
+    // still modal: the rest of the window is hidden from the accessibility tree
+    expect(screen.queryByRole('navigation', { name: 'Navigator' })).toBeNull()
+    expect(document.querySelector('[data-placement="end"]:not([role="dialog"])')).not.toBeNull()
+  })
+
+  it('G opens it in the work frame with X focused; not while typing, with a modifier or during a job', async () => {
+    const t = await renderRun()
+    // not connected: nothing
+    await t.user.keyboard('g')
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+    await connectAndHome(t)
+    // typing a g in a text field never opens it
+    const custom = within(t.nav()).getByRole('textbox', { name: 'Custom jog step (mm)' })
+    custom.focus()
+    await t.user.keyboard('g')
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+    custom.blur()
+    await t.user.keyboard('{Meta>}g{/Meta}{Control>}g{/Control}')
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+    await t.user.keyboard('g')
+    expect(within(dialog()).getByRole('radio', { name: 'Work (G54)' })).toBeChecked()
+    expect(field('X')).toHaveFocus()
+    // in the dialog, g is text
+    await t.user.keyboard('g')
+    expect(field('X').value).toBe('g')
+    await t.user.keyboard('{Escape}{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+    // during a run job: nothing
+    t.push({
+      state: 'Run',
+      job: { jobId: 'run-1', phase: 'streaming', line: 1, startedAt: '', elapsedSeconds: 0 },
+    })
+    document.body.focus()
+    await t.user.keyboard('g')
+    expect(screen.queryByRole('dialog', { name: 'Go to' })).toBeNull()
+  })
+
+  it('the jog section menu has "Go to…" (G), disabled with why until homed; focus returns to the menu button', async () => {
+    const t = await renderRun()
+    const menuButton = () => within(t.nav()).getByRole('button', { name: 'Jog options' })
+    const openMenu = async () => {
+      menuButton().focus()
+      await t.user.keyboard('{Enter}')
+    }
+    await openMenu()
+    const item = await screen.findByRole('menuitem', { name: /Go to…/ })
+    expect(item).toHaveAttribute('aria-disabled', 'true')
+    expect(item).toHaveTextContent('Connect to a machine first.')
+    await t.user.keyboard('{Escape}')
+    await connectAndHome(t)
+    await openMenu()
+    await t.user.click(await screen.findByRole('menuitem', { name: /Go to…/ }))
+    await waitFor(() => expect(field('X')).toHaveFocus())
+    expect(within(dialog()).getByRole('radio', { name: 'Work (G54)' })).toBeChecked()
+    await expectNoAxeViolations()
+    await t.user.click(within(dialog()).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(menuButton()).toHaveFocus())
+  })
+
+  it('the time estimate reads in minutes past a minute', () => {
+    expect(runMessages.goTo.seconds(6)).toBe('about 6 s')
+    expect(runMessages.goTo.seconds(60)).toBe('about 1 min')
+    expect(runMessages.goTo.seconds(125)).toBe('about 2 min 5 s')
   })
 })
 

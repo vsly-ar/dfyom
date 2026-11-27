@@ -9,7 +9,10 @@ describe('jogShortcuts (the shortcut list, DF88)', () => {
       'Shift+→',
       'Jog X+ (tap: one step, hold: until released)',
     ])
-    expect(jogShortcuts('game').at(-1)).toEqual(['Esc', 'Stop jogging'])
+    expect(jogShortcuts('game').slice(-2)).toEqual([
+      ['Esc', 'Stop jogging'],
+      ['G', 'Go to coordinates…'],
+    ])
     expect(jogShortcuts('off')[0]?.[1]).toBe('Jog keys are off (Settings → Jog keys)')
   })
 })

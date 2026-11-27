@@ -57,6 +57,20 @@ export type Axis = 'x' | 'y' | 'z'
 export interface GoToRequest {
   readonly frame: 'work' | 'machine'
   readonly axis: Axis
+  /**
+   * GT2: where focus returns on close when it is not the focused element at opening (the jog
+   * section's menu button: the menu item is gone by then).
+   */
+  readonly opener?: HTMLElement | null | undefined
+}
+
+/**
+ * DF128 GT2: the move the open Go to dialog shows, for the run scene's dashed path (machine
+ * coordinates, mm): the start and each step's end, the last one the target.
+ */
+export interface GoToPreview {
+  readonly from: readonly [number, number, number]
+  readonly points: readonly (readonly [number, number, number])[]
 }
 
 /** What "Connect" opens: the GRBL emulator or a real controller (docs/modes/run-machine.md#ui). */
@@ -241,6 +255,8 @@ export interface RunState {
   readonly goTo: GoToRequest | undefined
   /** DF128: "Lift to the top first", per window (off by default). */
   readonly goToLiftTop: boolean
+  /** DF128 GT2: the open dialog's planned steps, drawn in the run scene; absent: none. */
+  readonly goToPreview: GoToPreview | undefined
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -253,6 +269,7 @@ export interface RunState {
   openGoTo(request: GoToRequest): void
   closeGoTo(): void
   setGoToLiftTop(on: boolean): void
+  setGoToPreview(preview: GoToPreview | undefined): void
   setGcode(patch: Partial<GcodePanelState>): void
   setMachine(machineId: string | undefined): void
   setSetup(setupId: string | undefined): void
@@ -475,7 +492,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       goTo: undefined,
       goToLiftTop: false,
       openGoTo: (goTo) => set({ goTo }),
-      closeGoTo: () => set({ goTo: undefined }),
+      goToPreview: undefined,
+      closeGoTo: () => set({ goTo: undefined, goToPreview: undefined }),
+      setGoToPreview: (goToPreview) => set({ goToPreview }),
       setGoToLiftTop: (goToLiftTop) => set({ goToLiftTop }),
       async loadFile(path) {
         const name = fileNameOf(path)

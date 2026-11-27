@@ -2,7 +2,7 @@
 // shorter than the hold delay jogs one step, a key held past it jogs continuously until its
 // keyup (jog cancel) – and Escape stops a jog. Active only while connected, without a run job,
 // with the jog gate open and the Go to dialog closed (DF128); never while typing or in a dialog
-// without a jog pad (`jog-keys.ts`).
+// without a jog pad (`jog-keys.ts`). DF128 GT2: `G` opens the Go to dialog (`useGoToHotkey`).
 // Listens on the window in the capture phase, so a focused control cannot swallow a key.
 // Doc: docs/conventions/ui.md#jog-hotkeys
 import { useEffect, useRef, useState } from 'react'
@@ -11,10 +11,46 @@ import { useSettings } from '../../shell/ShellContext'
 import { endsPress, jogKeyOf, jogTargetAllowed } from './jog-keys'
 import { createJogPress, type JogPressHandlers } from './jog-press'
 import { useJogControls, type JogControls } from './JogPad'
-import { activeJob, isConnected, runGates } from './machine-state'
+import { isEditableTarget } from '../../shell/shortcuts'
+import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
 import type { JogKeyStyle } from '../../../../shared/settings'
 import type { RunStatus } from '../../../../core/run/service'
-import { useRun } from './run-store'
+import { useRun, useRunStore } from './run-store'
+
+/**
+ * DF128 GT2 (Q157): whether a `G` key press opens the Go to dialog: the plain key (no modifier,
+ * no repeat), focus not in a text field, no dialog, alert or menu open, the dialog not open yet
+ * and the DRO buttons' gate open (connected, homed, no run job). Pure but for the DOM query.
+ */
+export function goToKeyOpens(
+  e: Pick<
+    KeyboardEvent,
+    'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'repeat' | 'target'
+  >,
+  status: RunStatus,
+  open: boolean,
+): boolean {
+  if (e.key.toLowerCase() !== 'g' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false
+  if (e.repeat || open || isEditableTarget(e.target)) return false
+  if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]') !== null)
+    return false
+  return goToOpenGate(status) === null
+}
+
+/** `G` opens the Go to dialog in the work frame with X focused (run-goto.md#keyboard). */
+export function useGoToHotkey(): void {
+  const store = useRunStore()
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => {
+      const s = store.getState()
+      if (!goToKeyOpens(e, s.status, s.goTo !== undefined)) return
+      e.preventDefault()
+      s.openGoTo({ frame: 'work', axis: 'x' })
+    }
+    window.addEventListener('keydown', onDown)
+    return () => window.removeEventListener('keydown', onDown)
+  }, [store])
+}
 
 /** Whether jog hotkeys may jog now: connected, no run job, the jog gate open. */
 export function jogHotkeysActive(status: RunStatus, style: JogKeyStyle): boolean {
@@ -121,5 +157,6 @@ export function JogHotkeys({ doc }: { doc: ProjectDoc | undefined }): null {
     jogging: status.state.startsWith('Jog'),
     controls,
   })
+  useGoToHotkey()
   return null
 }

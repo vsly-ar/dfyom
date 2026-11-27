@@ -1,7 +1,9 @@
 // Dialog: modal panel over the --bg-overlay scrim with a title, body and a footer of actions
 // (tool change, export). Focus is trapped and returns to the trigger. Confirmations use
 // ConfirmDialog. Enter in a field inside never applies, and Cmd/Ctrl+Enter is inactive while a
-// modal one is open (docs/architecture/apply.md#keyboard). Doc: docs/conventions/ui.md#radix-wrapping-pattern, #elevation
+// modal one is open (docs/architecture/apply.md#keyboard). `placement="end"` (DF128 GT2, the Go to
+// dialog) puts it at the bottom of the window's end edge with a clear scrim, so the 3D view stays
+// visible while focus is still held in it. Doc: docs/conventions/ui.md#radix-wrapping-pattern, #elevation
 import { Dialog as RadixDialog, VisuallyHidden } from 'radix-ui'
 import { useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { ApplyScope, MODAL_ATTR } from '../ApplyButton/ApplyScope'
@@ -49,6 +51,12 @@ export interface DialogProps {
    * `xl` 720 px for a grid of picture cards (DF107: pattern presets).
    */
   size?: 'md' | 'lg' | 'xl'
+  /**
+   * `center` (default): centred over the dimming scrim. `end` (DF128 GT2): at the bottom of the
+   * window's end edge, the scrim clear (it still takes outside clicks), so the view beside it
+   * stays visible; still modal (focus held, Escape closes).
+   */
+  placement?: 'center' | 'end'
 }
 
 export function Dialog({
@@ -64,6 +72,7 @@ export function Dialog({
   modal = true,
   onCloseAutoFocus,
   size,
+  placement = 'center',
 }: DialogProps): React.JSX.Element {
   const container = usePortalContainer()
   const [isOpen, setOpen] = useOpenState(open, defaultOpen, onOpenChange)
@@ -73,11 +82,15 @@ export function Dialog({
     <RadixDialog.Root modal={modal} open={isOpen} onOpenChange={setOpen}>
       {trigger ? <RadixDialog.Trigger asChild>{trigger}</RadixDialog.Trigger> : null}
       <RadixDialog.Portal container={container}>
-        <RadixDialog.Overlay className={styles['overlay']} />
+        <RadixDialog.Overlay
+          className={styles['overlay']}
+          {...(placement === 'end' ? { 'data-placement': 'end' } : {})}
+        />
         <RadixDialog.Content
           ref={content}
           className={styles['content']}
           {...(size !== undefined && size !== 'md' ? { 'data-size': size } : {})}
+          {...(placement === 'end' ? { 'data-placement': 'end' } : {})}
           {...(description === undefined ? { 'aria-describedby': undefined } : {})}
           {...(modal ? { [MODAL_ATTR]: '' } : {})}
           {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
