@@ -7,7 +7,8 @@
 // with alignment points aligns in the docked Run panel (AlignmentPanel, Q107 assumed): the prompt
 // says so with "Align in the Run panel" and keeps "Start setup n" disabled until it is confirmed.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
-// docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
+// docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7,
+// docs/modes/run-workholding.md#implementation-rw6 (the guard's line until the new zero is set)
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -24,6 +25,7 @@ import { WorkZeroButtons } from './RunNavigator'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
 import { stepOf } from './AlignmentStep'
+import { useRunWorkholding } from './useRunWorkholding'
 import styles from './Run.module.css'
 
 const m = runMessages.setupChange
@@ -38,6 +40,8 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const pending = useRun((s) => s.pending)
   const ids = { jog: useId(), zero: useId(), start: useId() }
   const plate = usePlateThickness(doc)
+  // DF133 RW6: the new setup's items are outlined and jogs unchecked until its zero is set
+  const wh = useRunWorkholding()
   const plan = planId === undefined ? undefined : doc.plans[planId]
   if (setupId === undefined || plan === undefined) return null
   const a = store.getState()
@@ -111,6 +115,11 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         ))}
       </ol>
       <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} />
+      {wh?.trust === 'zeroStale' ? (
+        <p className={styles['hint']} data-setup-change-guard>
+          {runMessages.guard.setupChange}
+        </p>
+      ) : null}
       <WorkZeroButtons
         gate={gates.workZero}
         reasonId={ids.zero}

@@ -1,6 +1,6 @@
 // The live clearance chip under the Position table (hardening DF133 RW5, Q192): "Clear: 14 mm to
 // Toe clamp 2 (collet nut)", the nearest item to the tool and holder at the current position,
-// neutral, amber under 2 × margin, red at or within the margin ("Within the margin: …"); updated
+// neutral, amber under 2 × margin ("Close: …", RW6), red at or within the margin ("Within the margin: …"); updated
 // with each status report. The chip itself is not live: a visually hidden polite status says the
 // item and its colour only, so a screen reader hears a change of item or colour, not every report.
 // Absent while the guard cannot vouch for the items (the status line above says why).
@@ -25,7 +25,9 @@ export function ClearanceChip({ units }: { units: UnitSystem }): React.JSX.Eleme
       <p className={styles['clearance']} data-clearance={n.tone} data-item={n.itemId}>
         {n.tone === 'inside'
           ? g.clearanceInside(gap, n.item, part)
-          : g.clearance(gap, n.item, part)}
+          : n.tone === 'close'
+            ? g.clearanceClose(gap, n.item, part)
+            : g.clearance(gap, n.item, part)}
       </p>
       <p className={styles['srOnly']} role="status">
         {g.clearanceSays[n.tone](n.item)}

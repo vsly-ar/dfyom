@@ -4,14 +4,16 @@
 // clamps are outlined; homed with G54 never set they are hidden; with the work zero set they are
 // solid and the holder ghost stands at the tool marker with its chip. Windows stay hidden
 // (fixture). With DFYOM_RENDERS=1: df133-rw1-outlined and df133-rw1-solid (light and dark) in
-// design/features/renders/, or in DFYOM_RENDERS_DIR. RW3: a held Y+ toward the front clamp stops
+// design/features/renders/, or in DFYOM_RENDERS_DIR. RW3: a held X+ beside the front clamp stops
 // at the margin with the notice, a further step is not sent, "Jog past once" lets one step
-// through, the Jog menu switches the guard off (df133-rw3-stopped). RW4: a Go to down onto the
+// through, the Jog menu switches the guard off. RW4: a Go to down onto the
 // front clamp is refused with the finding and a red target, then "Go anyway" goes
-// (df133-rw4-goto-blocked). RW5: the live clearance chip, red at the stop by the front clamp. RW6
-// completes the guard's e2e.
+// (df133-rw4-goto-blocked). RW5: the live clearance chip, red at the stop by the front clamp. RW6:
+// the guard's e2e (run-workholding.md § Testing): the held jog's stop renders
+// df133-run-workholding, 1 mm back from the stop the chip and the clamp are amber
+// (df133-rw6-amber), and the guard switched off (df133-rw6-guard-off).
 // Docs: docs/modes/run-workholding.md#implementation-rw1, #implementation-rw3, #implementation-rw4,
-// #implementation-rw5,
+// #implementation-rw5, #implementation-rw6,
 // docs/conventions/ui.md#workholding
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -48,7 +50,7 @@ async function render(page: Page, name: string): Promise<void> {
   }
 }
 
-test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the holder ghost', async ({
+test('run scene workholding (DF133 RW1–RW6): trust states, guarded jogs and Go to, the chip, the switch', async ({
   dfyom,
 }) => {
   test.setTimeout(120_000)
@@ -154,39 +156,50 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
 
   await expect(inspector.locator('[data-clearance]')).toHaveText(/^Clear: [\d.]+ mm to /)
 
-  // RW3: in front of the front clamp, below its top; a held Y+ stops at the margin, not at the
-  // stock (Y 0) and not at the travel edge
-  await call(page, 'run.machine.jog', { to: [-230, -200, -65], feed: 5000 })
-  await expect.poll(() => at('Work position Y')).toBeCloseTo(-40, 3)
+  // RW3: beside the front clamp (X 45–75: its grip onto the stock and its 50 mm reach in front
+  // of it), below its top; a held X+ stops at the margin, not at the travel edge. (RW6: until RW5
+  // this started in front of the stock, which is inside the clamp's reach: the chip read 0 mm.)
+  await call(page, 'run.machine.jog', { to: [-270, -180, -65], feed: 5000 })
+  await expect.poll(() => at('Work position X')).toBeCloseTo(20, 3)
+  await expect.poll(() => at('Work position Y')).toBeCloseTo(-20, 3)
   await expect(machineGroup.getByText('Idle')).toBeVisible()
-  const yPlus = navigator.getByRole('button', { name: 'Jog Y+' })
-  const box = (await yPlus.boundingBox())!
+  const clearance = inspector.locator('[data-clearance]')
+  await expect(clearance).toHaveText(/^Clear: 22(\.0)? mm to Toe clamp 1 \(tool\)$/)
+  const xPlus = navigator.getByRole('button', { name: 'Jog X+' })
+  const box = (await xPlus.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down()
   const notice = navigator.locator('[data-guard-notice] [role="status"]')
-  await expect(notice).toHaveText(/^Stopped \d+(\.\d+)? mm from Toe clamp 1 \(tool\)\.$/)
+  await expect(notice).toHaveText(/^Stopped 2(\.0)? mm from Toe clamp 1 \(tool\)\.$/)
   await page.mouse.up()
   await expect(machineGroup.getByText('Idle')).toBeVisible()
-  const y = await at('Work position Y')
-  expect(y).toBeGreaterThan(-40)
-  expect(y).toBeLessThan(-5)
+  const x = await at('Work position X')
+  expect(x).toBeGreaterThan(39.9)
+  expect(x).toBeLessThan(40)
   // RW5: the live clearance chip names the front clamp, red at the stop point (the margin)
-  const clearance = inspector.locator('[data-clearance]')
-  await expect(clearance).toHaveText(/^Within the margin: [\d.]+ mm to Toe clamp 1 \(tool\)$/)
+  await expect(clearance).toHaveText(/^Within the margin: 2(\.0)? mm to Toe clamp 1 \(tool\)$/)
   await expect(clearance).toHaveAttribute('data-clearance', 'inside')
   await page.getByRole('button', { name: 'Fit' }).click()
-  await render(page, 'df133-rw3-stopped')
+  await render(page, 'df133-run-workholding')
   // further in: not moved
-  await yPlus.click()
+  await xPlus.click()
   await expect(notice).toHaveText(/^Not moved: the tool would come within the margin/)
-  expect(await at('Work position Y')).toBe(y)
+  expect(await at('Work position X')).toBe(x)
   // Jog past once: armed, then used by the next step (1 mm, today's command)
   await navigator.getByRole('button', { name: 'Jog past once' }).click()
   await expect(notice).toHaveText('Next jog unguarded.')
   await navigator.getByRole('radio', { name: '1 mm', exact: true }).click()
-  await yPlus.click()
-  await expect.poll(() => at('Work position Y')).toBeCloseTo(y + 1, 3)
+  await xPlus.click()
+  await expect.poll(() => at('Work position X')).toBeCloseTo(x + 1, 3)
   await expect(notice).toHaveText('')
+  await expect(clearance).toHaveText(/^Within the margin: 1(\.0)? mm to Toe clamp 1 \(tool\)$/)
+  // RW6: 1 mm back from the stop point the clearance is 3 mm, under 2 × the 2 mm margin: amber
+  await call(page, 'run.machine.jog', { to: [x - 1 - 290, -180, -65], feed: 5000 })
+  await expect.poll(() => at('Work position X')).toBeCloseTo(x - 1, 3)
+  await expect(machineGroup.getByText('Idle')).toBeVisible()
+  await expect(clearance).toHaveText(/^Close: 3(\.0)? mm to Toe clamp 1 \(tool\)$/)
+  await expect(clearance).toHaveAttribute('data-clearance', 'close')
+  await render(page, 'df133-rw6-amber')
 
   // RW4: above the front clamp's X, in front of it; Go to down onto it is refused, then Go anyway
   await call(page, 'run.machine.jog', { to: [-230, -200, -40], feed: 5000 })
@@ -223,6 +236,8 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await navigator.getByRole('button', { name: 'Jog options' }).click()
   await page.getByRole('menuitemradio', { name: /Workholding guard/ }).click()
   await expect(line).toHaveText('Workholding guard off.')
+  await expect(line).toHaveAttribute('data-tone', 'warning')
+  await render(page, 'df133-rw6-guard-off')
 
   await navigator.getByRole('button', { name: 'Disconnect' }).click()
   await expect(machineGroup).toHaveCount(0)

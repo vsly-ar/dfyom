@@ -459,6 +459,11 @@ export const runMessages = {
     noItems: 'No workholding in this setup.',
     notHomed: 'Home the machine to check jogs against the workholding.',
     zeroUnset: 'Set the work zero to check jogs against the workholding.',
+    /** RW6: after a setup change, until G54 changes: the items stand at the old setup's zero. */
+    zeroStale: 'New setup: set its work zero to check jogs against the workholding.',
+    /** RW6: the setup-change dialog's line under its jog pad, until the new zero is set. */
+    setupChange:
+      'Clamps outlined: jogs are not checked against them until you set this setup’s work zero.',
     trusted: 'Checks the clamps as placed in Plan, at the work zero.',
     /** A setup with items and no tool: nothing to check a jog with. */
     unchecked:
@@ -494,6 +499,9 @@ export const runMessages = {
     anywayPastOnce: 'Jog past once is armed: this move is not checked.',
     /** RW5 (Q192): the live clearance chip under the Position table. */
     clearance: (gap: string, item: string, part: string) => `Clear: ${gap} to ${item} (${part})`,
+    /** RW6: under 2 × the margin (amber): "Clear" would read as all clear. */
+    clearanceClose: (gap: string, item: string, part: string) =>
+      `Close: ${gap} to ${item} (${part})`,
     clearanceInside: (gap: string, item: string, part: string) =>
       `Within the margin: ${gap} to ${item} (${part})`,
     /** Its polite announcement: only a change of item or colour is read. */

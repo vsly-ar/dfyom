@@ -31,6 +31,13 @@ describe('workholdingTrust (run-workholding.md § Trust, Q184)', () => {
     // homed, G54 never set (0 0 0, the DRO's hint)
     expect(workholdingTrust(open({ homed: true }), true)).toBe('zeroUnset')
     expect(workholdingTrust(open({ homed: true, workZero: [-200, 0, 0] }), true)).toBe('trusted')
+    // RW6: a setup change began at this G54: outlined until it changes; a lesser state wins
+    expect(workholdingTrust(open({ homed: true, workZero: [-200, 0, 0] }), true, true)).toBe(
+      'zeroStale',
+    )
+    expect(workholdingTrust(open({ homed: false, workZero: [-200, 0, 0] }), true, true)).toBe(
+      'notHomed',
+    )
   })
 })
 
@@ -78,7 +85,7 @@ describe('runWorkholdingOverlay', () => {
       frame.solids[0]!.outline[0]![0] - 20,
       frame.solids[0]!.outline[0]![1] - 10,
     ])
-    for (const trust of ['disconnected', 'notHomed'] as const) {
+    for (const trust of ['disconnected', 'notHomed', 'zeroStale'] as const) {
       const o = runWorkholdingOverlay(holding, setup.id, zero, trust)!
       expect(o.outlined).toBe(true)
       expect(o.solids).toEqual(planned.solids)
