@@ -21,6 +21,7 @@ export const testRow = (over: Partial<MaterialRow> = {}): MaterialRow => ({
     { maxDiameter: 25, fz: { min: 0.06, max: 0.14 } },
   ],
   sources: [TEST_SOURCE],
+  chart: 'router',
   ...over,
 })
 

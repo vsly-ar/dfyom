@@ -126,18 +126,19 @@ describe('shipped material table: golden cases against the cited charts', () => 
     expect(value(s.stepdown)).toBeCloseTo(6 * 1 * 0.5, 9) // 1 x D (Onsrud, Amana) × hobby apFactor
   })
 
-  it('6 mm 2F carbide flat slotting 6061 aluminium, hobby: Harvey Tool SFM and 1/8" chip load', () => {
+  it('6 mm 2F carbide flat slotting 6061 aluminium, hobby: Harvey Tool SFM, 1/8" chip load scaled for the class (DF131)', () => {
     const s = shipped({})
     expect(codes(s)).toEqual(['feeds.powerSkipped'])
     const d = s.display.unwrap()
     const vcSfm = d.vc / 0.3048
-    expect(vcSfm).toBeCloseTo(537.5, 6) // 500–650 SFM at rangePos 0.25
+    expect(vcSfm).toBeCloseTo(1000, 6) // the range's top for every class (DF131)
     expect(vcSfm).toBeGreaterThanOrEqual(500) // Harvey guide, Aluminum 440/356/380: 500–1000 SFM
     expect(vcSfm).toBeLessThanOrEqual(1000) // Harvey SF_13900 slotting, wrought: 1000 SFM
-    expect(value(s.spindleSpeed)).toBeCloseTo((537.5 * 0.3048 * 1000) / (Math.PI * 6), 6)
-    expect(d.fz / IN).toBeCloseTo(0.001, 12) // Harvey guide, aluminium 1/8": .001 IPT
-    expect(d.fz / IN).toBeLessThanOrEqual(0.00151) // Harvey SF_13900 slotting 0.125": .00151
-    expect(value(s.stepdown)).toBeCloseTo(6 * 0.5 * 0.5, 9) // SF_13900 slot axial .50 x Dia × hobby
+    expect(value(s.spindleSpeed)).toBeCloseTo((1000 * 0.3048 * 1000) / (Math.PI * 6), 6)
+    // [0.5 × .001, .001] at the hobby class's machining position 0.1
+    expect(d.fz / IN).toBeCloseTo(0.00055, 12)
+    expect(d.fz / IN).toBeLessThanOrEqual(0.001) // Harvey guide, aluminium 1/8": .001 IPT
+    expect(value(s.stepdown)).toBeCloseTo(6 * 0.5 * 0.12, 9) // SF_13900 .50 x Dia × hobby 0.12
   })
 
   it('1/4" 2F carbide flat slotting hardwood, prosumer: Onsrud / Amana 1/4" chip load and feed', () => {

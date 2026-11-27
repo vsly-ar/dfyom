@@ -64,6 +64,12 @@ export interface MaterialRow {
   readonly sources: readonly DataSource[]
   /** Fields that are derived estimates; the reasoning is in the doc (Material data). */
   readonly estimated?: readonly DataField[]
+  /**
+   * Which kind of chart the row comes from: `router` (router-bit charts, already for routers) or
+   * `machining` (machining-centre charts: scaled for the machine class, corrected power model;
+   * docs/architecture/feeds-speeds.md#hobby-metal-cutting-hardening-df131).
+   */
+  readonly chart: 'router' | 'machining'
 }
 
 /** The row's speed: surface speed `vc` (F1) or chart spindle speed `n`; undefined if neither. */
@@ -84,6 +90,17 @@ const FOOT = 0.3048
 const ipt = (min: number, max = min): Range => ({ min: min * INCH, max: max * INCH })
 /** Surface speed range printed in SFM → m/min. */
 const sfm = (min: number, max = min): Range => ({ min: min * FOOT, max: max * FOOT })
+/**
+ * Bottom of a machining-centre chip-load range as a share of the printed value (DF131): the
+ * printed value is the top (a rigid machine), this share of it the bottom, the hobby end (at 1/8"
+ * still above the ~0.013 mm minimum chip). Doc: docs/architecture/feeds-speeds.md#hobby-metal-cutting-hardening-df131
+ */
+export const HOBBY_FZ_SHARE = 0.5
+/** A machining-centre chip load printed in inches per tooth → [share × printed, printed] mm. */
+const machiningIpt = (printed: number): Range => ({
+  min: printed * INCH * HOBBY_FZ_SHARE,
+  max: printed * INCH,
+})
 /** Machine unit horsepower (hp per in³/min) → W·s/mm³ (F7). */
 const unitHp = (hp: number): number => hp * KP_TO_UNIT_POWER
 
@@ -136,26 +153,31 @@ function routerRow(
       { ref: MMS_UNIT_HP, fields: ['u'] },
     ],
     estimated: ['kPlunge', 'u'],
+    chart: 'router',
   }
 }
 
-/** Machining rows: Harvey Tool SFM and slotting chip loads; `kPlunge` estimated (doc). */
+/**
+ * Machining rows: Harvey Tool SFM and slotting chip loads, printed in IPT (each band's range is
+ * [HOBBY_FZ_SHARE × printed, printed], DF131); `kPlunge` estimated (doc).
+ */
 function metalRow(
   materialClass: DataMaterialClass,
   vc: Range,
-  b6: Range,
-  b12: Range,
-  b25: Range,
+  b6: number,
+  b12: number,
+  b25: number,
   u: number,
 ): MaterialRow {
   return {
     materialClass,
     toolMaterial: 'carbide',
+    chart: 'machining',
     vc,
     apSlot: 0.5,
     kPlunge: 0.25,
     u,
-    bands: bandsFrom(b6, b12, b25),
+    bands: bandsFrom(machiningIpt(b6), machiningIpt(b12), machiningIpt(b25)),
     sources: [
       { ref: HARVEY_GUIDE, fields: ['vc', 'fz'] },
       { ref: HARVEY_13900, fields: ['vc', 'fz', 'apSlot'] },
@@ -206,32 +228,52 @@ export const MATERIAL_DATA: readonly MaterialRow[] = [
     [AMANA_BALL, AMANA_BALL_PLASTIC],
   ),
   // vc: HT guide 500–1000 / 800–1500; SF_13900 wrought 1000, castings 750/700/650 (≤ 12 % Si).
+  // DF131: 500–1000, the wrought rows' 1000 as the top (not the castings' 650): a low speed is not
+  // the safe side on a router spindle, and the speed is the range's top.
   // fz: HT guide .001/.002/.004 < SF_13900 slotting .00151/.00303/.00605 (.00136/.00272/.00545 Si).
-  metalRow('aluminum', sfm(500, 650), ipt(0.001), ipt(0.002), ipt(0.004), unitHp(0.25)),
+  metalRow('aluminum', sfm(500, 1000), 0.001, 0.002, 0.004, unitHp(0.25)),
   // vc: HT guide brass 600–1000 / 800–1500; SF_13900 brass 500. fz: HT guide .001/.002/.003 <
   // SF_13900 .00121/.00242/.00484. u: MMS "Brass (Hard)" 0.50 (> "Soft" 0.33).
-  metalRow('brass', sfm(500), ipt(0.001), ipt(0.002), ipt(0.003), unitHp(0.5)),
+  metalRow('brass', sfm(500), 0.001, 0.002, 0.003, unitHp(0.5)),
   // Carbon and low-alloy steels only. vc: HT guide 10XX/11XX/13XX 100–300, 23XX/31XX 100–150;
   // SF_13900 600 (free-machining) / 200 (1030–1095, alloy). fz: lowest of HT guide .0005/.0015/.003
   // and SF_13900 .00052/.00104/.00208, .00048/.00095/.00190. u: MMS "Steel 400 BHN" 2.00.
-  metalRow('steel', sfm(100, 150), ipt(0.00048), ipt(0.00095), ipt(0.0019), unitHp(2.0)),
+  metalRow('steel', sfm(100, 150), 0.00048, 0.00095, 0.0019, unitHp(2.0)),
 ]
 
 export interface RigidityFactors {
-  /** Multiplies `apSlot` for the suggested stepdown. */
+  /** Multiplies `apSlot` for the suggested stepdown (router rows). */
   readonly apFactor: number
-  /** Position within every `vc`, `n`, `fz` and `fn` range (0 = low end, 1 = high end). */
+  /** Position within the router rows' `fz` and every `fn` range (0 = low end, 1 = high end). */
   readonly rangePos: number
+  /** Multiplies `apSlot` for the suggested stepdown of machining rows (metals, DF131). */
+  readonly machiningApFactor: number
+  /** Position within the machining rows' `fz` range (metals, DF131). */
+  readonly machiningFzPos: number
 }
 
-/** docs/architecture/feeds-speeds.md#machine-rigidity-presets */
+/**
+ * docs/architecture/feeds-speeds.md#machine-rigidity-presets; the machining (metal) columns:
+ * #hobby-metal-cutting-hardening-df131. Speeds are the top of their range for every preset (DF131).
+ */
 export const RIGIDITY_FACTORS: Readonly<Record<Rigidity, RigidityFactors>> = {
-  extrusion: { apFactor: 0.3, rangePos: 0 },
-  hobby: { apFactor: 0.5, rangePos: 0.25 },
-  prosumer: { apFactor: 0.75, rangePos: 0.5 },
-  fixedGantry: { apFactor: 0.85, rangePos: 0.6 },
-  benchMill: { apFactor: 0.9, rangePos: 0.75 },
-  rigidMill: { apFactor: 1.0, rangePos: 1.0 },
+  extrusion: { apFactor: 0.3, rangePos: 0, machiningApFactor: 0.1, machiningFzPos: 0 },
+  hobby: { apFactor: 0.5, rangePos: 0.25, machiningApFactor: 0.12, machiningFzPos: 0.1 },
+  prosumer: { apFactor: 0.75, rangePos: 0.5, machiningApFactor: 0.16, machiningFzPos: 0.2 },
+  fixedGantry: { apFactor: 0.85, rangePos: 0.6, machiningApFactor: 0.16, machiningFzPos: 0.2 },
+  benchMill: { apFactor: 0.9, rangePos: 0.75, machiningApFactor: 0.5, machiningFzPos: 0.5 },
+  rigidMill: { apFactor: 1.0, rangePos: 1.0, machiningApFactor: 1.0, machiningFzPos: 1.0 },
+}
+
+/** The stepdown factor and chip-load position for `row` on a machine of class `rigidity`. */
+export function classFactors(
+  row: MaterialRow,
+  rigidity: Rigidity,
+): { readonly apFactor: number; readonly fzPos: number } {
+  const f = RIGIDITY_FACTORS[rigidity]
+  return row.chart === 'machining'
+    ? { apFactor: f.machiningApFactor, fzPos: f.machiningFzPos }
+    : { apFactor: f.apFactor, fzPos: f.rangePos }
 }
 
 /** Without a machine or a machine rigidity, the lowest preset applies. */
