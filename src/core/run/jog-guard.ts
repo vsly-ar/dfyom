@@ -4,7 +4,7 @@
  * envelope (tool, collet nut, spindle body) and the per-move test of the workholding collision
  * check, plus the stock top for the nut and body (Q188), and shortens it to just before the first
  * contact. A move that starts inside an item may leave it, never go deeper. `nearestClearance` is
- * the live read-out's distance. Not wired into jogs yet (RW3).
+ * the live read-out's distance. Jogs reach it through `guardedJog` (RW3).
  * Doc: docs/modes/run-workholding.md#the-guard, #implementation-rw2
  *
  * Pure and headless; mm in the setup frame (the frame of the items, Z0 on the stock top).

@@ -19,7 +19,26 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi, RunRecoveryAction } from '../../../../shared/preload-api'
 import { useSettings, useShell } from '../../shell/ShellContext'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
-import { activeJob, isHeld } from './machine-state'
+import { activeJob, isConnected, isHeld } from './machine-state'
+import {
+  guardedJog,
+  plainJogArgs,
+  plainJogEnd,
+  type JogArgs,
+  type JogRequest,
+} from '../../../../core/run/guarded-jog'
+import type { Vec3 } from '../../../../core/toolpath/model'
+import {
+  arrived,
+  contactItem,
+  guardActive,
+  JOG_END_STALE_MS,
+  jogStart,
+  PAST_ONCE_MS,
+  wcoOf,
+  type GuardNotice,
+  type JogGuardSetup,
+} from './run-guard'
 import {
   fileNameOf,
   prepareGcodeFile,
@@ -54,6 +73,15 @@ export type RunEnd =
   | { readonly jobId: string; readonly kind: 'failed'; readonly error: AppErrorData }
 
 export type Axis = 'x' | 'y' | 'z'
+
+const axisIndex = (a: Axis): 0 | 1 | 2 => (a === 'x' ? 0 : a === 'y' ? 1 : 2)
+
+/** DF133 RW3: a jog's command, its machine end when known and a guarded stop's notice. */
+interface PlannedJog {
+  readonly args: JogArgs
+  readonly end: Vec3 | undefined
+  readonly notice?: GuardNotice
+}
 
 /** DF128: what the Go to dialog opens on (docs/modes/run-goto.md#what-the-user-does). */
 export interface GoToRequest {
@@ -280,6 +308,21 @@ export interface RunState {
   readonly startHash: string | undefined
   /** DF129 RC5: the recovery panel's steps in this window, for the interruption of `jobId`. */
   readonly recoveryUi: RecoveryUi | undefined
+  /**
+   * DF133 RW3: what the jog guard checks against (`useJogGuardSync`); absent without a plan setup
+   * with items and a tool (docs/modes/run-workholding.md#implementation-rw3).
+   */
+  readonly guardSetup: JogGuardSetup | undefined
+  /** DF133 RW3 (Q186): the Jog menu's switch is off, until reconnect or a setup change. */
+  readonly guardOff: boolean
+  /** DF133 RW3: the jog notice of the guard, in the jog pads. */
+  readonly guardNotice: GuardNotice | undefined
+  /** DF133 RW3 (Q186): "Jog past once" until this time (epoch ms): the next jog goes unguarded. */
+  readonly pastOnceUntil: number | undefined
+  /** DF133 (Q189): the tool of the last tool-change wait seen in this connection. */
+  readonly spindleTool: number | undefined
+  /** DF133 (Q190): a tool-change wait began and the work zero Z was not set since. */
+  readonly zUnset: boolean
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -309,6 +352,12 @@ export interface RunState {
   /** Sets the custom step and chooses it. */
   setJogCustom(stepMm: number): void
   setJogFeed(feed: number): void
+  /** DF133 RW3: the guard's setup (a new `key` turns the switch back on). */
+  setGuardSetup(setup: JogGuardSetup | undefined): void
+  /** DF133 RW3: the Jog menu's "Workholding guard" switch. */
+  setGuardOff(off: boolean): void
+  /** DF133 RW3: "Jog past once": the next jog or Go to within 30 s goes unguarded. */
+  jogPastOnce(): void
   setPreflightOpen(open: boolean): void
   /** Opens the pre-flight in resume mode at the operation the last run stopped in (M5). */
   openResume(): void
@@ -438,6 +487,20 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   let live = false
   /** The continuous jog of this window: still being accepted, and whether released meanwhile. */
   let held: { released: boolean } | undefined
+  /**
+   * DF133 RW3: where the jogs this window queued end (MPos), the start of the next guarded jog;
+   * forgotten at the end, a cancel, a reset or a state other than Idle and Jog.
+   */
+  let queued: { end: Vec3; sentAt: number } | undefined
+  /** When this window last cancelled a jog or reset (the machine may still decelerate). */
+  let cancelAt: number | undefined
+  /** A guarded stop's notice, shown when the machine is there (a hold released before: never). */
+  let stopNotice: { end: Vec3; notice: GuardNotice } | undefined
+  let pastOnceTimer: ReturnType<typeof setTimeout> | undefined
+  /** Q190: the work zero Z at the start of the tool-change wait `key`. */
+  let zWait: { key: string; z: number } | undefined
+  /** DF133 RW3: the guard's part of a status push (set up with the store's actions). */
+  let onJogStatus: (status: RunStatus) => void = () => {}
   /** The plan or library machine the open serial connection was checked against (DF87). */
   let checkedAgainst: { planId: string } | { machineId: string } | undefined
 
@@ -448,6 +511,14 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       args: object = {},
       opts: { keepError?: boolean } = {},
     ): Promise<CallReply> => {
+      if (name === 'run.machine.jogCancel' || name === 'run.machine.reset') {
+        // at rest already (Idle where the queued jogs end): no deceleration to wait for
+        const st = get().status
+        const atRest = st.state === 'Idle' && (queued === undefined || arrived(st, queued.end))
+        if (!atRest) cancelAt = Date.now()
+        queued = undefined
+        stopNotice = undefined
+      }
       set((s) =>
         opts.keepError === true
           ? { pending: [...s.pending, name] }
@@ -494,6 +565,130 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       if (id !== undefined) await call(name, { jobId: id })
     }
 
+    /** DF133 RW3: ends "Jog past once" (used, expired, the switch or a new connection). */
+    const disarmPastOnce = (): void => {
+      clearTimeout(pastOnceTimer)
+      pastOnceTimer = undefined
+      if (get().pastOnceUntil === undefined) return
+      set((s) => ({
+        pastOnceUntil: undefined,
+        ...(s.guardNotice?.kind === 'pastOnce' ? { guardNotice: undefined } : {}),
+      }))
+    }
+    /**
+     * DF133 RW3: the command of a jog: today's when the guard is not on (Q184) or "Jog past once"
+     * is armed (used up here), else through `guardedJog`; undefined when nothing is sent (the
+     * notice says why). docs/modes/run-workholding.md#jogs
+     */
+    const planJog = (request: JogRequest): PlannedJog | undefined => {
+      const s = get()
+      const status = s.status
+      const travel = status.envelope?.travel
+      const now = Date.now()
+      const guarded = guardActive(status, s.guardSetup, s.guardOff)
+      if (!guarded || (s.pastOnceUntil !== undefined && now <= s.pastOnceUntil)) {
+        if (guarded) disarmPastOnce()
+        const base = queued?.end ?? status.mpos
+        return { args: plainJogArgs(request), end: plainJogEnd(request, base, travel) }
+      }
+      const g = s.guardSetup!
+      const from = jogStart(status, queued?.end, cancelAt, now)
+      if (from === undefined) {
+        set({ guardNotice: { kind: 'moving' } })
+        return undefined
+      }
+      const r = guardedJog({
+        request,
+        from,
+        wco: wcoOf(status),
+        offset: [g.zero[0], g.zero[1], status.zeroLevel ?? 0],
+        ...(travel === undefined ? {} : { travel }),
+        setup: g.setup,
+      })
+      if (r.kind === 'blocked') {
+        set({
+          guardNotice: { kind: 'blocked', item: contactItem(g, r.contact), contact: r.contact },
+        })
+        return undefined
+      }
+      if (get().guardNotice !== undefined) set({ guardNotice: undefined })
+      const item = r.contact === undefined ? undefined : contactItem(g, r.contact)
+      return {
+        args: r.args,
+        end: r.end,
+        ...(r.contact === undefined || item === undefined
+          ? {}
+          : { notice: { kind: 'stopped', item, contact: r.contact } }),
+      }
+    }
+    /** Sends a planned jog; remembers its end (the next guarded jog's start) and stop notice. */
+    const sendJog = async (plan: PlannedJog): Promise<CallReply> => {
+      const r = await call('run.machine.jog', plan.args)
+      if (r.ok) {
+        queued = plan.end === undefined ? undefined : { end: plan.end, sentAt: Date.now() }
+        stopNotice =
+          plan.notice === undefined || plan.end === undefined
+            ? undefined
+            : { end: plan.end, notice: plan.notice }
+        if (stopNotice !== undefined && arrived(get().status, stopNotice.end)) showStopNotice()
+      }
+      return r
+    }
+    const showStopNotice = (): void => {
+      const n = stopNotice
+      stopNotice = undefined
+      if (n !== undefined) set({ guardNotice: n.notice })
+    }
+    onJogStatus = (status: RunStatus): void => {
+      const now = Date.now()
+      if (!isConnected(status)) {
+        queued = undefined
+        stopNotice = undefined
+        zWait = undefined
+        disarmPastOnce()
+        const st = get()
+        if (
+          st.guardOff ||
+          st.guardNotice !== undefined ||
+          st.spindleTool !== undefined ||
+          st.zUnset
+        )
+          set({ guardOff: false, guardNotice: undefined, spindleTool: undefined, zUnset: false })
+        return
+      }
+      // the queued jogs' end: reached, or stale (an Idle report long after the send), or ended
+      if (queued !== undefined) {
+        const idle = status.state === 'Idle'
+        if (
+          (idle && (arrived(status, queued.end) || now - queued.sentAt >= JOG_END_STALE_MS)) ||
+          (!idle && !status.state.startsWith('Jog'))
+        )
+          queued = undefined
+      }
+      if (stopNotice !== undefined) {
+        if (arrived(status, stopNotice.end)) showStopNotice()
+        else if (status.state !== 'Idle' && !status.state.startsWith('Jog')) stopNotice = undefined
+      }
+      // Q189 / Q190: the tool of the wait; its Z not set until the work zero Z changes
+      const job = activeJob(status)
+      const tc = job?.phase === 'toolChange' ? job.toolChange : undefined
+      const patch: { spindleTool?: number; zUnset?: boolean } = {}
+      if (job !== undefined && tc !== undefined) {
+        if (get().spindleTool !== tc.n) patch.spindleTool = tc.n
+        const key = `${job.jobId}:${tc.n}`
+        if (zWait?.key !== key) {
+          zWait = { key, z: status.workZero[2] }
+          patch.zUnset = true
+        }
+      }
+      if (zWait !== undefined && Math.abs(status.workZero[2] - zWait.z) > 1e-6) {
+        // set: the note goes; NaN keeps this wait from raising it again
+        zWait = { key: zWait.key, z: Number.NaN }
+        patch.zUnset = false
+      }
+      if (Object.keys(patch).length > 0) set(patch)
+    }
+
     return {
       status: closedStatus(),
       planId: undefined,
@@ -525,6 +720,12 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       startAt: { kind: 'beginning' },
       startHash: undefined,
       recoveryUi: undefined,
+      guardSetup: undefined,
+      guardOff: false,
+      guardNotice: undefined,
+      pastOnceUntil: undefined,
+      spindleTool: undefined,
+      zUnset: false,
       startProgram: undefined,
       pending: [],
       probeJobId: undefined,
@@ -601,6 +802,21 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setJogStep: (jogStep) => set({ jogStep }),
       setJogCustom: (jogCustom) => set({ jogCustom, jogStep: jogCustom }),
       setJogFeed: (jogFeed) => set({ jogFeed }),
+      setGuardSetup: (guardSetup) =>
+        set((s) =>
+          guardSetup?.key === s.guardSetup?.key
+            ? { guardSetup }
+            : { guardSetup, guardOff: false, guardNotice: undefined },
+        ),
+      setGuardOff: (guardOff) => {
+        disarmPastOnce()
+        set({ guardOff, guardNotice: undefined })
+      },
+      jogPastOnce() {
+        disarmPastOnce()
+        set({ pastOnceUntil: Date.now() + PAST_ONCE_MS, guardNotice: { kind: 'pastOnce' } })
+        pastOnceTimer = setTimeout(disarmPastOnce, PAST_ONCE_MS)
+      },
       setPreflightOpen: (preflightOpen) =>
         set(
           preflightOpen
@@ -722,18 +938,19 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       home: () => job('run.machine.home'),
       unlock: async () => void (await call('run.machine.unlock')),
       async jog(axis, mm, feed) {
-        const by: [number, number, number] = [0, 0, 0]
-        by['xyz'.indexOf(axis)] = mm
-        await call('run.machine.jog', { by, feed })
+        const request: JogRequest = { kind: 'step', axis: axisIndex(axis), mm, feed }
+        const plan = planJog(request)
+        if (plan !== undefined) await sendJog(plan)
       },
       jogCancel: async () => void (await call('run.machine.jogCancel')),
       async jogHoldStart(axis, sign, feed) {
         if (held !== undefined) return
+        // DF133 RW3: through the guard (a contact: a jog to the stop point; release still cancels)
+        const plan = planJog({ kind: 'hold', axis: axisIndex(axis), sign, feed })
+        if (plan === undefined) return
         const h = { released: false }
         held = h
-        const by: [number, number, number] = [0, 0, 0]
-        by['xyz'.indexOf(axis)] = sign
-        const r = await call('run.machine.jog', { by, feed, continuous: true })
+        const r = await sendJog(plan)
         if (held === h) {
           if (!r.ok) held = undefined
           return
@@ -746,6 +963,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (h === undefined) return
         h.released = true
         held = undefined
+        // released before the stop point: no "Stopped" notice
+        stopNotice = undefined
         // keep a refusal of the start (e.g. at the travel edge) visible
         void call('run.machine.jogCancel', {}, { keepError: true })
       },
@@ -753,9 +972,12 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       probeZ: (plateThickness) =>
         job('run.machine.probeZ', { plateThickness }, (probeJobId) => ({ probeJobId })),
       async moveTo(moves) {
+        // DF133 RW3 (Q186): a Go to uses up "Jog past once" (it is guarded from RW4 on)
+        if (get().pastOnceUntil !== undefined) disarmPastOnce()
         for (const { to, feed } of moves) {
           const r = await call('run.machine.jog', { to: [...to], feed })
           if (!r.ok) return false
+          queued = { end: [to[0], to[1], to[2]], sentAt: Date.now() }
         }
         return true
       },
@@ -967,6 +1189,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
 
   const onStatus = (status: RunStatus): void => {
     store.setState({ status })
+    onJogStatus(status)
     // a closed connection ends the setup sequence (the stock is no longer on a known machine)
     if (status.connection.state === 'closed' && store.getState().settingsCheck !== undefined)
       store.setState({ settingsCheck: undefined })

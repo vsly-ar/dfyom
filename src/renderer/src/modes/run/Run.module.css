@@ -304,6 +304,31 @@
   color: var(--text-muted);
 }
 
+/* DF133 RW3: the workholding guard's notice line, reserved (two lines and the button's height)
+   while the guard is on so a stop never moves the controls (DF34) */
+.guardNotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-height: calc(2 * var(--lh-sm));
+}
+
+.guardNoticeText {
+  flex: 1 1 12rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+/* DF133 RW3: "Workholding guard off." under the Position table, in the warning colour */
+.hint[data-tone='warning'] {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--warning);
+  color: var(--text);
+}
+
 .jogPad[data-z-only] {
   grid-template-columns: var(--control-lg);
   grid-template-rows: repeat(2, var(--control-lg));

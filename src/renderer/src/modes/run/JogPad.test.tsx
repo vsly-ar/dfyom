@@ -234,6 +234,35 @@ const up = (target: Element | Window, init: KeyboardEventInit) =>
       ),
   )
 
+describe('JogPad: the workholding guard’s notice (DF133 RW3)', () => {
+  it('no line without the guard; a reserved line with it; the notice and Jog past once, without axe violations', async () => {
+    const { unmount } = renderUi(
+      <JogPad controls={controls()} disabledReason={null} reasonId="why" />,
+    )
+    expect(document.querySelector('[data-guard-notice]')).toBeNull()
+    unmount()
+    const c = controls({ guard: { notice: undefined, pastOnce: undefined } })
+    const r = renderUi(<JogPad controls={c} disabledReason={null} reasonId="why" />)
+    const line = document.querySelector('[data-guard-notice]')!
+    expect(within(line as HTMLElement).getByRole('status')).toHaveTextContent(/^$/)
+    expect(screen.queryByRole('button', { name: 'Jog past once' })).toBeNull()
+    r.unmount()
+    const s = controls({
+      guard: {
+        notice: 'Stopped 2 mm from Toe clamp 2 (collet nut).',
+        pastOnce: () => s.log.push('past once'),
+      },
+    })
+    const p = renderUi(<JogPad controls={s} disabledReason={null} reasonId="why" />)
+    expect(
+      within(document.querySelector('[data-guard-notice]') as HTMLElement).getByRole('status'),
+    ).toHaveTextContent('Stopped 2 mm from Toe clamp 2 (collet nut).')
+    await p.user.click(screen.getByRole('button', { name: 'Jog past once' }))
+    expect(s.log).toEqual(['past once'])
+    await expectNoAxeViolations()
+  })
+})
+
 describe('jog hotkeys', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())

@@ -451,15 +451,37 @@ export const runMessages = {
   },
 
   /**
-   * DF133: the setup's workholding in the Run scene and its status line under the Position table
-   * (docs/modes/run-workholding.md#trust-what-the-guard-knows). RW1 draws; the jog guard (RW3)
-   * replaces "are not checked" with the doc's guard wording.
+   * DF133: the workholding in the Run scene and the jog guard: the Position panel's status line
+   * per trust state (docs/modes/run-workholding.md#trust-what-the-guard-knows), the jog notice and
+   * the Jog menu's switch (#jogs, RW3).
    */
   guard: {
     noItems: 'No workholding in this setup.',
-    notHomed: 'Clamps outlined: home the machine to place them at the work zero.',
-    zeroUnset: 'Clamps hidden: set the work zero to place them.',
-    trusted: 'Clamps drawn as placed in Plan, at the work zero. Jogs are not checked against them.',
+    notHomed: 'Home the machine to check jogs against the workholding.',
+    zeroUnset: 'Set the work zero to check jogs against the workholding.',
+    trusted: 'Checks the clamps as placed in Plan, at the work zero.',
+    /** A setup with items and no tool: nothing to check a jog with. */
+    unchecked:
+      'Clamps drawn as placed in Plan, at the work zero. Jogs are not checked against them.',
+    /** Q190: after a tool-change wait, until Probe Z or Set Z zero. */
+    zUnset: 'Z not set for this tool yet: heights may be off by the difference in tool length.',
+    off: 'Workholding guard off.',
+    /** The jog notice (Q185). */
+    stopped: (gap: string, item: string, part: string) => `Stopped ${gap} from ${item} (${part}).`,
+    blocked: (item: string, part: string) =>
+      `Not moved: the ${part} would come within the margin of ${item}.`,
+    moving: 'Not moved: wait for the machine to stop, the guard needs its position.',
+    part: { tool: 'tool', nut: 'collet nut', body: 'spindle body' },
+    stockTop: 'the stock top',
+    anItem: 'an item',
+    /** Q186: the notice's button; one deliberate click, no hotkey. */
+    pastOnce: 'Jog past once',
+    pastOnceHint: 'The next jog or Go to within 30 s is not checked against the workholding.',
+    pastOnceArmed: 'Next jog unguarded.',
+    /** Q186: the Jog menu's switch. */
+    switchLabel: 'Workholding guard',
+    switchHint:
+      'Stops jogs short of the clamps as placed in Plan. Off until you switch it on, reconnect or change the setup.',
     /** The holder ghost's chip: the tool the scene assumes in the spindle (Q189). */
     tool: (n: number, diameter: string, stickout: string, holder: string) =>
       `T${n} Ø${diameter} · stickout ${stickout} · ${holder}`,

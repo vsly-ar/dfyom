@@ -172,7 +172,11 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
           goTo={{ gate: goToOpenGate(status), onGoTo: a.openGoTo }}
         />
         {workholding?.line === undefined ? null : (
-          <p className={styles['hint']} data-workholding-trust={workholding.trust}>
+          <p
+            className={styles['hint']}
+            data-workholding-trust={workholding.trust}
+            data-tone={workholding.warn === true ? 'warning' : undefined}
+          >
             {workholding.line}
           </p>
         )}

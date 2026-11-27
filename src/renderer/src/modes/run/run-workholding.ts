@@ -10,7 +10,11 @@ import { resolveHolder } from '../../../../core/library/holder'
 import { stickoutOf } from '../../../../core/plan/evaluate'
 import type { LoadedPlan } from '../../../../core/plan/plan'
 import type { SetupDTO } from '../../../../core/plan/plan.dto'
-import { toolEnvelope, type HolderSizes } from '../../../../core/plan/workholding/envelope'
+import {
+  toolEnvelope,
+  type EnvelopeSegment,
+  type HolderSizes,
+} from '../../../../core/plan/workholding/envelope'
 import { holderSizes } from '../../../../core/plan/workholding/findings'
 import type { SetupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { RunStatus } from '../../../../core/run/service'
@@ -95,6 +99,17 @@ export function guardTool(
   }
 }
 
+/** The guard's envelope of the tool (`toolEnvelope` with its planned stickout and holder). */
+export function guardEnvelope(g: GuardTool): EnvelopeSegment[] {
+  const tool = {
+    diameter: g.tool.diameter.canonical,
+    ...g.tool.shankDiameter.mapOr<{ shankDiameter?: number }>({}, (q) => ({
+      shankDiameter: q.canonical,
+    })),
+  }
+  return toolEnvelope(tool, g.stickout, g.holder)
+}
+
 /**
  * The holder ghost at the tool marker (`tip`, WCS mm): tool, nut and body by the planned stickout
  * (the body broken off as in Plan, `bodyShown`); none without a holder (the tool marker alone).
@@ -106,16 +121,10 @@ export function runHolderGhost(
 ): HolderGhostOverlay | undefined {
   if (g === undefined || g.holder === undefined || tip === null) return undefined
   const holder = g.holder
-  const tool = {
-    diameter: g.tool.diameter.canonical,
-    ...g.tool.shankDiameter.mapOr<{ shankDiameter?: number }>({}, (q) => ({
-      shankDiameter: q.canonical,
-    })),
-  }
   return {
     key: `T${g.n}:${tip.join(',')}`,
     tip,
-    parts: toolEnvelope(tool, g.stickout, holder).map((s) => ({
+    parts: guardEnvelope(g).map((s) => ({
       part: s.part,
       radius: s.radius,
       zFrom: s.zFrom,

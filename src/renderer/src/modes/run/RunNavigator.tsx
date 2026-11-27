@@ -85,9 +85,12 @@ function Section({
 function JogMenu({
   gate,
   onGoTo,
+  guard,
 }: {
   gate: string | null
   onGoTo: (opener: HTMLElement | null) => void
+  /** DF133 RW3 (Q186): the "Workholding guard" switch, while the setup has items to guard. */
+  guard?: { readonly on: boolean; toggle(): void }
 }) {
   const g = runMessages.goTo
   const trigger = useRef<HTMLButtonElement>(null)
@@ -112,6 +115,17 @@ function JogMenu({
             chosen.current = true
           },
         },
+        ...(guard === undefined
+          ? []
+          : [
+              'separator' as const,
+              {
+                label: runMessages.guard.switchLabel,
+                description: runMessages.guard.switchHint,
+                checked: guard.on,
+                onSelect: guard.toggle,
+              },
+            ]),
       ]}
     >
       <IconButton
@@ -170,6 +184,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const setupId = useRun((s) => s.setupId)
   const timeScale = useRun((s) => s.timeScale)
   const jog = useJogControls(doc)
+  const guardSetup = useRun((s) => s.guardSetup)
+  const guardOff = useRun((s) => s.guardOff)
   const machineKey = useMachineJog(doc).key
   const skipHome = useSettings((s) => s.settings.skipHomeConfirm)
   const updateSettings = useSettings((s) => s.update)
@@ -457,6 +473,9 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           <JogMenu
             gate={goToOpenGate(status)}
             onGoTo={(opener) => a.openGoTo({ frame: 'work', axis: 'x', opener })}
+            {...(guardSetup === undefined
+              ? {}
+              : { guard: { on: !guardOff, toggle: () => a.setGuardOff(!guardOff) } })}
           />
         }
       >

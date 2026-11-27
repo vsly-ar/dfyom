@@ -4,8 +4,11 @@
 // clamps are outlined; homed with G54 never set they are hidden; with the work zero set they are
 // solid and the holder ghost stands at the tool marker with its chip. Windows stay hidden
 // (fixture). With DFYOM_RENDERS=1: df133-rw1-outlined and df133-rw1-solid (light and dark) in
-// design/features/renders/, or in DFYOM_RENDERS_DIR. RW6 extends this into the guard's e2e.
-// Docs: docs/modes/run-workholding.md#implementation-rw1, docs/conventions/ui.md#workholding
+// design/features/renders/, or in DFYOM_RENDERS_DIR. RW3: a held Y+ toward the front clamp stops
+// at the margin with the notice, a further step is not sent, "Jog past once" lets one step
+// through, the Jog menu switches the guard off (df133-rw3-stopped). RW6 completes the guard's e2e.
+// Docs: docs/modes/run-workholding.md#implementation-rw1, #implementation-rw3,
+// docs/conventions/ui.md#workholding
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
@@ -122,13 +125,13 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: '10×' }).click()
   await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
-  await expect(line).toHaveText('Clamps outlined: home the machine to place them at the work zero.')
+  await expect(line).toHaveText('Home the machine to check jogs against the workholding.')
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw1-outlined')
 
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machineGroup.getByText('Idle')).toBeVisible()
-  await expect(line).toHaveText('Clamps hidden: set the work zero to place them.')
+  await expect(line).toHaveText('Set the work zero to check jogs against the workholding.')
 
   // the work zero at machine (−290, −160, −75), then the tool beside the front clamp, above it
   await call(page, 'run.machine.jog', { to: [-290, -160, -75], feed: 5000 })
@@ -136,9 +139,7 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await expect(machineGroup.getByText('Idle')).toBeVisible()
   for (const axis of ['X', 'Y', 'Z'])
     await dro.getByRole('button', { name: `Set ${axis} zero` }).click()
-  await expect(line).toHaveText(
-    'Clamps drawn as placed in Plan, at the work zero. Jogs are not checked against them.',
-  )
+  await expect(line).toHaveText('Checks the clamps as placed in Plan, at the work zero.')
   await call(page, 'run.machine.jog', { to: [-205, -150, -50], feed: 5000 })
   await expect.poll(() => at('Work position Z')).toBeCloseTo(25, 3)
   await expect(machineGroup.getByText('Idle')).toBeVisible()
@@ -146,6 +147,40 @@ test('run scene workholding (DF133 RW1): outlined, hidden, then solid with the h
   await expect(chip).toHaveText('T1 Ø6 mm · stickout 30 mm · ER11')
   await page.getByRole('button', { name: 'Fit' }).click()
   await render(page, 'df133-rw1-solid')
+
+  // RW3: in front of the front clamp, below its top; a held Y+ stops at the margin, not at the
+  // stock (Y 0) and not at the travel edge
+  await call(page, 'run.machine.jog', { to: [-230, -200, -65], feed: 5000 })
+  await expect.poll(() => at('Work position Y')).toBeCloseTo(-40, 3)
+  await expect(machineGroup.getByText('Idle')).toBeVisible()
+  const yPlus = navigator.getByRole('button', { name: 'Jog Y+' })
+  const box = (await yPlus.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  const notice = navigator.locator('[data-guard-notice] [role="status"]')
+  await expect(notice).toHaveText(/^Stopped \d+(\.\d+)? mm from Toe clamp 1 \(tool\)\.$/)
+  await page.mouse.up()
+  await expect(machineGroup.getByText('Idle')).toBeVisible()
+  const y = await at('Work position Y')
+  expect(y).toBeGreaterThan(-40)
+  expect(y).toBeLessThan(-5)
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await render(page, 'df133-rw3-stopped')
+  // further in: not moved
+  await yPlus.click()
+  await expect(notice).toHaveText(/^Not moved: the tool would come within the margin/)
+  expect(await at('Work position Y')).toBe(y)
+  // Jog past once: armed, then used by the next step (1 mm, today's command)
+  await navigator.getByRole('button', { name: 'Jog past once' }).click()
+  await expect(notice).toHaveText('Next jog unguarded.')
+  await navigator.getByRole('radio', { name: '1 mm', exact: true }).click()
+  await yPlus.click()
+  await expect.poll(() => at('Work position Y')).toBeCloseTo(y + 1, 3)
+  await expect(notice).toHaveText('')
+  // the Jog menu's switch: off, the status line warns
+  await navigator.getByRole('button', { name: 'Jog options' }).click()
+  await page.getByRole('menuitemradio', { name: /Workholding guard/ }).click()
+  await expect(line).toHaveText('Workholding guard off.')
 
   await navigator.getByRole('button', { name: 'Disconnect' }).click()
   await expect(machineGroup).toHaveCount(0)

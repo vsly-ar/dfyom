@@ -44,7 +44,7 @@ import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
 import { skippedSegments } from './start-at'
 import { useStartPreview } from './StartAt'
-import { guardTool, runHolderGhost, runWorkholdingOverlay, type GuardTool } from './run-workholding'
+import { runHolderGhost, runWorkholdingOverlay, type GuardTool } from './run-workholding'
 import { useRunWorkholding } from './useRunWorkholding'
 
 export function useRunScene(mode: AppMode): RunScene | null {
@@ -274,13 +274,6 @@ function useSceneWorkholding(
 } {
   const wh = useRunWorkholding()
   const status = useRun((s) => s.status)
-  const job = activeJob(status)
-  const waiting = job?.phase === 'toolChange' ? job.toolChange?.n : undefined
-  // the last tool-change wait of this connection (a new connection forgets it)
-  const last = useRef<number | undefined>(undefined)
-  if (!isConnected(status)) last.current = undefined
-  else if (waiting !== undefined) last.current = waiting
-  const n = last.current
   const overlay = useMemo(
     () =>
       wh === undefined
@@ -288,10 +281,8 @@ function useSceneWorkholding(
         : runWorkholdingOverlay(wh.holding, wh.setup.id, wh.zero, wh.trust),
     [wh],
   )
-  const spindle = useMemo(
-    () => (wh === undefined ? undefined : guardTool(wh.plan, wh.setup, n)),
-    [wh?.plan, wh?.setup, n],
-  )
+  // the tool the guard assumes (Q189: the store's `spindleTool`, RW3)
+  const spindle = wh?.tool
   const known = isConnected(status) && status.homed
   const holder = useMemo(
     () =>

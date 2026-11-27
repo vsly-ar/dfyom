@@ -4,8 +4,10 @@
 // starts a continuous jog (`jog-press.ts`). Every other end of a press (pointer cancel, blur, the
 // window losing focus or hiding, the pad turning disabled, unmounting) drops it or cancels the
 // continuous jog. The same pad in the navigator and the tool-change and setup-change dialogs,
-// all fed by `useJogControls`.
-// Doc: docs/conventions/ui.md#jog-position-and-probing-df88, docs/modes/run-machine.md#machine-readiness-m3
+// all fed by `useJogControls`. DF133 RW3: every jog goes through the workholding guard (the run
+// store); the pad's reserved notice line says where a jog stopped and offers "Jog past once".
+// Doc: docs/conventions/ui.md#jog-position-and-probing-df88, docs/modes/run-machine.md#machine-readiness-m3,
+// docs/modes/run-workholding.md#jogs
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
@@ -23,6 +25,7 @@ import {
   type JogFeedRange,
 } from './machine-state'
 import { machineJog, type MachineJog } from './plan-info'
+import { guardActive, guardNoticeText } from './run-guard'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import styles from './Run.module.css'
 
@@ -51,6 +54,11 @@ export interface JogControls {
   holdEnd(): void
   /** "Stop jog": jog cancel. */
   cancel(): void
+  /**
+   * DF133 RW3: the workholding guard while it is on (the notice line is reserved then): its
+   * notice and "Jog past once" (offered after a stop). Absent: no guard, no line.
+   */
+  guard?: { readonly notice: string | undefined; readonly pastOnce: (() => void) | undefined }
 }
 
 /** The jog limits and key of the chosen plan's machine, or the manual-control machine. */
@@ -79,6 +87,9 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
     axis === 'z' && machine.maxZ !== undefined ? Math.min(feed, machine.maxZ) : feed
   const a = store.getState()
   const stepMm = jogStepMm(step, units)
+  const notice = useRun((s) => s.guardNotice)
+  const on = useRun((s) => guardActive(s.status, s.guardSetup, s.guardOff))
+  const stopped = notice?.kind === 'stopped' || notice?.kind === 'blocked'
   return {
     units,
     step: stepMm,
@@ -95,6 +106,14 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
     holdStart: (axis, sign) => void a.jogHoldStart(axis, sign, feedOf(axis)),
     holdEnd: a.jogHoldEnd,
     cancel: () => void a.jogCancel(),
+    ...(on || notice?.kind === 'pastOnce'
+      ? {
+          guard: {
+            notice: notice === undefined ? undefined : guardNoticeText(notice, units),
+            pastOnce: stopped ? a.jogPastOnce : undefined,
+          },
+        }
+      : {}),
   }
 }
 
@@ -265,11 +284,47 @@ export function JogPad({
           {m.jogHint}
         </p>
       </div>
+      {controls.guard === undefined ? null : (
+        <GuardNoticeLine notice={controls.guard.notice} onPastOnce={controls.guard.pastOnce} />
+      )}
       {disabledReason !== null && reasonShown ? (
         <p id={reasonId} className={styles['why']}>
           {disabledReason}
         </p>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * DF133 RW3: the guard's notice line under the pad (reserved height while the guard is on, DF34:
+ * nothing moves): "Stopped 2 mm from Toe clamp 2 (collet nut)." and "Jog past once" (Q186: a
+ * deliberate click, no hotkey).
+ */
+export function GuardNoticeLine({
+  notice,
+  onPastOnce,
+}: {
+  notice: string | undefined
+  onPastOnce: (() => void) | undefined
+}): React.JSX.Element {
+  const g = runMessages.guard
+  const hintId = useId()
+  return (
+    <div className={styles['guardNotice']} data-guard-notice="">
+      <p role="status" className={styles['guardNoticeText']}>
+        {notice ?? ''}
+      </p>
+      {onPastOnce === undefined ? null : (
+        <>
+          <Button size="sm" onClick={onPastOnce} aria-describedby={hintId}>
+            {g.pastOnce}
+          </Button>
+          <span id={hintId} hidden>
+            {g.pastOnceHint}
+          </span>
+        </>
+      )}
     </div>
   )
 }
