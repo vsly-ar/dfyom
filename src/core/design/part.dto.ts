@@ -389,12 +389,19 @@ export type PieceBlankDTO = z.output<typeof PieceBlankDtoSchema>
 /**
  * Who set an already-cut mark and when (hardening DF135 C2, docs/modes/cut-state.md#what-is-stored):
  * `hand` or `run` (a real run finished it); `at` ISO time; a run mark's `fingerprint` is the
- * marked unit's geometry as the run cut it (`unitFingerprint`, design/already-cut.ts).
+ * marked unit's geometry as the run cut it (`unitFingerprint`, design/already-cut.ts), `asCut` its
+ * operations (C4).
  */
 export const CutMarkDtoSchema = z.object({
   by: z.enum(['hand', 'run']),
   at: z.string(),
   fingerprint: z.string().optional(),
+  /**
+   * DF135 C4 (docs/modes/cut-state.md#cutting-only-the-difference-c4): a run mark's unit
+   * operations as the run cut them (roughing passes left out); once the unit is edited, plans cut
+   * only the difference to them. Absent on hand marks and run marks written before C4.
+   */
+  asCut: z.array(OperationDtoSchema).optional(),
 })
 export type CutMarkDTO = z.output<typeof CutMarkDtoSchema>
 

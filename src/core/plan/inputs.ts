@@ -19,6 +19,7 @@ import type { Stock } from '../library/stock'
 import type { Tool } from '../library/tool'
 import type { ProjectDoc } from '../project/document'
 import { Quantity } from '../quantity/quantity'
+import { recutAsCut } from './as-cut'
 import { cutTest } from './cut'
 import { evaluateOperation, planFindings } from './evaluate'
 import { namedPlanMessages } from './labels'
@@ -186,10 +187,14 @@ export function planOperationInputs(
   // operation made every export quadratic in operations (hardening P4).
   // DF135: the already-cut list only leaves operations out of the program, so their toolpaths
   // (and every later one) stay cached when it changes
+  // C4: except the as-cut operations of recut units (their removal shapes the toolpaths; only
+  // when there are any, so every other plan keeps its hashes)
+  const recut = recutAsCut(plan.dto.design.part)
   const part = hashJson({
     ...plan.dto.design.part,
     alreadyCut: undefined,
     alreadyCutMarks: undefined,
+    ...(Object.keys(recut).length === 0 ? {} : { recut }),
   })
   const isCut = cutTest(plan.dto.design.part)
   let chain = ''

@@ -81,6 +81,8 @@ export type CutMarksState =
       readonly kind: 'marked'
       readonly partId: string
       readonly units: readonly string[]
+      /** DF135 C4: the listed (recut) units among `units` the run marked anew; Undo keeps them. */
+      readonly recut?: readonly string[]
       readonly undone?: boolean
     }
   | {

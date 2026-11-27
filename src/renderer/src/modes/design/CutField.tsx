@@ -4,7 +4,7 @@
 // message under the switch. Not shown for owned or nested rows (their feature carries the mark),
 // rows that are off (DF106; the row menu offers no mark there either) or split pieces (read-only).
 // Doc: docs/modes/cut-state.md#implementation-c3, docs/conventions/ui.md (Switch fields)
-import { cutChangedUnits, cutMarkOf } from '../../../../core/design/already-cut'
+import { cutChangedUnits, cutMarkOf, recutUnits } from '../../../../core/design/already-cut'
 import { isDisabled, topLevelUnits } from '../../../../core/design/disabled'
 import { designMessages } from '../../messages/design'
 import { Field, Switch, type FieldMessage } from '../../ui'
@@ -27,7 +27,11 @@ export function CutField({ part, id }: { part: DesignPart; id: string }): React.
   const messages: FieldMessage[] = run
     ? [
         changed
-          ? { id: 'cut', severity: 'hard', text: m.cutChangedTitle(markDay(mark.at)) }
+          ? {
+              id: 'cut',
+              severity: 'hard',
+              text: m.cutChangedTitle(markDay(mark.at), recutUnits(dto).has(id)),
+            }
           : { id: 'cut', severity: 'note', text: m.cutByRunTitle(markDay(mark.at)) },
       ]
     : []

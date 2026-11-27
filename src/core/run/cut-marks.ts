@@ -7,7 +7,7 @@
  * finished operations in `lastRun`, Run's UI decides with `runCutMarks`.
  * Doc: docs/modes/cut-state.md#marking, #implementation-c2
  */
-import { alreadyCutOperations, roughingOwnerOf } from '../design/already-cut'
+import { alreadyCutOperations, recutUnits, roughingOwnerOf } from '../design/already-cut'
 import { topLevelUnits, unitOfOperation } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { PlanDTO } from '../plan/plan.dto'
@@ -61,7 +61,8 @@ export function carriedFinished(
 
 /**
  * The top-level units of the plan's design copy that `finished` plan operations cut in full, in
- * design order, minus those `live` (the design as it is now) already lists or no longer has. A unit
+ * design order, minus those `live` (the design as it is now) already lists (unless recut, C4) or no
+ * longer has. A unit
  * is cut when each of its design operations (a roughing pass follows its owner) is already cut or
  * machined only by finished plan operations, and at least one by this run.
  */
@@ -75,10 +76,12 @@ export function finishedUnits(plan: PlanDTO, finished: readonly string[], live: 
       for (const d of op.designOperationIds)
         machinedBy.set(d, [...(machinedBy.get(d) ?? []), op.id])
   const listed = new Set(live.alreadyCut ?? [])
+  // C4: a recut unit (edited since a run cut it) the run cut again is marked anew
+  const recut = recutUnits(live)
   const known = new Set(topLevelUnits(live))
   const out: string[] = []
   for (const unit of topLevelUnits(part)) {
-    if (listed.has(unit) || !known.has(unit)) continue
+    if ((listed.has(unit) && !recut.has(unit)) || !known.has(unit)) continue
     const ops = part.operations.filter(
       (o) => unitOfOperation(part, o.id) === unit && roughingOwnerOf(o) === undefined,
     )
@@ -130,4 +133,21 @@ export function runCutMarks(
   const units = finishedUnits(plan, lastRun.finished ?? [], live)
   if (units.length === 0) return { kind: 'none', reason: 'nothing' }
   return { kind: lastRun.outcome === 'done' ? 'mark' : 'offer', planId: plan.id, units }
+}
+
+/**
+ * The `design.part.update` arguments that mark `units` (a run's, `runCutMarks`) on `live`: the
+ * list with the new ones added, and the listed ones (recut units, C4) as `recut` so the run marks
+ * them anew. Doc: docs/modes/cut-state.md#cutting-only-the-difference-c4
+ */
+export function runMarkUpdate(
+  live: PartDTO,
+  units: readonly string[],
+): { alreadyCut: string[]; recut?: string[] } {
+  const list = live.alreadyCut ?? []
+  const recut = units.filter((u) => list.includes(u))
+  return {
+    alreadyCut: [...list, ...units.filter((u) => !list.includes(u))],
+    ...(recut.length === 0 ? {} : { recut }),
+  }
 }

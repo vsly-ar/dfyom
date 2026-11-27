@@ -9,7 +9,7 @@ import { useEffect } from 'react'
 import type { PartDTO } from '../../../../core/design/part.dto'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
-import { runCutMarks } from '../../../../core/run/cut-marks'
+import { runCutMarks, runMarkUpdate } from '../../../../core/run/cut-marks'
 import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { useCall } from '../../shell/hooks'
@@ -72,10 +72,17 @@ export function useRunCutMarks(doc: ProjectDoc | undefined): void {
       store.getState().setCutMarks({ jobId, kind: 'none' })
       return
     }
-    store.getState().setCutMarks({ jobId, kind: 'marked', partId: live.id, units: r.units })
+    const update = runMarkUpdate(live, r.units)
+    store.getState().setCutMarks({
+      jobId,
+      kind: 'marked',
+      partId: live.id,
+      units: r.units,
+      ...(update.recut === undefined ? {} : { recut: update.recut }),
+    })
     void call('design.part.update', {
       partId: live.id,
-      alreadyCut: [...(live.alreadyCut ?? []), ...r.units],
+      ...update,
       cutByRun: r.planId,
     }).then((reply) => {
       if (!reply.ok) store.getState().setCutMarks({ jobId, kind: 'none' })
@@ -122,7 +129,12 @@ export function CutMarksView({
     )
   if (state.kind !== 'marked' && state.kind !== 'offer') return null
   const list = names(part, state.units)
-  const without = (part?.alreadyCut ?? []).filter((id) => !state.units.includes(id))
+  // C4: Undo takes back the ids the run added; a recut unit keeps its new mark (without any it
+  // would be cut in full again), Design's Undo takes that back
+  const recut = state.kind === 'marked' ? (state.recut ?? []) : []
+  const without = (part?.alreadyCut ?? []).filter(
+    (id) => !state.units.includes(id) || recut.includes(id),
+  )
   if (state.kind === 'marked')
     return (
       <div className={styles['notice']} role="status" aria-label={m.region}>
@@ -172,9 +184,10 @@ export function CutMarksView({
             disabled={part === undefined}
             onClick={() => {
               if (part === undefined) return
+              const update = runMarkUpdate(part, state.units)
               void call('design.part.update', {
                 partId: part.id,
-                alreadyCut: [...(part.alreadyCut ?? []), ...state.units],
+                ...update,
                 cutByRun: state.planId,
               })
               store.getState().setCutMarks({
@@ -182,6 +195,7 @@ export function CutMarksView({
                 kind: 'marked',
                 partId: part.id,
                 units: state.units,
+                ...(update.recut === undefined ? {} : { recut: update.recut }),
               })
             }}
           >

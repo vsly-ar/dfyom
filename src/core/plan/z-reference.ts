@@ -30,6 +30,7 @@ import type { LoadedPlan } from './plan'
 import type { PlanOperationDTO } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { toolRuns } from './tool-runs'
+import { asCutRemovals } from './as-cut'
 import { cutTest } from './cut'
 
 /** Touch-off clearance past the tool or plate (mm). */
@@ -157,6 +158,10 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
   // DF135: a cut operation has run before (docs/modes/cut-state.md#setups-and-work-zero)
   let afterCut = false
   const isCut = cutTest(plan.dto.design.part)
+  // DF135 C4: a recut unit's as-cut removal is gone before its first plan operation; its floor is
+  // no touch-off surface (the tool that cut it is not known here)
+  // (docs/modes/cut-state.md#cutting-only-the-difference-c4)
+  const removals = asCutRemovals(plan, port)
   const out: ToolRunZRef[] = []
   for (const setup of plan.setups) {
     const direction = setupDirection(setup)
@@ -169,6 +174,11 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
     const runs = toolRuns(setup.operations, isCut)
     const starts = new Map(runs.map((r, i) => [r.start, i]))
     setup.operations.forEach((op, i) => {
+      for (const r of removals)
+        if (r.index === index) {
+          patches.apply(r.geometry, false)
+          afterCut = true
+        }
       const run = starts.get(i)
       if (run !== undefined) {
         const tool = op.tool === undefined ? undefined : plan.tools.get(op.tool)

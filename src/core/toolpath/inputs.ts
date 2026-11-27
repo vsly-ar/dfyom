@@ -567,6 +567,10 @@ export function toGeneratorInputs(
                 },
                 strategy,
               }
+              // DF135 C4: a recut pocket's as-cut version cleared down to its floor (widened,
+              // the old one as deep): the whole-region pass would only re-trace the old floor
+              if (partial.asCut === true && partial.level <= placed.onZ - placed.depth + 1e-9)
+                return { kind: 'regionPocket', ...turned, inputs: [upper] }
               return { kind: 'regionPocket', ...turned, inputs: [upper, lower] }
             })
           // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2

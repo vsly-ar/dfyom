@@ -1015,8 +1015,11 @@ export const designMessages = {
     cutFieldInfo:
       'The stock no longer has this material (cut by a program, by hand, or there when the stock arrived). Plans keep it as removed and export nothing for it.',
     cutChanged: 'Changed',
-    cutChangedTitle: (date: string) =>
-      `Changed since the run cut it on ${date}: the stock still has the shape the run cut. Plans export nothing for it.`,
+    /** C4: a recut unit (the run kept what it cut) is cut again for the difference only. */
+    cutChangedTitle: (date: string, recut: boolean) =>
+      recut
+        ? `Changed since the run cut it on ${date}: plans cut only the difference to what the run cut.`
+        : `Changed since the run cut it on ${date}: the stock still has the shape the run cut. Plans export nothing for it.`,
     actions: (name: string) => `Actions for ${name}`,
     /** The description of a row with a row menu (DF70: no action buttons on rows). */
     rowMenuHint: 'Right-click or Shift+F10 for actions.',

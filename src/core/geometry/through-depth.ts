@@ -215,6 +215,8 @@ interface Clear {
  * pocket clears its region (a floor fillet leaves material along the walls: only the region
  * inset by its radius is flat), a blind profile its slot (DF61). With `openings` (a port and the
  * setup order) also the openings of an earlier setup on the same axis: through the whole extent.
+ * Blind drillings listed in `asCut` (DF135 C4: as-cut removals) clear their disc to their full
+ * diameter depth; other drillings clear nothing here.
  */
 function clearsOf(
   ops: readonly OperationGeometry[],
@@ -225,6 +227,7 @@ function clearsOf(
   port: Region2dPort | undefined,
   before: RunsBefore,
   openings?: RunsBefore,
+  asCut?: ReadonlySet<string>,
 ): Clear[] {
   const mapper = (from: Direction) =>
     from === frame ? undefined : lazy(() => frameMap(from, frame, stock))
@@ -252,6 +255,12 @@ function clearsOf(
       const p = o
       const own = () => slotRegion(p, stock, port)
       out.push({ id: o.id, top: 0, bottom: o.depth, region: placed(direction, own) })
+    } else if (o.kind === 'drilling' && o.bottom.kind !== 'through' && asCut?.has(o.id)) {
+      // DF135 C4: an as-cut blind hole clears its disc down to where it has its full diameter
+      const p = o
+      const own = () => holeRegion(p, stock, port)
+      const bottom = o.bottom.depth - o.onZ
+      out.push({ id: o.id, top: -o.onZ, bottom, region: placed(direction, own) })
     }
   }
   if (openings !== undefined && port !== undefined) {
@@ -319,12 +328,14 @@ export function throughDepths(
   stock: StockGeometry,
   port: Region2dPort | undefined,
   before: RunsBefore = defaultRunsBefore,
+  asCut?: ReadonlySet<string>,
 ): Map<string, number> {
   const out = new Map<string, number>()
   for (const op of ops) {
     if (!isThroughCut(op)) continue
     const direction = op.direction ?? '+z'
-    const clears = clearsOf(ops, OPPOSITE[direction], direction, op, stock, port, before)
+    const opposite = OPPOSITE[direction]
+    const clears = clearsOf(ops, opposite, direction, op, stock, port, before, undefined, asCut)
     if (clears.length === 0) continue
     const slot = lazy(() =>
       port === undefined
@@ -392,6 +403,11 @@ export interface MaterialBand {
 export interface PartialCover {
   readonly level: number
   readonly region: Region
+  /**
+   * DF135 C4: an as-cut removal (a recut unit's) is among the clearings of `region`; when `level`
+   * is the pocket's floor, the toolpath then cuts no whole-region pass at the floor.
+   */
+  readonly asCut?: true
 }
 
 /** A material band with the partial coverage of a pocket (plan side only; not a generator input). */
@@ -417,6 +433,7 @@ function partialCover(
   from: number,
   whole: number,
   floor: number,
+  asCut?: ReadonlySet<string>,
 ): PartialCover | undefined {
   const shaped = clears
     .filter((c): c is Clear & { region: () => Region | undefined } => c.region !== 'face')
@@ -466,17 +483,15 @@ function partialCover(
   }
   let best: { score: number; cover: PartialCover } | undefined
   for (const L of levels) {
-    const region = union(
-      shaped
-        .filter((q) => q.bottom >= L - EPSILON)
-        .map((q) => effective.get(q))
-        .filter((r): r is Region => r !== undefined),
-    )
+    const used = shaped.filter((q) => q.bottom >= L - EPSILON && effective.has(q))
+    const region = union(used.map((q) => effective.get(q)!))
     if (region === undefined) continue
     const area = regionArea(region)
     if (area <= COVER_AREA) continue
     const score = (L - from) * area
-    if (best === undefined || score > best.score) best = { score, cover: { level: -L, region } }
+    const recut = used.some((q) => asCut?.has(q.id) === true)
+    if (best === undefined || score > best.score)
+      best = { score, cover: { level: -L, region, ...(recut ? { asCut: true as const } : {}) } }
   }
   return best?.cover
 }
@@ -499,6 +514,7 @@ export function materialBands(
   port: Region2dPort | undefined,
   before: RunsBefore,
   setupBefore: RunsBefore = before,
+  asCut?: ReadonlySet<string>,
 ): Map<string, MaterialCover> {
   const out = new Map<string, MaterialCover>()
   for (const op of ops) {
@@ -520,19 +536,19 @@ export function materialBands(
       op.kind === 'pocket' ? op.depth - op.onZ : op.kind === 'drilling' ? undefined : op.depth
     let top: number | undefined
     let partial: PartialCover | undefined
-    const same = clearsOf(ops, direction, direction, op, stock, port, before, setupBefore)
+    const same = clearsOf(ops, direction, direction, op, stock, port, before, setupBefore, asCut)
     if (same.length > 0) {
       const cleared = clearedDepth(same, target, port)
       if (cleared > start + EPSILON) top = -cleared
       const t = target()
       if (op.kind === 'pocket' && port !== undefined && t !== undefined && floor !== undefined)
-        partial = partialCover(port, same, t, Math.max(start, cleared), cleared, floor)
+        partial = partialCover(port, same, t, Math.max(start, cleared), cleared, floor, asCut)
     }
     let bottom: number | undefined
     // a through pocket has its `throughDepth` for that, as a through profile
     if (floor !== undefined && !isThroughPocket(op)) {
       const opposite = OPPOSITE[direction]
-      const below = clearsOf(ops, opposite, direction, op, stock, port, before)
+      const below = clearsOf(ops, opposite, direction, op, stock, port, before, undefined, asCut)
       if (below.length > 0) {
         const cleared = clearedDepth(below, target, port)
         const z = cleared - local.thickness

@@ -6,7 +6,7 @@
  * Doc: docs/modes/cut-state.md
  */
 import { fail, type AppResult } from '../../shared/result'
-import { alreadyCutOperations, cutChangedUnits } from '../design/already-cut'
+import { alreadyCutOperations, cutChangedUnits, recutUnits } from '../design/already-cut'
 import { unitOfOperation } from '../design/disabled'
 import type { PartDTO } from '../design/part.dto'
 import type { PlanWarning } from './checks'
@@ -106,13 +106,15 @@ function unitName(part: PartDTO, id: string): string {
 
 /**
  * `plan.cutChanged` (DF135 C2, Q198 as revised: warning): a plan operation machining a unit that
- * a run marked already cut and whose geometry was edited since. Marks set by hand never warn.
+ * a run marked already cut and whose geometry was edited since. Marks set by hand never warn. A
+ * recut unit (C4) is no cut operation: it cuts only the difference, and the message says so.
  * Doc: docs/modes/cut-state.md#editing-an-already-cut-operation
  */
 function cutChangedFindings(plan: LoadedPlan): PlanWarning[] {
   const part = plan.dto.design.part
   const changed = cutChangedUnits(part)
   if (changed.size === 0) return []
+  const recut = recutUnits(part)
   const out: PlanWarning[] = []
   for (const s of plan.setups)
     for (const op of s.operations) {
@@ -124,7 +126,8 @@ function cutChangedFindings(plan: LoadedPlan): PlanWarning[] {
       out.push({
         code: 'plan.cutChanged',
         severity: 'warning',
-        message: `${unitName(part, unit)} changed since the run cut it`,
+        // C4: a recut unit cuts the difference to what the run cut
+        message: `${unitName(part, unit)} changed since the run cut it${recut.has(unit) ? ': the plan cuts only the difference' : ''}`,
         planOperationId: op.id,
         rule: 'cutChanged',
         params: { unitId: unit, ...(at === undefined ? {} : { markedAt: at }) },

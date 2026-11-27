@@ -50,7 +50,7 @@ async function renderRun() {
     )
   const part = () => s.d.doc.parts[s.partId]!
   const updates = () => bridge.calls.filter((c) => c.name === 'design.part.update')
-  return { ...r, bridge, ops, ended, part, updates, planId }
+  return { ...r, s, plan, bridge, ops, ended, part, updates, planId }
 }
 
 describe('Run: already-cut marks (DF135 C2)', () => {
@@ -72,6 +72,38 @@ describe('Run: already-cut marks (DF135 C2)', () => {
     expect(notice).toHaveTextContent('The already-cut marks were taken back.')
     // decided once: nothing marked again for the same run
     expect(t.updates()).toHaveLength(2)
+  })
+
+  it('C4: a run that cuts a recut unit again marks it anew; Undo keeps that mark', async () => {
+    const t = await renderRun()
+    runStoreOf(t.bridge).setState({ startedHere: 'job-1' })
+    t.ended({})
+    await waitFor(() => expect(t.part().alreadyCut).toContain('facing1'))
+    const first = t.part().alreadyCutMarks!['facing1']!
+    // Facing 1 made deeper in Design: recut, in the program again
+    await act(async () => {
+      await t.s.run('design.facing.update', {
+        partId: t.part().id,
+        operationId: 'facing1',
+        depth: '1',
+      })
+      await t.s.run('project.apply', {})
+    })
+    const facing = t
+      .plan()
+      .setups[0]!.operations.find((o) => o.designOperationIds.includes('facing1'))!
+    runStoreOf(t.bridge).setState({ startedHere: 'job-2' })
+    t.ended({ jobId: 'job-2', operations: [facing.id], finished: [facing.id] })
+    const notice = await screen.findByRole('status', { name: 'Already cut' })
+    await waitFor(() => expect(notice).toHaveTextContent('Marked 1 operation as already cut'))
+    await waitFor(() => expect(t.updates()).toHaveLength(2))
+    expect(t.updates()[1]!.args).toMatchObject({ recut: ['facing1'], cutByRun: t.planId })
+    await waitFor(() => expect(t.part().alreadyCutMarks?.['facing1']).not.toEqual(first))
+    expect(t.part().alreadyCutMarks?.['facing1']?.asCut?.[0]).toMatchObject({ id: 'facing1' })
+    const listed = t.part().alreadyCut
+    await t.user.click(within(notice).getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(t.updates()).toHaveLength(3))
+    expect(t.part().alreadyCut).toEqual(listed)
   })
 
   it('a stopped real run offers its finished operations only; Not now closes the offer', async () => {
