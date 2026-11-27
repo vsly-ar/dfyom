@@ -44,10 +44,10 @@ function input(over: Partial<FeedsInput> = {}): FeedsInput {
 const val = (f: Option<ResolvedFeed>) => f.unwrap().value
 const src = (f: Option<ResolvedFeed>) => f.map((v) => v.source).unwrapOr(null as never)
 
-// Aluminum, carbide, D ≤ 6 mm band: vc 500 SFM = 152.4 m/min, fz .001" = 0.0254 mm, apSlot 0.5,
-// kPlunge 0.25; lowest rigidity (no machine): range low end, apFactor 0.3.
-const N6 = (152.4 * 1000) / (Math.PI * 6)
-const VF6 = N6 * 2 * 0.0254
+// Aluminum, carbide, D ≤ 6 mm band: vc 1000 SFM = 304.8 m/min (the top, DF131), fz [0.0127, 0.0254] mm,
+// apSlot 0.5, kPlunge 0.25; lowest rigidity (no machine): fz 0.0127, machining apFactor 0.1.
+const N6 = (304.8 * 1000) / (Math.PI * 6)
+const VF6 = N6 * 2 * 0.0127
 
 describe('resolveFeeds: resolution order and source', () => {
   it('without preset or override: calculator speeds and stepdown, strategy stepover', () => {
@@ -55,7 +55,7 @@ describe('resolveFeeds: resolution order and source', () => {
     expect(val(r.fields.spindleSpeed)).toBeCloseTo(N6, 6)
     expect(val(r.fields.feedRate)).toBeCloseTo(VF6, 6)
     expect(val(r.fields.plungeRate)).toBeCloseTo(0.25 * VF6, 6)
-    expect(val(r.fields.stepdown)).toBeCloseTo(0.5 * 6 * 0.3, 9)
+    expect(val(r.fields.stepdown)).toBeCloseTo(0.5 * 6 * 0.1, 9)
     expect(val(r.fields.stepover)).toBeCloseTo(0.4 * 6, 9) // pocket fallback 0.4 D
     expect(Object.fromEntries(Object.entries(r.fields).map(([k, v]) => [k, src(v)]))).toEqual({
       spindleSpeed: 'calculator',
@@ -66,7 +66,7 @@ describe('resolveFeeds: resolution order and source', () => {
     })
     expect(r.fields.feedRate.unwrap().derivation?.length).toBeGreaterThan(0)
     expect(r.engagement).toEqual({ kind: 'slot' })
-    expect(r.chipLoad.unwrap()).toBeCloseTo(0.0254, 9)
+    expect(r.chipLoad.unwrap()).toBeCloseTo(0.0127, 9)
   })
 
   it('a preset wins over the calculator for every field it has', () => {
@@ -81,8 +81,8 @@ describe('resolveFeeds: resolution order and source', () => {
     expect(r.fields.stepdown.unwrap()).toMatchObject({ value: 1, source: 'preset' })
     expect(r.fields.stepover.unwrap()).toMatchObject({ value: 3, source: 'preset' })
     // calculator unused; the final-value check still sees the preset's chip load
-    // (800 / (18 000 · 2) = 0.022 mm < the 0.0254 mm data minimum)
-    expect(r.warnings.map((w) => [w.code, w.field])).toEqual([['feeds.rubbing', 'feedRate']])
+    // (800 / (18 000 · 2) = 0.022 mm, inside the 0.0127–0.0254 mm data range: no warning)
+    expect(r.warnings).toEqual([])
     expect(r.locks.spindleSpeed).toEqual({ state: 'hidden' })
     expect(r.recommended.spindleSpeed.isNone()).toBe(true)
   })
@@ -127,7 +127,7 @@ describe('resolveFeeds: resolution order and source', () => {
     expect(r.engagement).toEqual({ kind: 'slot' })
     expect(r.fields.stepdown.unwrap()).toMatchObject({ value: 2, source: 'override' })
     expect(val(r.fields.spindleSpeed)).toBeCloseTo(N6, 6)
-    expect(r.recommended.stepdown.unwrap()).toBeCloseTo(0.5 * 6 * 0.3, 9)
+    expect(r.recommended.stepdown.unwrap()).toBeCloseTo(0.5 * 6 * 0.1, 9)
     expect(r.locked).toEqual([])
   })
 
@@ -218,7 +218,7 @@ describe('resolveFeeds: auto mode and locks', () => {
       input({ machine, overrides: { spindleSpeed: q(rpm('10000')) }, locked: ['spindleSpeed'] }),
     )
     expect(r.fields.spindleSpeed.unwrap()).toMatchObject({ value: 10000, source: 'override' })
-    expect(val(r.fields.feedRate)).toBeCloseTo(10000 * 2 * 0.0254, 6)
+    expect(val(r.fields.feedRate)).toBeCloseTo(10000 * 2 * 0.0127, 6)
     expect(src(r.fields.feedRate)).toBe('calculator')
     expect(r.locked).toEqual(['spindleSpeed'])
     // what the field would be without its entry
@@ -229,8 +229,8 @@ describe('resolveFeeds: auto mode and locks', () => {
     const r = resolveFeeds(input({ machine, overrides: { spindleSpeed: q(rpm('10000')) } }))
     expect(val(r.fields.feedRate)).toBeCloseTo(VF6, 6)
     expect(r.recommended.spindleSpeed.unwrap()).toBeCloseTo(N6, 6)
-    // the final-value check sees the entered value: 0.0254·N6/10 000 is below the data minimum
-    expect(r.warnings.map((w) => [w.code, w.field])).toContainEqual(['feeds.rubbing', 'feedRate'])
+    // the final-value check and the read-out see the entered value: a thicker chip at 10 000 rpm
+    expect(r.used.unwrap().fz).toBeCloseTo(VF6 / (10000 * 2), 9)
   })
 
   it('a locked stepdown is an input: the calculator suggests none, the strategy is the fallback', () => {
@@ -238,7 +238,7 @@ describe('resolveFeeds: auto mode and locks', () => {
       input({ machine, overrides: { stepdown: q(len('2')) }, locked: ['stepdown'] }),
     )
     expect(r.fields.stepdown.unwrap()).toMatchObject({ value: 2, source: 'override' })
-    expect(r.recommended.stepdown.unwrap()).toBeCloseTo(0.5 * 6 * 0.3, 9)
+    expect(r.recommended.stepdown.unwrap()).toBeCloseTo(0.5 * 6 * 0.1, 9)
   })
 
   it('a lock that breaks a rule now is inactive with feeds.lockInactive and the rule', () => {

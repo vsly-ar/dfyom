@@ -117,9 +117,9 @@ M0 ;Stop spindle, install T3 Flat 4, 4 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10.5
-M3 S12128
-(Set spindle to 12128 rpm)
-M0 ;Set spindle to 12128 rpm
+M3 S24255
+(Set spindle to 24255 rpm)
+M0 ;Set spindle to 24255 rpm
 X85 Y14
 Z2
 G1 Z0 F154

@@ -13,6 +13,7 @@ import { taperedGrooveWidth, type Tool } from '../library/tool'
 import { TOOL_TYPE_LABEL } from '../design/tool'
 import {
   bandOf,
+  classFactors,
   DEFAULT_RIGIDITY,
   findRow,
   MATERIAL_DATA,
@@ -32,8 +33,11 @@ import {
   drillFeed,
   chamferEffectiveDiameter,
   effectiveDiameter,
+  feedFactor,
   feedRate,
+  MACHINING_LOAD_LIMIT,
   materialRemovalRate,
+  TOOL_WEAR_FACTOR,
   plungeRate,
   rctf,
   spindleSpeed,
@@ -154,6 +158,7 @@ export type CuttingWarningCode =
   | 'feeds.powerExceeded'
   | 'feeds.powerSkipped'
   | 'feeds.noData'
+  | 'feeds.manyFlutes'
 
 export interface CuttingWarning {
   readonly code: CuttingWarningCode
@@ -372,7 +377,7 @@ type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
 
 function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   const { tool } = c.input
-  const factors = RIGIDITY_FACTORS[c.rigidity]
+  const factors = classFactors(c.row, c.rigidity)
   // Pocket and profile engage as a slot whatever the stepover; facing uses a locked stepover.
   const ae = e.kind === 'stepover' ? Math.min(c.locked.ae ?? e.ae, c.D) : c.D
   // A fixed stepdown (locked, the helix pitch or the chamfer depth) is used, not suggested.
@@ -435,13 +440,18 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   if (!result.exceeded) return result.suggestion
   const first = result.pc
   for (let i = 0; i < MAX_POWER_ITERATIONS && result.exceeded; i++) {
-    ap = ap * (result.pAvail / result.pc) * 0.999
+    ap = ap * (result.budget / result.pc) * 0.999
     result = millAt(c, ae, ap, Some(apSteps))
   }
+  const limit = loadLimit(c.row)
   const reduced: DerivationStep = {
     step: 'power',
-    formula: 'ap reduced until Pc ≤ Pavail',
-    inputs: { PcBefore: first, Pavail: result.pAvail },
+    formula:
+      limit < 1 ? 'ap reduced until Pc ≤ loadLimit · Pavail' : 'ap reduced until Pc ≤ Pavail',
+    inputs:
+      limit < 1
+        ? { PcBefore: first, Pavail: result.pAvail, loadLimit: limit }
+        : { PcBefore: first, Pavail: result.pAvail },
     result: ap,
     unit: 'mm',
   }
@@ -451,9 +461,70 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
 interface MillResult {
   readonly suggestion: CuttingSuggestion
   readonly pc: number
+  /** Available power (kW). */
   readonly pAvail: number
+  /** The power a suggestion may use: `loadLimit · pAvail` (kW). */
+  readonly budget: number
   readonly exceeded: boolean
 }
+
+/**
+ * F7 for the row (kW). Machining rows (metals, DF131) add Machinery's Handbook feed factor `C` at
+ * the chip `fz` (after thinning) and the tool-wear factor `W`; router rows keep `Q·u/60 000`
+ * (their `u` is already aluminium's, an upper bound). Doc: feeds-speeds.md#hobby-metal-cutting-hardening-df131
+ */
+export function rowCuttingPower(row: MaterialRow, Q: number, fz: number): number {
+  const pc = cuttingPower(Q, row.u)
+  return row.chart === 'machining' ? pc * feedFactor(fz) * TOOL_WEAR_FACTOR : pc
+}
+
+/** Share of the available power a suggestion for `row` may use (machining rows: 0.8, DF131). */
+export const loadLimit = (row: MaterialRow): number =>
+  row.chart === 'machining' ? MACHINING_LOAD_LIMIT : 1
+
+/**
+ * Position of the speed within the row's range: machining rows (metals) take the top for every
+ * machine class (DF131: a low speed is not the safe side on a router spindle); router rows keep the
+ * rigidity's `rangePos` (their `n` is a single chart speed).
+ */
+const speedPos = (c: Ctx): number =>
+  c.row.chart === 'machining' ? 1 : RIGIDITY_FACTORS[c.rigidity].rangePos
+
+/** `feeds.powerExceeded` params: Pc and the power allowed (and the load limit when below 1). */
+const powerParams = (row: MaterialRow, pc: number, budget: number): Record<string, number> =>
+  loadLimit(row) < 1
+    ? { cuttingPower: pc, availablePower: budget, loadLimit: loadLimit(row) }
+    : { cuttingPower: pc, availablePower: budget }
+
+/** Machine classes on which 3+ flutes in an aluminium slot clog (router frames, DF131). */
+const ROUTER_CLASSES: ReadonlySet<Rigidity> = new Set([
+  'extrusion',
+  'hobby',
+  'prosumer',
+  'fixedGantry',
+])
+
+/**
+ * `feeds.manyFlutes` (DF131): 3 or more flutes slotting aluminium on a router-class machine pack
+ * the flutes with chips (re-cut chips, welding, a jump in load); 1–2 flutes clear them.
+ */
+function manyFlutes(c: Ctx, z: number): CuttingWarning | undefined {
+  const e = c.input.engagement
+  if (c.row.materialClass !== 'aluminum' || z < 3 || !ROUTER_CLASSES.has(c.rigidity))
+    return undefined
+  if (e.kind === 'stepover' && Math.min(c.locked.ae ?? e.ae, c.D) < c.D / 2) return undefined
+  return warn(
+    'feeds.manyFlutes',
+    `A ${z}-flute end mill clogs with aluminium chips in a slot on this machine: use a 1 or 2 flute end mill, with air or a drop of cutting fluid.`,
+    { flutes: z },
+  )
+}
+
+/** "the spindle" or "80 % of the spindle's power" for power messages. */
+const spindleWords = (row: MaterialRow): string =>
+  loadLimit(row) < 1
+    ? `${Math.round(loadLimit(row) * 100)} % of the spindle's power`
+    : 'the spindle'
 
 /**
  * One milling evaluation at stepdown `ap` (`apSteps` Some = calculator-owned). Locked `n`/`vf`
@@ -470,7 +541,7 @@ function millAt(
   const { tool, machine, engagement } = c.input
   const { D, row, locked: L } = c
   const warnings: CuttingWarning[] = []
-  const pos = RIGIDITY_FACTORS[c.rigidity].rangePos
+  const pos = classFactors(row, c.rigidity).fzPos
   // a tapered ball is a flat end mill of Ø De (F11): its ball is already in De
   const RE = engagement.kind === 'taper' ? 0 : tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
@@ -557,7 +628,7 @@ function millAt(
             unit: 'mm',
           }
         : undefined)
-    const speed = dataSpeed(c, pos, dCalc, f4)
+    const speed = dataSpeed(c, speedPos(c), dCalc, f4)
     nSteps = speed.steps
     n = clampRpm(speed.n0, machine, nSteps, warnings)
   }
@@ -624,27 +695,42 @@ function millAt(
     }
   }
 
-  // Power: F6, F7 against Pavail; with a fixed stepdown an unlocked feed absorbs an excess.
+  // Power: F6, F7 against the budget (loadLimit · Pavail); with a fixed stepdown an unlocked feed
+  // absorbs an excess.
   const power = machine.andThen((m) => m.power)
   const pAvail = power.isSome()
     ? availablePower(power.unwrap(), n, machine.unwrap().maxSpeed)
     : Infinity
-  let Q = materialRemovalRate(ae, ap, vf)
-  let pc = cuttingPower(Q, row.u)
-  let exceeded = pc > pAvail * (1 + EPS)
+  const limit = loadLimit(row)
+  const budget = pAvail * limit
+  const powerAt = (feed: number): { Q: number; pc: number } => {
+    const q = materialRemovalRate(ae, ap, feed)
+    return { Q: q, pc: rowCuttingPower(row, q, feed / (n * z * k)) }
+  }
+  let { Q, pc } = powerAt(vf)
+  let exceeded = pc > budget * (1 + EPS)
   let feedReduced = false
   if (exceeded && apSteps.isNone() && L.vf === undefined) {
     const before = vf
-    vf = vf * (pAvail / pc) * 0.999
+    const pcBefore = pc
+    // the feed factor C grows as the chip thins, so a few rounds may be needed
+    for (let i = 0; i < MAX_POWER_ITERATIONS && pc > budget * (1 + EPS); i++) {
+      vf = vf * (budget / pc) * 0.999
+      ;({ Q, pc } = powerAt(vf))
+    }
     vfSteps.push({
       step: 'power',
-      formula: 'vf reduced until Pc ≤ Pavail (n kept)',
-      inputs: { vf: before, PcBefore: pc, Pavail: pAvail },
+      formula:
+        limit < 1
+          ? 'vf reduced until Pc ≤ loadLimit · Pavail (n kept)'
+          : 'vf reduced until Pc ≤ Pavail (n kept)',
+      inputs:
+        limit < 1
+          ? { vf: before, PcBefore: pcBefore, Pavail: pAvail, loadLimit: limit }
+          : { vf: before, PcBefore: pcBefore, Pavail: pAvail },
       result: vf,
       unit: 'mm/min',
     })
-    Q = materialRemovalRate(ae, ap, vf)
-    pc = cuttingPower(Q, row.u)
     exceeded = false
     feedReduced = true
   }
@@ -680,18 +766,21 @@ function millAt(
       warn(
         'feeds.powerExceeded',
         powerReduced
-          ? 'Cutting power exceeds the spindle: suggested stepdown reduced to fit.'
+          ? `Cutting power exceeds ${spindleWords(row)}: suggested stepdown reduced to fit.`
           : feedReduced
-            ? 'Cutting power exceeds the spindle: suggested feed rate reduced to fit.'
-            : 'Cutting power exceeds the spindle: reduce stepdown or stepover.',
-        { cuttingPower: pc, availablePower: pAvail },
+            ? `Cutting power exceeds ${spindleWords(row)}: suggested feed rate reduced to fit.`
+            : `Cutting power exceeds ${spindleWords(row)}: reduce stepdown or stepover.`,
+        powerParams(row, pc, budget),
       ),
     )
+  const flutes = manyFlutes(c, z)
+  if (flutes !== undefined) warnings.push(flutes)
 
   const feedDerivation = [...nSteps, ...fzSteps, ...vfSteps]
   return {
     pc,
     pAvail,
+    budget,
     exceeded,
     suggestion: {
       spindleSpeed: Some({ value: n, unit: 'rpm', derivation: nSteps }),
@@ -733,7 +822,7 @@ function drill(c: Ctx): CuttingSuggestion {
     ]
     n = clampToSpindle(n0, machine, nSteps)
   } else {
-    const speed = dataSpeed(c, pos, D, undefined)
+    const speed = dataSpeed(c, speedPos(c), D, undefined)
     nSteps = speed.steps
     n = clampRpm(speed.n0, machine, nSteps, warnings)
   }
@@ -889,19 +978,19 @@ export function checkCutting(
   const RE = tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
   const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
-  const out: CheckWarning[] = chipLoadWarnings(values.vf / (values.n * z * k), c.range, false).map(
-    on('feedRate'),
-  )
+  const fz = values.vf / (values.n * z * k)
+  const out: CheckWarning[] = chipLoadWarnings(fz, c.range, false).map(on('feedRate'))
   const power = machine.andThen((m) => m.power)
   if (ap !== undefined && power.isSome()) {
-    const pAvail = availablePower(power.unwrap(), values.n, machine.unwrap().maxSpeed)
-    const pc = cuttingPower(materialRemovalRate(ae, ap, values.vf), c.row.u)
-    if (pc > pAvail * (1 + EPS))
+    const budget =
+      availablePower(power.unwrap(), values.n, machine.unwrap().maxSpeed) * loadLimit(c.row)
+    const pc = rowCuttingPower(c.row, materialRemovalRate(ae, ap, values.vf), fz)
+    if (pc > budget * (1 + EPS))
       out.push({
         ...warn(
           'feeds.powerExceeded',
-          'Cutting power exceeds the spindle: reduce stepdown, stepover or feed.',
-          { cuttingPower: pc, availablePower: pAvail },
+          `Cutting power exceeds ${spindleWords(c.row)}: reduce stepdown, stepover or feed.`,
+          powerParams(c.row, pc, budget),
         ),
         field: fixedAp(e) === undefined ? 'stepdown' : 'feedRate',
       })
@@ -942,14 +1031,15 @@ export function cuttingAt(
   const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
   const dCalc = ap === undefined ? D : effectiveDiameter(D, RE, ap)
   const Q: Option<number> = ap === undefined ? None : Some(materialRemovalRate(ae, ap, values.vf))
-  const Pc: Option<number> = Q.map((q) => cuttingPower(q, c.row.u))
+  const fz = values.vf / (values.n * z * k)
+  const Pc: Option<number> = Q.map((q) => rowCuttingPower(c.row, q, fz))
   const spindleLoad: Option<number> = machine.andThen((m) =>
     Pc.andThen((pc) => m.power.map((p) => (pc / availablePower(p, values.n, m.maxSpeed)) * 100)),
   )
   return Some({
     dCalc,
     vc: surfaceSpeed(values.n, dCalc),
-    fz: values.vf / (values.n * z * k),
+    fz,
     chipThinning: k,
     Q,
     Pc,
@@ -1000,7 +1090,15 @@ export function finishingAt(
   const ap = fixedAp(e) ?? values.ap
   const kr = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
   const kf = chipThinning(rctf(Math.min(allowance, D), D), actf(RE, finishAp))
-  const wanted = (values.vf * kf) / kr
+  const keeping = (values.vf * kf) / kr
+  // DF131, machining rows (metals): no faster than the roughing pass removes material (Q = ae·ap·vf),
+  // so the finishing pass's mean cutting force and power stay those of the roughing pass
+  const roughQ = ap === undefined ? undefined : ae * ap * values.vf
+  const finishArea = Math.min(allowance, D) * finishAp
+  const wanted =
+    c.row.chart === 'machining' && roughQ !== undefined && finishArea > 0
+      ? Math.min(keeping, roughQ / finishArea)
+      : keeping
   const max = input.machine.mapOr(Infinity, (m) => m.maxFeedXY)
   const feedRate = Math.min(wanted, max)
   return Some({
@@ -1051,7 +1149,14 @@ function dataSpeed(
   const value = pick(range, pos)
   if (field === 'n') return { n0: value, steps: [dataStep(c.row, 'n', value, 'rpm', range)] }
   const n0 = spindleSpeed(value, dCalc)
-  const steps = [dataStep(c.row, 'vc', value, 'm/min', range)]
+  const steps = [
+    c.row.chart === 'machining'
+      ? {
+          ...dataStep(c.row, 'vc', value, 'm/min', range),
+          formula: 'vc = max (the top of the range)',
+        }
+      : dataStep(c.row, 'vc', value, 'm/min', range),
+  ]
   if (f4 !== undefined) steps.push(f4)
   steps.push({
     step: 'F1',

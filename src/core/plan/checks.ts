@@ -58,6 +58,7 @@ export const PLAN_WARNING_CODES = [
   'feeds.powerExceeded',
   'feeds.powerSkipped',
   'feeds.noData',
+  'feeds.manyFlutes',
   'feeds.lockInactive',
 ] as const
 export type PlanWarningCode = (typeof PLAN_WARNING_CODES)[number]

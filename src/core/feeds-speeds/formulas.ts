@@ -100,6 +100,29 @@ export const materialRemovalRate = (ae: number, ap: number, vf: number): number 
 /** F7 `Pc = Q · u / 60 000` (kW; u in W·s/mm³). */
 export const cuttingPower = (Q: number, u: number): number => (Q * u) / 60_000
 
+/**
+ * Machinery's Handbook feed factor `C` for the power constant (DF131): thin chips take more energy
+ * per mm³. Fitted to the handbook's milling table (1.60 at .001″ per tooth, 1.40 at .002″, ≈ 1.0
+ * at .012″): `C = (0.3048 / fz)^0.19`, at least 1, at most `FEED_FACTOR_CAP`; `fz` in mm (the
+ * chip after thinning). Doc: docs/architecture/feeds-speeds.md#hobby-metal-cutting-hardening-df131
+ */
+export function feedFactor(fz: number): number {
+  if (!(fz > 0)) return FEED_FACTOR_CAP
+  return Math.min(FEED_FACTOR_CAP, Math.max(1, (0.3048 / fz) ** 0.19))
+}
+
+/** Upper bound of the feed factor `C` (chips under ≈ .0005″ rub anyway: `feeds.rubbing`). */
+export const FEED_FACTOR_CAP = 2
+
+/** Machinery's Handbook tool-wear factor `W` for end milling (1.1 sharp – 1.3 worn; DF131). */
+export const TOOL_WEAR_FACTOR = 1.25
+
+/**
+ * Share of the available power a machining-chart (metal) suggestion may use (DF131): the power
+ * fit and the final-value check keep `Pc ≤ 0.8 · Pavail`.
+ */
+export const MACHINING_LOAD_LIMIT = 0.8
+
 /** F7 `u = Kp · 2.73` from Machinery's Handbook unit horsepower `Kp`. */
 export const unitPowerFromKp = (kp: number): number => kp * KP_TO_UNIT_POWER
 
