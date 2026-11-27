@@ -154,3 +154,49 @@ describe('X2 shaping at the agent boundary (DF38, DF41)', () => {
     expect((full['rows'] as Record<string, unknown>[])[0]).toHaveProperty('path')
   })
 })
+
+// hardening DF138 F7 (X3): plan_operation_update returned `{}`; now the updated operation
+describe('plan_operation_update returns the updated operation (DF138 F7)', () => {
+  it('its stickout, minimum stickout and findings, and the plan counts', async () => {
+    const s = await planSetup({ part: false })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: {
+        kind: 'rectangle',
+        center: ['50', '30'],
+        length: '30',
+        width: '20',
+        cornerRadius: '4',
+      },
+      depth: '6',
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const op = s.plan(planId).setups[0]!.operations[0]!
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: op.id,
+      toolLibraryItemId: s.tools.flat6,
+    })
+    const session: ShaperSession = {
+      boundKey: 'p',
+      peek: (name, args) => s.d.query(name, args, ui).map((o) => o.value),
+      resultSchema: () => undefined,
+    }
+    const shaper = new ResultShaper(session)
+    const args = { planId, planOperationId: op.id, stickout: '8' }
+    const outcome = expectOk(await s.d.dispatch('plan.operation.update', args, ui))
+    const call: SessionCallResult = {
+      name: 'plan.operation.update',
+      kind: 'command',
+      result: Ok({ value: outcome.value, revision: 1 }),
+    }
+    const view: View = { detail: 'summary', from: 0, count: 0 }
+    const value = expectOk(shaper.shape(call, args, view).result).value as Record<string, unknown>
+    expect(value).toMatchObject({ planOperationId: op.id, stickout: 8, stickoutNeeded: 11 })
+    // 8 mm reaches the 6 mm floor but leaves the nut within 5 mm of the stock top
+    const findings = value['findings'] as { rule: string; message: string }[]
+    expect(findings.map((f) => f.rule)).toContain('shortStickout')
+    expect(value['counts']).toEqual(expect.objectContaining({ warning: expect.any(Number) }))
+  })
+})

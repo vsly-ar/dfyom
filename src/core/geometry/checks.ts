@@ -307,7 +307,9 @@ function retainedText(
   return {
     message:
       `${a}: ${by} lowers ${tabs} from ${mmText(hit.height)} to ${mmText(remains)} ` +
-      `(${volume}); change ${by}: make it shallower or move it off the tabs`,
+      // DF138 F9 (X3): the remover may be reference geometry: thicker tabs are the other way
+      `(${volume}); change ${by}: make it shallower or move it off the tabs; or, when ${by} ` +
+      `must stay, make ${a}'s tabs thicker (tabs.thickness)`,
     params: lowered,
   }
 }

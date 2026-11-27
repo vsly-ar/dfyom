@@ -1395,8 +1395,10 @@ export class GrblSender {
     else run.heldBy = run.heldMark = undefined
     run.phase = phase
     this.log.debug({ phase }, 'run phase')
-    this.emitPhase(run)
+    // DF138 F10: the progress (its label names the tool change) before the phase, so whoever
+    // reacts to the wait reads the progress of that wait, not the last section's
     this.emitProgress(run)
+    this.emitPhase(run)
   }
 
   private endWait(run: ActiveRun): void {

@@ -12,6 +12,7 @@ import type { Stock } from '../library/stock'
 import type { ToolType } from '../library/tool.dto'
 import type { Tool } from '../library/tool'
 import type { Quantity } from '../quantity/quantity'
+import type { Option } from '../../shared/result'
 import type { ResolvedFeeds } from './feeds'
 import type { ResolvedStrategy } from './strategy'
 import { chamferCuts, holeDepth, loopCut } from './strategy'
@@ -383,6 +384,40 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
  */
 export const STICKOUT_CLEARANCE = 5
 
+/**
+ * The least shank length the collet must hold, in shank diameters (hardening DF138 F2): 3 × the
+ * shank Ø (the cutting Ø without one), the common router-bit and end mill rule. A stickout
+ * suggestion never goes beyond the tool's usable length, OAL − this grip.
+ * Doc: docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130
+ */
+export const MIN_GRIP_SHANKS = 3
+
+/** The longest stickout a tool gives with `MIN_GRIP_SHANKS` in the collet (mm), and that grip. */
+export function usableStickout(tool: {
+  readonly diameter: Quantity
+  readonly shankDiameter: Option<Quantity>
+  readonly overallLength: Quantity
+}): { readonly max: number; readonly grip: number; readonly overallLength: number } {
+  const shank = tool.shankDiameter.mapOr(tool.diameter.canonical, (s) => s.canonical)
+  const grip = MIN_GRIP_SHANKS * shank
+  const overallLength = tool.overallLength.canonical
+  return { max: overallLength - grip, grip, overallLength }
+}
+
+/**
+ * The remedy text when a needed stickout is beyond the tool's usable length (DF138 F2): "the tool
+ * is too short for that (75 mm long, at most 57 mm out with 18 mm (3 x shank) in the collet)".
+ */
+export function tooShortText(u: {
+  readonly max: number
+  readonly grip: number
+  readonly overallLength: number
+}): string {
+  const r = (v: number) => String(Math.floor(v * 10 + 1e-6) / 10)
+  const g = (v: number) => String(Math.round(v * 10) / 10)
+  return `the tool is too short for that (${g(u.overallLength)} mm long, at most ${r(Math.max(0, u.max))} mm out with ${g(u.grip)} mm (${MIN_GRIP_SHANKS} × shank Ø) in the collet)`
+}
+
 /** A through pocket's breakthrough (patterns P4; its floor is the opposite face); else 0. */
 const pocketBreakthrough = (op: Operation, i: ToolCheckInput): number =>
   op.kind === 'pocket' && op.through === true && i.strategy.kind === 'pocket'
@@ -481,10 +516,16 @@ export function rigidityFindings(i: Omit<ToolCheckInput, 'stepdown'>): Finding[]
   const depth = needed - STICKOUT_CLEARANCE
   if (i.stickout < needed - EPS && i.stickout >= depth - EPS) {
     const at = Math.ceil(needed * 10 - 1e-6) / 10
+    // DF138 F2: never suggest more than the tool gives with its minimum grip in the collet
+    const usable = usableStickout(tool)
+    const fix =
+      needed > usable.max + EPS
+        ? `${tooShortText(usable)}: use a longer tool`
+        : `chuck the tool with at least ${at} mm out`
     out.push({
       field: 'stickout',
       rule: 'shortStickout',
-      message: `stickout ${r2(i.stickout)} mm is shorter than the ${at} mm the deepest cut (${r2(depth)} mm) needs: the collet nut passes within ${STICKOUT_CLEARANCE} mm of the stock top; chuck the tool with at least ${at} mm out`,
+      message: `stickout ${r2(i.stickout)} mm is shorter than the ${at} mm the deepest cut (${r2(depth)} mm) needs: the collet nut passes within ${STICKOUT_CLEARANCE} mm of the stock top; ${fix}`,
       params: { stickout: i.stickout, depth, needed },
     })
   }

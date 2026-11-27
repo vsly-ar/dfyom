@@ -904,9 +904,15 @@ function drill(c: Ctx): CuttingSuggestion {
   }
 }
 
+/**
+ * Slack of the chip load range for values rounded to whole rpm and mm/min (hardening DF138 F5):
+ * a recommended 2,743 mm/min gave 0.076194 mm against the data minimum 0.0762 and warned.
+ */
+const ROUNDING = 1e-3
+
 /** `feeds.rubbing` below the data range, `feeds.chipLoadHigh` above it. */
 function chipLoadWarnings(actual: number, range: Range, isDrill: boolean): CuttingWarning[] {
-  if (actual < range.min * (1 - EPS))
+  if (actual < range.min * (1 - ROUNDING))
     return [
       isDrill
         ? warn('feeds.rubbing', 'Feed per revolution is below the data minimum: the drill rubs.', {
@@ -922,7 +928,7 @@ function chipLoadWarnings(actual: number, range: Range, isDrill: boolean): Cutti
             },
           ),
     ]
-  if (actual > range.max * (1 + EPS))
+  if (actual > range.max * (1 + ROUNDING))
     return [
       isDrill
         ? warn(

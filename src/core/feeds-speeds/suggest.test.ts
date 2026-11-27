@@ -373,6 +373,25 @@ describe('hobby metal cutting (hardening DF131, TG #425)', () => {
     ])
   })
 
+  // hardening DF138 F5 (X3): a recommended feed rounded to whole mm/min fell 0.008 % under the
+  // data minimum and warned of rubbing
+  it('the chip load range allows the rounding of whole rpm and mm/min (0.1 %)', () => {
+    const input: CuttingInput = {
+      tool: flat633(),
+      materialClass: 'aluminum',
+      engagement: SLOT,
+      machine: nova('fixedGantry'),
+    }
+    const n = 12_000
+    const z = flat633().fluteCount.canonical
+    const slow = checkCutting(input, { n, vf: 1, ap: 0.5 }).find((w) => w.code === 'feeds.rubbing')
+    const min = slow!.params!['minimum'] as number
+    const codes = (fz: number) =>
+      checkCutting(input, { n, vf: fz * n * z, ap: 0.5 }).map((w) => w.code)
+    expect(codes(min * (1 - 1e-4))).not.toContain('feeds.rubbing')
+    expect(codes(min * (1 - 1e-2))).toContain('feeds.rubbing')
+  })
+
   it('finishing pass in metal: no faster than the roughing pass removes material', () => {
     const s = userCase('extrusion')
     const values = { n: value(s.spindleSpeed), vf: value(s.feedRate), ap: value(s.stepdown) }

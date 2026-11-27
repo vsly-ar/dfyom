@@ -31,6 +31,11 @@ export interface CheckTool {
   readonly stickout?: number
   /** The holder the tool sits in (DF132); absent = the WH-F cylinder only. */
   readonly holder?: HolderSizes
+  /**
+   * The longest stickout the tool gives with its minimum grip in the collet (DF138 F2,
+   * `usableStickout`): stickout remedies never go beyond it; absent = not bounded.
+   */
+  readonly usable?: { readonly max: number; readonly grip: number; readonly overallLength: number }
 }
 
 /** One operation of the program, in machining order. */

@@ -13,7 +13,7 @@ import type { Toolpath } from '../../toolpath/model'
 import { toGeneratorInputs } from '../../toolpath/inputs'
 import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
 import { setupZero } from '../alignment'
-import { STICKOUT_CLEARANCE, type PlanWarning } from '../checks'
+import { STICKOUT_CLEARANCE, tooShortText, usableStickout, type PlanWarning } from '../checks'
 import { HOLDER_PRESET_NAMES, resolveHolder, type Holder } from '../../library/holder'
 import type { Option } from '../../../shared/result'
 import type { PlanOperationInput } from '../inputs'
@@ -116,6 +116,7 @@ export function checkOperations(
         ...(holder.isSome()
           ? { stickout: input.stickout, holder: holderSizes(holder.unwrap()) }
           : {}),
+        usable: usableStickout(input.tool),
       },
       moves: back(toolpath).passes.flatMap((p) => p.moves),
       ...(input.stickoutNeeded === undefined ? {} : { stickoutNeeded: input.stickoutNeeded }),
@@ -200,6 +201,14 @@ export function moveFindings(
   })
   const out: PlanWarning[] = []
   const holderOf = (id: string) => operations.find((o) => o.planOperationId === id)?.tool.holder
+  // DF138 F2: a stickout remedy beyond the tool's usable length is replaced by moving the item
+  // or a longer tool
+  const remedy = (id: string, needed: number, at: number) => {
+    const usable = operations.find((o) => o.planOperationId === id)?.tool.usable
+    return usable !== undefined && needed > usable.max + 1e-6
+      ? `${tooShortText(usable)}: move the item further from the cut or use a longer tool`
+      : `chuck the tool with at least ${at} mm out or move the item`
+  }
   // DF132 H3: the minimum stickout with the clamp term names the stickout that clears the holder
   const needs = stickoutsOf(h, operations, zero)
   const shown = (v: number) => Math.ceil(v * 10 - 1e-6) / 10
@@ -218,7 +227,7 @@ export function moveFindings(
       out.push({
         code: 'plan.workholding.collision',
         severity: 'error',
-        message: `${label(c.planOperationId)}: the ${part}${what === '' ? '' : ` (${what})`} at Z${mm(c.partZ ?? 0)} hits ${name} near X${mm(x(c))} Y${mm(y(c))} (tip Z${mm(c.lowestZ)}, ${name} top Z${mm(maxTop(h, c.itemId))}, margin ${mm(h.margin)} mm): chuck the tool with at least ${at} mm out or move the item`,
+        message: `${label(c.planOperationId)}: the ${part}${what === '' ? '' : ` (${what})`} at Z${mm(c.partZ ?? 0)} hits ${name} near X${mm(x(c))} Y${mm(y(c))} (tip Z${mm(c.lowestZ)}, ${name} top Z${mm(maxTop(h, c.itemId))}, margin ${mm(h.margin)} mm): ${remedy(c.planOperationId, needed, at)}`,
         planOperationId: c.planOperationId,
         field: 'stickout',
         rule: 'holder',
@@ -255,7 +264,11 @@ export function moveFindings(
     out.push({
       code: 'plan.check',
       severity: 'warning',
-      message: `stickout ${mm(stickout)} mm is shorter than the ${at} mm ${itemName(h, itemId ?? '')} needs under the ${word}: the ${word} passes within ${STICKOUT_CLEARANCE} mm of its top; chuck the tool with at least ${at} mm out`,
+      message: `stickout ${mm(stickout)} mm is shorter than the ${at} mm ${itemName(h, itemId ?? '')} needs under the ${word}: the ${word} passes within ${STICKOUT_CLEARANCE} mm of its top; ${
+        o.tool.usable !== undefined && need.needed > o.tool.usable.max + 1e-6
+          ? `${tooShortText(o.tool.usable)}: move the item further from the cut or use a longer tool`
+          : `chuck the tool with at least ${at} mm out`
+      }`,
       planOperationId: o.planOperationId,
       field: 'stickout',
       rule: 'shortStickout',

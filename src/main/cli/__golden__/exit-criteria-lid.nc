@@ -1872,7 +1872,7 @@ M5
 X132 Y53
 (Stop the spindle)
 (DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)
-M0 ;Stop spindle, install T3 Chamfer 90 x, 12 mm chamfer, then zero Z
+M0 ;Stop spindle, install T3 Chamfer 90 x 12, 12 mm, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10

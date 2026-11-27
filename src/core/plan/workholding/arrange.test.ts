@@ -1,7 +1,7 @@
 // Spec: docs/modes/workholding.md#automatic-arrangement-w6 (v0.4-llm-first W6)
 import { describe, expect, it } from 'vitest'
 import type { Move, Vec3 } from '../../toolpath/model'
-import { arrangeToeClamps, type ArrangeInput, type PlacedClamp } from './arrange'
+import { arrangeToeClamps, stickoutForRoom, type ArrangeInput, type PlacedClamp } from './arrange'
 import { checkWorkholding, type CheckOperation } from './check'
 import type { ResolvedItem } from './items'
 import { obstacles } from './obstacles'
@@ -172,5 +172,48 @@ describe('arrangeToeClamps (W6)', () => {
       { edge: 'vMin', at: 45 },
       { edge: 'vMin', at: 155 },
     ])
+  })
+})
+
+// hardening DF138 F1 (X3): the automatic placement keeps the collet nut and the spindle body
+// clear, not only the tool
+describe('arrangeToeClamps with a holder (DF138 F1)', () => {
+  const ER11 = { nutDiameter: 19, nutLength: 12, bodyDiameter: 52, name: 'ER11' }
+  const held = (op: CheckOperation, stickout: number): CheckOperation => ({
+    ...op,
+    tool: { ...tool, stickout, holder: ER11 },
+  })
+
+  it('the body beside the long edges sends the clamps to the short edges, clear of the envelope', () => {
+    // 25 mm from the long edges: the Ø6 tool keeps them free, the Ø52 body (from Z 17) does not
+    const ops = [held(loop(40, 25, 160, 125), 10)]
+    const plain = arrangeToeClamps(input([loop(40, 25, 160, 125)]))
+    expect('clamps' in plain && plain.clamps.map((c) => c.edge)).toEqual([
+      'vMin',
+      'vMin',
+      'vMax',
+      'vMax',
+    ])
+    const r = arrangeToeClamps(input(ops))
+    expect('clamps' in r && r.clamps.map((c) => c.edge)).toEqual(['uMin', 'uMin', 'uMax', 'uMax'])
+    if (!('clamps' in r) || !('clamps' in plain)) return
+    // the exact check with the stepped envelope: no holder collision
+    expect(exactCheck(r.clamps, ops).collisions).toEqual([])
+    expect(exactCheck(plain.clamps, ops).collisions.map((c) => c.kind)).toContain('holder')
+  })
+
+  it('no placement at the planned stickout: the stickout that makes room (exact, 5 mm above)', () => {
+    const ops = [held(loop(30, 25, 170, 125), 10)]
+    expect('edges' in arrangeToeClamps(input(ops))).toBe(true)
+    const room = stickoutForRoom(input(ops))
+    expect(room?.clamps.map((c) => c.edge)).toEqual(['vMin', 'vMin', 'vMax', 'vMax'])
+    // the body (12 mm above the stickout) must clear the 25 mm clamp from the tip at Z−5 by 5 mm
+    expect(room?.stickouts.get('op1')).toBeCloseTo(25 + 5 - 12 + 5, 6)
+    // with it the placement passes the exact check
+    const longer = [held(loop(30, 25, 170, 125), room!.stickouts.get('op1')!)]
+    expect(exactCheck(room!.clamps, longer).collisions).toEqual([])
+    // without a holder, or with no room for the tool either: nothing to say
+    expect(stickoutForRoom(input([loop(30, 25, 170, 125)]))).toBeUndefined()
+    expect(stickoutForRoom(input([held(loop(8, 8, 192, 142), 10)]))).toBeUndefined()
   })
 })

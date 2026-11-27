@@ -205,11 +205,16 @@ function noToolWarnings(
     )
     if (why === undefined) return []
     const label = designToolLabel(why.tool, None)
+    // DF138 F8 (X3): sharp inside corners block every end mill; name the two ways on
+    const sharp =
+      why.unfit.rule === 'cornerRadius' && Number(why.unfit.values['cornerRadius'] ?? 1) <= 1e-6
+        ? ': round the sharp inside corners (roundInside on design_shape_import, or a corner radius on the shape) or choose a tool (design_operation_tool_set; the corners keep its radius)'
+        : ''
     return [
       {
         code: 'dfm.noFittingTool',
         severity: 'warning',
-        message: `${op.id}: no tool fits, not even the ${label}: ${why.unfit.detail}`,
+        message: `${op.id}: no tool fits, not even the ${label}: ${why.unfit.detail}${sharp}`,
         operation: op.id,
         parameter: 'tool',
         params: { ...why.unfit.values, rule: why.unfit.rule, tool: label },

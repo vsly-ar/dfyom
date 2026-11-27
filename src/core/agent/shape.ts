@@ -135,6 +135,7 @@ export class ResultShaper {
     if (call.name === 'plan.warning.list')
       value = summary ? findingGroups(value) : withFindingNext(value)
     if (summary && call.name === 'design.operation.list') value = operationSummary(value)
+    if (call.name === 'plan.operation.update') value = this.updatedOperation(args) ?? value
     if (summary && call.name === 'design.clones.preview') value = previewSummary(value)
     const partId = isObj(args) && typeof args['partId'] === 'string' ? args['partId'] : undefined
     if (call.name === 'design.warning.list' && partId !== undefined && isObj(value))
@@ -161,6 +162,44 @@ export class ResultShaper {
     if (shapedApplied !== undefined)
       (shaped as { applied?: unknown }).applied = compact(shapedApplied)
     return { ...call, result: Ok(shaped) }
+  }
+
+  /**
+   * `plan.operation.update` (hardening DF138 F7): the updated operation instead of `{}`: its
+   * stickout and minimum stickout, its findings now (with `next`) and the plan's counts by
+   * severity, so a stickout or feeds edit says whether it cleared what it was meant to.
+   */
+  private updatedOperation(args: unknown): Obj | undefined {
+    if (!isObj(args) || typeof args['planId'] !== 'string') return undefined
+    const { planId, planOperationId: id } = args
+    if (typeof id !== 'string') return undefined
+    const list = this.session.peek('plan.operation.list', { planId })
+    const warnings = this.session.peek('plan.warning.list', { planId })
+    if (list.isErr() || warnings.isErr()) return undefined
+    const ops = isObj(list.unwrap()) ? (list.unwrap() as Obj)['operations'] : undefined
+    const row = Array.isArray(ops)
+      ? (ops as unknown[]).find((o): o is Obj => isObj(o) && o['id'] === id)
+      : undefined
+    const all = isObj(warnings.unwrap()) ? (warnings.unwrap() as Obj)['warnings'] : undefined
+    const findings: Obj[] = []
+    const counts: Record<string, number> = {}
+    for (const f of Array.isArray(all) ? (all as unknown[]) : []) {
+      if (!isObj(f)) continue
+      const severity = String(f['severity'])
+      counts[severity] = (counts[severity] ?? 0) + 1
+      if (f['planOperationId'] !== id) continue
+      const { planOperationId: _id, params: _params, ...rest } = f
+      const next = findingNext(f)
+      findings.push(next === undefined ? rest : { ...rest, next })
+    }
+    return {
+      planOperationId: id,
+      ...(row === undefined
+        ? {}
+        : { stickout: row['stickout'], stickoutNeeded: row['stickoutNeeded'] }),
+      findings,
+      counts,
+    }
   }
 
   /**

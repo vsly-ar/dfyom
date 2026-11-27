@@ -234,12 +234,19 @@ export function operationIssues(
   const stockOnly = op.kind === 'facing' || op.kind === 'profile'
   const targets = table.before(index).filter((e) => e.onTarget && (!stockOnly || e.owner < 0))
   const on = targets.find((e) => e.id === op.on)
+  // DF138 F4: a facing or profile on an earlier floor gets the next step (its stock face and the
+  // floor's depth to add)
+  const floor = on === undefined ? table.before(index).find((e) => e.id === op.on) : undefined
+  const face = floor && targets.find((e) => e.owner < 0 && e.direction === floor.direction)
+  const below = floor === undefined ? 0 : Math.round(-floor.faceZ.toNumber() * 1000) / 1000
   c.check(
     on !== undefined,
     'on',
     'onSurface',
     stockOnly
-      ? 'must be a stock face'
+      ? face !== undefined
+        ? `must be a stock face (${targets.map((e) => e.id).join(', ')}): a ${op.kind} starts from the stock; use on ${face.id} and add ${op.on}'s depth below it (${below} mm) to depth`
+        : `must be a stock face (${targets.map((e) => e.id).join(', ')})`
       : 'must be a stock face or a floor or tab top of an earlier operation',
     { allowed: targets.map((e) => e.id), actual: op.on },
   )

@@ -333,7 +333,8 @@ describe('evaluatePart: retainedRemoved', () => {
     expect(w[0]!.params['remains'] as number).toBeCloseTo(0.5, 3)
     expect(w[0]!.message).toBe(
       'profile1: pocket2 lowers tab 1 from 3 mm to 0.5 mm (120.0 mm³); change pocket2: make it ' +
-        'shallower or move it off the tabs',
+        "shallower or move it off the tabs; or, when pocket2 must stay, make profile1's tabs " +
+        'thicker (tabs.thickness)',
     )
     expect(e.pieces).toBe(1) // the other three tabs still hold
   })

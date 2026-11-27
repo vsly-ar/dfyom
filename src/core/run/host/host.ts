@@ -1072,6 +1072,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           progress.soon()
         },
         phase: (p: PhaseChange) => {
+          // DF138 F10: the throttled progress goes out first (it names the wait)
+          if (lastProgress?.jobId === jobId) progress.now()
           job.phase = p.phase
           job.toolChange = p.toolChange
           // DF69: the tool run from this tool change on is in its surface's Z
