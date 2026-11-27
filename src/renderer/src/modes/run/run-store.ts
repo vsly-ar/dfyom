@@ -34,6 +34,7 @@ import {
   guardActive,
   JOG_END_STALE_MS,
   jogStart,
+  moveGuard,
   PAST_ONCE_MS,
   wcoOf,
   type GuardNotice,
@@ -101,6 +102,11 @@ export interface GoToRequest {
 export interface GoToPreview {
   readonly from: readonly [number, number, number]
   readonly points: readonly (readonly [number, number, number])[]
+  /**
+   * DF133 RW4: the workholding guard's first contact: on step `step` (0-based) at `at`; the path
+   * turns red from there on (docs/modes/run-workholding.md#go-to-and-the-touch-off-spot).
+   */
+  readonly hit?: { readonly step: number; readonly at: readonly [number, number, number] }
 }
 
 /** What "Connect" opens: the GRBL emulator or a real controller (docs/modes/run-machine.md#ui). */
@@ -410,10 +416,14 @@ export interface RunState {
   probeZ(plateThickness: number): Promise<void>
   /**
    * DF69: jog to the touch-off spot (`touchOffMoves`), one jog after the other; DF128: the Go to
-   * steps. False when a jog was refused (the banner has why).
+   * steps. False when a jog was refused (the banner has why). DF133 RW4: through the workholding
+   * guard while it is on: a step that would come within the margin of an item sends nothing (the
+   * jog notice says which) unless `anyway` (the dialog's "Go anyway" ticked) or "Jog past once" is
+   * armed (used up here).
    */
   moveTo(
     moves: readonly { readonly to: readonly [number, number, number]; readonly feed: number }[],
+    opts?: { readonly anyway?: boolean },
   ): Promise<boolean>
   /** DF78 alignment step: `run.align.goto` (the pointer to `zero`, a point, `next`, `previous`). */
   alignGoto(setupId: string, to: string): Promise<void>
@@ -971,9 +981,31 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
       probeZ: (plateThickness) =>
         job('run.machine.probeZ', { plateThickness }, (probeJobId) => ({ probeJobId })),
-      async moveTo(moves) {
-        // DF133 RW3 (Q186): a Go to uses up "Jog past once" (it is guarded from RW4 on)
-        if (get().pastOnceUntil !== undefined) disarmPastOnce()
+      async moveTo(moves, opts = {}) {
+        // DF133 RW4 (Q186, Q187): through the guard unless "Go anyway" or "Jog past once" (used up)
+        const s = get()
+        const now = Date.now()
+        const past = s.pastOnceUntil !== undefined && now <= s.pastOnceUntil
+        if (s.pastOnceUntil !== undefined) disarmPastOnce()
+        if (guardActive(s.status, s.guardSetup, s.guardOff) && !past && opts.anyway !== true) {
+          const g = s.guardSetup!
+          const from = jogStart(s.status, queued?.end, cancelAt, now)
+          if (from === undefined) {
+            set({ guardNotice: { kind: 'moving' } })
+            return false
+          }
+          const hit = moveGuard(
+            s.status,
+            g,
+            from,
+            moves.map((m) => m.to),
+          )
+          if (hit !== undefined) {
+            set({ guardNotice: { kind: 'blocked', item: hit.item, contact: hit.hit.contact } })
+            return false
+          }
+          if (s.guardNotice !== undefined) set({ guardNotice: undefined })
+        }
         for (const { to, feed } of moves) {
           const r = await call('run.machine.jog', { to: [...to], feed })
           if (!r.ok) return false

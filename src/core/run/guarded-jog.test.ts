@@ -18,8 +18,10 @@ import type { Footprint, Prism } from '../plan/workholding/obstacles'
 import { createToolpathCache } from '../toolpath/cache'
 import type { Vec3 } from '../toolpath/model'
 import { systemTimerHost } from './clock'
+import { goToMoves } from './goto'
 import {
   guardedJog,
+  guardedMoves,
   MIN_JOG_MM,
   plainJogArgs,
   type GuardSetup,
@@ -181,6 +183,101 @@ describe('guardedJog: the jog command', () => {
   })
 })
 
+describe('guardedMoves: the steps of a Go to (DF133 RW4)', () => {
+  /** A Go to's steps from above the block (setup frame = machine frame here). */
+  const plan = (from: Vec3, target: Vec3) =>
+    goToMoves({
+      from,
+      wco: ZERO,
+      target,
+      frame: 'machine',
+      mode: 'absolute',
+      safeZ: 25,
+      liftToTop: false,
+    })
+      .unwrap()
+      .map((s) => s.to)
+
+  it('every step clear: no hit', () => {
+    const to = plan([0, 0, 30], [10, 0, 5])
+    expect(to).toHaveLength(2)
+    expect(guardedMoves({ from: [0, 0, 30], to, wco: ZERO, offset: ZERO, setup: SETUP })).toBe(
+      undefined,
+    )
+  })
+
+  it('down onto the block: the last step, stopped at the margin above it', () => {
+    const to = plan([0, 0, 30], [25, 0, 5])
+    const hit = guardedMoves({ from: [0, 0, 30], to, wco: ZERO, offset: ZERO, setup: SETUP })
+    expect(hit).toMatchObject({ step: 1, contact: { itemId: 'wh1', part: 'tool' } })
+    // the tip stops just above the block's top + margin (22)
+    expect(hit!.stop[2]).toBeGreaterThan(22)
+    expect(hit!.stop[2]).toBeLessThan(22.03)
+    expect(hit!.stop[0]).toBe(25)
+  })
+
+  it('a target beside the block with a holder: the tool clears, the collet nut is named', () => {
+    // ER11 nut Ø19 (radius 9.5) at a 20 mm stickout; the tip 6 mm off the block's side
+    const setup: GuardSetup = {
+      ...SETUP,
+      envelope: toolEnvelope({ diameter: 6 }, 20, {
+        nutDiameter: 19,
+        nutLength: 12,
+        bodyDiameter: 52,
+        name: 'ER11',
+      }),
+    }
+    const to = plan([0, 0, 50], [14, 0, 0])
+    const hit = guardedMoves({ from: [0, 0, 50], to, wco: ZERO, offset: ZERO, setup })
+    expect(hit).toMatchObject({ step: 1, contact: { itemId: 'wh1', part: 'nut' } })
+    // the nut's bottom (tip + 20) stops at the block's top + margin: tip Z ≈ 2
+    expect(hit!.stop[2]).toBeCloseTo(2, 1)
+    // the tool alone (no holder) goes all the way down
+    expect(guardedMoves({ from: [0, 0, 50], to, wco: ZERO, offset: ZERO, setup: SETUP })).toBe(
+      undefined,
+    )
+  })
+
+  it('in the machine frame: through the WCO and the setup offset, back again', () => {
+    const wco: Vec3 = [-200, -150, -60]
+    const offset: Vec3 = [5, 0, 0]
+    // setup X = MPos − WCO + 5: the block at setup X 20..30 is at machine −185..−175
+    const from: Vec3 = [-200, -150, -30]
+    const hit = guardedMoves({
+      from,
+      to: [
+        [-180, -150, -30],
+        [-180, -150, -55],
+      ],
+      wco,
+      offset,
+      setup: SETUP,
+    })
+    expect(hit).toMatchObject({ step: 1, contact: { itemId: 'wh1' } })
+    expect(hit!.stop[2] - wco[2]).toBeCloseTo(22, 1)
+    expect(hit!.at[0]).toBe(-180)
+  })
+
+  it('starting inside: up and out is free, deeper is the first step’s hit', () => {
+    const inside: Vec3 = [25, 0, 5]
+    expect(
+      guardedMoves({
+        from: inside,
+        to: [
+          [25, 0, 30],
+          [0, 0, 30],
+        ],
+        wco: ZERO,
+        offset: ZERO,
+        setup: SETUP,
+      }),
+    ).toBe(undefined)
+    expect(
+      guardedMoves({ from: inside, to: [[25, 0, 2]], wco: ZERO, offset: ZERO, setup: SETUP }),
+    ).toMatchObject({ step: 0, stop: inside })
+  })
+})
+
 // ── on the virtual machine ──────────────────────────────────────────────────────────────────────
 
 const clients: MachineClient[] = []
@@ -313,5 +410,44 @@ describe('guarded jogs on the virtual machine (DF133 RW3)', { timeout: 60_000 },
     // re-armed: starting inside the margin, further in is refused, out is allowed
     expect(t.guarded(step(0, 1))).toMatchObject({ kind: 'blocked', contact: { itemId: 'wh1' } })
     expect(t.guarded(step(0, -1))).toMatchObject({ kind: 'send', args: { by: [-1, 0, 0] } })
+  })
+
+  it('a Go to down onto the block is refused; clear and "Go anyway" go to the target (RW4)', async () => {
+    const t = await virtualMachine()
+    const goTo = (target: Vec3) => {
+      const st = t.status()
+      const wco: Vec3 = [st.mpos[0] - st.wpos[0], st.mpos[1] - st.wpos[1], st.mpos[2] - st.wpos[2]]
+      const steps = goToMoves({
+        from: st.mpos,
+        wco,
+        target,
+        frame: 'work',
+        mode: 'absolute',
+        safeZ: wco[2] + 25,
+        liftToTop: false,
+        ...(st.envelope === undefined ? {} : { envelope: st.envelope }),
+      })
+        .unwrap()
+        .map((s) => s.to)
+      return {
+        steps,
+        hit: guardedMoves({ from: st.mpos, to: steps, wco, offset: ZERO, setup: SETUP }),
+      }
+    }
+    const sendAll = async (steps: readonly Vec3[]) => {
+      for (const to of steps) await t.send({ to: [...to], feed: 5000 })
+      await t.settle(steps[steps.length - 1])
+    }
+    // beside the block, clear: sent as planned, arrives
+    const clear = goTo([10, 0, 5])
+    expect(clear.hit).toBeUndefined()
+    await sendAll(clear.steps)
+    expect(t.status().wpos.map((v) => Math.round(v * 1000) / 1000)).toEqual([10, 0, 5])
+    // onto the block: the down step hits it, nothing is sent by the dialog
+    const onto = goTo([25, 0, 15])
+    expect(onto.hit).toMatchObject({ step: onto.steps.length - 1, contact: { itemId: 'wh1' } })
+    // "Go anyway": the steps as planned, unguarded, reach the target
+    await sendAll(onto.steps)
+    expect(t.status().wpos.map((v) => Math.round(v * 1000) / 1000)).toEqual([25, 0, 15])
   })
 })

@@ -10,6 +10,8 @@
 // but the one safety line. RC6: the same panel for a run the last session left interrupted (the
 // journal at launch, `interruption.launch`): where the run was from with "Open project" / "Open
 // file" / "Locate…", and "Connect to …" (never by itself, Q158) in place of the reconnect line.
+// DF133 RW4: "Go to last position" / the work zero through the workholding guard (once homed with
+// the work zero set; a contact is a finding with "Go anyway", docs/modes/run-workholding.md).
 // Doc: docs/modes/run-recovery.md#the-recovery-panel, #implementation-rc5, #implementation-rc6,
 // docs/conventions/ui.md#run-mode-safety-ui
 import { useEffect, useId, useState } from 'react'
@@ -18,12 +20,14 @@ import { goToMoves, goToSafeZ, goToSeconds, type Vec3 } from '../../../../core/r
 import type { Interruption, LaunchInfo } from '../../../../core/run/interruption'
 import { programHash } from '../../../../core/run/recovery'
 import type { LastRun, RunStatus } from '../../../../core/run/service'
+import { lengthSource } from '../../messages/dfm'
 import { runMessages } from '../../messages/run'
 import { useShell } from '../../shell/ShellContext'
 import { Button, Checkbox, ConfirmDialog, Dialog, DialogClose, Icon } from '../../ui'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
 import { useJogControls, useMachineJog } from './JogPad'
 import { formatFeed, formatLength, goToOpenGate, isConnected, runGates } from './machine-state'
+import { findingText, mayGo, MoveGuardFinding, useGoAnyway, useMoveGuard } from './MoveGuardFinding'
 import { resumeChanges, setupClearance } from './plan-info'
 import { useRun, useRunStore, useRunUnits, type RecoveryUi } from './run-store'
 import styles from './Run.module.css'
@@ -639,6 +643,11 @@ function RecoveryGoTo({
     envelope,
   })
   const steps = planned.isOk() ? planned.unwrap() : undefined
+  // DF133 RW4: the steps through the workholding guard ("Go anyway" for this very move)
+  const tos = steps?.map((s) => s.to) ?? []
+  const guard = useMoveGuard(from, tos)
+  const [anyway, setAnyway] = useGoAnyway(JSON.stringify([from, ...tos]))
+  const findingId = useId()
   const unit = runMessages.dro.units[units]
   const work = (v: number, k: number) => formatLength(v - (wco[k] ?? 0), units)
   const g = m.goTo
@@ -658,13 +667,15 @@ function RecoveryGoTo({
           <Button
             variant="primary"
             icon={<Icon name="move-to" />}
-            disabled={steps === undefined || steps.length === 0}
+            disabled={steps === undefined || steps.length === 0 || !mayGo(guard, anyway)}
+            {...(guard.finding === undefined ? {} : { 'aria-describedby': findingId })}
             onClick={() => {
               const todo = steps ?? []
               onClose()
-              void store
-                .getState()
-                .moveTo(todo.map((s) => ({ to: s.to, feed: s.axis === 'z' ? feed.z : feed.xy })))
+              void store.getState().moveTo(
+                todo.map((s) => ({ to: s.to, feed: s.axis === 'z' ? feed.z : feed.xy })),
+                { anyway },
+              )
             }}
           >
             {g.move}
@@ -690,6 +701,17 @@ function RecoveryGoTo({
             ))}
           </ol>
           <p className={styles['hint']}>{g.seconds(goToSeconds(from, steps, feed))}</p>
+          <MoveGuardFinding
+            id={findingId}
+            text={
+              guard.finding === undefined
+                ? undefined
+                : findingText(guard.finding, from, steps, work, (mm) => lengthSource(mm, units))
+            }
+            guard={guard}
+            anyway={anyway}
+            onAnyway={setAnyway}
+          />
         </>
       )}
     </Dialog>

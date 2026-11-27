@@ -478,6 +478,20 @@ export const runMessages = {
     pastOnce: 'Jog past once',
     pastOnceHint: 'The next jog or Go to within 30 s is not checked against the workholding.',
     pastOnceArmed: 'Next jog unguarded.',
+    /** RW4 (Q187): a Go to's or a touch-off move's finding, under its steps. */
+    moveHit: (
+      n: number,
+      step: string,
+      item: string,
+      part: string,
+      gap: string,
+      rel: 'above' | 'from',
+      at: string,
+    ) => `Step ${n} (${step}) hits ${item}: the ${part} stops ${gap} ${rel} it at ${at}.`,
+    moveDeeper: (n: number, step: string, item: string, part: string) =>
+      `Step ${n} (${step}) takes the ${part} deeper into ${item}.`,
+    anyway: 'Go anyway (the clamps are not where the plan says)',
+    anywayPastOnce: 'Jog past once is armed: this move is not checked.',
     /** Q186: the Jog menu's switch. */
     switchLabel: 'Workholding guard',
     switchHint:

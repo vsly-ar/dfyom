@@ -236,7 +236,14 @@ export function useRunScene(mode: AppMode): RunScene | null {
       p[1] - wco[1]!,
       p[2] - wco[2]! + level,
     ]
-    return { points: [w(preview.from), ...preview.points.map(w)], label: runMessages.goTo.target }
+    return {
+      points: [w(preview.from), ...preview.points.map(w)],
+      label: runMessages.goTo.target,
+      // DF133 RW4: red from the workholding guard's first contact on
+      ...(preview.hit === undefined
+        ? {}
+        : { hit: { step: preview.hit.step, at: w(preview.hit.at) } }),
+    }
     // the offset by value (a new status each report)
   }, [preview, wco?.[0], wco?.[1], wco?.[2], level])
   const workholding = useSceneWorkholding(tool, units)

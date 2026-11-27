@@ -23,6 +23,8 @@ export interface ConfirmDialogProps {
   cancelLabel?: string
   /** Destructive actions use the danger button (red label, never a red fill). */
   destructive?: boolean
+  /** The confirming button is disabled (e.g. a finding in `extra` blocks it, DF133 RW4). */
+  confirmDisabled?: boolean
   trigger?: ReactElement
   open?: boolean
   defaultOpen?: boolean
@@ -37,6 +39,7 @@ export function ConfirmDialog({
   onConfirm,
   cancelLabel = 'Cancel',
   destructive = true,
+  confirmDisabled = false,
   trigger,
   open,
   defaultOpen,
@@ -68,7 +71,11 @@ export function ConfirmDialog({
               <Button>{cancelLabel}</Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <Button variant={destructive ? 'danger' : 'default'} onClick={onConfirm}>
+              <Button
+                variant={destructive ? 'danger' : 'default'}
+                disabled={confirmDisabled}
+                onClick={onConfirm}
+              >
                 {confirmLabel}
               </Button>
             </AlertDialog.Action>

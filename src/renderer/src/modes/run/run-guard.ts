@@ -2,10 +2,15 @@
 // setup, its items and the tool in the spindle, set by `useJogGuardSync` while in Run mode), when
 // it is on (Q184: homed, G54 set, items; the Jog menu's switch, Q186), where a jog starts (the end
 // of the jogs this window queued, else the last report while Idle and settled) and the notice a
-// guarded stop writes in the jog pads. Pure.
-// Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3
+// guarded stop writes in the jog pads. RW4: the steps of a Go to or a touch-off move through the
+// guard (`moveGuard`). Pure.
+// Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3, #implementation-rw4
 import type { UnitSystem } from '../../../../core/project/document'
-import type { GuardSetup } from '../../../../core/run/guarded-jog'
+import {
+  guardedMoves,
+  type GuardedMoveHit,
+  type GuardSetup,
+} from '../../../../core/run/guarded-jog'
 import { STOCK_TOP, type JogContact } from '../../../../core/run/jog-guard'
 import type { RunStatus } from '../../../../core/run/service'
 import type { Vec3 } from '../../../../core/toolpath/model'
@@ -85,6 +90,32 @@ const near = (a: Vec3, b: Vec3, eps: number) => a.every((v, i) => Math.abs(v - b
 /** Whether a report shows the machine at rest at `end` (within the report's 0.001 mm, and a bit). */
 export const arrived = (s: RunStatus, end: Vec3): boolean =>
   s.state === 'Idle' && near(s.mpos, end, 0.002)
+
+/** DF133 RW4: a Go to's or a touch-off move's first contact, with the item's name. */
+export interface MoveFinding {
+  readonly hit: GuardedMoveHit
+  readonly item: string
+}
+
+/**
+ * DF133 RW4 (Q187): the steps `to` (MPos) from `from` through the guard while it is on (the
+ * setup's frame as for jogs); undefined when the guard is not on or every step is clear.
+ */
+export function moveGuard(
+  status: RunStatus,
+  setup: JogGuardSetup,
+  from: Vec3,
+  to: readonly Vec3[],
+): MoveFinding | undefined {
+  const hit = guardedMoves({
+    from,
+    to,
+    wco: wcoOf(status),
+    offset: [setup.zero[0], setup.zero[1], status.zeroLevel ?? 0],
+    setup: setup.setup,
+  })
+  return hit === undefined ? undefined : { hit, item: contactItem(setup, hit.contact) }
+}
 
 /** The item's name for a contact ("the stock top" for the stock). */
 export function contactItem(setup: JogGuardSetup, contact: JogContact): string {

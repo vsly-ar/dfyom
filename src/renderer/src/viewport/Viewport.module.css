@@ -414,3 +414,8 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   white-space: nowrap;
   user-select: none;
 }
+
+/* DF133 RW4: the workholding guard stops the move before the target */
+.goToChip[data-hit] {
+  border-color: var(--danger);
+}

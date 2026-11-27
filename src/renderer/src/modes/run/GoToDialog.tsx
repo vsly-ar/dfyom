@@ -7,7 +7,10 @@
 // restores an edited field first, else closes, stopping the move (jog cancel) if one runs.
 // GT2: the listed steps go to the run store (`goToPreview`) for the 3D path; the dialog sits at
 // the bottom of the end edge without the dark scrim (`placement="end"`), so the view stays visible.
-// Doc: docs/modes/run-goto.md
+// DF133 RW4 (Q187): the steps through the workholding guard on every change; a contact is a finding
+// under the steps, Go disabled, the path red from the contact on, and "Go anyway" (reset when the
+// move changes) or an armed "Jog past once" lets it go. Guard not on: exactly as before.
+// Doc: docs/modes/run-goto.md, docs/modes/run-workholding.md#go-to-and-the-touch-off-spot
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { quantityFromSource } from '../../../../core/expression/quantity'
@@ -25,6 +28,7 @@ import {
 } from '../../../../core/run/goto'
 import type { RunStatus } from '../../../../core/run/service'
 import { None } from '../../../../shared/result'
+import { lengthSource } from '../../messages/dfm'
 import { runMessages } from '../../messages/run'
 import {
   Button,
@@ -38,8 +42,10 @@ import {
 } from '../../ui'
 import { useJogControls, useMachineJog } from './JogPad'
 import { formatFeed, formatLength, goToGate } from './machine-state'
+import { findingText, mayGo, MoveGuardFinding, useGoAnyway, useMoveGuard } from './MoveGuardFinding'
 import { setupClearance } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis, type GoToRequest } from './run-store'
+import { guardActive, moveGuard } from './run-guard'
 import { RunDialogFooter } from './RunStop'
 import styles from './Run.module.css'
 
@@ -137,6 +143,8 @@ type Phase =
       readonly steps: readonly GoToStep[]
       /** The step under way (0-based). */
       readonly current: number
+      /** DF133 RW4: the guard's contact the user went past ("Go anyway", "Jog past once"). */
+      readonly hit?: { readonly step: number; readonly at: Vec3 }
     }
   | { readonly kind: 'stopped'; readonly at: Vec3 }
 
@@ -180,6 +188,7 @@ function GoToOpen({
   const stepsId = useId()
   const whyId = useId()
   const relativeId = useId()
+  const findingId = useId()
   // focus goes back to the DRO value that opened the dialog (taken before the field's autofocus;
   // the dialog unmounts on close, so Radix cannot return it)
   const [opener] = useState(() => request.opener ?? document.activeElement)
@@ -208,12 +217,18 @@ function GoToOpen({
           { axis: Axis; target: number; min: number; max: number } | undefined)
       : undefined
 
+  // DF133 RW4: the steps through the guard; "Go anyway" is for this very move
+  const stepTos = steps?.map((st) => st.to) ?? []
+  const guard = useMoveGuard(plannedFrom, stepTos)
+  const [anyway, setAnyway] = useGoAnyway(JSON.stringify([plannedFrom, ...stepTos]))
+
   const gate = goToGate(status)
   const moving = phase.kind === 'moving'
   const why =
     gate ??
     (!valid ? m.invalid : travel !== undefined ? null : steps?.length === 0 ? m.already : null)
-  const canGo = !moving && why === null && steps !== undefined && steps.length > 0
+  const canGo =
+    !moving && why === null && steps !== undefined && steps.length > 0 && mayGo(guard, anyway)
 
   // follow the steps: Idle at the last end = arrived (the dialog closes); Idle short of it after
   // jogging, or any other state = stopped (the jog cancel, a refusal, an alarm)
@@ -259,10 +274,29 @@ function GoToOpen({
     })
     if (r.isErr() || r.unwrap().length === 0) return
     const todo = r.unwrap()
-    setPhase({ kind: 'moving', from: [s.mpos[0], s.mpos[1], s.mpos[2]], steps: todo, current: 0 })
-    const sent = await store
-      .getState()
-      .moveTo(todo.map((st) => ({ to: st.to, feed: st.axis === 'z' ? feed.z : feed.xy })))
+    const from: Vec3 = [s.mpos[0], s.mpos[1], s.mpos[2]]
+    // DF133 RW4: the guard again on the live steps; a contact goes only with "Go anyway" or past once
+    const st = store.getState()
+    const live = guardActive(st.status, st.guardSetup, st.guardOff)
+      ? moveGuard(
+          st.status,
+          st.guardSetup,
+          from,
+          todo.map((x) => x.to),
+        )
+      : undefined
+    if (live !== undefined && !anyway && st.pastOnceUntil === undefined) return
+    setPhase({
+      kind: 'moving',
+      from,
+      steps: todo,
+      current: 0,
+      ...(live === undefined ? {} : { hit: { step: live.hit.step, at: live.hit.at } }),
+    })
+    const sent = await store.getState().moveTo(
+      todo.map((x) => ({ to: x.to, feed: x.axis === 'z' ? feed.z : feed.xy })),
+      { anyway },
+    )
     if (!sent) {
       const now = store.getState().status
       setPhase({ kind: 'stopped', at: [now.mpos[0], now.mpos[1], now.mpos[2]] })
@@ -346,12 +380,27 @@ function GoToOpen({
 
   // GT2: the steps shown, drawn in the run scene as a dashed path to a target marker (by value,
   // so a status report that moved nothing republishes nothing)
-  const previewKey = list.length === 0 ? '' : JSON.stringify([listFrom, ...list.map((st) => st.to)])
+  // DF133 RW4: red from the guard's contact on
+  const hit =
+    phase.kind === 'moving'
+      ? phase.hit
+      : guard.finding === undefined
+        ? undefined
+        : { step: guard.finding.hit.step, at: guard.finding.hit.at }
+  const previewKey =
+    list.length === 0 ? '' : JSON.stringify([[listFrom, ...list.map((st) => st.to)], hit ?? null])
   useEffect(() => {
-    const pts = previewKey === '' ? [] : (JSON.parse(previewKey) as Vec3[])
+    const [pts, h] =
+      previewKey === ''
+        ? [[], null]
+        : (JSON.parse(previewKey) as [Vec3[], { step: number; at: Vec3 } | null])
     store
       .getState()
-      .setGoToPreview(pts.length < 2 ? undefined : { from: pts[0]!, points: pts.slice(1) })
+      .setGoToPreview(
+        pts.length < 2
+          ? undefined
+          : { from: pts[0]!, points: pts.slice(1), ...(h === null ? {} : { hit: h }) },
+      )
   }, [previewKey, store])
   useEffect(() => () => store.getState().setGoToPreview(undefined), [store])
 
@@ -377,7 +426,7 @@ function GoToOpen({
             variant="primary"
             icon={<Icon name="jog" />}
             disabled={!canGo}
-            aria-describedby={`${stepsId} ${whyId}`}
+            aria-describedby={`${stepsId} ${guard.finding === undefined ? '' : `${findingId} `}${whyId}`}
             onClick={() => void go()}
           >
             {m.go}
@@ -510,6 +559,21 @@ function GoToOpen({
             })}
           </ol>
         </div>
+        {phase.kind === 'editing' && steps !== undefined ? (
+          <MoveGuardFinding
+            id={findingId}
+            text={
+              guard.finding === undefined
+                ? undefined
+                : findingText(guard.finding, plannedFrom, steps, shown, (mm) =>
+                    lengthSource(mm, units),
+                  )
+            }
+            guard={guard}
+            anyway={anyway}
+            onAnyway={setAnyway}
+          />
+        ) : null}
         <p id={whyId} className={styles['why']} role="status">
           {phase.kind === 'moving'
             ? m.moving(phase.current + 1, phase.steps.length)
