@@ -287,6 +287,8 @@ export interface StickoutReason {
   readonly part?: 'nut' | 'body'
   readonly x?: number
   readonly y?: number
+  /** The tool tip's Z at the deciding move (its lowest Z; WCS, mm): where H5's ghost stands. */
+  readonly z?: number
 }
 
 /** An operation's minimum stickout (mm, not rounded) with the clamp term, and its reason. */
@@ -326,6 +328,7 @@ function stickoutsOf(
               part: c.part,
               x: c.at[0] - zero[0],
               y: c.at[1] - zero[1],
+              z: c.at[2],
             },
     })
   }

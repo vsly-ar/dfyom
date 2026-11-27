@@ -310,6 +310,11 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   border-color: var(--accent-border);
 }
 
+/* DF132 H5: the holder ghost's chip at a holder collision */
+.zSpotChip[data-colliding] {
+  border-color: var(--danger);
+}
+
 /* DF78: an alignment point's cycle number beside its marker (AlignmentLayer) */
 .alignChip {
   position: absolute;

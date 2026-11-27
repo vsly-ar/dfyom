@@ -22,11 +22,12 @@
 // a drop commits one `plan.workholding.set` with the whole list and is held until the plan
 // re-reads it (docs/modes/workholding.md#toe-clamp-drag-x2-6). DF122: while an operation cut after
 // its roughing, or that roughing, is selected, its rest region (`RunScene.rest`,
-// docs/modes/roughing.md#plan-viewport-rest-shading).
+// docs/modes/roughing.md#plan-viewport-rest-shading). DF132 H5: the shown operation's holder ghost
+// (`RunScene.holder`, holder-ghost.ts; docs/modes/tool-holder.md#implementation-h5).
 import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
-import type { PlanDTO } from '../../../../core/plan/plan.dto'
+import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import {
   acrossEdge,
   EDGE_WORD,
@@ -34,6 +35,8 @@ import {
   lengthText as summaryLength,
 } from '../../../../core/plan/workholding/items'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
+import { holderSizes } from '../../../../core/plan/workholding/findings'
+import { runStickoutNeeded, toolRuns } from '../../../../core/plan/tool-runs'
 import { linkedToolpaths } from '../../../../core/toolpath/links'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
@@ -59,6 +62,7 @@ import {
   chosenPlan,
   currentSetup,
   editedOperations,
+  loadedPlanOf,
   planPart,
   planStockSize,
   pointsWithAdded,
@@ -73,6 +77,7 @@ import {
   usePlanData,
   usePlanState,
   usePlanStore,
+  type PlanData,
 } from './plan-store'
 import {
   clampAxis,
@@ -82,6 +87,7 @@ import {
   workholdingOverlay,
 } from './workholding-scene'
 import { useMeasuredFrom } from './workholding-from'
+import { holderGhost } from './holder-ghost'
 import { shownZRefRun, snapSpot } from './z-spot'
 import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
 import { usePlanSelection } from './usePlan'
@@ -444,6 +450,36 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       shifted === undefined ? undefined : clamps === undefined ? shifted : { ...shifted, clamps }
     // DF122: the selected owner's (or its roughing's) rest region
     const rest = shownRest(plan, setup, selected, data.toolpaths)
+    // DF132 H5: the shown operation's holder ghost
+    const ghostOp = shownHolderOperation(setup, selected, preview, data)
+    const loaded = ghostOp === undefined ? undefined : loadedPlanOf(doc, plan)
+    const holder = loaded?.machine.andThen((m) => m.holder).mapOr(undefined, holderSizes)
+    const tool = ghostOp?.tool === undefined ? undefined : loaded?.tools.get(ghostOp.tool)
+    const entry = ghostOp === undefined ? undefined : data.toolpaths[ghostOp.id]
+    const current =
+      entry?.toolpath != null && !entry.stale && entry.pendingApply !== true && !data.pendingApply
+        ? (entry.toolpath as Toolpath)
+        : undefined
+    const ghost = holderGhost({
+      op: data.operations?.find((o) => o.id === ghostOp?.id),
+      holder,
+      tool:
+        tool === undefined
+          ? undefined
+          : {
+              diameter: tool.diameter.canonical,
+              ...tool.shankDiameter.mapOr<{ shankDiameter?: number }>({}, (q) => ({
+                shankDiameter: q.canonical,
+              })),
+            },
+      toolpath: current,
+      warnings: data.warnings,
+      label: (stickout, needed) =>
+        planMessages.toolChanges.holderGhost(
+          lengthSource(stickout, units),
+          lengthSource(needed, units, 'up'),
+        ),
+    })
     return {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
@@ -459,8 +495,11 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(aids === undefined ? {} : { aids }),
       ...(workholding === undefined ? {} : { workholding }),
       ...(rest === undefined ? {} : { rest: { patch: rest.patch, level: rest.level } }),
+      ...(ghost === undefined ? {} : { holder: ghost }),
     }
   }, [
+    preview,
+    units,
     data,
     plan,
     setup,
@@ -477,6 +516,37 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     heldClamp,
     clamps,
   ])
+}
+
+/**
+ * The operation whose holder ghost the plan scene shows (DF132 H5, tool-holder.md § Viewport): the
+ * tool run whose tool-change row is hovered or focused (`preview`, its first operation's id) by
+ * the operation that decides the run's minimum stickout (one with a `holder` collision first);
+ * else the selected plan operation; only in the scene's setup.
+ */
+export function shownHolderOperation(
+  setup: SetupDTO,
+  selected: string | null,
+  preview: string | undefined,
+  data: Pick<PlanData, 'operations' | 'warnings'>,
+): PlanOperationDTO | undefined {
+  const run =
+    preview === undefined
+      ? undefined
+      : toolRuns(setup.operations).find((r) => r.operations[0]?.id === preview)
+  if (run === undefined) return setup.operations.find((o) => o.id === selected)
+  const colliding = run.operations.find((o) =>
+    data.warnings.some(
+      (w) =>
+        w.code === 'plan.workholding.collision' &&
+        w.rule === 'holder' &&
+        w.planOperationId === o.id,
+    ),
+  )
+  if (colliding !== undefined) return colliding
+  const rows = run.operations.map((o) => data.operations?.find((r) => r.id === o.id))
+  const needed = runStickoutNeeded(rows.map((r) => r?.stickoutNeeded))
+  return run.operations.find((_, i) => needed !== undefined && rows[i]?.stickoutNeeded === needed)
 }
 
 /** The deviation panel's chosen region in the plan scene (U4 follow-up). */

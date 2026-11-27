@@ -5,7 +5,7 @@
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
 // reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
 // (WorkholdingLayer.tsx, workholding.md); an operation's rest after its roughing (DF122,
-// RestLayer.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx); an interrupted
+// RestLayer.tsx); the shown operation's holder ghost (DF132 H5, HolderGhost.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx); an interrupted
 // run's last seen tool position as a translucent ghost tool (DF129 RC6). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
@@ -27,6 +27,7 @@ import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 import { RestLayer, type RestOverlay } from './RestLayer'
 import { GoToPath, type GoToOverlay } from './GoToPath'
+import { HolderGhost, type HolderGhostOverlay } from './HolderGhost'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -74,6 +75,12 @@ export interface RunScene {
    * coordinates; absent: none (docs/modes/roughing.md#plan-viewport-rest-shading).
    */
   readonly rest?: RestOverlay | undefined
+  /**
+   * The shown operation's tool, collet nut and spindle body at the move that decides its minimum
+   * stickout (plan scene, DF132 H5), in work coordinates; absent: none
+   * (docs/modes/tool-holder.md#implementation-h5).
+   */
+  readonly holder?: HolderGhostOverlay | undefined
   /**
    * The open Go to dialog's planned steps (run scene, DF128 GT2), in work coordinates: a dashed
    * path from the tool to a target marker; absent: none (docs/modes/run-goto.md#preview).
@@ -231,6 +238,7 @@ export function RunLayer({
         <WorkholdingLayer workholding={run.workholding} palette={palette} />
       ) : null}
       {run.rest ? <RestLayer rest={run.rest} palette={palette} /> : null}
+      {run.holder ? <HolderGhost ghost={run.holder} palette={palette} /> : null}
       {run.zRef ? (
         <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
       ) : null}
