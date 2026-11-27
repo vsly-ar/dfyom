@@ -100,6 +100,7 @@ describe('plan.toolpath.generate', () => {
       stale: true,
       pendingApply: false,
       overreach: null,
+      rest: null,
     })
     const first = expectOk(await t.generate()) as Outcome
     expect(first.operations).toEqual(
@@ -140,6 +141,7 @@ describe('plan.toolpath.generate', () => {
       stale: true,
       pendingApply: true,
       overreach: null,
+      rest: null,
     })
     const r = expectOk(await t.generate()) as Outcome
     // the facing and everything after it (chained hash) regenerate
@@ -170,6 +172,7 @@ describe('plan.toolpath.generate', () => {
       stale: true,
       pendingApply: false,
       overreach: null,
+      rest: null,
     })
   })
 

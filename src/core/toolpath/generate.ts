@@ -22,6 +22,7 @@ import type { ToolpathCache } from './cache'
 import { toGeneratorInputs } from './inputs'
 import type { Toolpath } from './model'
 import { toolpathOverreach, type Overreach } from './overreach'
+import { restShading } from './rest-shading'
 import { ToolpathSchema } from './schemas'
 import { setupOrientation } from './wcs'
 
@@ -73,6 +74,44 @@ export function inputOverreach(input: PlanOperationInput, toolpath: Toolpath): O
 const OverreachSchema = z
   .object({ xMin: z.number(), xMax: z.number(), yMin: z.number(), yMax: z.number() })
   .describe('mm the tool reaches past the stock left, right, front, back on the machine')
+
+const RestSchema = z
+  .object({
+    level: z.number().describe('Z of the roughing’s lowest level, setup WCS mm'),
+    area: z.number().describe('mm²'),
+    patch: z
+      .array(
+        z.object({
+          outer: z.array(z.tuple([z.number(), z.number()])),
+          holes: z.array(z.array(z.tuple([z.number(), z.number()]))),
+        }),
+      )
+      .describe('Setup WCS mm (left out of agents’ results)'),
+  })
+  .describe('What the roughing left for this operation’s tool (DF122)')
+
+/**
+ * The rest region of an operation cut after its roughing (DF122), for the Plan viewport's
+ * shading: docs/modes/roughing.md#plan-viewport-rest-shading. Null without a roughing before it,
+ * without the 2D port, or when the 2D library fails (the preview just shows no shading).
+ */
+function inputRest(
+  input: PlanOperationInput,
+  port: Region2dPort | undefined,
+): z.output<typeof RestSchema> | null {
+  if (input.restAfter === undefined || port === undefined) return null
+  const rest = toGeneratorInputs(input, port).andThen((r) => restShading(r, port))
+  if (rest.isErr() || rest.unwrap() === undefined) return null
+  const s = rest.unwrap()!
+  return {
+    level: s.level,
+    area: s.area,
+    patch: s.patch.map((p) => ({
+      outer: p.outer.map((q): [number, number] => [q[0], q[1]]),
+      holes: p.holes.map((h) => h.map((q): [number, number] => [q[0], q[1]])),
+    })),
+  }
+}
 
 const failed = (planOperationId: string, e: AppError): OperationOutcome => ({
   planOperationId,
@@ -198,6 +237,9 @@ export const toolpathGet = defineQuery({
       .boolean()
       .describe("The plan's inputs have changes not applied yet: regenerated on Apply"),
     overreach: OverreachSchema.nullable().describe('Of the current toolpath; null when stale'),
+    rest: RestSchema.nullable().describe(
+      'After its roughing: the rest region; null without one or when stale',
+    ),
   }),
   run(doc, args, ctx) {
     const where = 'plan.toolpath.get'
@@ -238,8 +280,15 @@ export const toolpathGet = defineQuery({
         stale: false,
         pendingApply,
         overreach: inputOverreach(input, current),
+        rest: inputRest(input, ctx.services.region2d),
       })
     const last = cache.unwrap().last(args.planId, args.planOperationId)
-    return Ok({ toolpath: last?.toolpath ?? null, stale: true, pendingApply, overreach: null })
+    return Ok({
+      toolpath: last?.toolpath ?? null,
+      stale: true,
+      pendingApply,
+      overreach: null,
+      rest: null,
+    })
   },
 })

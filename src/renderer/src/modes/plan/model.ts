@@ -558,6 +558,38 @@ export interface ToolpathEntry {
   readonly pendingApply?: boolean
   /** How far the current toolpath's tool reaches past the stock sides (mm, DF59); null if stale. */
   readonly overreach?: Overreach | null
+  /** DF122: after its roughing, what the roughing left (WCS mm); null without one or if stale. */
+  readonly rest?: RestView | null
+}
+
+/** `plan.toolpath.get` `rest` (DF122): the rest region at the roughing's lowest level. */
+export interface RestView {
+  readonly level: number
+  readonly area: number
+  readonly patch: readonly {
+    readonly outer: readonly (readonly [number, number])[]
+    readonly holes: readonly (readonly (readonly [number, number])[])[]
+  }[]
+}
+
+/**
+ * DF122: the rest region the Plan viewport shades, while a plan operation cut after its roughing
+ * or that roughing is selected (in the setup shown); undefined otherwise.
+ * Doc: docs/modes/roughing.md#plan-viewport-rest-shading
+ */
+export function shownRest(
+  plan: PlanDTO,
+  setup: SetupDTO,
+  selected: string | null,
+  toolpaths: Readonly<Record<string, ToolpathEntry>>,
+): RestView | undefined {
+  if (selected === null) return undefined
+  const owner = setup.operations.find(
+    (o) =>
+      toolpaths[o.id]?.rest != null &&
+      (o.id === selected || roughingBefore(plan, o)?.id === selected),
+  )
+  return owner === undefined ? undefined : (toolpaths[owner.id]?.rest ?? undefined)
 }
 
 /**

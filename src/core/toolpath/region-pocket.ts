@@ -611,15 +611,27 @@ export function restInside(
   rough: RestAfter,
   R: number,
 ): AppResult<Region> {
+  return roughCleared(port, region, rough).andThen((cleared) =>
+    cleared.pieces.length === 0 ? Ok(cleared) : port.offset(cleared, R - REST_TOLERANCE),
+  )
+}
+
+/**
+ * What a roughing pocket of `region` cleared at its floor (DF108, DF122): the region shrunk by
+ * the roughing tool's radius + wall margin (its tool-centre region) grown back by its flat
+ * radius. Shared by `restInside` and the Plan viewport's rest shading (rest-shading.ts).
+ */
+export function roughCleared(
+  port: Region2dPort,
+  region: Region,
+  rough: RestAfter,
+): AppResult<Region> {
   return port
     .offset(region, rough.radius + rough.wall)
     .andThen((centres) =>
       centres.pieces.length === 0
         ? Ok(centres)
         : port.offset(centres, -(rough.radius - rough.cornerRadius)),
-    )
-    .andThen((cleared) =>
-      cleared.pieces.length === 0 ? Ok(cleared) : port.offset(cleared, R - REST_TOLERANCE),
     )
 }
 

@@ -754,6 +754,7 @@ export function Viewport({
   const text = [
     summary ?? msg.summary({ operations, status: mesh ? status : 'empty' }),
     regionMarker?.label,
+    run?.rest ? msg.restShaded : undefined,
   ]
     .filter(Boolean)
     .join(' ')

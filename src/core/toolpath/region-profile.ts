@@ -359,7 +359,7 @@ export function generateRegionProfile(
   const cutGroup = (group: readonly Ring[], z: number) => {
     const todo = [...group]
     while (todo.length > 0) {
-      const here = xy()
+      const here = b.position === undefined ? P0 : xy()
       let bi = 0
       let best = ringClosest(todo[0]!.segs, here)!
       todo.forEach((r, i) => {
@@ -508,7 +508,9 @@ export function generateRegionProfile(
     }
     for (const g of groups) cutGroup(g, z)
     // closed loops lift after each level (v0.1); an open groove stays down for the way back
-    if (passes.centre === undefined || passes.rough.length > 0) b.rapid(at(xy(), retract))
+    // DF122: a rest level may cut nothing (the roughing reached everything), so no move yet
+    if ((passes.centre === undefined || passes.rough.length > 0) && b.position !== undefined)
+      b.rapid(at(xy(), retract))
     previous = z
   }
 
@@ -519,7 +521,7 @@ export function generateRegionProfile(
     const finishFeed = cutting.finishFeedRate ?? feed
     const todo = [...passes.finish]
     while (todo.length > 0) {
-      const here = xy()
+      const here = b.position === undefined ? P0 : xy() // DF122: the finishing pass may be the first cut
       let bi = 0
       let bd = Infinity
       todo.forEach((r, i) => {
@@ -642,6 +644,22 @@ export function profileRestInside(
   rough: ProfileRestAfter,
   R: number,
 ): AppResult<Region> {
+  return profileRoughCleared(port, L, outside, rough).andThen((cleared) =>
+    cleared.pieces.length === 0 ? Ok(EMPTY) : port.offset(cleared, R - REST_TOLERANCE),
+  )
+}
+
+/**
+ * DF122 R4: what a roughing profile of loop `L` cleared at its floor: its tool-centre band (as
+ * `profileRestInside` describes it) grown by its flat radius on both sides. Shared with the Plan
+ * viewport's rest shading (rest-shading.ts).
+ */
+export function profileRoughCleared(
+  port: Region2dPort,
+  L: Region,
+  outside: boolean,
+  rough: ProfileRestAfter,
+): AppResult<Region> {
   const far = Math.max(rough.radius, rough.slotWidth - rough.radius)
   const near = Math.min(rough.radius + rough.wall, far)
   const flatR = rough.radius - rough.cornerRadius
@@ -656,14 +674,9 @@ export function profileRestInside(
   if (grown.isErr()) return grown
   const cut = inner.pieces.length === 0 ? Ok(EMPTY) : port.offset(inner, flatR)
   if (cut.isErr()) return cut
-  const cleared =
-    cut.unwrap().pieces.length === 0
-      ? Ok(grown.unwrap())
-      : port.difference(grown.unwrap(), cut.unwrap())
-  if (cleared.isErr()) return cleared
-  return cleared.unwrap().pieces.length === 0
-    ? Ok(EMPTY)
-    : port.offset(cleared.unwrap(), R - REST_TOLERANCE)
+  return cut.unwrap().pieces.length === 0
+    ? Ok(grown.unwrap())
+    : port.difference(grown.unwrap(), cut.unwrap())
 }
 
 /** Half-width of tool-centre travel in an `on` slot; slightly negative within the fit tolerance. */

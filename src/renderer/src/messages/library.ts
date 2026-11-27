@@ -258,6 +258,8 @@ export const libraryMessages = {
     included: (deg: string) => `${deg}° included`,
     /** The cone read-out (`taperHeights`): "Cone reaches Ø 3.175 mm at 21.5 mm". */
     coneReaches: (dc: string, h: string) => `Cone reaches Ø ${dc} at ${h}.`,
+    /** DF124 T3 follow-up (`taperedGrooveWidth`): "Cuts a groove 0.6 mm wide at 1 mm deep." */
+    grooveWidth: (w: string, d: string) => `Cuts a groove ${w} wide at ${d} deep.`,
     /** Q153: the cone does not fit the flutes, the usual sign of an included angle typed per side. */
     coneMismatch: (h: string, lcf: string, deg: string) =>
       `The cone reaches the large end at ${h}, the flutes end at ${lcf}: is ${deg}° the angle per side?`,

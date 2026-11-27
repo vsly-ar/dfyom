@@ -4,7 +4,8 @@
 // and the work zero marker at the WCS origin, all in the setup's WCS, placed on the part by the
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
 // reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
-// (WorkholdingLayer.tsx, workholding.md). Props only.
+// (WorkholdingLayer.tsx, workholding.md); an operation's rest after its roughing (DF122,
+// RestLayer.tsx). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -23,6 +24,7 @@ import {
 import { AidHandles, type AidOverlay } from './AidHandles'
 import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
+import { RestLayer, type RestOverlay } from './RestLayer'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -65,6 +67,11 @@ export interface RunScene {
    * workholding.md#ui-summary), in work coordinates; absent: none.
    */
   readonly workholding?: WorkholdingOverlay | undefined
+  /**
+   * The selected operation's rest region after its roughing (plan scene, DF122), in work
+   * coordinates; absent: none (docs/modes/roughing.md#plan-viewport-rest-shading).
+   */
+  readonly rest?: RestOverlay | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -211,6 +218,7 @@ export function RunLayer({
       {run.workholding ? (
         <WorkholdingLayer workholding={run.workholding} palette={palette} />
       ) : null}
+      {run.rest ? <RestLayer rest={run.rest} palette={palette} /> : null}
       {run.zRef ? (
         <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
       ) : null}

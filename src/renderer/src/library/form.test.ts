@@ -277,9 +277,13 @@ describe('tapered ball end mill (tapered-ball-nose.md § Library window, DF124 T
     expect(texts(tapered('mm'), 'mm')).toEqual({
       tipDiameter: ['R 0.25 mm'],
       taperAngle: ['7.2° included'],
-      diameter: ['Cone reaches Ø 3.175 mm at 21.5 mm.'],
+      // T3 follow-up: the groove width at 1 mm from the core's formula (doc example 0.60 mm)
+      diameter: ['Cone reaches Ø 3.175 mm at 21.5 mm.', 'Cuts a groove 0.6 mm wide at 1 mm deep.'],
     })
-    expect(texts(tapered('inch'), 'inch')).toMatchObject({ tipDiameter: ['R 0.01"'] })
+    expect(texts(tapered('inch'), 'inch')).toMatchObject({
+      tipDiameter: ['R 0.01"'],
+      diameter: [expect.any(String), 'Cuts a groove 0.024" wide at 0.04" deep.'],
+    })
     expect(taperedNotes(defaultToolValues('mm'), 'mm')).toEqual({})
   })
 

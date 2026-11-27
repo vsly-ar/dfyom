@@ -6,9 +6,12 @@
 // plan list there (review captures, not asserted). R4: the same for a through outside profile
 // (its floor margin is the Skin; captures with DFYOM_R4_DIR). R5: Make Clones… on a roughed
 // pocket; both instances rough (the roughings in one Ø 8 run, both pockets with the rest chip).
+// The Plan viewport shades the rest while the pocket or profile, or its roughing, is selected (its
+// text summary says so; captures with DFYOM_REST_DIR).
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/roughing.md#ui, docs/modes/roughing.md#implementation-r2,
 // docs/modes/roughing.md#implementation-r4, docs/modes/roughing.md#implementation-r5,
+// docs/modes/roughing.md#plan-viewport-rest-shading,
 // docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -18,6 +21,8 @@ import { expect, test } from './app.fixture'
 
 const SHOTS = process.env['DFYOM_R2_DIR']
 const SHOTS_R4 = process.env['DFYOM_R4_DIR']
+// the Plan viewport's rest shading (DF122, R3's viewport item): top and isometric, light and dark
+const SHOTS_REST = process.env['DFYOM_REST_DIR']
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -47,6 +52,34 @@ const flat = (diameter: number) => ({
     },
   ],
 })
+
+/**
+ * DF122: the viewport's text summary names the rest shading while the owner or its roughing is
+ * selected; with DFYOM_REST_DIR, captures from the top and the isometric view.
+ */
+async function restShading(
+  page: Page,
+  owner: Locator,
+  roughing: Locator,
+  name: string,
+): Promise<void> {
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  const shaded = /Shaded: what the roughing left for this operation\./
+  await owner.click()
+  await expect(viewport).toHaveAccessibleDescription(shaded)
+  if (SHOTS_REST !== undefined) {
+    await viewport.focus()
+    await page.keyboard.press('1')
+    await expect(viewport).toHaveAccessibleDescription(/View: Top\./)
+    await shoot(page, `${name}-top`, SHOTS_REST)
+    await page.keyboard.press('4')
+    await expect(viewport).toHaveAccessibleDescription(/View: Top front right corner\./)
+    await shoot(page, `${name}-iso`, SHOTS_REST)
+  }
+  // the roughing selected: the same shading
+  await roughing.click()
+  await expect(viewport).toHaveAccessibleDescription(shaded)
+}
 
 /** `name`-light.png and -dark.png of the window (only with DFYOM_R2_DIR, or `to`). */
 async function shoot(page: Page, name: string, to = SHOTS): Promise<void> {
@@ -169,6 +202,7 @@ test('roughing: turn it on for a pocket, see the pass in the Plan list, export',
 
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await restShading(page, rows.nth(1), rows.nth(0), 'rest-pocket')
   await rows.nth(1).click()
   await shoot(page, 'r2-plan-rest')
   await navigator
@@ -271,6 +305,7 @@ test('roughing R4: a through outside profile roughs above its skin, rest chip, e
   await expect(rows.nth(1).getByTitle('Cuts only what Profile 1 · roughing left')).toBeVisible()
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await restShading(page, rows.nth(1), rows.nth(0), 'rest-profile')
   await rows.nth(1).click()
   await shoot(page, 'r4-plan-rest', SHOTS_R4)
   await navigator

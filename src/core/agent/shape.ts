@@ -122,7 +122,7 @@ export class ResultShaper {
     const summary = view.detail === 'summary'
     if (summary && call.name === 'plan.get') value = this.planSummary(value)
     if (call.name === 'plan.toolpath.get')
-      value = summary ? toolpathSummary(value) : toolpathRange(value, view)
+      value = withoutRestPatch(summary ? toolpathSummary(value) : toolpathRange(value, view))
     if (summary && call.name === 'design.shape.get') value = shapeSummary(value)
     if (call.name === 'plan.warning.list')
       value = summary ? findingGroups(value) : withFindingNext(value)
@@ -525,6 +525,16 @@ function bounds(passes: readonly { moves: readonly MoveLike[] }[]) {
       }
     }
   return min[0] === Infinity ? null : { min, max }
+}
+
+/**
+ * `plan.toolpath.get`'s rest region without its viewport outline (DF122,
+ * docs/modes/roughing.md#plan-viewport-rest-shading): the level and area stay.
+ */
+function withoutRestPatch(value: unknown): unknown {
+  if (!isObj(value) || !isObj(value['rest'])) return value
+  const { patch: _, ...rest } = value['rest']
+  return { ...value, rest }
 }
 
 /** `plan.toolpath.get` summary: moves per pass, bounds, lengths and time. */
