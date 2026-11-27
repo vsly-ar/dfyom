@@ -24,6 +24,7 @@ import {
   patchPreset,
   qdto,
   quantityText,
+  taperedNotes,
   toolName,
   uniqueName,
   nameTaken,
@@ -251,5 +252,53 @@ describe('recommended presets (library.md#recommended-presets)', () => {
     expect(patchPreset(p, { stepover: qdto('length', '2', 'mm') }).recommended).toBe(true)
     expect(patchPreset(p, { name: 'B' }).recommended).toBe(true)
     expect(patchPreset(p, { recommended: undefined }).recommended).toBeUndefined()
+  })
+})
+
+describe('tapered ball end mill (tapered-ball-nose.md § Library window, DF124 T3)', () => {
+  const tapered = (units: UnitSystem) =>
+    withToolType(defaultToolValues(units), 'taperedBallEndMill', units)
+  const texts = (v: ReturnType<typeof tapered>, units: UnitSystem) =>
+    Object.fromEntries(
+      Object.entries(taperedNotes(v, units)).map(([k, ms]) => [k, ms.map((x) => x.text)]),
+    )
+
+  it('becomes a typical 1/8″ bit: R0.25 at 3.6° per side, its large end the shank, valid', () => {
+    for (const units of ['mm', 'inch'] as const) {
+      const v = tapered(units)
+      expect(v.diameter).toEqual(v.shankDiameter)
+      expect(draftIssues(v, true)).toEqual([])
+    }
+    expect(toolName(tapered('mm'))).toBe('Tapered ball R0.25 3.6°')
+    expect(toolName(tapered('inch'))).toBe('Tapered ball R0.01 3.6°')
+  })
+
+  it('reads out the radius, the included angle and where the cone reaches the large end', () => {
+    expect(texts(tapered('mm'), 'mm')).toEqual({
+      tipDiameter: ['R 0.25 mm'],
+      taperAngle: ['7.2° included'],
+      diameter: ['Cone reaches Ø 3.175 mm at 21.5 mm.'],
+    })
+    expect(texts(tapered('inch'), 'inch')).toMatchObject({ tipDiameter: ['R 0.01"'] })
+    expect(taperedNotes(defaultToolValues('mm'), 'mm')).toEqual({})
+  })
+
+  it('hints (Q153, info, never an error) when the cone ends beyond 1.5 × or before ½ × the flutes', () => {
+    const v = { ...tapered('mm'), taperAngle: qdto('angle', '1.8', 'mm') }
+    const hint = taperedNotes(v, 'mm').fluteLength
+    expect(hint).toEqual([
+      {
+        id: 'coneMismatch',
+        severity: 'info',
+        text: 'The cone reaches the large end at 42.8 mm, the flutes end at 20 mm: is 1.8° the angle per side?',
+      },
+    ])
+    expect(draftIssues(v, true)).toEqual([])
+    // under half: a 10° cone on 20 mm flutes reaches the shank at 7.6 mm
+    const short = { ...tapered('mm'), taperAngle: qdto('angle', '10', 'mm') }
+    expect(taperedNotes(short, 'mm').fluteLength?.[0]?.id).toBe('coneMismatch')
+    // a tip as wide as the large end has no cone: no read-out (the field shows its error)
+    const wide = { ...tapered('mm'), tipDiameter: qdto('length', '4', 'mm') }
+    expect(taperedNotes(wide, 'mm')).not.toHaveProperty('diameter')
   })
 })

@@ -1041,6 +1041,16 @@ U4, in the [Library window](ui-library-window.md) and the quick "New tool…" di
 - **Tool drawing** (`ToolDrawing`): the side view with the conical tip; the focused field's dimension is amber (DC across the top of the cone, the angle as an arc between the flanks, the tip as the flat at the bottom, LCF along the flank, OAL), named in the image label ("Tool drawing: included angle highlighted").
 - **Item list:** an "Angle" column, empty for the other types (an empty cell, not a dash, as the segment table); the tool picker and tool field show "90° chamfer mill Ø 12" (generalized) or the tool's name beside the icon.
 
+#### Tapered ball end mill in the Library window
+
+DF124 T3 ([tapered-ball-nose.md § Implementation (T3)](../modes/tapered-ball-nose.md#implementation-t3)), in the Library window and the quick "New tool…" dialogs:
+
+- **Type** "Tapered ball end mill" with the `tapered-ball-end-mill` icon ([icons](#icons-v04)), offered for every new tool.
+- **Geometry fields, in vendor order:** Tip diameter (ball) (icon `ballTip`, note "R 0.25 mm"), Taper angle (per side) (icon `taperAngle`, (i) "half the included angle", note "7.2° included"), Shank diameter (shown in the quick dialog too), Large end diameter (the stored `diameter`, DC; follows the shank while the two are equal; note "Cone reaches Ø 3.175 mm at 21.5 mm."), Flute length, Stickout, Flutes; Overall length under Details. Becoming one sets a 1/8″ shank and large end, 20 mm / 3/4″ flutes, R0.25 / 0.01″ at 3.6°. Name suggestion "Tapered ball R0.25 3.6°".
+- **Q153 hint** at Flute length (severity `info`, never blocks Save) when the cone reaches the large end beyond 1.5 × or before ½ × the flute length: "The cone reaches the large end at 42.8 mm, the flutes end at 20 mm: is 1.8° the angle per side?".
+- **Tool drawing:** shank, cone (drawn about 9° per side) and ball tip; DC below, DCN across the ball, TA an arc between a dashed axis-parallel line and the flank, LCF from the cone's top. The legend names DC "Large end diameter" and DCN "Tip diameter (ball)".
+- **Item list:** the Angle column shows "3.6°/side" (sorted by the included angle).
+
 #### Clones
 
 `ClonesInspector` and `ClonesDraft` (U3):
@@ -1109,6 +1119,7 @@ Drawn in L1 to the [icon rules](#icons) (16 px grid, one accent part, grey at re
 | `hole-countersink`                   | Section: the bore with a cone at the mouth; accent: the cone flanks                                                                                                  |
 | `chamfer`                            | Section of an edge with a 45° bevel; accent: the bevel. Distinct from the countersink by having no bore                                                              |
 | `chamfer-mill`                       | The drawn V-bit side view (formerly `v-bit`) wired as the `chamferMill` tool type (B22-6 a); accent: the conical tip (B22-4 a)                                       |
+| `tapered-ball-end-mill` (DF124 T3)   | Side view: a short shank over a long cone ending in a small ball; accent: the cone flanks and the ball                                                               |
 | `clones`                             | A rounded square (the source) and two dashed copies along a dotted path; accent: the path. Also Make Clones…                                                         |
 | Row kinds (`row-grid` … `row-along`) | Dots (≤ 1.8 px, the fill exception) in the row's layout: a 3 × 2 grid, a line, a ray, an arc round a cross, a jump arrow to a dot, dots on a curve; accent: the dots |
 | `groove` (B22 follow-up)             | Redrawn for 16 px: the bent slot closed by a round cap at its visible end and 1 px wider, so it reads as a slot, not a signal glyph; accent: the centreline          |

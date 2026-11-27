@@ -114,13 +114,22 @@ function columns(kind: LibraryTabKind, units: UnitSystem): Column[] {
         text: (i) => (i.kind === 'tool' ? quantityText(i[key]) : ''),
         sort: (i) => (i.kind === 'tool' ? num(i[key]) : 0),
       })),
-      // a chamfer mill's included angle; an empty cell for the other types (task U4)
+      // a chamfer mill's included angle, a tapered ball's per side ("3.6°/side", DF124 T3, sorted
+      // by its included angle); an empty cell for the other types (task U4)
       {
         key: 'angle',
         label: w.columns.angle,
         numeric: true,
-        text: (i) => (i.kind === 'tool' && i.angle !== undefined ? degrees(i.angle) : ''),
-        sort: (i) => (i.kind === 'tool' ? num(i.angle) : 0),
+        text: (i) =>
+          i.kind !== 'tool'
+            ? ''
+            : i.angle !== undefined
+              ? degrees(i.angle)
+              : i.taperAngle !== undefined
+                ? libraryMessages.tool.perSide(degrees(i.taperAngle).slice(0, -1))
+                : '',
+        sort: (i) =>
+          i.kind !== 'tool' ? 0 : i.taperAngle !== undefined ? 2 * num(i.taperAngle) : num(i.angle),
       },
       {
         key: 'presets',

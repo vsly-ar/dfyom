@@ -21,7 +21,7 @@ import {
 import type { MachineValuesDTO } from '../../../core/library/machine.dto'
 import type { StockValuesDTO } from '../../../core/library/stock.dto'
 import type { WorkholdingType, WorkholdingValuesDTO } from '../../../core/library/workholding.dto'
-import { Tool } from '../../../core/library/tool'
+import { taperHeights, Tool } from '../../../core/library/tool'
 import type { CuttingPresetDTO, ToolType, ToolValuesDTO } from '../../../core/library/tool.dto'
 import {
   itemUnitSystem,
@@ -36,6 +36,7 @@ import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import type { Issue } from '../../../shared/errors/app-error'
 import { libraryMessages } from '../messages/library'
+import type { FieldMessage } from '../ui'
 
 export { libraryUnit }
 
@@ -270,6 +271,67 @@ export function defaultValues(
         : defaultWorkholdingValues(type, units)
 }
 
+// ── tapered ball end mill read-outs (tapered-ball-nose.md § Library window, DF124 T3) ─────────
+
+/** A length in the window's units, at most `places` decimals (one more for inches): "0.25 mm". */
+function lengthText(mm: number, units: UnitSystem, places: number): string {
+  return units === 'inch'
+    ? `${Number((mm / 25.4).toFixed(places + 1))}"`
+    : `${Number(mm.toFixed(places))} mm`
+}
+
+/** Q153: the hint shows when the cone reaches the large end beyond 1.5 × LCF or before LCF / 2. */
+export const CONE_MISMATCH = { over: 1.5, under: 0.5 } as const
+
+/**
+ * The read-outs of a tapered ball end mill's fields, as field notes (empty for other types or
+ * values that do not load): the ball's radius at the tip, the included angle at the taper angle,
+ * where the cone reaches the large end (`taperHeights`) at the large end, and the Q153 hint at the
+ * flute length when cone and flutes do not fit (a hint, never an error: real bits differ).
+ */
+export function taperedNotes(
+  v: ToolDraft,
+  units: UnitSystem,
+): Readonly<
+  Partial<Record<'tipDiameter' | 'taperAngle' | 'diameter' | 'fluteLength', FieldMessage[]>>
+> {
+  if (v.type !== 'taperedBallEndMill') return {}
+  const m = libraryMessages.tool
+  const tip = v.tipDiameter === undefined ? undefined : quantityOf(v.tipDiameter)?.canonical
+  const a = v.taperAngle === undefined ? undefined : quantityOf(v.taperAngle)?.canonical
+  const dc = quantityOf(v.diameter)?.canonical
+  const lcf = quantityOf(v.fluteLength)?.canonical
+  const note = (id: string, text: string): FieldMessage[] => [{ id, severity: 'note', text }]
+  const deg = (x: number) => String(Number(x.toFixed(2)))
+  const out: Partial<
+    Record<'tipDiameter' | 'taperAngle' | 'diameter' | 'fluteLength', FieldMessage[]>
+  > = {}
+  if (tip !== undefined && tip > 0)
+    out.tipDiameter = note('ballRadius', m.ballRadius(lengthText(tip / 2, units, 3)))
+  if (a !== undefined && a > 0) out.taperAngle = note('included', m.included(deg(2 * a)))
+  // the cone needs a ball smaller than the large end and an angle in range (else the field errors)
+  if (tip === undefined || a === undefined || dc === undefined || !(a > 0 && a < 90 && tip < dc))
+    return out
+  const h = taperHeights(tip, a, dc).largeEnd
+  out.diameter = note(
+    'coneReaches',
+    m.coneReaches(lengthText(dc, units, 3), lengthText(h, units, 1)),
+  )
+  if (
+    lcf !== undefined &&
+    lcf > 0 &&
+    (h > CONE_MISMATCH.over * lcf || h < CONE_MISMATCH.under * lcf)
+  )
+    out.fluteLength = [
+      {
+        id: 'coneMismatch',
+        severity: 'info',
+        text: m.coneMismatch(lengthText(h, units, 1), lengthText(lcf, units, 1), deg(a)),
+      },
+    ]
+  return out
+}
+
 /** Names compare trimmed and case-insensitively (ui-library-window.md § Names, DF47). */
 const nameKey = (name: string) => name.trim().toLocaleLowerCase()
 
@@ -298,11 +360,24 @@ export function uniqueName(base: string, taken: readonly string[]): string {
  * among `taken`, the other tools' names ("Flat 6 (2)", DF47).
  */
 export function toolName(
-  v: Pick<ToolDraft, 'type' | 'diameter' | 'angle'>,
+  v: Pick<ToolDraft, 'type' | 'diameter' | 'angle' | 'tipDiameter' | 'taperAngle'>,
   taken: readonly string[] = [],
 ): string {
   const short = libraryMessages.tool.shortTypes[v.type]
   const d = v.diameter.source.trim()
+  if (v.type === 'taperedBallEndMill') {
+    // as vendors and the G-code comment name it: "Tapered ball R0.25 3.6°" (tapered-ball-nose.md
+    // § Implementation (T3)); the radius in the unit the tip was entered in
+    const tip = v.tipDiameter === undefined ? undefined : quantityOf(v.tipDiameter)
+    const a = v.taperAngle === undefined ? undefined : quantityOf(v.taperAngle)?.canonical
+    if (tip === undefined || a === undefined) return uniqueName(`${short} ${d}`, taken)
+    const inch = v.tipDiameter?.defaultUnit === 'in'
+    const r = tip.canonical / 2 / (inch ? 25.4 : 1)
+    return uniqueName(
+      `${short} R${Number(r.toFixed(inch ? 4 : 3))} ${Number(a.toFixed(2))}°`,
+      taken,
+    )
+  }
   if (v.type !== 'chamferMill') return uniqueName(`${short} ${d}`, taken)
   const a = v.angle === undefined ? undefined : quantityOf(v.angle)?.canonical
   return uniqueName(
@@ -327,6 +402,18 @@ export function withToolType(v: ToolDraft, type: ToolType, units: UnitSystem): T
       tipDiameter: v.tipDiameter ?? qdto('length', units === 'mm' ? '0.5' : '0.02', units),
       taperAngle: v.taperAngle ?? qdto('angle', '3.6', units),
     }),
+    // … on the usual 1/8″ shank, its large end the shank, with the usual 20 mm / 3/4″ flutes, so
+    // the cone fits the flutes (§ Implementation (T3)); the shank the user gave stays
+    ...(type === 'taperedBallEndMill' &&
+      v.type !== 'taperedBallEndMill' &&
+      (() => {
+        const shank = v.shankDiameter ?? qdto('length', units === 'mm' ? '3.175' : '1/8', units)
+        return {
+          shankDiameter: shank,
+          diameter: shank,
+          fluteLength: qdto('length', units === 'mm' ? '20' : '3/4', units),
+        }
+      })()),
     cornerRadius: v.cornerRadius ?? qdto('length', units === 'mm' ? '1' : '1/32', units),
     pointAngle: v.pointAngle ?? qdto('angle', '118', units),
     angle,

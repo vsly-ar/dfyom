@@ -291,6 +291,16 @@ export const ICON_SET = {
     src: 'b22',
     parts: [{ d: 'M6 7V1.5h4V7M3.5 7h9' }, { d: 'M3.5 7L8 14.5 12.5 7', a: true }],
   },
+  // DF124 T3: a ball tip on a cone below the shank; the cone and ball are the cutting end
+  'tapered-ball-end-mill': {
+    label: 'Tapered ball end mill',
+    group: 'tool',
+    src: 'b22',
+    parts: [
+      { d: 'M5 5.5V1.5h6v4H5' },
+      { d: 'M5 5.5L6.9 12.6a1.1 1.1 0 0 0 2.2 0L11 5.5', a: true },
+    ],
+  },
   // ── drawing tools and shape kinds (top views) ───────────────────────────────────────────────
   select: {
     label: 'Select',
