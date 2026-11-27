@@ -363,12 +363,25 @@ Numbering continues after [pattern-presets.md](../modes/pattern-presets.md#quest
 | A3    | Inspector line and tooltip; the Library window note                                                                                                                                                                                                                                          | Component tests for the line (one field, three fields, none); a hidden-window e2e check of the inspector on an adapted operation                                                                                                                                                                                                                                                    |
 | A4    | X3 recheck                                                                                                                                                                                                                                                                                   | The X3 plan rebuilt (scripted, recommended presets): `plan_warning_list` has no F5 entries; the research note's F5 and this section marked done; status → implemented                                                                                                                                                                                                               |
 
+### Implementation (DF139)
+
+**(A1) `adaptPreset`** in [`preset.ts`](../../src/core/feeds-speeds/preset.ts), tests in [`adapt.test.ts`](../../src/core/feeds-speeds/adapt.test.ts) (the X3 and DF131 cases, the spindle range both ways, the X/Y and Z limits, no spindle power, the chip-load floor, inch rounding, and a 400-case seeded property test: feed, plunge and stepdown never rise, the speed rises only to the spindle minimum, the spindle load never rises, the result is within every machine limit, and within the power budget unless flagged). Decisions:
+
+- **One model for the check and the adaptation.** The final-value check's chip load and power are now `checkModel` in `suggest.ts` (`checkCutting` uses it); `adaptPreset` fits against the same model, so an adapted value cannot trip the check it adapted for.
+- **Rounding keeps the chip.** When speed and feed move together (steps 1 and 2) the feed rounds down first and the speed follows the rounded feed, rounded down to whole rpm (not below the spindle minimum): the chip is never thinner than the stored one, which sits on the data minimum (lowest rigidity, `fz` position 0), so a rounding cannot add a `feeds.rubbing`. A feed reduced for power rounds down, but never below the chip-load floor (it rounds up to it instead, never above the stored feed). The stepdown floor is one rounding step (0.01 mm, 0.001 in).
+- **The power step's engagement** is the operation's: the preset's stepdown, or the strategy's fallback stepdown when the preset has none (then the feed absorbs the excess), and the preset's or the strategy's stepover (facing). A drill feeds along Z, so step 2 also caps a drill's feed at the Z max (`maxFeedRateZ`).
+- **One reason per field:** the last step that changed it (a feed scaled by the spindle maximum and then reduced for power says `power`). `from` is the stored canonical value; a field whose rounded value equals the stored one is not adapted.
+- **The chip-load floor is the plan engagement's**, not the preset's: a chamfer cut shallower than the full cone (a smaller De, maybe another diameter band) has a lower floor, so its feed can drop. The X3 countersink (Chamfer 82 at Ø4.861, De in the ≤ 6 mm band) drops 4572 → 2744 mm/min but still needs 0.43 kW of 0.3 kW: **it stays flagged** (`powerExceeded`), the real warning the Warnings paragraph keeps. Lowering a feed under the data minimum (rubbing) is not an adaptation (Q213).
+
 ## API
 
 ```ts
 // src/core/feeds-speeds/suggest.ts
 suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing data → None fields + warning
 checkCutting(input: CuttingInput, values: CuttingValues): CheckWarning[] // final-value check
+checkModel(input: CuttingInput): Option<CheckModel> // its chip load and power model (DF139)
+// src/core/feeds-speeds/preset.ts (DF139)
+adaptPreset(values: PresetValues, input: AdaptInput, machine: MachineLimits, units?): AdaptedPreset
 noDataFor(input: CuttingInput): Option<CuttingWarning> // feeds.noData, or None when there is data
 ```
 
