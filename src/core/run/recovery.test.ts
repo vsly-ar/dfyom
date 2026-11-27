@@ -205,8 +205,9 @@ describe('the lead-in', () => {
       'M5',
       'M9',
       'G53 G0 Z-1',
-      '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)',
-      'M0 ;Check T1 Flat 6, 6 mm flat, then zero Z',
+      // DF130: the marker's description carries the minimum stickout into the lead-in
+      '(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 17.5 mm)',
+      'M0 ;Check T1 Flat 6, 6 mm flat, min stickout 17.5 mm, then zero Z',
       'G90 G94 G17 G21',
       'G54',
       'G53 G0 Z-1',
