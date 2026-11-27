@@ -68,6 +68,14 @@ export const disabledFollowHook: DocumentHook = {
         if (kept.length === 0) delete draftPart.alreadyCut
         else if (kept.length !== cut.length) draftPart.alreadyCut = kept
       }
+      // C2: a mark goes with its id
+      const marks = part.alreadyCutMarks
+      if (marks !== undefined) {
+        const listed = new Set(draftPart.alreadyCut ?? [])
+        const gone = Object.keys(marks).filter((x) => !listed.has(x))
+        if (gone.length === Object.keys(marks).length) delete draftPart.alreadyCutMarks
+        else for (const x of gone) delete draftPart.alreadyCutMarks![x]
+      }
       if (part.disabled === undefined) continue
       const before = isDraft(draftPart) ? (original(draftPart) as PartDTO | undefined) : undefined
       const r = follow(part, before, command.name)

@@ -186,7 +186,11 @@ export function planOperationInputs(
   // operation made every export quadratic in operations (hardening P4).
   // DF135: the already-cut list only leaves operations out of the program, so their toolpaths
   // (and every later one) stay cached when it changes
-  const part = hashJson({ ...plan.dto.design.part, alreadyCut: undefined })
+  const part = hashJson({
+    ...plan.dto.design.part,
+    alreadyCut: undefined,
+    alreadyCutMarks: undefined,
+  })
   const isCut = cutTest(plan.dto.design.part)
   let chain = ''
   let previous: string | undefined

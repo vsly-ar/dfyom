@@ -947,6 +947,12 @@ export const designMessages = {
     cut: 'Cut',
     cutTitle:
       'Already cut: the stock no longer has this material. Plans keep it as removed and export nothing for it.',
+    /** DF135 C2: a mark set by a real run, with its date; changed since (Q198 as revised). */
+    cutByRunTitle: (date: string) =>
+      `Cut by a run on ${date}: the stock no longer has this material. Plans keep it as removed and export nothing for it.`,
+    cutChanged: 'Changed',
+    cutChangedTitle: (date: string) =>
+      `Changed since the run cut it on ${date}: the stock still has the shape the run cut. Plans export nothing for it.`,
     actions: (name: string) => `Actions for ${name}`,
     /** The description of a row with a row menu (DF70: no action buttons on rows). */
     rowMenuHint: 'Right-click or Shift+F10 for actions.',

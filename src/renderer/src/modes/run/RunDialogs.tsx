@@ -33,6 +33,7 @@ import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
+import { useRunCutMarks } from './CutMarks'
 import styles from './Run.module.css'
 
 export function RunDialogs(): React.JSX.Element {
@@ -43,6 +44,8 @@ export function RunDialogs(): React.JSX.Element {
   const running = useRun((s) => activeJob(s.status) !== undefined)
   // DF93: a window with a file that opens a project shows the project; the file is dropped
   const hasDoc = doc !== undefined
+  // DF135 C2: a real run's finished operations marked already cut (cut-state.md#marking)
+  useRunCutMarks(doc)
   useEffect(() => {
     if (hasDoc && !running && store.getState().file !== undefined) store.getState().closeFile()
   }, [hasDoc, running, store])

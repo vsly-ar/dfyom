@@ -80,6 +80,7 @@ import {
   syncRoughing,
 } from './roughing'
 import { checkDisabledList, disabledState, dropDisabledWarnings } from './disabled'
+import { cutMarksFor } from './already-cut'
 import { baseOf } from './frozen-memo'
 import {
   AnchorDtoSchema,
@@ -1533,6 +1534,7 @@ const partUpdate = defineCommand({
       .array(z.string().min(1))
       .optional()
       .describe('Ids already cut in the stock (replaces the list)'),
+    cutByRun: z.string().min(1).optional().describe('Plan of the real run that cut the ids added'),
   }),
   // the stock is listed on design.part.add only (tools/list budget, DF95); validated in full
   listedArgs: { stock: listedAs('object', 'design.part.add stock (changes the stock)') },
@@ -1595,8 +1597,35 @@ const partUpdate = defineCommand({
           })),
           where,
         )
+      // C2: who marked each id and when; a run mark keeps the geometry as the run cut it (the
+      // plan's design copy), so a later edit warns (cut-state.md#editing-an-already-cut-operation)
+      let runPart: PartDTO | undefined
+      if (args.cutByRun !== undefined) {
+        const plan = draft.plans[args.cutByRun]
+        if (plan === undefined || plan.design.part.id !== args.partId)
+          return malformed(
+            [
+              {
+                path: ['cutByRun'],
+                rule: 'unknownPlan',
+                message: `${args.cutByRun} is no plan of ${args.partId}`,
+                params: { planId: args.cutByRun },
+              },
+            ],
+            where,
+          )
+        runPart = baseOf(plan.design.part)
+      }
+      const marks = cutMarksFor(
+        baseOf(target),
+        list,
+        runPart,
+        new Date(ctx.clock.now()).toISOString(),
+      )
       if (list.length === 0) delete target.alreadyCut
       else if (!deepEqual(target.alreadyCut, list)) target.alreadyCut = list
+      if (marks === undefined) delete target.alreadyCutMarks
+      else if (!deepEqual(target.alreadyCutMarks, marks)) target.alreadyCutMarks = marks
     }
     if (args.name !== undefined) target.name = args.name
     if (args.blank !== undefined) {

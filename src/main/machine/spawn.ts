@@ -47,6 +47,8 @@ export function createMachineClient(o: MachineClientSetup): MachineClient {
     ...(o.journal === undefined ? {} : { journal: o.journal, hashProgram: sha256 }),
     ...(o.keepAwake === undefined ? {} : { keepAwake: o.keepAwake }),
     ...(o.autoReconnect === undefined ? {} : { reconnect: { enabled: o.autoReconnect } }),
+    // DF135 C2 test seam: e2e tests mark already cut from a virtual machine's run
+    ...(process.env['DFYOM_TEST_VIRTUAL_CUT_MARKS'] === '1' ? { virtualCutMarks: true } : {}),
     onLog: (batch) =>
       void o.forward?.(
         batch,

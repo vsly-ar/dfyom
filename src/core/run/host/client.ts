@@ -45,6 +45,7 @@ import { reconcileStep, type AlignmentStep } from '../alignment'
 import { RunRecorder, type RunJournal, type RunJournalPort, type UsbIdentity } from '../journal'
 import { interruptionOf, type InterruptionReason } from '../interruption'
 import type { LaunchRecord } from '../launch'
+import { carriedFinished, finishedOperations } from '../cut-marks'
 import { Reconnector, type ReconnectProgress } from './reconnect'
 import {
   ControllerInfoSchema,
@@ -109,6 +110,12 @@ export interface MachineClientOptions {
     readonly enabled?: () => boolean
     readonly timers?: TimerHost
   }
+  /**
+   * DF135 C2 test seam: a virtual machine's run counts as real for Run's already-cut marks
+   * (`lastRun.real`), so tests can mark from the virtual machine. The app sets it only with
+   * `DFYOM_TEST_VIRTUAL_CUT_MARKS=1` (docs/modes/cut-state.md#implementation-c2).
+   */
+  readonly virtualCutMarks?: boolean
 }
 
 type ConnectProfile = {
@@ -156,6 +163,10 @@ interface Job {
   executing?: Executing
   /** DF84: the work position of the last status, for the direction of motion. */
   position?: Vec3
+  /** DF135 C2: a real run (or the test seam's virtual one), whose finished operations mark. */
+  readonly real: boolean
+  /** DF135 C2: the finished operations of the run this one resumes (`carriedFinished`). */
+  readonly carried: readonly string[]
 }
 
 /** Lines traced per slice (DF84): ~25 ms of main's time each. */
@@ -530,16 +541,23 @@ export class MachineClient implements MachineService {
         }
       return
     }
-    const op = r.isOk() ? undefined : stoppedOperation(about, job.done, job.atToolChange)
+    // the record's acknowledged lines are newer than the throttled progress (a pulled cable)
+    const done = Math.max(job.done, rec?.progress.acknowledged ?? 0)
+    const op = r.isOk() ? undefined : stoppedOperation(about, done, job.atToolChange)
+    const outcome = r.isOk() ? 'done' : r.unwrapErr().code === 'op.aborted' ? 'stopped' : 'failed'
+    // DF135 C2: what the run finished, with what the run it resumed had (cut-state.md#marking)
+    const finished = [...job.carried, ...finishedOperations(about.operations, outcome, op)]
     this.lastRun = {
       jobId: job.jobId,
       planId: about.plan.planId,
       setupId: about.plan.setupId,
-      outcome: r.isOk() ? 'done' : r.unwrapErr().code === 'op.aborted' ? 'stopped' : 'failed',
+      outcome,
       ...(op === undefined ? {} : { planOperationId: op }),
       ...(about.planHash === undefined ? {} : { planHash: about.planHash }),
       ...(about.order === undefined ? {} : { operations: [...about.order] }),
       ...(interruption === undefined ? {} : { interruption }),
+      ...(finished.length === 0 ? {} : { finished }),
+      ...(job.real ? { real: true as const } : {}),
     }
   }
 
@@ -883,6 +901,19 @@ export class MachineClient implements MachineService {
         arcTolerance: this.conn.settings?.['12'] ?? DEFAULT_ARC_TOLERANCE,
         ...(this.hostStatus === undefined ? {} : { start: this.hostStatus.wpos }),
       }),
+      real: this.conn.target === 'serial' || this.opts.virtualCutMarks === true,
+      carried:
+        about !== undefined && 'operations' in about
+          ? carriedFinished(
+              this.lastRun,
+              {
+                planId: about.plan.planId,
+                setupId: about.plan.setupId,
+                ...(about.planHash === undefined ? {} : { planHash: about.planHash }),
+              },
+              about.operations,
+            )
+          : [],
     }
     this.job = job
     // a new run: "Reconnected" has done its job (DF129 RC4)

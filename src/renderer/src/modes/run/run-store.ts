@@ -68,6 +68,30 @@ export interface RunSummaryView {
   readonly next?: { readonly setupId: string; readonly name: string }
 }
 
+/**
+ * DF135 C2: what Run did with the design's already-cut marks after run `jobId`
+ * (docs/modes/cut-state.md#marking): `marked` (automatic, with Undo; `undone` after it),
+ * `offer` (the finished operations of a stopped or interrupted run), `waiting` (a resume is
+ * pending: decided again once it is not), `changed` (the plan changed since the export), `none`
+ * (nothing to say) and `closed` (the offer answered).
+ */
+export type CutMarksState =
+  | {
+      readonly jobId: string
+      readonly kind: 'marked'
+      readonly partId: string
+      readonly units: readonly string[]
+      readonly undone?: boolean
+    }
+  | {
+      readonly jobId: string
+      readonly kind: 'offer'
+      readonly partId: string
+      readonly planId: string
+      readonly units: readonly string[]
+    }
+  | { readonly jobId: string; readonly kind: 'waiting' | 'changed' | 'none' | 'closed' }
+
 /** How the window's last run job ended. */
 export type RunEnd =
   | { readonly jobId: string; readonly kind: 'done'; readonly summary: RunSummaryView }
@@ -270,6 +294,8 @@ export interface RunState {
   readonly ended: RunEnd | undefined
   /** The failure dialog shows `ended` while true. */
   readonly failureOpen: boolean
+  /** DF135 C2: the already-cut marks of the last run (decided once per run). */
+  readonly cutMarks: CutMarksState | undefined
   /** Last refused action (inline banner in the panel that started it). */
   readonly actionError: AppErrorData | undefined
   /** Key of the tool change / pause wait the user put off with "Later". */
@@ -384,6 +410,8 @@ export interface RunState {
   startFromHere(line: number, points: readonly ResumePoint[]): void
   dismissWait(key: string | undefined): void
   closeFailure(): void
+  /** DF135 C2: records what Run did with the last run's already-cut marks. */
+  setCutMarks(state: CutMarksState): void
   clearActionError(): void
 
   connect(): Promise<void>
@@ -728,6 +756,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       progress: undefined,
       ended: undefined,
       failureOpen: false,
+      cutMarks: undefined,
       actionError: undefined,
       dismissedWait: undefined,
       preflightOpen: false,
@@ -881,6 +910,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setResumeFrom: (resumeFrom) => set({ resumeFrom }),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
       closeFailure: () => set({ failureOpen: false }),
+      setCutMarks: (cutMarks) => set({ cutMarks }),
       clearActionError: () => set({ actionError: undefined }),
 
       async connect() {

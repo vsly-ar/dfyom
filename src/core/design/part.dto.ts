@@ -386,6 +386,18 @@ export const PieceBlankDtoSchema = z.object({
 })
 export type PieceBlankDTO = z.output<typeof PieceBlankDtoSchema>
 
+/**
+ * Who set an already-cut mark and when (hardening DF135 C2, docs/modes/cut-state.md#what-is-stored):
+ * `hand` or `run` (a real run finished it); `at` ISO time; a run mark's `fingerprint` is the
+ * marked unit's geometry as the run cut it (`unitFingerprint`, design/already-cut.ts).
+ */
+export const CutMarkDtoSchema = z.object({
+  by: z.enum(['hand', 'run']),
+  at: z.string(),
+  fingerprint: z.string().optional(),
+})
+export type CutMarkDTO = z.output<typeof CutMarkDtoSchema>
+
 export const PartDtoSchema = z.object({
   id: PartIdSchema,
   name: z.string().min(1).max(NAME_MAX),
@@ -413,6 +425,16 @@ export const PartDtoSchema = z.object({
     .array(OperationIdSchema)
     .optional()
     .describe('Already-cut operation and feature ids'),
+  /**
+   * DF135 C2 (docs/modes/cut-state.md#what-is-stored): who marked each `alreadyCut` id and when –
+   * `hand` (Design's row menu, an agent) or `run` (a real run that finished it, with the unit's
+   * geometry `fingerprint` as the run cut it, so a later edit warns `plan.cutChanged`). Keyed by
+   * the listed id; absent for marks set before C2 (read as `hand`).
+   */
+  alreadyCutMarks: z
+    .record(OperationIdSchema, CutMarkDtoSchema)
+    .optional()
+    .describe('Who marked each already-cut id, and when'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
   /** Split parts 4a (docs/modes/split-parts.md#model): on a source part; absent = not split. */
   split: SplitDtoSchema.optional(),

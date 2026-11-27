@@ -652,6 +652,27 @@ export const runMessages = {
     startedElsewhere: 'Started in another window or by an agent.',
   },
 
+  /** DF135 C2: already-cut marks from Run (docs/modes/cut-state.md#marking). */
+  cutMarks: {
+    region: 'Already cut',
+    marked: (n: number) =>
+      n === 1
+        ? 'Marked 1 operation as already cut in Design.'
+        : `Marked ${n} operations as already cut in Design.`,
+    undone: 'The already-cut marks were taken back.',
+    undo: 'Undo',
+    offer: (n: number) =>
+      n === 1
+        ? 'Mark the finished operation as already cut?'
+        : `Mark the ${n} finished operations as already cut?`,
+    offerHint:
+      'Only operations the machine finished. The one in progress stays not cut: resume it or run it again.',
+    mark: 'Mark as already cut',
+    notNow: 'Not now',
+    changed:
+      'The plan changed since this program was exported, so nothing was marked. Mark operations by hand in Design.',
+  },
+
   /** DF93: an external gCode file (docs/modes/run.md#run-an-external-g-code-file-df93). */
   file: {
     open: 'Run gCode file…',

@@ -71,6 +71,14 @@ export const LastRunSchema = z.object({
   planHash: z.string().exactOptional(),
   operations: z.array(z.string()).readonly().exactOptional(),
   /**
+   * DF135 C2: the plan operations the run finished (all streamed ones when `done`, else those
+   * before the operation in progress), with those of the run it resumed; Run marks or offers
+   * them as already cut (docs/modes/cut-state.md#implementation-c2).
+   */
+  finished: z.array(z.string()).readonly().exactOptional(),
+  /** DF135 C2: a real machine's run (`true`); absent on the virtual machine, which marks nothing. */
+  real: z.literal(true).exactOptional(),
+  /**
    * DF129 RC5: the run ended without DFYOM wanting it to (a lost connection, a controller reset,
    * the machine's power): where it was and the suggested resume point, until the next run starts
    * or the record is dismissed (docs/modes/run-recovery.md#agent-api).
