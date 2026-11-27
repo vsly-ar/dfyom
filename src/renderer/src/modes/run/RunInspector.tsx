@@ -8,6 +8,8 @@
 // "Start run" then take the run section (DF93). Run and Overrides are `InspectorGroup`s (the
 // inspectors' group header style, DF110 S6); Reset has no title, only the rule above it.
 // DF129 RC6: the Position header's menu, "The machine lost power…" while idle (Q171).
+// DF133 RW1: under the DRO, one line on the setup's workholding in the view (outlined until homed,
+// hidden until the work zero is set; docs/modes/run-workholding.md#trust-what-the-guard-knows).
 // Doc: docs/modes/run.md#run-without-a-project-df80, #run-an-external-g-code-file-df93
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress,
 // docs/conventions/inspector-layout.md#group-header-style
@@ -35,6 +37,7 @@ import { RecoveryPanel } from './RecoveryPanel'
 import { RunFileSection } from './RunFile'
 import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
+import { useRunWorkholding } from './useRunWorkholding'
 import styles from './Run.module.css'
 
 const m = runMessages.progress
@@ -144,6 +147,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
     (ended?.kind === 'stopped' || ended?.kind === 'failed') &&
     isConnected(status)
   const powerWhy = useId()
+  const workholding = useRunWorkholding()
 
   return (
     <>
@@ -167,6 +171,11 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
           zero={{ gate: gates.workZero, onZero: (axis) => void a.setWorkZero([axis]) }}
           goTo={{ gate: goToOpenGate(status), onGoTo: a.openGoTo }}
         />
+        {workholding?.line === undefined ? null : (
+          <p className={styles['hint']} data-workholding-trust={workholding.trust}>
+            {workholding.line}
+          </p>
+        )}
         {/* DF78 (Q107): the alignment step docked beside the DRO */}
         {doc === undefined ? null : <AlignmentPanel doc={doc} />}
 

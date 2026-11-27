@@ -12,11 +12,15 @@
 // open one is drawn transparent without depth write (the stock and toolpaths show through) and is
 // not pickable (no handlers, no anchor: the pointer reaches what is behind); the open clamp stays
 // drawn as before and draggable; a colliding ghost keeps a stronger `--danger`. R9: a surface hold
-// as a thin layer under the stock, `--vp-grid-major` hatched in `--vp-edge`.
-// Doc: docs/modes/workholding.md#toe-clamp-drag-x2-6, docs/conventions/ui.md#workholding
+// as a thin layer under the stock, `--vp-grid-major` hatched in `--vp-edge`. DF133 RW1: in the Run
+// scene, read-only, `outlined` while the scene cannot vouch for the items' place (not homed, no
+// connection): no fill, dashed `--vp-edge` rims and corner edges; turning solid fades the fill in
+// over `--motion-fast` (instant with reduced motion).
+// Doc: docs/modes/workholding.md#toe-clamp-drag-x2-6, docs/conventions/ui.md#workholding,
+// docs/modes/run-workholding.md#scene
 import { Html, Line, type CameraControlsImpl } from '@react-three/drei'
-import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   CanvasTexture,
   Color,
@@ -27,6 +31,7 @@ import {
   SRGBColorSpace,
   Vector2,
   type Group,
+  type MeshStandardMaterial,
 } from 'three'
 import type { Palette, Rgb } from './colours'
 import styles from './Viewport.module.css'
@@ -60,6 +65,11 @@ export interface WorkholdingOverlay {
   /** A surface hold (tape, vacuum, glue; R9): a thin hatched layer under the stock (WCS, mm). */
   readonly surface?:
     { readonly outline: readonly P[]; readonly zMin: number; readonly zMax: number } | undefined
+  /**
+   * Run scene (DF133 RW1): the items' place is not vouched for (not homed, not connected): drawn
+   * as dashed outlines without fill.
+   */
+  readonly outlined?: boolean | undefined
 }
 
 export type ClampDragPhase = 'start' | 'move' | 'end' | 'cancel'
@@ -104,6 +114,22 @@ const noRaycast = (): void => {}
 
 /** A ghost item's fill opacity (R8): there, but the stock and toolpaths read through it. */
 const GHOST_OPACITY = 0.12
+
+/** `--motion-fast` (ms): an outlined item turning solid fades its fill in this long (DF133 RW1). */
+export const SOLID_FADE_MS = 120
+
+/** Dashes of an outlined item (mm). */
+const OUTLINE_DASH = { dashSize: 2, gapSize: 1.5 } as const
+
+/**
+ * The vertical edges of an outlined prism (DF133 RW1): every corner of a polygon, four points
+ * around a circle (its outline has many). Pure.
+ */
+export function outlineCorners(outline: readonly P[]): readonly P[] {
+  if (outline.length <= 8) return outline
+  const step = outline.length / 4
+  return [0, 1, 2, 3].map((k) => outline[Math.round(k * step) % outline.length]!)
+}
 
 /** The surface hold's hatching period (mm, R9). */
 const HATCH_MM = 3
@@ -188,6 +214,8 @@ function Solid({
   strong,
   ghost,
   events,
+  outlined = false,
+  reducedMotion = false,
 }: {
   outline: readonly P[]
   zMin: number
@@ -195,6 +223,9 @@ function Solid({
   fill: Color
   edge: Color
   strong: boolean
+  /** DF133 RW1: dashed outlines, no fill (the Run scene cannot vouch for the place). */
+  outlined?: boolean
+  reducedMotion?: boolean
   /** Drawn faint, without depth write (R8); `colliding`: a stronger faint fill. */
   ghost?: 'plain' | 'colliding' | undefined
   /** Pointer handlers of a draggable clamp; without them the solid is not pickable. */
@@ -211,7 +242,67 @@ function Solid({
     () => [...outline, outline[0]!].map((p): [number, number, number] => [p[0], p[1], zMax]),
     [outline, zMax],
   )
+  const opacity =
+    ghost === 'plain' ? GHOST_OPACITY : ghost === 'colliding' ? 0.35 : strong ? 0.95 : 0.8
+  // DF133 RW1: outlined → solid fades the fill in (the mesh mounts with the change)
+  const material = useRef<MeshStandardMaterial>(null)
+  const invalidate = useThree((s) => s.invalidate)
+  const was = useRef(outlined)
+  const fade = useRef<{ from: number | null } | null>(null)
+  useLayoutEffect(() => {
+    if (was.current && !outlined && !reducedMotion) {
+      fade.current = { from: null }
+      if (material.current) material.current.opacity = 0
+      invalidate()
+    }
+    was.current = outlined
+  }, [outlined, reducedMotion, invalidate])
+  useFrame(({ clock }) => {
+    const f = fade.current
+    const m = material.current
+    if (f === null || m === null) return
+    const now = clock.getElapsedTime() * 1000
+    f.from ??= now
+    const t = Math.min(1, (now - f.from) / SOLID_FADE_MS)
+    m.opacity = opacity * t
+    if (t < 1) invalidate()
+    else fade.current = null
+  })
   if (geometry === null) return null
+  if (outlined) {
+    const bottom = ring.map((p): [number, number, number] => [p[0], p[1], zMin])
+    return (
+      <group>
+        {[ring, bottom].map((points, i) => (
+          <Line
+            key={i}
+            points={points}
+            color={edge}
+            lineWidth={1}
+            dashed
+            {...OUTLINE_DASH}
+            raycast={noRaycast}
+            renderOrder={2}
+          />
+        ))}
+        {outlineCorners(outline).map((p, i) => (
+          <Line
+            key={`v${i}`}
+            points={[
+              [p[0], p[1], zMin],
+              [p[0], p[1], zMax],
+            ]}
+            color={edge}
+            lineWidth={1}
+            dashed
+            {...OUTLINE_DASH}
+            raycast={noRaycast}
+            renderOrder={2}
+          />
+        ))}
+      </group>
+    )
+  }
   return (
     <group>
       <mesh
@@ -221,13 +312,12 @@ function Solid({
         renderOrder={1}
       >
         <meshStandardMaterial
+          ref={material}
           color={fill}
           roughness={0.85}
           metalness={0.05}
           transparent
-          opacity={
-            ghost === 'plain' ? GHOST_OPACITY : ghost === 'colliding' ? 0.35 : strong ? 0.95 : 0.8
-          }
+          opacity={opacity}
           depthWrite={ghost === undefined}
         />
       </mesh>
@@ -246,9 +336,11 @@ function Solid({
 export function WorkholdingLayer({
   workholding,
   palette,
+  reducedMotion = false,
 }: {
   workholding: WorkholdingOverlay
   palette: Palette
+  reducedMotion?: boolean
 }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
   const getState = useThree((s) => s.get)
@@ -394,6 +486,8 @@ export function WorkholdingLayer({
             }
             ghost={ghosted(s.itemId) ? (s.colliding ? 'colliding' : 'plain') : undefined}
             events={h === undefined ? undefined : eventsOf(h)}
+            outlined={workholding.outlined === true}
+            reducedMotion={reducedMotion}
           />
         )
       })}

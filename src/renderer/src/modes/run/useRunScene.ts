@@ -11,7 +11,10 @@
 // setup frame). DF128 GT2: the open Go to dialog's planned steps as a dashed path to a target
 // marker (docs/modes/run-goto.md#preview). DF129 RC6: after an interrupted run, a ghost tool at
 // its last seen position and the toolpath before it dimmed; after a crash the interrupted plan's
-// toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6).
+// toolpaths are generated again (docs/modes/run-recovery.md#implementation-rc6). DF133 RW1: the
+// setup's workholding, outlined until homed with the work zero set, hidden while G54 was never
+// set, and the holder ghost of the tool in the spindle at the tool marker
+// (docs/modes/run-workholding.md#implementation-rw1).
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene),
 // docs/modes/run.md#run-an-external-g-code-file-df93
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -41,6 +44,8 @@ import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
 import { skippedSegments } from './start-at'
 import { useStartPreview } from './StartAt'
+import { guardTool, runHolderGhost, runWorkholdingOverlay, type GuardTool } from './run-workholding'
+import { useRunWorkholding } from './useRunWorkholding'
 
 export function useRunScene(mode: AppMode): RunScene | null {
   const { bridge, replica: events } = useShell()
@@ -234,6 +239,7 @@ export function useRunScene(mode: AppMode): RunScene | null {
     return { points: [w(preview.from), ...preview.points.map(w)], label: runMessages.goTo.target }
     // the offset by value (a new status each report)
   }, [preview, wco?.[0], wco?.[1], wco?.[2], level])
+  const workholding = useSceneWorkholding(tool, units)
   return useMemo(
     () =>
       active
@@ -241,6 +247,8 @@ export function useRunScene(mode: AppMode): RunScene | null {
             lines,
             done,
             tool,
+            ...(workholding.overlay === undefined ? {} : { workholding: workholding.overlay }),
+            ...(workholding.holder === undefined ? {} : { holder: workholding.holder }),
             ...(frame === undefined ? {} : { frame }),
             ...(envelope === undefined ? {} : { envelope }),
             ...(zRef === undefined ? {} : { zRef }),
@@ -248,8 +256,56 @@ export function useRunScene(mode: AppMode): RunScene | null {
             ...(ghost === undefined ? {} : { ghost }),
           }
         : null,
-    [active, lines, done, tool, frame, envelope, zRef, goTo, ghost],
+    [active, lines, done, tool, frame, envelope, zRef, goTo, ghost, workholding],
   )
+}
+
+/**
+ * DF133 RW1: the setup's items as the trust state allows and the holder ghost at the tool marker
+ * while the position is known (homed). The tool (Q189): the one of the tool-change wait, else the
+ * last wait's tool seen in this connection, else the setup's first.
+ */
+function useSceneWorkholding(
+  tool: readonly [number, number, number] | null,
+  units: UnitSystem,
+): {
+  overlay: RunScene['workholding']
+  holder: RunScene['holder']
+} {
+  const wh = useRunWorkholding()
+  const status = useRun((s) => s.status)
+  const job = activeJob(status)
+  const waiting = job?.phase === 'toolChange' ? job.toolChange?.n : undefined
+  // the last tool-change wait of this connection (a new connection forgets it)
+  const last = useRef<number | undefined>(undefined)
+  if (!isConnected(status)) last.current = undefined
+  else if (waiting !== undefined) last.current = waiting
+  const n = last.current
+  const overlay = useMemo(
+    () =>
+      wh === undefined
+        ? undefined
+        : runWorkholdingOverlay(wh.holding, wh.setup.id, wh.zero, wh.trust),
+    [wh],
+  )
+  const spindle = useMemo(
+    () => (wh === undefined ? undefined : guardTool(wh.plan, wh.setup, n)),
+    [wh?.plan, wh?.setup, n],
+  )
+  const known = isConnected(status) && status.homed
+  const holder = useMemo(
+    () =>
+      runHolderGhost(spindle, known ? tool : null, (g: GuardTool) =>
+        runMessages.guard.tool(
+          g.n,
+          lengthSource(g.tool.diameter.canonical, units),
+          lengthSource(g.stickout, units),
+          g.holder?.name ?? runMessages.guard.nut(lengthSource(g.holder?.nutDiameter ?? 0, units)),
+        ),
+      ),
+    [spindle, known, tool, units],
+  )
+  return useMemo(() => ({ overlay, holder }), [overlay, holder])
 }
 
 const noDrag = (): void => {}
