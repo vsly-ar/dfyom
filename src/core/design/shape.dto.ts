@@ -153,7 +153,7 @@ function itemSchema(q: (kind: QuantityField) => z.ZodType, mode: 'dto' | 'args')
   const point = (what: string) => z.tuple([len(), len()]).describe(`[x, y] ${what}`)
   const dflt = <T extends z.ZodType>(s: T) => (mode === 'dto' ? s : s.optional())
   const op = dflt(z.enum(SHAPE_OPS)).describe(
-    'Combines with the items before: add (default), subtract, intersect; the first item adds',
+    'With the items before; default add (the first item adds)',
   )
   const rotation = q('angle').optional().describe('Counter-clockwise about center, default 0')
   const segment = z.discriminatedUnion('kind', [

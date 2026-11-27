@@ -77,7 +77,7 @@ export type ItemMetaDTO = z.output<typeof ItemMetaDtoSchema>
 
 /** `name` and `notes`, shared by all value schemas. */
 export const commonValuesShape = {
-  name: z.string().min(1).max(NAME_MAX).describe('Display label; also in gCode comments'),
+  name: z.string().min(1).max(NAME_MAX).describe('Also in gCode comments'),
   notes: z.string().max(NOTES_MAX).optional(),
 }
 

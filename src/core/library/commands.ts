@@ -51,7 +51,10 @@ const VALUES = {
 }
 
 /** Command args take quantities as strings (library.md#command-input); results are stored DTOs. */
-const UNITS_ARG = UnitSystemSchema.default('mm').describe('Unit of bare numbers in values')
+/** The project unit system's values without its description ("Project display unit system"). */
+const LIBRARY_UNITS = z.enum(UnitSystemSchema.options)
+// No description: the primer's quantities line says bare numbers take the units arg.
+const UNITS_ARG = LIBRARY_UNITS.default('mm')
 
 const ITEM_RESULTS = {
   stock: StockValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
@@ -185,7 +188,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     args: z.object({
       id: ItemIdSchema,
       revision: z.number().int().min(1).optional(),
-      confirm: z.literal(true).describe('Must be true: the user confirmed the deletion'),
+      confirm: z.literal(true), // the primer says what confirm: true asserts (llm-api.md#schemas)
     }),
     result: z.object({ id: z.string() }),
     async run(_doc, args, ctx) {
@@ -278,7 +281,7 @@ function workholdingQueries(): QueryDef[] {
     name: 'library.workholding.get',
     summary: 'Get a workholding device (library or built-in).',
     readsDocument: false,
-    args: z.object({ id: ItemIdSchema, units: UnitSystemSchema.default('mm') }),
+    args: z.object({ id: ItemIdSchema, units: LIBRARY_UNITS.default('mm') }),
     result: WorkholdingResult,
     run(_doc, args, ctx) {
       const where = 'library.workholding.get'
@@ -331,7 +334,7 @@ const SETTINGS_TEXT = z
   .string()
   .min(1)
   .max(100_000)
-  .describe('GRBL `$$` output as pasted from any sender; other lines are ignored')
+  .describe('Pasted GRBL `$$` output (any sender); other lines ignored')
 
 const ChangeSchema = z.object({
   setting: z.string().describe('e.g. $110'),
