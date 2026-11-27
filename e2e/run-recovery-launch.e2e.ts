@@ -3,7 +3,8 @@
 // journals) is taken and the app quits. The test leaves that record as a `running` journal with
 // the program copy next to it, as a crash would (the virtual machine journals nothing itself).
 // On the next launch the first window switches to Run mode with the recovery panel ("DFYOM was
-// closed unexpectedly…"); the user opens the project from the panel, ticks the checklist,
+// closed unexpectedly…"); the user opens the project from the panel (the 3D view draws the
+// toolpath with the ghost tool, the part before it dimmed), ticks the checklist,
 // connects (never by itself), homes, restores the run's work zero (the virtual machine forgets
 // it across launches), resumes near where it stopped: the pre-flight starts at the suggested
 // line, the lead-in waits at the tool, the rest runs to Idle.
@@ -215,6 +216,15 @@ test('after a crash: the next launch offers the panel; open the project, connect
     if (await open.isVisible()) await open.click()
     await expect(open).toHaveCount(0, { timeout: 30_000 })
     await expect(p).toHaveTitle(/Recover/)
+    // the 3D view draws the run's toolpath (generated again: the cache went with the app), the
+    // ghost tool where it was last seen, the part before it dimmed and the rest live
+    const view = p.getByRole('region', { name: '3D viewport' })
+    await expect(view).toHaveAttribute('data-toolpath-segments', /^[1-9]\d*$/, { timeout: 60_000 })
+    await expect(view).toHaveAttribute('data-ghost', '')
+    const segments = Number(await view.getAttribute('data-toolpath-segments'))
+    const done = Number(await view.getAttribute('data-toolpath-done'))
+    expect(done).toBeGreaterThan(0)
+    expect(done).toBeLessThan(segments)
     await render(p, 'df129-launch')
 
     // the checklist, then connect (the user's click), home from the panel

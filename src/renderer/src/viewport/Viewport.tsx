@@ -774,6 +774,10 @@ export function Viewport({
       data-picking={pick ? '' : undefined}
       data-measuring={measureOn ? '' : undefined}
       data-hover={hovered && (!pick || pick.eligible.has(hovered.surface)) ? '' : undefined}
+      // the run scene for tests (DF129 RC6): segments drawn, how many dimmed as done, the ghost
+      data-toolpath-segments={run?.lines?.segments}
+      data-toolpath-done={run?.lines ? run.done : undefined}
+      data-ghost={run?.ghost ? '' : undefined}
       onKeyDown={onKeyDown}
       onPointerMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect()
