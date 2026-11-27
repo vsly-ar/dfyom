@@ -5,7 +5,7 @@
 // holder ghost of the tool in the spindle at the tool marker (Q189: a tool-change wait's tool,
 // kept for the connection).
 // Doc: docs/modes/run-workholding.md#implementation-rw1
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
@@ -155,8 +155,8 @@ describe('Run scene workholding (DF133 RW1)', () => {
     t.push({ ...job('toolChange', { toolChange: { n: 2, name: 'Flat 4' } }) })
     await waitFor(() => expect(probe.run?.holder?.label).toMatch(/^T2 /))
     t.push({ ...job('streaming') })
-    t.push({ job: undefined } as Partial<RunStatus>)
-    await waitFor(() => expect(within(document.body).queryByRole('dialog')).toBeNull())
+    // the run ends: the tool chucked at the wait stays the spindle's
+    t.push({ ...job('done') })
     expect(probe.run!.holder!.label).toMatch(/^T2 /)
     // a new connection: the setup's first tool again
     t.push(closedStatus())
