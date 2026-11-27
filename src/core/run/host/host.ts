@@ -131,6 +131,8 @@ interface Connection {
   readonly emulator?: GrblEmulator | undefined
   /** `$13=1`: GRBL reports in inch. */
   readonly inches: boolean
+  /** DF129: the virtual machine's cable pulled ("Simulate a lost connection"); virtual only. */
+  readonly unplug?: (() => void) | undefined
   /** gCode that restores the modal state a failed probe left (sent after `$X`/`$H`, M4). */
   restoreModes?: readonly string[] | undefined
 }
@@ -366,6 +368,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       homing: target.homing,
       trace: false,
       ...(target.position === undefined ? {} : { position: target.position }),
+      ...(target.workZero === undefined ? {} : { workOffset: target.workZero }),
     })
     if (created.isErr()) return Err(created.unwrapErr().withContext('machineHost.connect'))
     const emu = created.unwrap()
@@ -374,7 +377,16 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const transport = new VirtualGrblTransport(emu, clock)
     const sender = new GrblSender(transport, clock, { timers, log })
     clock.setBusy(() => emu.nextEventAt() !== undefined || sender.needsStatus)
-    const c = await finishConnect(target, clock, sender, transport, !target.homing, undefined, emu)
+    const c = await finishConnect(
+      target,
+      clock,
+      sender,
+      transport,
+      !target.homing,
+      undefined,
+      emu,
+      () => transport.unplug('simulated'),
+    )
     if (c.isErr() || target.prepare === undefined || conn === undefined) return c
     const prepared = await prepare(conn, target.prepare.workZero)
     if (prepared.isErr()) return Err(prepared.unwrapErr())
@@ -391,6 +403,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     homed: boolean,
     port: { path: string; baud: number } | undefined,
     emulator?: GrblEmulator,
+    unplug?: () => void,
   ): Promise<AppResult<ConnectedInfo>> {
     const info = await sender.connect()
     connecting = false
@@ -412,6 +425,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       laserMode: info.unwrap().settings['32'] === 1,
       emulator,
       inches: info.unwrap().settings['13'] === 1,
+      unplug,
     }
     conn = c
     lastPosted = undefined
@@ -605,6 +619,15 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         if (action.axes.includes('z')) c.zeroLevel = c.job?.level ?? 0
         return readWorkZero(c)
       }
+      case 'simulateLostConnection':
+        if (c.unplug === undefined)
+          return fail('run.state', 'only the virtual machine can simulate a lost connection', {
+            where: 'machineHost.machine',
+            data: { state },
+          })
+        // the sender reports the closed port: `connectionLost` follows, as for a real cable
+        c.unplug()
+        return Ok(undefined)
       case 'reset':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)

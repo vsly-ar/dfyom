@@ -58,6 +58,7 @@ export function SettingsDialog(): React.JSX.Element {
   const autoApplyHint = useId()
   const jogKeysHint = useId()
   const homeHint = useId()
+  const reconnectHint = useId()
   const delays: readonly number[] = AUTO_APPLY_DELAYS.includes(
     settings.autoApplyDelay as (typeof AUTO_APPLY_DELAYS)[number],
   )
@@ -226,6 +227,17 @@ export function SettingsDialog(): React.JSX.Element {
             </div>
             <p id={homeHint} className={styles['settingHint']}>
               {m.homeConfirmHint(settings.skipHomeConfirm.length)}
+            </p>
+          </div>
+          <div className={styles['settingRow']}>
+            <Switch
+              label={m.autoReconnect}
+              checked={settings.autoReconnect}
+              onCheckedChange={(autoReconnect) => update({ autoReconnect })}
+              aria-describedby={reconnectHint}
+            />
+            <p id={reconnectHint} className={styles['settingHint']}>
+              {m.autoReconnectHint}
             </p>
           </div>
         </InspectorGroup>

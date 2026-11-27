@@ -43,6 +43,7 @@ describe('settings store', () => {
       lastMachine: 'machine-1',
       jogKeys: 'game',
       skipHomeConfirm: [],
+      autoReconnect: true,
       jogFeed: {},
       inspectorGroups: {},
       inspectorTabs: {},

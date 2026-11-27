@@ -11,6 +11,7 @@ import type { FittedLoop } from '../core/design/reference-section'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunProgram, RunStatus } from '../core/run/service'
+import type { RunJournal } from '../core/run/journal'
 import type { LibraryTabKind } from '../core/library/item'
 import type { LibraryChange } from '../core/library/library'
 import type { UnitSystem } from '../core/project/document'
@@ -71,6 +72,17 @@ export const IPC = {
    * no longer kept (DF84, docs/modes/run.md#gcode-panel-df84).
    */
   runProgram: 'dfyom:run.program',
+  /**
+   * Renderer → main (invoke): DF129 RC4 auto-reconnect: `cancel` ("Stop trying") or `simulate`
+   * ("Simulate a lost connection" on the virtual machine during a run); null or the refusal.
+   * Renderer only. Doc: docs/modes/run-recovery.md#implementation-rc4
+   */
+  runReconnect: 'dfyom:run.reconnect',
+  /**
+   * Renderer → main (invoke): DF129 the record of the current or last run (`RunJournal`), or
+   * null. Renderer only (RC5's recovery panel; agents read `run.status.get`).
+   */
+  runRecord: 'dfyom:run.record',
   /**
    * Renderer → main (invoke): run an external gCode file (DF93): the dialog unless a path is
    * given, then the window without a project that shows it (`RunFileOpened`, or null if cancelled).
@@ -459,6 +471,14 @@ export interface PreloadApi {
     readFile(path: string): Promise<RunFileReadReply>
     /** The recently run gCode files, newest first (at most 8). */
     recentFiles(): Promise<readonly string[]>
+    /**
+     * DF129 RC4: "Stop trying" (`cancel`) or "Simulate a lost connection" (`simulate`, the
+     * virtual machine during a run); null when done, else the refusal. Renderer only
+     * (docs/modes/run-recovery.md#implementation-rc4).
+     */
+    reconnect(action: 'cancel' | 'simulate'): Promise<AppErrorData | null>
+    /** DF129: the record of the current or last run, or null (docs/modes/run-recovery.md#what-dfyom-keeps). */
+    record(): Promise<RunJournal | null>
   }
   /**
    * One command, query or session tool by registry name, through this window's session (the same

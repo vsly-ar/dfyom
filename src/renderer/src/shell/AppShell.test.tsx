@@ -232,6 +232,7 @@ describe('AppShell', () => {
         lastMachine: null,
         jogKeys: 'game',
         skipHomeConfirm: [],
+        autoReconnect: true,
         jogFeed: {},
         inspectorGroups: {},
         inspectorTabs: {},

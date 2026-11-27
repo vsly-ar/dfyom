@@ -35,6 +35,28 @@ describe('startup', () => {
   })
 })
 
+describe('powerCycle (DF129 fault hook)', () => {
+  it('restarts as from power-up mid-move: no ALARM:3, the start-up lock, G54 kept, spindle off', () => {
+    const emu = emulator({ homing: true, workOffset: [-10, -20, -5] })
+    emu.readOutput()
+    send(emu, '$X\n')
+    expect(send(emu, '$#\n')[0]).toBe('[G54:-10.000,-20.000,-5.000]')
+    send(emu, 'G1 X-50 F600 M3 S1000\n')
+    emu.advance(200)
+    expect(emu.status().state).toBe('Run')
+    emu.readOutput()
+    emu.powerCycle()
+    expect(emu.readOutput()).toBe(`\r\n${BANNER}\r\n${UNLOCK}\r\n`)
+    expect(emu.status()).toMatchObject({ state: 'Alarm', spindleSpeed: 0, rate: 0 })
+    expect(send(emu, '$#\n')[0]).toBe('[G54:-10.000,-20.000,-5.000]')
+    // without homing it powers up Idle
+    const idle = emulator()
+    idle.readOutput()
+    idle.powerCycle()
+    expect(idle.status().state).toBe('Idle')
+  })
+})
+
 describe('lines and responses', () => {
   it('answers ok for empty and comment-only lines, one per end-of-line byte', () => {
     const emu = emulator()

@@ -152,6 +152,11 @@ export const VirtualTargetSchema = z.object({
   machineKey: z.string().max(200),
   /** MPos at power-up (the virtual machine's physical position; grbl.md#homing-and-machine-coordinates). */
   position: Vec3Schema.exactOptional(),
+  /**
+   * DF129: G54 at power-up, as GRBL's EEPROM kept it: the virtual machine reconnected after a
+   * simulated lost connection (docs/modes/run-recovery.md#implementation-rc4).
+   */
+  workZero: Vec3Schema.exactOptional(),
   /** Home at `max` speed, then set G54 to this MPos (docs/modes/run-v0.1.md decision 7). */
   prepare: z.object({ workZero: Vec3Schema }).exactOptional(),
 })
@@ -205,6 +210,11 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     values: Vec3Schema.exactOptional(),
   }),
   z.object({ kind: z.literal('reset') }),
+  /**
+   * DF129, Q173: the virtual machine's cable is pulled (virtual only): the connection is lost as a
+   * real one is, for practising recovery (docs/modes/run-recovery.md#implementation-rc4).
+   */
+  z.object({ kind: z.literal('simulateLostConnection') }),
   /**
    * Feed hold (`!`) of a manual cycle (Probe Z, hardening DF82); answers once the controller
    * reports `Hold:0`. A run holds through `job.pause` (jobControl). Not during homing.

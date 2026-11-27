@@ -34,6 +34,8 @@ export interface MachineClientSetup {
   readonly journal?: RunJournalPort
   /** DF129: keeps the computer awake during real runs (the app's power-save blocker). */
   readonly keepAwake?: (on: boolean) => void
+  /** DF129 RC4: the setting "Reconnect automatically after a lost connection" (default on). */
+  readonly autoReconnect?: () => boolean
 }
 
 /** The app instance's one machine connection (`services.machine`). */
@@ -44,6 +46,7 @@ export function createMachineClient(o: MachineClientSetup): MachineClient {
     logLevel: o.logLevel,
     ...(o.journal === undefined ? {} : { journal: o.journal, hashProgram: sha256 }),
     ...(o.keepAwake === undefined ? {} : { keepAwake: o.keepAwake }),
+    ...(o.autoReconnect === undefined ? {} : { reconnect: { enabled: o.autoReconnect } }),
     onLog: (batch) =>
       void o.forward?.(
         batch,

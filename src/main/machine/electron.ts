@@ -3,6 +3,8 @@
 import { BrowserWindow, ipcMain, powerSaveBlocker, utilityProcess } from 'electron'
 import type { MachineClient, MachineHostFactory } from '../../core/run/host/client'
 import type { RunProgram, RunStatus } from '../../core/run/service'
+import type { RunJournal } from '../../core/run/journal'
+import type { AppErrorData } from '../../shared/errors/app-error'
 import { IPC, RUN_STATUS_IPC_CHANNEL } from '../../shared/preload-api'
 
 /** Forks `entryPath` (the bundled utility.ts) per connection. */
@@ -30,6 +32,30 @@ export function registerRunProgramIpc(
     isWindow(event.sender.id) && typeof jobId === 'string'
       ? (machine.program(jobId) ?? null)
       : null,
+  )
+}
+
+/**
+ * DF129 RC4: answers a DFYOM window's `run.reconnect(action)` ("Stop trying", "Simulate a lost
+ * connection") and `run.record()` (the run record). Renderer only: no command, no agent tool
+ * (docs/modes/run-recovery.md#implementation-rc4).
+ */
+export function registerRunRecoveryIpc(
+  machine: Pick<MachineClient, 'cancelReconnect' | 'simulateConnectionLoss' | 'runRecord'>,
+  isWindow: (webContentsId: number) => boolean,
+): void {
+  ipcMain.handle(IPC.runReconnect, async (event, action: unknown): Promise<AppErrorData | null> => {
+    if (!isWindow(event.sender.id)) return null
+    if (action === 'cancel') {
+      machine.cancelReconnect()
+      return null
+    }
+    if (action !== 'simulate') return null
+    const r = await machine.simulateConnectionLoss()
+    return r.isOk() ? null : r.unwrapErr().toWireData()
+  })
+  ipcMain.handle(IPC.runRecord, (event): RunJournal | null =>
+    isWindow(event.sender.id) ? (machine.runRecord() ?? null) : null,
   )
 }
 

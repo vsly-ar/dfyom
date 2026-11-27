@@ -15,7 +15,7 @@ import {
   type AppResult,
   type AsyncAppResult,
 } from '../../../shared/result'
-import type { TimeScale } from '../clock'
+import { systemTimerHost, type TimerHost, type TimeScale } from '../clock'
 import type { Vec3 } from '../../toolpath/model'
 import type { RunSummary, SenderProgram } from '../grbl/sender'
 import {
@@ -42,7 +42,8 @@ import {
 } from '../executing'
 import { PLANNER_BLOCKS } from '../grbl/emulator/planner'
 import { reconcileStep, type AlignmentStep } from '../alignment'
-import { RunRecorder, type RunJournal, type RunJournalPort } from '../journal'
+import { RunRecorder, type RunJournal, type RunJournalPort, type UsbIdentity } from '../journal'
+import { Reconnector, type ReconnectProgress } from './reconnect'
 import {
   ControllerInfoSchema,
   HostMessage,
@@ -95,7 +96,36 @@ export interface MachineClientOptions {
    * start, `false` at the end; Electron `powerSaveBlocker` in the app).
    */
   readonly keepAwake?: (on: boolean) => void
+  /**
+   * DF129 RC4: auto-reconnect after a connection lost during a run
+   * (docs/modes/run-recovery.md#implementation-rc4). `enabled`: the app's setting "Reconnect
+   * automatically after a lost connection" (default: on); `timers`: the backoff's (default: the
+   * system's).
+   */
+  readonly reconnect?: {
+    readonly enabled?: () => boolean
+    readonly timers?: TimerHost
+  }
 }
+
+type ConnectProfile = {
+  readonly spindleMinSpeed?: number | undefined
+  readonly machine?: MachineValuesDTO | undefined
+}
+
+/** The connection to open again after a loss (DF129 RC4): as last opened, with its profile. */
+interface Reopen {
+  readonly target: ConnectTarget
+  readonly profile: ConnectProfile | undefined
+  /** Serial: the port's USB identity at connect, when the OS reported one. */
+  readonly usb?: UsbIdentity | undefined
+}
+
+/**
+ * DF129, Q173: the simulated cable of the virtual machine stays out this long, so the practice run
+ * shows a failed attempt or two before it reconnects (docs/modes/run-recovery.md#implementation-rc4).
+ */
+export const SIMULATED_UNPLUG_MS = 2500
 
 interface Host {
   readonly handle: MachineHostHandle
@@ -197,9 +227,20 @@ export class MachineClient implements MachineService {
         machine?: MachineValuesDTO | undefined
         target?: TargetKind | undefined
         port?: { path: string; baud: number } | undefined
+        usb?: UsbIdentity | undefined
         settings?: Readonly<Record<string, number>> | undefined
       }
     | undefined
+  /** DF129 RC4: the last connection opened, to open again after a loss during a run. */
+  private reopen: Reopen | undefined
+  /** DF129 RC4: the current reconnecting episode and where it is (kept after it ends, see status). */
+  private reconnecting:
+    | { readonly r: Reconnector; progress: ReconnectProgress; nextAt?: number | undefined }
+    | undefined
+  /** DF129 RC4: the last position and G54 seen before a loss (the virtual machine's power-up). */
+  private lastSeen: { mpos: Vec3; workZero: Vec3 } | undefined
+  /** DF129, Q173: the simulated cable is back at this time (`reconnectTimers`' clock). */
+  private simulatedUntil: number | undefined
   /**
    * The last open connection ended without DFYOM closing it (host reported it lost, or the host
    * exited): shown until the next connect (docs/modes/run-machine.md#lost-connection-m2).
@@ -227,9 +268,12 @@ export class MachineClient implements MachineService {
   private readonly log: Logger
   private readonly now: () => number
 
+  private readonly reconnectTimers: TimerHost
+
   constructor(private readonly opts: MachineClientOptions) {
     this.log = (opts.log ?? noopLogger).child({ scope: 'run.client' })
     this.now = opts.now ?? (() => Date.now())
+    this.reconnectTimers = opts.reconnect?.timers ?? systemTimerHost
   }
 
   /** As the host reported it on connect; undefined while connecting or closed. */
@@ -257,13 +301,16 @@ export class MachineClient implements MachineService {
     const conn = this.conn
     const h = this.hostStatus
     const last = this.lastRun === undefined ? {} : { lastRun: { ...this.lastRun } }
+    const reconnect = this.reconnectStatus()
     if (conn === undefined || h === undefined) {
       const s: RunStatus = { ...closedStatus(this.timeScale), ...last }
-      if (conn === undefined && this.lost !== undefined)
+      // DF129 RC4: also while auto-reconnect's attempt connects
+      if (this.lost !== undefined)
         s.connection.lost = {
           target: this.lost.target,
           ...(this.lost.port === undefined ? {} : { port: { ...this.lost.port } }),
         }
+      if (reconnect !== undefined) s.connection.reconnect = reconnect
       return conn === undefined
         ? s
         : {
@@ -283,6 +330,7 @@ export class MachineClient implements MachineService {
         ...(conn.target === undefined ? {} : { target: conn.target }),
         ...(conn.port === undefined ? {} : { port: { ...conn.port } }),
         timeScale,
+        ...(reconnect === undefined ? {} : { reconnect }),
       },
       ...(job === undefined || this.job?.jobId !== job.jobId
         ? {}
@@ -298,6 +346,123 @@ export class MachineClient implements MachineService {
       ...last,
       ...(this.step === undefined ? {} : { alignment: structuredClone(this.step) }),
     }
+  }
+
+  /** DF129 RC4: auto-reconnect's state for the status, while trying and after it ended. */
+  private reconnectStatus(): RunStatus['connection']['reconnect'] {
+    const r = this.reconnecting
+    if (r === undefined) return undefined
+    return {
+      phase: r.progress.phase,
+      attempt: r.progress.attempt,
+      ...(r.progress.phase === 'waiting' && r.nextAt !== undefined ? { nextAt: r.nextAt } : {}),
+    }
+  }
+
+  /**
+   * DF129 RC4: after a connection lost during a run, open it again by itself: the same port path or
+   * USB serial number, backoff for 2 minutes; only a plain connect (handshake and reads), never a
+   * move, homing, unlock or resume (docs/modes/run-recovery.md#auto-reconnect).
+   */
+  private startReconnect(): void {
+    const reopen = this.reopen
+    if (reopen === undefined || this.opts.reconnect?.enabled?.() === false) return
+    this.reconnecting?.r.cancel()
+    const target = reopen.target
+    const r: Reconnector = new Reconnector({
+      timers: this.reconnectTimers,
+      attempt: (path) => this.reconnectAttempt(r, reopen, path),
+      ...(target.kind === 'serial'
+        ? {
+            serial: {
+              lost: { path: target.path, ...reopen.usb },
+              list: () => this.listPorts(),
+            },
+          }
+        : {}),
+      onChange: (progress) => {
+        if (this.reconnecting?.r !== r) return
+        this.reconnecting.progress = progress
+        this.reconnecting.nextAt =
+          progress.nextInMs === undefined ? undefined : this.now() + progress.nextInMs
+        this.log.info({ ...progress }, 'reconnect')
+        this.notify()
+      },
+    })
+    this.reconnecting = { r, progress: r.progress }
+    this.log.info({ target: target.kind }, 'reconnecting after a lost connection')
+    r.start()
+    this.notify()
+  }
+
+  /** One reconnect attempt: the connection as last opened, at `path` (serial). */
+  private async reconnectAttempt(
+    r: Reconnector,
+    reopen: Reopen,
+    path: string | undefined,
+  ): AsyncAppResult<unknown> {
+    const where = `${WHERE}.reconnect`
+    if (this.conn !== undefined) return fail('run.busy', 'a connection is open', { where })
+    const t = reopen.target
+    let target: ConnectTarget
+    if (t.kind === 'serial') target = { ...t, path: path ?? t.path }
+    else {
+      if (this.simulatedUntil !== undefined && this.reconnectTimers.now() < this.simulatedUntil)
+        return fail('machine.connection', 'the simulated cable is unplugged', { where })
+      // powers up where it stopped, G54 kept (EEPROM), never prepared (prepare homes)
+      const { prepare: _prepare, ...rest } = t
+      const seen = this.lastSeen
+      target = {
+        ...rest,
+        // the time scale the connection had when lost
+        timeScale: this.timeScale,
+        ...(seen === undefined ? {} : { position: seen.mpos, workZero: seen.workZero }),
+      }
+    }
+    // `lost` stays while trying: the safety warning is not announced again per attempt
+    const opened = await this.open(target, reopen.profile, true)
+    if (opened.isErr()) return opened
+    // "Stop trying" while this attempt connected: let go again (reads only happened)
+    if (this.reconnecting?.r !== r) {
+      await this.disconnect()
+      return fail('op.aborted', 'reconnecting was stopped', { where })
+    }
+    // the next loss reopens this port (a re-enumerated device keeps its new path)
+    this.reopen = { target, profile: reopen.profile, usb: this.connUsb() ?? reopen.usb }
+    return opened
+  }
+
+  /** DF129 RC4: the user's "Stop trying": ends auto-reconnect (the lost warning stays). */
+  cancelReconnect(): void {
+    const r = this.reconnecting
+    if (r === undefined) return
+    r.r.cancel()
+    this.reconnecting = undefined
+    this.notify()
+  }
+
+  /**
+   * DF129, Q173: "Simulate a lost connection" on the virtual machine during a run: its cable is
+   * pulled (the connection is lost as a real one is) and comes back after `SIMULATED_UNPLUG_MS`,
+   * so auto-reconnect and the recovery can be practised. Renderer only (no command, no agent tool).
+   */
+  async simulateConnectionLoss(): AsyncAppResult<void> {
+    const where = `${WHERE}.simulateConnectionLoss`
+    if (this.conn?.state !== 'open') return this.notConnected()
+    if (this.conn.target !== 'virtual')
+      return fail('run.state', 'only the virtual machine can simulate a lost connection', { where })
+    if (this.job === undefined)
+      return fail('run.state', 'a lost connection is simulated during a run', { where })
+    this.simulatedUntil = this.reconnectTimers.now() + SIMULATED_UNPLUG_MS
+    const r = await this.request({
+      type: 'machine',
+      requestId: '',
+      action: { kind: 'simulateLostConnection' },
+    })
+    // the host may be gone before its reply is read: lost is what was asked for
+    return r.isErr() && r.unwrapErr().code === 'machine.connection'
+      ? Ok(undefined)
+      : r.map(() => undefined)
   }
 
   alignmentStep(): AlignmentStep | undefined {
@@ -413,19 +578,28 @@ export class MachineClient implements MachineService {
     return () => this.listeners.delete(listener)
   }
 
-  async connect(
+  async connect(target: ConnectTarget, profile?: ConnectProfile): AsyncAppResult<ConnectedInfo> {
+    if (this.conn !== undefined)
+      return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
+    // the user's own connect ends auto-reconnect and its state (DF129 RC4)
+    this.cancelReconnect()
+    const r = await this.open(target, profile)
+    if (r.isOk()) this.reopen = { target, profile, usb: this.connUsb() }
+    return r
+  }
+
+  /** Opens `target` (a connect, the user's or auto-reconnect's). */
+  private async open(
     target: ConnectTarget,
-    profile?: {
-      readonly spindleMinSpeed?: number | undefined
-      readonly machine?: MachineValuesDTO | undefined
-    },
+    profile: ConnectProfile | undefined,
+    auto = false,
   ): AsyncAppResult<ConnectedInfo> {
     const machineKey = target.machineKey
     if (this.conn !== undefined)
       return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
     // the kind is known from the start, so a connection lost while opening is reported too
     this.conn = { state: 'connecting', machineKey, target: target.kind }
-    this.lost = undefined
+    if (!auto) this.lost = undefined
     this.plannerCapacity = PLANNER_BLOCKS
     // a real controller always runs at 1× (docs/modes/run-machine.md#amendments-to-run-v01md)
     this.timeScale = target.kind === 'virtual' ? target.timeScale : 1
@@ -437,20 +611,45 @@ export class MachineClient implements MachineService {
     const info = r.andThen((v) => parseWith(ControllerInfoSchema, v, `${WHERE}.connect`))
     if (info.isErr()) return this.connectFailed(info.unwrapErr())
     const connected = info.unwrap()
+    const usb =
+      connected.target === 'serial' ? await this.usbIdentity(connected.port?.path) : undefined
     this.conn = {
       state: 'open',
       machineKey,
       target: connected.target,
       ...(connected.port === undefined ? {} : { port: connected.port }),
+      ...(usb === undefined ? {} : { usb }),
       settings: connected.settings,
       ...(profile?.spindleMinSpeed === undefined
         ? {}
         : { spindleMinSpeed: profile.spindleMinSpeed }),
       ...(profile?.machine === undefined ? {} : { machine: profile.machine }),
     }
+    // auto-reconnect kept the lost warning while trying (the user's connect cleared it at once)
+    if (auto) this.lost = undefined
     this.log.info({ target: connected.target, version: connected.version }, 'connected')
     this.notify()
     return info
+  }
+
+  /** DF129 RC4: the open connection's USB identity (a method: narrowing does not see `open`). */
+  private connUsb(): UsbIdentity | undefined {
+    return this.conn?.usb
+  }
+
+  /** DF129 RC4: the USB identity the OS reports for `path` (undefined: none or no list). */
+  private async usbIdentity(path: string | undefined): Promise<UsbIdentity | undefined> {
+    if (path === undefined) return undefined
+    const listed = await this.request({ type: 'listPorts', requestId: '' })
+    const ports = listed.andThen((v) => parseWith(PortListSchema, v, `${WHERE}.connect`))
+    const p = ports.isOk() ? ports.unwrap().find((x) => x.path === path) : undefined
+    if (p === undefined || (p.serialNumber ?? p.vendorId ?? p.productId) === undefined)
+      return undefined
+    return {
+      ...(p.serialNumber === undefined ? {} : { serialNumber: p.serialNumber }),
+      ...(p.vendorId === undefined ? {} : { vendorId: p.vendorId }),
+      ...(p.productId === undefined ? {} : { productId: p.productId }),
+    }
   }
 
   async listPorts(): AsyncAppResult<SerialPortInfo[]> {
@@ -462,6 +661,8 @@ export class MachineClient implements MachineService {
   }
 
   async disconnect(): AsyncAppResult<void> {
+    // the user's own disconnect ends auto-reconnect and its state (DF129 RC4)
+    this.cancelReconnect()
     const host = this.host
     if (host === undefined || this.conn === undefined) return Ok(undefined)
     if (this.job !== undefined)
@@ -544,6 +745,8 @@ export class MachineClient implements MachineService {
       }),
     }
     this.job = job
+    // a new run: "Reconnected" has done its job (DF129 RC4)
+    if (this.reconnecting?.r.active === false) this.reconnecting = undefined
     // a new run replaces the record of the last one
     if (about !== undefined) this.lastRun = undefined
     this.lastProgram = {
@@ -565,6 +768,7 @@ export class MachineClient implements MachineService {
         machine: {
           target: this.conn.target,
           port: this.conn.port,
+          usb: this.conn.usb,
           machineKey: this.conn.machineKey,
           envelope: this.hostStatus?.envelope,
         },
@@ -630,6 +834,7 @@ export class MachineClient implements MachineService {
    * reset, then closes the controller), bounded by `timeoutMs`; then the host is ended.
    */
   async shutdown(timeoutMs = 3000): Promise<void> {
+    this.reconnecting?.r.cancel()
     const host = this.host
     if (host === undefined) return
     host.expectExit = true
@@ -646,6 +851,7 @@ export class MachineClient implements MachineService {
 
   /** Ends the host at once, without a controlled stop (tests; a host that does not answer). */
   close(): void {
+    this.reconnecting?.r.cancel()
     const host = this.host
     if (host === undefined) return
     host.expectExit = true
@@ -755,12 +961,15 @@ export class MachineClient implements MachineService {
           this.log.warn({ ...m.data }, 'machine connection lost')
           this.recorder(this.job?.jobId)?.flag('connectionLost')
           this.markLost()
+          const duringRun = this.job !== undefined
           host.expectExit = true
           this.conn = undefined
           this.hostStatus = undefined
           this.step = undefined
           this.reserved = undefined
           host.handle.terminate()
+          // DF129 RC4: lost during a run: reconnect by itself (never otherwise)
+          if (duringRun) this.startReconnect()
           this.notify()
           return
         }
@@ -779,6 +988,7 @@ export class MachineClient implements MachineService {
   private onExit(host: Host, code: number | null): void {
     if (host !== this.host) return
     const e = hostExited(code)
+    const lostRun = !host.expectExit && this.conn !== undefined && this.job !== undefined
     if (!host.expectExit && this.conn !== undefined) {
       this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
       this.markLost()
@@ -789,6 +999,8 @@ export class MachineClient implements MachineService {
     this.hostStatus = undefined
     this.step = undefined
     this.reserved = undefined
+    // DF129 RC4: the host died during a run: reconnect by itself
+    if (lostRun) this.startReconnect()
     this.notify()
   }
 
@@ -805,6 +1017,8 @@ export class MachineClient implements MachineService {
 
   private markLost(): void {
     const c = this.conn
+    const h = this.hostStatus
+    if (h !== undefined) this.lastSeen = { mpos: h.mpos, workZero: h.workZero }
     if (c?.target === undefined) return
     this.lost = { target: c.target, ...(c.port === undefined ? {} : { port: { ...c.port } }) }
   }

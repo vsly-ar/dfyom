@@ -49,6 +49,12 @@ export interface EmulatorOptions {
    */
   readonly position?: Vec3
   /**
+   * G54 at power-up (default 0,0,0), as GRBL's EEPROM keeps it over a power cycle (DF129: the
+   * virtual machine reconnected after a simulated lost connection,
+   * docs/modes/run-recovery.md#implementation-rc4).
+   */
+  readonly workOffset?: Vec3
+  /**
    * GRBL-exact homing (default false): no status report while `$H` runs; the `?`s received meanwhile
    * are answered once when the cycle ends. The default reports during homing (DFYOM's deviation,
    * docs/architecture/grbl.md#homing-and-machine-coordinates). `'drop'`: as a GRBL fork that drops
@@ -217,6 +223,7 @@ export class GrblEmulator {
     private readonly silentHoming: boolean | 'drop' = false,
     probePlate: number | undefined = undefined,
     private readonly bannerAfterHoming: boolean | 'alarm' = false,
+    workOffset: Vec3 = zero,
   ) {
     this.plate = probePlate
     const s = settings
@@ -232,7 +239,8 @@ export class GrblEmulator {
       },
     })
     this.mpos = position
-    this.parser = initialParserState(position, zero)
+    this.wco = workOffset
+    this.parser = initialParserState(position, workOffset)
     this.state = s.get(22) ? 'Alarm' : 'Idle'
     this.banner()
     this.noteState()
@@ -248,6 +256,7 @@ export class GrblEmulator {
           options.silentHoming ?? false,
           options.probePlate,
           options.bannerAfterHoming ?? false,
+          options.workOffset ?? zero,
         ),
       ),
     )
@@ -368,6 +377,19 @@ export class GrblEmulator {
     this.homingPath = undefined
     this.criticalAlarm(1)
     this.sample()
+    this.noteState()
+  }
+
+  /**
+   * Fault hook (DF129): the controller restarts as from power-up (a board reset by DTR when its
+   * port opens, or powered again): motion, spindle, coolant, overrides and the parser's modal
+   * state are gone, no `ALARM:3`; the banner, and with `$22=1` the start-up lock. G54 stays (GRBL's
+   * EEPROM). The position stays where the machine physically is (the emulator's MPos is its
+   * physical position; DFYOM never trusts it before homing). Doc: docs/architecture/grbl.md#fault-injection
+   */
+  powerCycle(): void {
+    this.silent = false
+    this.reset(true)
     this.noteState()
   }
 
@@ -996,10 +1018,16 @@ export class GrblEmulator {
     }
   }
 
-  /** Soft reset (ctrl-x): ALARM:3 if moving (ALARM:6 while homing), then the banner. */
-  private reset(): void {
+  /**
+   * Soft reset (ctrl-x): ALARM:3 if moving (ALARM:6 while homing), then the banner. `powerUp`
+   * (`powerCycle`): no alarm message, the state as at power-up (`$22`).
+   */
+  private reset(powerUp = false): void {
     const moving = this.exec !== undefined || this.state === 'Home'
-    if (this.critical) this.critical = false
+    if (powerUp) {
+      this.critical = false
+      this.state = this.settings.get(22) ? 'Alarm' : 'Idle'
+    } else if (this.critical) this.critical = false
     else if (moving) {
       this.emit(`ALARM:${this.state === 'Home' ? 6 : 3}`)
       this.state = 'Alarm'

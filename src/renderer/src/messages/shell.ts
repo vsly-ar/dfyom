@@ -139,6 +139,10 @@ export const shellMessages = {
       'In Run mode, while connected and no run is going: a short press jogs one step, holding jogs until released; Escape stops a jog. Not while typing in a field.',
     homeConfirm: 'Homing confirmation',
     homeConfirmReset: 'Ask again for every machine',
+    /** DF129 RC4 (docs/modes/run-recovery.md#auto-reconnect). */
+    autoReconnect: 'Reconnect automatically after a lost connection',
+    autoReconnectHint:
+      'When the connection drops during a run, DFYOM connects to the same machine again for up to 2 minutes. It only reads the controller: nothing moves until you say so.',
     homeConfirmHint: (n: number) =>
       n === 0
         ? 'Homing a real machine asks for confirmation first.'

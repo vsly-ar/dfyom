@@ -15,6 +15,7 @@ import {
   keepAwake,
   pushRunStatus,
   registerRunProgramIpc,
+  registerRunRecoveryIpc,
   utilityHostFactory,
 } from './machine/electron'
 import { createRunJournalStore, loadRunJournal } from './persistence/run-journal'
@@ -290,6 +291,8 @@ void app.whenReady().then(async () => {
     if (j !== undefined && j.state === 'interrupted')
       log.info({ reason: j.reason, jobId: j.job.jobId }, 'interrupted run journal found')
   })
+  // DF129 RC4: the setting, once the settings store exists (below)
+  let autoReconnect = (): boolean => true
   const machine = createMachineClient({
     factory: utilityHostFactory(MACHINE_UTILITY_ENTRY_PATH),
     log,
@@ -298,6 +301,7 @@ void app.whenReady().then(async () => {
     proc: 'utility',
     journal: runJournal,
     keepAwake: keepAwake(),
+    autoReconnect: () => autoReconnect(),
   })
   machine.onStatus(pushRunStatus)
   const gcodeFiles = createGcodeFiles()
@@ -331,6 +335,7 @@ void app.whenReady().then(async () => {
     initial: await loadSettings(appData, log),
     log: log.child({ scope: 'settings' }),
   })
+  autoReconnect = () => settings.get().autoReconnect
   // Remembered window bounds and dialog folders (docs/conventions/ui.md#remembered-window-state-and-dialog-folders).
   const appState = createAppStateStore({
     appData,
@@ -378,6 +383,7 @@ void app.whenReady().then(async () => {
   })
   // DF84: the streamed program for run mode's gCode panel (renderer only)
   registerRunProgramIpc(machine, (id) => sessions.isWindow(id))
+  registerRunRecoveryIpc(machine, (id) => sessions.isWindow(id))
   // DF93: external gCode files for a run (docs/modes/run.md#run-an-external-g-code-file-df93)
   const runFiles: RunFileDeps = {
     folders: appState,

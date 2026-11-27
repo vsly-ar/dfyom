@@ -18,7 +18,7 @@ import type { TimeScale } from '../../../../core/run/clock'
 import { runMessages } from '../../messages/run'
 import { useSettings } from '../../shell/ShellContext'
 import { Icon, Button, Checkbox, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
-import { AlarmPanel, LostConnectionWarning } from './AlarmPanel'
+import { AlarmPanel, LostConnectionWarning, ReconnectStatus } from './AlarmPanel'
 import { JogPad, useJogControls, useMachineJog } from './JogPad'
 import { planLabel } from '../plan/model'
 import { useLibraryItems } from '../plan/usePlan'
@@ -268,6 +268,13 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             >
               {m.disconnect}
             </Button>
+            {/* DF129, Q173: practise a lost connection on the virtual machine, mid-run */}
+            {!serial && status.job !== undefined ? (
+              <>
+                <Button onClick={() => void a.reconnect('simulate')}>{m.reconnect.simulate}</Button>
+                <p className={styles['hint']}>{m.reconnect.simulateHint}</p>
+              </>
+            ) : null}
             {serial && settingsCheck !== undefined ? (
               <SettingsWarning check={settingsCheck} machineId={manual ? machineId : undefined} />
             ) : null}
@@ -387,6 +394,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
       {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
       <AlarmPanel status={status} />
       <LostConnectionWarning status={status} />
+      <ReconnectStatus status={status} onStop={() => void a.reconnect('cancel')} />
       {actionError ? (
         <ErrorMessage
           error={actionError}

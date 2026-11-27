@@ -110,6 +110,24 @@ export const runMessages = {
     jogHint: 'Click to jog one step; hold to jog until released.',
     /** After a real connection was lost without a reset (run-machine.md#lost-connection-m2). */
     lost: 'Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop.',
+    /**
+     * DF129 RC4: auto-reconnect after a connection lost during a run, calm and polite
+     * (docs/modes/run-recovery.md#implementation-rc4).
+     */
+    reconnect: {
+      region: 'Reconnecting',
+      trying: (attempt: number) => `Reconnecting… attempt ${attempt}`,
+      tryingHint:
+        'DFYOM connects again by itself. Reconnecting restarts the controller, which stops it; nothing moves until you say so.',
+      reconnected: 'Reconnected — machine needs homing',
+      reconnectedHint:
+        'The controller restarted, so it no longer knows where the spindle is. Home it before you continue.',
+      gaveUp: 'Gave up after 2 min — reconnect manually',
+      gaveUpHint: 'Check the cable and the controller’s power, then connect again.',
+      stop: 'Stop trying',
+      simulate: 'Simulate a lost connection',
+      simulateHint: 'Practise: pull the virtual machine’s cable mid-run and see it reconnect.',
+    },
     /** DF88: only Probe Z is left of the former "Work zero" section. */
     probing: 'Probing',
     noPlate: 'Set the machine’s touch plate thickness in the Library to probe Z.',
