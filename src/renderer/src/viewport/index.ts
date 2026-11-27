@@ -29,3 +29,4 @@ export {
   toolpathLines,
   type ToolpathLines,
 } from './toolpath-lines'
+export { IN_PROCESS_OPACITY, type InProcessStockView } from './InProcessStockLayer'

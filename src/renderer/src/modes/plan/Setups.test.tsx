@@ -337,6 +337,15 @@ describe('Setup panel', () => {
     await waitFor(() =>
       expect(probe.scene?.lines?.starts.length).toBe(t.plan().setups[1]!.operations.length),
     )
+    // C5: the in-process stock, on by default: the material left after the cut operation
+    const stock = screen.getByRole('switch', { name: 'Show in-process stock' })
+    expect(stock).toHaveAttribute('aria-checked', 'true')
+    await waitFor(() => expect(probe.scene?.inProcessStock?.operations).toBe(1))
+    expect(probe.scene!.inProcessStock!.mesh.indices.length).toBeGreaterThan(0)
+    await expectNoAxeViolations()
+    await t.user.click(stock)
+    expect(stock).toHaveAttribute('aria-checked', 'false')
+    await waitFor(() => expect(probe.scene?.inProcessStock).toBeUndefined())
     await expectNoAxeViolations()
   })
 

@@ -755,6 +755,7 @@ export function Viewport({
     summary ?? msg.summary({ operations, status: mesh ? status : 'empty' }),
     regionMarker?.label,
     run?.rest ? msg.restShaded : undefined,
+    run?.inProcessStock ? msg.inProcessStock(run.inProcessStock.operations) : undefined,
   ]
     .filter(Boolean)
     .join(' ')
@@ -778,6 +779,8 @@ export function Viewport({
       data-toolpath-segments={run?.lines?.segments}
       data-toolpath-done={run?.lines ? run.done : undefined}
       data-ghost={run?.ghost ? '' : undefined}
+      // DF135 C5: the in-process stock drawn, by its already-cut operations
+      data-in-process-stock={run?.inProcessStock?.operations}
       onKeyDown={onKeyDown}
       onPointerMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect()

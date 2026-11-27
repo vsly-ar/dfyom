@@ -513,6 +513,8 @@ export const planMessages = {
     markerTip:
       'Already cut (marked in Design): not in the program; its material counts as removed for the operations after it.',
     showToolpaths: 'Show cut toolpaths',
+    /** C5: the material left after the cut operations, around the part. */
+    showStock: 'Show in-process stock',
   },
 
   /** Items switched off for this plan (DF106, plan-v0.4.md § Disabling in a plan). */
