@@ -217,4 +217,56 @@ describe('GcodePanelView', () => {
     expect(screen.getByText('The program shows here once a run starts.')).toBeInTheDocument()
     await expectNoAxeViolations()
   })
+
+  it('before a start at a line: earlier lines skipped, the start line marked; "Start from here…" (DF129 RC3)', async () => {
+    const asked: number[] = []
+    const { user } = renderUi(
+      <GcodePanelView
+        program={{ state: 'ready', value: program(60) }}
+        run={undefined}
+        start={45}
+        state={{ open: true, height: 12, follow: true }}
+        onChange={() => {}}
+        onStartFromHere={(line) => asked.push(line)}
+      />,
+    )
+    const region = screen.getByRole('region', { name: 'gCode' })
+    expect(within(region).getByText('Starts at line 45')).toBeInTheDocument()
+    const list = within(region).getByRole('list', { name: 'Program lines' })
+    expect(list).toHaveAccessibleDescription(/Muted lines are skipped/)
+    const start = list.querySelector('[aria-current="location"]')!
+    expect(start.getAttribute('data-line')).toBe('45')
+    expect(list.querySelector('[data-line="44"]')).toHaveAttribute('data-state', 'skipped')
+    expect(list.querySelector('[data-line="46"]')).toHaveAttribute('data-state', 'pending')
+    await expectNoAxeViolations()
+    // the row's context menu
+    fireEvent.contextMenu(list.querySelector('[data-line="50"]')!)
+    await user.click(await screen.findByRole('menuitem', { name: 'Start from here…' }))
+    expect(asked).toEqual([50])
+  })
+
+  it("mutes a resumed run's lead-in until it runs (DF129 RC3)", () => {
+    const p = program(30)
+    renderUi(
+      <GcodePanelView
+        program={{
+          state: 'ready',
+          value: {
+            ...p,
+            sections: [
+              { fromLine: 1, label: 'Lead-in' },
+              { fromLine: 12, label: 'pocket1 · tool 1: Flat 6' },
+            ],
+          },
+        }}
+        run={{ acknowledged: 0, sent: 0 }}
+        state={{ open: true, height: 12, follow: true }}
+        onChange={() => {}}
+      />,
+    )
+    const list = screen.getByRole('list', { name: 'Program lines' })
+    expect(list.querySelector('[data-line="11"]')).toHaveAttribute('data-lead-in', '')
+    expect(list.querySelector('[data-line="12"]')).not.toHaveAttribute('data-lead-in')
+    expect(screen.queryByRole('menuitem')).toBeNull()
+  })
 })

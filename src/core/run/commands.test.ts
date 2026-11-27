@@ -513,6 +513,42 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().state).toBe('Idle')
   })
 
+  it('run.job.check { program: true } returns the checked program and its resume points (DF129 RC3)', async () => {
+    const file = '/files/fusion-grbl.nc'
+    const text = fs.readFileSync(new URL('./__fixtures__/fusion-grbl.nc', import.meta.url), 'utf8')
+    const t = await setup({ files: new Map([[file, text]]) })
+    expectOk(await t.open({ prepare: true }))
+    type Checked = {
+      program?: {
+        lines: string[]
+        sections: { fromLine: number; label: string }[]
+        points: { line: number; kind: string; label?: string }[]
+      }
+    }
+    const plain = expectOk(await t.run('run.job.check', { planId: t.planId })) as Checked
+    expect(plain.program).toBeUndefined()
+    const full = expectOk(await t.run('plan.export', { planId: t.planId, target: '/x.nc' })) as {
+      lines: number
+    }
+    const r = expectOk(await t.run('run.job.check', { planId: t.planId, program: true })) as Checked
+    expect(r.program!.lines).toHaveLength(full.lines)
+    expect(r.program!.sections.length).toBeGreaterThan(0)
+    const points = r.program!.points
+    expect(points[0]).toMatchObject({ kind: 'operation', label: expect.any(String) })
+    expect(points.some((p) => p.kind === 'pass')).toBe(true)
+    // each point is a line a check accepts as it is
+    const pass = points.find((p) => p.kind === 'pass')!
+    const at = expectOk(
+      await t.run('run.job.check', { planId: t.planId, fromLine: pass.line, program: true }),
+    ) as Checked & { resume: { fromLine: number } }
+    expect(at.resume.fromLine).toBe(pass.line)
+    expect(at.program!.points).toEqual(points)
+    // a file: its prepared lines and points
+    const f = expectOk(await t.run('run.job.check', { file, program: true })) as Checked
+    expect(f.program!.lines).toEqual(prepareGcodeFile(text).lines)
+    expect(f.program!.points.filter((p) => p.kind === 'operation')).toHaveLength(2)
+  })
+
   it('starts a plan and a file at a line after a lead-in; refused when the program changed (DF129 RC2)', async () => {
     const file = '/files/fusion-grbl.nc'
     const text = fs.readFileSync(new URL('./__fixtures__/fusion-grbl.nc', import.meta.url), 'utf8')

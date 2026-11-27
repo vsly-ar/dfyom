@@ -1,12 +1,14 @@
 // Run mode UI against the fake bridge: a project with a real plan (core plan fixture) and a
 // scripted machine that answers the run commands and pushes statuses as main does.
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #testing
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { planSetup } from '../../../../core/plan/plan.fixture'
 import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import { runPlanHash } from '../../../../core/run/plan-hash'
+import { resumePoints, resumeProgram, scanProgram } from '../../../../core/run/recovery'
+import { prepareGcodeFile } from '../../../../core/run/gcode-file'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
@@ -18,6 +20,30 @@ import { expectNoAxeViolations, renderUi } from '../../test/render'
 
 const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
 
+/** The program `run.job.check` answers (DF129 RC3): two passes, the second entering on a ramp. */
+const TWO_PASSES = [
+  '(Pocket 1)',
+  '(DFYOM TOOL CHANGE 1: Flat 6)',
+  'M0',
+  'G90 G94 G17 G21',
+  'G54',
+  'M3 S18000',
+  'G4 P3',
+  'G0 Z5',
+  'G0 X10 Y10',
+  'G1 Z-1 F150',
+  'G1 X20 F600',
+  'G1 Y20',
+  'G0 Z5',
+  'G0 X10 Y10',
+  'G1 X12 Z-1.5 F300',
+  'G1 X14 Z-2',
+  'G1 X20',
+  'G1 Y20',
+  'G0 Z5',
+  'M5',
+]
+
 interface Machine {
   status: RunStatus
   push(patch: Partial<RunStatus>): void
@@ -25,6 +51,8 @@ interface Machine {
   outcome: { ok: true; value: unknown } | { ok: false; error: AppErrorData } | undefined
   /** `softLimit` findings `run.job.check` answers (DF46). */
   findings: { rule: string; params: Record<string, number | string> }[]
+  /** DF129 RC3: a file's prepared lines, for `run.job.check { file, fromLine }`. */
+  fileLines?: readonly string[]
 }
 
 /** Answers the run commands like main and the virtual machine would, and pushes statuses. */
@@ -94,7 +122,43 @@ function scriptMachine(bridge: FakeBridge): Machine {
   })
   bridge.handle('job.abort', () => ok({}))
   bridge.handle('run.job.continue', () => ok({}))
-  bridge.handle('run.job.check', () => ok({ setupId: 's', findings: m.findings }))
+  // DF129 RC3: the program and the start's preview, from core on a small two-pass program
+  bridge.handle('run.job.check', (a) => {
+    const { fromLine, program, file } = a as {
+      fromLine?: number
+      program?: boolean
+      file?: string
+    }
+    const lines = file !== undefined && m.fileLines !== undefined ? m.fileLines : TWO_PASSES
+    const points = resumePoints(scanProgram(lines))
+    const resumed =
+      fromLine === undefined
+        ? undefined
+        : resumeProgram({ lines, sections: [] }, fromLine, {
+            topZ: -1,
+            spinUpSeconds: 3,
+            spindleControl: 'gcode',
+          }).unwrap()
+    return ok({
+      setupId: 's',
+      findings: m.findings,
+      ...(program === true
+        ? { program: { lines, sections: [{ fromLine: 1, label: 'Pocket 1' }], points } }
+        : {}),
+      ...(resumed === undefined
+        ? {}
+        : {
+            resume: {
+              fromLine: resumed.fromLine,
+              programHash: 'hash-1',
+              leadIn: resumed.leadIn,
+              findings: resumed.findings,
+              before: points.filter((p) => p.line <= resumed.fromLine).at(-1)?.line,
+              after: points.find((p) => p.line > resumed.fromLine)?.line,
+            },
+          }),
+    })
+  })
   bridge.handle('run.machine.reset', () => ok({}))
   bridge.handle('run.machine.probeZ', () => ok({ jobId: 'probe-1' }))
   bridge.handle('run.override.set', () => ok({}))
@@ -345,9 +409,13 @@ describe('Run mode', () => {
     // DF46: the soft-limit result, then Start run is enabled and focused
     await within(preflight).findByText('Inside the travel at this work zero.')
     await waitFor(() => expect(start).toHaveFocus())
+    // DF129 RC3: the first check also reads the program for "Start at"
     expect(t.callsOf('run.job.check')).toEqual([
-      { planId: t.plan().id, setupId: expect.any(String) },
+      { planId: t.plan().id, setupId: expect.any(String), program: true },
     ])
+    expect(within(preflight).getByRole('combobox', { name: 'Start at' })).toHaveTextContent(
+      'Beginning',
+    )
     await expectNoAxeViolations()
     await t.user.click(start)
     expect(t.callsOf('run.job.start')).toHaveLength(1)
@@ -383,6 +451,74 @@ describe('Run mode', () => {
     await t.user.click(within(group).getByRole('button', { name: 'Stop' }))
     expect(t.callsOf('job.abort')).toEqual([{ jobId: 'run-1' }])
     expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('pre-flight "Start at": a pass start, the lead-in with its tool wait, a risky line, the start (DF129 RC3)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = within(screen.getByRole('dialog', { name: 'Start run?' }))
+    await preflight.findByText('Inside the travel at this work zero.')
+    // a pass start from the list, grouped by its operation
+    await t.user.click(preflight.getByRole('combobox', { name: 'Start at' }))
+    expect(screen.getByRole('option', { name: 'Operation start · line 10' })).toBeInTheDocument()
+    await t.user.click(screen.getByRole('option', { name: 'Pass 2 · line 15' }))
+    expect(await preflight.findByText('The run first waits at tool 1: Flat 6')).toBeInTheDocument()
+    expect(t.callsOf('run.job.check').at(-1)).toMatchObject({ fromLine: 15 })
+    expect(t.callsOf('run.job.check').at(-1)).not.toHaveProperty('program')
+    expect(
+      preflight.getByText('Lines 1–14 are skipped: the machine runs from line 15 on.'),
+    ).toBeInTheDocument()
+    const leadIn = within(preflight.getByRole('region', { name: 'Lead-in' }))
+    expect(leadIn.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Spindle and coolant off, then straight up to the machine top.',
+      'Waits at tool 1 (the tool-change dialog).',
+      'Spindle on at 18,000 rpm, then waits 3 s for it to spin up.',
+      'Rapid to X 10 Y 10 mm at the top.',
+      'Rapid down to Z 5 mm.',
+      'Runs the program from line 15.',
+    ])
+    // the gCode panel behind the dialog (inert while it is open): lines before the start
+    // skipped, the start line marked
+    const list = document.querySelector('[aria-label="gCode"] [role="list"]')!
+    expect(list.querySelector('[aria-current="location"]')).toHaveAttribute('data-line', '15')
+    expect(list.querySelector('[data-line="14"]')).toHaveAttribute('data-state', 'skipped')
+    const start = preflight.getByRole('button', { name: 'Start at line 15' })
+    await waitFor(() => expect(start).toBeEnabled())
+    await expectNoAxeViolations()
+
+    // any line behind "Choose a line…": inside the ramp, in the material
+    await t.user.click(preflight.getByRole('combobox', { name: 'Start at' }))
+    await t.user.click(screen.getByRole('option', { name: 'Choose a line…' }))
+    const field = preflight.getByRole('textbox', { name: 'Line' })
+    await t.user.clear(field)
+    await t.user.type(field, '16{Enter}')
+    expect(
+      await preflight.findByText(
+        /^This line is part of a ramp; starting here plunges straight down/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      preflight.getByText(/^The line starts in the material at Z -1\.500 mm/),
+    ).toBeInTheDocument()
+    expect(preflight.getByText(/^Line 16 is not an operation or pass start/)).toBeInTheDocument()
+    // allowed after reading; the ramp's first line a click away
+    await waitFor(() =>
+      expect(preflight.getByRole('button', { name: 'Start at line 16' })).toBeEnabled(),
+    )
+    await expectNoAxeViolations()
+    await t.user.click(preflight.getAllByRole('button', { name: 'Start at line 15' })[0]!)
+    expect(preflight.getByRole('combobox', { name: 'Start at' })).toHaveTextContent(
+      'Pass 2 · line 15',
+    )
+    const go = preflight.getByRole('button', { name: 'Start at line 15' })
+    await waitFor(() => expect(go).toBeEnabled())
+    await t.user.click(go)
+    expect(t.callsOf('run.job.start')).toEqual([
+      { planId: t.plan().id, setupId: expect.any(String), fromLine: 15, programHash: 'hash-1' },
+    ])
   })
 
   it('pre-flight: a program outside the travel keeps Start run disabled and says why (DF46)', async () => {
@@ -1700,6 +1836,49 @@ describe('an external gCode file without a project (DF93)', () => {
     expect(t.bridge.runFileOpens).toEqual([undefined, '/cam/g28.nc'])
     await inspector.findByText('1 line cannot run')
     await expectNoAxeViolations(t.container)
+  })
+
+  it('"Start from here…" on a file\'s line opens the pre-flight at the resume point before it (DF129 RC3)', async () => {
+    const t = await renderNoProject()
+    const lines = prepareGcodeFile(FUSION).lines
+    t.machine.fileLines = lines
+    t.bridge.setRunFile('/cam/fusion.nc', FUSION)
+    act(() => t.bridge.emitShowRunFile('/cam/fusion.nc'))
+    const nav = within(t.nav())
+    const connect = await nav.findByRole('button', { name: 'Connect' })
+    await waitFor(() => expect(connect).toBeEnabled())
+    await t.user.click(connect)
+    await screen.findByRole('group', { name: 'Machine' })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    await within(machineGroup()!).findByText('Idle')
+    const asked = lines.indexOf('G1 X40 F800') + 1
+    const point = resumePoints(scanProgram(lines))
+      .filter((p) => p.line < asked)
+      .at(-1)!.line
+    const panel = screen.getByRole('region', { name: 'gCode' })
+    const row = await waitFor(() => panel.querySelector(`[data-line="${asked}"]`)!)
+    fireEvent.contextMenu(row)
+    await t.user.click(await screen.findByRole('menuitem', { name: 'Start from here…' }))
+    const preflight = within(await screen.findByRole('dialog', { name: 'Start run?' }))
+    expect(
+      preflight.getByText(
+        `Line ${asked} is not a resume point: the run starts at the pass start on line ${point} before it.`,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      await preflight.findByText(/^The run first waits at tool 1: D=6 CR=0 - flat end mill$/),
+    ).toBeInTheDocument()
+    expect(t.callsOf('run.job.check').at(-1)).toEqual({ file: '/cam/fusion.nc', fromLine: point })
+    // the asked line anyway: inside the cut
+    await t.user.click(preflight.getByRole('button', { name: `Start at line ${asked} anyway` }))
+    expect(await preflight.findByText(/^The line starts in the material/)).toBeInTheDocument()
+    const start = preflight.getByRole('button', { name: `Start at line ${asked}` })
+    await waitFor(() => expect(start).toBeEnabled())
+    await expectNoAxeViolations(t.container)
+    await t.user.click(start)
+    expect(t.callsOf('run.job.start')).toEqual([
+      { file: '/cam/fusion.nc', fromLine: asked, programHash: 'hash-1' },
+    ])
   })
 
   it('a file that cannot be read says so', async () => {
