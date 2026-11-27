@@ -49,7 +49,10 @@ export function dfmTool(tool: Tool): DfmTool {
     diameter: tool.diameter.canonical,
     ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
     ...(tool.angle.isSome() && { angle: tool.angle.unwrap().canonical }),
-    ...(tool.type === 'chamferMill' && { tipDiameter: tool.tipDiameterMm }),
+    ...((tool.type === 'chamferMill' || tool.type === 'taperedBallEndMill') && {
+      tipDiameter: tool.tipDiameterMm,
+    }),
+    ...(tool.taperAngle.isSome() && { taperAngle: tool.taperAngle.unwrap().canonical }),
     reach: tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical),
     fluteLength: tool.fluteLength.canonical,
     ...(tool.shankDiameter.isSome() && { shankDiameter: tool.shankDiameter.unwrap().canonical }),
@@ -284,9 +287,16 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   }
   const size = sizeClasses(out.map((c) => c.tool.diameter.canonical))
   const cls = (c: LibraryCandidate) => size.get(c.tool.diameter.canonical) ?? 0
-  // a Line's default tool is a V-bit (engraved-patterns.md § Tools): chamfer mills first
+  // a Line's default tool is a V-bit (engraved-patterns.md § Tools): chamfer mills first, then
+  // tapered ball end mills before a fragile straight one (tapered-ball-nose.md Q152)
   const vBit = (c: LibraryCandidate) =>
-    input.op.kind === 'line' && c.tool.type === 'chamferMill' ? 0 : 1
+    input.op.kind !== 'line'
+      ? 1
+      : c.tool.type === 'chamferMill'
+        ? 0
+        : c.tool.type === 'taperedBallEndMill'
+          ? 1
+          : 2
   // among V-bits, the angle nearest the default 60° (DF123): a sharp 10°–20° engraving bit cuts a
   // groove a quarter as wide, so it is taken when locked or when it is the only V-bit
   const off60 = (c: LibraryCandidate) =>
@@ -567,7 +577,7 @@ export function chooseTool(input: ChoiceInput): ToolChoice {
 
 /**
  * The tool a Line's groove takes (engraved-patterns.md § Line operation): its tool field's chamfer
- * mill (V-bit), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
+ * mill (V-bit), tapered ball (docs/modes/tapered-ball-nose.md#line-operation), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
  * that does not resolve) the default 60° V-bit.
  */
 export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
@@ -581,6 +591,17 @@ export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): 
       diameter: tool.diameter,
       angle: tool.angle,
       tipDiameter: tool.tipDiameter ?? 0,
+    }
+  if (
+    tool.type === 'taperedBallEndMill' &&
+    tool.tipDiameter !== undefined &&
+    tool.taperAngle !== undefined
+  )
+    return {
+      kind: 'taperedBall',
+      diameter: tool.diameter,
+      tipDiameter: tool.tipDiameter,
+      taperAngle: tool.taperAngle,
     }
   if (tool.type === 'ballEndMill') return { kind: 'ball', diameter: tool.diameter }
   if (tool.type === 'flatEndMill') return { kind: 'flat', diameter: tool.diameter }

@@ -279,10 +279,13 @@ function engagementOf(
         ? { kind: 'helix', ap: i.chamferDepth ?? 0.25 * D }
         : { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
     case 'line':
-      // engraved-patterns.md § Toolpath: a V-bit by F10 at the deepest point, else a full slot
+      // engraved-patterns.md § Toolpath: a V-bit by F10 at the deepest point, a tapered ball by F11
+      // there (tapered-ball-nose.md § Feeds and speeds), else a full slot
       return i.tool.type === 'chamferMill'
         ? { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
-        : { kind: 'slot' }
+        : i.tool.type === 'taperedBallEndMill'
+          ? { kind: 'taper', depth: i.chamferDepth ?? 0 }
+          : { kind: 'slot' }
   }
 }
 

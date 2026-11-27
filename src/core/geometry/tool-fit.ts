@@ -352,20 +352,17 @@ export function toolFit(
           }
     }
     case 'line': {
-      // a V-bit (chamfer mill with an angle), a ball or a flat end mill (engraved-patterns.md
-      // § Tools); its cutting length is the DFM's `lineTooDeep`, the reach here
+      // a V-bit (chamfer mill with an angle), a tapered ball (tapered-ball-nose.md), a ball or a
+      // flat end mill (engraved-patterns.md § Tools); its cutting length is the DFM's `lineTooDeep`, the reach here
       const ok =
         (tool.type === 'chamferMill' && tool.angle !== undefined) ||
+        tool.type === 'taperedBallEndMill' ||
         tool.type === 'ballEndMill' ||
         tool.type === 'flatEndMill'
       if (!ok)
         return {
           rule: 'type',
-          // tapered-ball-nose.md#which-operations-can-use-it: Lines take one from T2 on
-          detail:
-            tool.type === 'taperedBallEndMill'
-              ? 'a Line cannot use a tapered ball end mill yet: pick a V-bit (chamfer mill), a ball or a flat end mill'
-              : 'a Line needs a V-bit (chamfer mill), a ball or a flat end mill',
+          detail: 'a Line needs a V-bit (chamfer mill), a tapered ball, a ball or a flat end mill',
           values: { needs: 'lineTool' },
         }
       if (tool.reach === undefined) return undefined

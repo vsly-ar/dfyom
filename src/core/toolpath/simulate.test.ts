@@ -23,6 +23,7 @@ import {
 import { bullNose, chamferMill, drill, endMill, taperedBall } from './testing/fixtures'
 import { Heightmap, toolSurface } from './testing/oracles'
 import { turnToolpath } from './wcs'
+import { grooveWidth } from '../geometry/line'
 
 const ball = (d: number): ToolpathTool => ({ ...bullNose(d, d / 2), type: 'ballEndMill' })
 const STOCK = { length: 40, width: 30, thickness: 10 }
@@ -123,6 +124,37 @@ describe('tool profiles', () => {
     const short = taperedBall(3.175, 0.5, 3.6, 10)
     expect(toolProfile(short).radius).toBeCloseTo(half(10), 9)
     expect(toolSurface(short, half(10) + 0.01)).toBe(Infinity)
+  })
+})
+
+// docs/modes/tapered-ball-nose.md#implementation-t2: the Line's width read-out equals the
+// simulated groove (and so the deviation check, which reads the same cut map)
+describe('tapered ball groove (DF124 T2)', () => {
+  it("a straight groove's simulated width is the read-out's within one cell at 0.5, 1 and 3 mm", () => {
+    const t = taperedBall(3.175, 0.5, 3.6)
+    const cutter = {
+      kind: 'taperedBall',
+      diameter: 3.175,
+      tipDiameter: 0.5,
+      taperAngle: 3.6,
+    } as const
+    const cell = 0.1
+    const stock = { length: 20, width: 10, thickness: 10 }
+    for (const d of [0.5, 1, 3]) {
+      const m = simulate(
+        t,
+        [rapid([2, 5.03, 1]), line([2, 5.03, -d]), line([18, 5.03, -d]), rapid([18, 5.03, 1])],
+        cell,
+        stock,
+      )
+      const i = Math.floor(10 / cell)
+      let cut = 0
+      for (let j = 0; j < m.nv; j++) if (at(m, i, j) < -1e-6) cut++
+      // the cut cells' centres lie within the width: their count × cell is it within one cell
+      expect(Math.abs(cut * cell - grooveWidth(cutter, d))).toBeLessThanOrEqual(cell + 1e-9)
+      // the groove's floor is the tip's depth
+      expect(Math.min(...Array.from({ length: m.nv }, (_, j) => at(m, i, j)))).toBeCloseTo(-d, 2)
+    }
   })
 })
 

@@ -199,6 +199,12 @@ export const LineGeometrySchema = z.object({
       angle: z.number(),
       tipDiameter: z.number(),
     }),
+    z.object({
+      kind: z.literal('taperedBall'),
+      diameter: z.number(),
+      tipDiameter: z.number(),
+      taperAngle: z.number(),
+    }),
     z.object({ kind: z.literal('ball'), diameter: z.number() }),
     z.object({ kind: z.literal('flat'), diameter: z.number() }),
   ]),

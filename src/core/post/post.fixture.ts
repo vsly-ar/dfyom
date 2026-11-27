@@ -35,7 +35,16 @@ const TYPE_NAMES: Readonly<Record<ToolpathTool['type'], string>> = {
 }
 
 export function programTool(t: ToolpathTool): ProgramTool {
-  return { name: `${t.diameter} mm ${TYPE_NAMES[t.type]}`, diameter: t.diameter, type: t.type }
+  return {
+    name: `${t.diameter} mm ${TYPE_NAMES[t.type]}`,
+    diameter: t.diameter,
+    type: t.type,
+    // the tool-change message's `R0.25 3.6 deg` (as plan-export.ts sets them)
+    ...(t.type === 'taperedBallEndMill' &&
+      t.tipDiameter !== undefined && { tipDiameter: t.tipDiameter }),
+    ...(t.type === 'taperedBallEndMill' &&
+      t.taperAngle !== undefined && { taperAngle: t.taperAngle }),
+  }
 }
 
 export function operation(toolpath: Toolpath, tool: ToolpathTool, label?: string): ExportOperation {

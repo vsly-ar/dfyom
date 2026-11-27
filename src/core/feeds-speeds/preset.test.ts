@@ -54,6 +54,29 @@ describe('presetRecommendation', () => {
     expect(r.stepdown).toBeUndefined()
   })
 
+  it('a tapered ball end mill: a 1 mm deep Line (F11), stepdown suggested (DF124 T2)', () => {
+    const taper = expectOk(
+      Tool.fromDTO({
+        ...values(),
+        type: 'taperedBallEndMill',
+        diameter: len('3.175'),
+        tipDiameter: len('0.5'),
+        taperAngle: deg('3.6'),
+        presets: [],
+      }),
+    )
+    const r = presetRecommendation(taper, 'hardwood').unwrap()
+    const s = suggestCutting({
+      tool: taper,
+      materialClass: 'hardwood',
+      engagement: { kind: 'taper', depth: 1 },
+      machine: None,
+    })
+    expect(s.display.unwrap().dCalc).toBeCloseTo(0.595, 3)
+    expect(r.feedRate).toBeCloseTo(s.feedRate.unwrap().value, 6)
+    expect(r.stepdown).toBeCloseTo(s.stepdown.unwrap().value, 6)
+  })
+
   it('without data: the calculator reason', () => {
     const r = presetRecommendation(tool(), 'aluminum', [])
     expect(r.isErr() && r.unwrapErr().length > 0).toBe(true)

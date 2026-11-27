@@ -7,7 +7,7 @@ import { expectOk } from '../../shared/testing/result'
 import { arc, line } from './2d/model'
 import { parameterChecks } from './dfm'
 import { evaluatePart } from './evaluate'
-import { grooveWidth, lineChains, vBitEdgeHeight } from './line'
+import { grooveWidth, lineChains, cutterEdgeHeight } from './line'
 import { loadManifold } from './manifold'
 import type { LineCutter, LineGeometry, OperationGeometry, Shape, StockGeometry } from './model'
 import type { SolidKernel } from './solid-port'
@@ -52,6 +52,44 @@ function vGrooveVolume(length: number, a: number, b: number): number {
   const body = (TAN30 * length * (a * a + a * b + b * b)) / 3
   const ends = (Math.PI / 6) * TAN30 * TAN30 * (a ** 3 + b ** 3)
   return body + ends
+}
+
+/** R0.25 at 3.6° per side on a 1/8″ large end (tapered-ball-nose.md § The tool). */
+const TAPER: LineCutter = {
+  kind: 'taperedBall',
+  diameter: 3.175,
+  tipDiameter: 0.5,
+  taperAngle: 3.6,
+}
+
+/** The tapered ball's lower surface at radius `rho` (tapered-ball-nose.md § The tool). */
+function taperSurface(rho: number): number {
+  const r = 0.25
+  const t = (3.6 * Math.PI) / 180
+  return rho <= r * Math.cos(t)
+    ? r - Math.sqrt(r * r - rho * rho)
+    : r * (1 - Math.sin(t)) + (rho - r * Math.cos(t)) / Math.tan(t)
+}
+
+/** The groove's cross-section area at depth `d`: ∫ (d − z(|x|)) dx over its width. */
+function taperArea(d: number): number {
+  const half = grooveWidth(TAPER, d) / 2
+  const n = 400
+  let a = 0
+  for (let i = 0; i < n; i++) a += d - taperSurface((half * (i + 0.5)) / n)
+  return (2 * a * half) / n
+}
+
+/** The tool's solid of revolution below the face at depth `d`: ∫ 2π ρ (d − z(ρ)) dρ. */
+function taperRevolved(d: number): number {
+  const half = grooveWidth(TAPER, d) / 2
+  const n = 400
+  let v = 0
+  for (let i = 0; i < n; i++) {
+    const rho = (half * (i + 0.5)) / n
+    v += 2 * Math.PI * rho * (d - taperSurface(rho))
+  }
+  return (v * half) / n
 }
 
 describe('removal solid', () => {
@@ -106,6 +144,17 @@ describe('removal solid', () => {
     expect(Math.abs(flat - flatExpected) / flatExpected).toBeLessThan(0.01)
   })
 
+  // docs/modes/tapered-ball-nose.md#implementation-t2: the swept ball-and-cone against the
+  // integral of its cross-section along the line and a half solid of revolution at each end
+  it('a curved open line 0.2 → 1.5 mm with a tapered ball R0.25 3.6°: the swept-profile volume ± 1 %', () => {
+    const v = removed([lineOf([curve], 0.2, 1.5, TAPER)]).volume
+    const n = 400
+    let body = 0
+    for (let i = 0; i < n; i++) body += taperArea(0.2 + (1.3 * (i + 0.5)) / n) * (CURVE_LENGTH / n)
+    const expected = body + (taperRevolved(0.2) + taperRevolved(1.5)) / 2
+    expect(Math.abs(v - expected) / expected).toBeLessThan(0.01)
+  })
+
   it('costs within the evaluation budget on ≈ 1 400 mm of line (measured, E1)', () => {
     // 20 copies of the curve (71.4 mm each) = 1 428 mm
     const paths = Array.from({ length: 20 }, (_, i): Shape => ({
@@ -126,8 +175,23 @@ describe('width and depth read-outs', () => {
     expect(grooveWidth({ kind: 'ball', diameter: 4 }, 1)).toBeCloseTo(2 * Math.sqrt(3), 9)
     expect(grooveWidth({ kind: 'ball', diameter: 4 }, 3)).toBe(4)
     expect(grooveWidth({ kind: 'flat', diameter: 3 }, 0.1)).toBe(3)
-    expect(vBitEdgeHeight(V60)).toBeCloseTo(3 / TAN30, 9)
-    expect(vBitEdgeHeight({ kind: 'flat', diameter: 3 })).toBeUndefined()
+    expect(cutterEdgeHeight(V60)).toBeCloseTo(3 / TAN30, 9)
+    expect(cutterEdgeHeight({ kind: 'flat', diameter: 3 })).toBeUndefined()
+  })
+
+  it("gives a tapered ball's width: the ball, then the tangent cone (tapered-ball-nose.md § The tool)", () => {
+    // the ball alone below h_t = r (1 − sin θ) = 0.234 mm
+    expect(grooveWidth(TAPER, 0.1)).toBeCloseTo(2 * Math.sqrt(0.1 * 0.4), 9)
+    // the doc's example: 0.60 mm at 1 mm, 0.85 at 3, 1.85 at 11; DC beyond the cone
+    expect(grooveWidth(TAPER, 1)).toBeCloseTo(0.6, 2)
+    expect(grooveWidth(TAPER, 3)).toBeCloseTo(0.85, 2)
+    expect(grooveWidth(TAPER, 11)).toBeCloseTo(1.85, 2)
+    expect(grooveWidth(TAPER, 30)).toBe(3.175)
+    // continuous at the tangent height
+    const ht = 0.25 * (1 - Math.sin((3.6 * Math.PI) / 180))
+    expect(grooveWidth(TAPER, ht - 1e-9)).toBeCloseTo(grooveWidth(TAPER, ht + 1e-9), 6)
+    // its cone reaches the 1/8″ large end 21.5 mm up
+    expect(cutterEdgeHeight(TAPER)).toBeCloseTo(21.5, 1)
   })
 
   it('splits a line into pieces with their own depth when a coincident element goes', () => {
@@ -171,7 +235,7 @@ describe('DFM', () => {
   it('DF123: a 15° V-bit cuts to its flute length when that is shorter than its cone', () => {
     const v15: LineCutter = { kind: 'vBit', diameter: 3.175, angle: 15, tipDiameter: 0 }
     // the cone is 1.5875 / tan 7.5° = 12.06 mm tall; the flutes 6 mm
-    expect(vBitEdgeHeight(v15)).toBeCloseTo(1.5875 / Math.tan((7.5 * Math.PI) / 180), 9)
+    expect(cutterEdgeHeight(v15)).toBeCloseTo(1.5875 / Math.tan((7.5 * Math.PI) / 180), 9)
     const withFlutes = (op: LineGeometry, fluteLength: number) =>
       parameterChecks(
         { stock: STOCK, operations: [op] },
@@ -195,6 +259,37 @@ describe('DFM', () => {
     expect(checks(lineOf([curve], 0.5, 13, v15))).toContainEqual(['dfm.lineTooDeep', 'warning'])
     // the groove at 1 mm: 2 × tan 7.5° = 0.263 mm
     expect(grooveWidth(v15, 1)).toBeCloseTo(2 * Math.tan((7.5 * Math.PI) / 180), 9)
+  })
+
+  it('DF124 T2: a tapered ball cuts to its flute length when its cone is longer', () => {
+    const withFlutes = (op: LineGeometry, fluteLength: number) =>
+      parameterChecks(
+        { stock: STOCK, operations: [op] },
+        {
+          tools: [],
+          unitSystem: 'metric',
+          operationTools: {
+            line1: {
+              tool: {
+                type: 'taperedBallEndMill',
+                diameter: 3.175,
+                tipDiameter: 0.5,
+                taperAngle: 3.6,
+                fluteLength,
+              },
+              label: 'R0.25 3.6°',
+              generalized: false,
+              locked: true,
+            },
+          },
+        },
+      ).find((w) => w.code === 'dfm.lineTooDeep')
+    // the cone reaches the large end at 21.5 mm, the flutes end first: they are the reach
+    expect(withFlutes(lineOf([curve], 0.5, 9, TAPER), 12)).toBeUndefined()
+    expect(withFlutes(lineOf([curve], 0.5, 9.5, TAPER), 9)?.params).toMatchObject({
+      depth: 9.5,
+      cuts: 9,
+    })
   })
 
   it('dfm.lineShallow (info) under 0.05 mm', () => {

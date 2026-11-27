@@ -187,6 +187,54 @@ describe('shipped material table: golden cases against the cited charts', () => 
     expect(scale?.formula).toContain('1.5875')
   })
 
+  // docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124 (DF124 T2): F11 at the
+  // Line's depth, the 1/8" chip load × De / 3.175, the stepdown solved against De(ap)
+  it('tapered ball R0.25 3.6° 2F carbide, a 1 mm Line in hardwood, hobby router: derivation golden', async () => {
+    const taper = tool({
+      name: 'R0.25 3.6°',
+      type: 'taperedBallEndMill',
+      diameter: len('3.175'),
+      tipDiameter: len('0.5'),
+      taperAngle: deg('3.6'),
+      fluteLength: len('22'),
+      overallLength: len('38'),
+    })
+    const s = shipped({
+      tool: taper,
+      materialClass: 'hardwood',
+      engagement: { kind: 'taper', depth: 1 },
+    })
+    expect(codes(s)).toEqual(['feeds.powerSkipped'])
+    const d = s.display.unwrap()
+    expect(d.dCalc).toBeCloseTo(0.595, 3) // the groove width at 1 mm
+    expect(value(s.spindleSpeed)).toBe(18_000) // the router row's chart rpm (no F1)
+    // the ≤ 6 mm band's 1/8" chip load (Onsrud hard wood .003–.005 at rangePos 0.25) × De / 3.175
+    expect(d.fz / IN).toBeCloseTo(0.0035 * (d.dCalc / 3.175), 9)
+    // a light carving feed: n · z · fz = 18,000 · 2 · 0.0167 mm ≈ 600 mm/min
+    expect(value(s.feedRate)).toBeCloseTo(18_000 * 2 * d.fz, 6)
+    expect(value(s.feedRate)).toBeLessThan(700)
+    // hobby: k = apSlot 1 × 0.5; ap = k·A / (1 − k·B) on the cone
+    const r = 0.25
+    const t = (3.6 * Math.PI) / 180
+    const A = (2 * r) / Math.cos(t) - 2 * r * Math.tan(t)
+    expect(value(s.stepdown)).toBeCloseTo((0.5 * A) / (1 - 0.5 * 2 * Math.tan(t)), 9)
+    const golden = {
+      spindleSpeed: s.spindleSpeed.unwrap(),
+      feedRate: s.feedRate.unwrap(),
+      plungeRate: s.plungeRate.unwrap(),
+      stepdown: s.stepdown.unwrap(),
+      display: {
+        ...d,
+        Q: d.Q.unwrapOr(-1),
+        Pc: d.Pc.unwrapOr(-1),
+        spindleLoad: d.spindleLoad.unwrapOr(-1),
+      },
+    }
+    await expect(`${JSON.stringify(golden, null, 2)}\n`).toMatchFileSnapshot(
+      '__golden__/tapered-ball-hardwood.json',
+    )
+  })
+
   it('ships carbide rows only, one per material class except other', () => {
     expect(MATERIAL_DATA.every((r) => r.toolMaterial === 'carbide')).toBe(true)
     expect(MATERIAL_DATA.map((r) => r.materialClass)).toEqual([
@@ -674,7 +722,7 @@ describe('noDataFor', () => {
     ).toBe('feeds.noData')
   })
 
-  it('a tapered ball end mill has no data yet (T2), never a flat end mill of its large end Ø', () => {
+  it('a tapered ball end mill only by its taper engagement, never a flat end mill of its large end Ø', () => {
     const taper = tool({
       type: 'taperedBallEndMill',
       diameter: len('3.175'),
@@ -687,7 +735,19 @@ describe('noDataFor', () => {
       TEST_DATA,
     ).unwrap()
     expect(w.code).toBe('feeds.noData')
-    expect(w.message).toMatch(/tapered ball end mill.*enter the values/)
+    expect(w.message).toMatch(/slot cut does not fit a tapered ball end mill/)
+    const chamfer = tool({ type: 'chamferMill', diameter: len('6'), angle: deg('90') })
+    expect(
+      noDataFor(
+        {
+          tool: chamfer,
+          materialClass: 'aluminum',
+          engagement: { kind: 'taper', depth: 1 },
+          machine: None,
+        },
+        TEST_DATA,
+      ).unwrap().code,
+    ).toBe('feeds.noData')
   })
 })
 

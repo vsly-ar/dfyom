@@ -237,7 +237,9 @@ export type OperationGeometry = FacePlacement &
 
 /**
  * A Line's cutter (engraved-patterns.md § Line operation): the tool shape its groove takes, mm
- * and degrees. A V-bit (chamfer mill, tip Ø `tipDiameter`, 0 = pointed), a ball or a flat end mill.
+ * and degrees. A V-bit (chamfer mill, tip Ø `tipDiameter`, 0 = pointed), a tapered ball end mill
+ * (ball Ø `tipDiameter` under a cone of `taperAngle` per side up to Ø `diameter`,
+ * docs/modes/tapered-ball-nose.md#line-operation), a ball or a flat end mill.
  */
 export type LineCutter =
   | {
@@ -245,6 +247,12 @@ export type LineCutter =
       readonly diameter: number
       readonly angle: number
       readonly tipDiameter: number
+    }
+  | {
+      readonly kind: 'taperedBall'
+      readonly diameter: number
+      readonly tipDiameter: number
+      readonly taperAngle: number
     }
   | { readonly kind: 'ball'; readonly diameter: number }
   | { readonly kind: 'flat'; readonly diameter: number }
