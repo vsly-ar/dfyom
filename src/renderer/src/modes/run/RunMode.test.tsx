@@ -1891,3 +1891,230 @@ describe('an external gCode file without a project (DF93)', () => {
     expect(inspector.getByRole('button', { name: 'Close file' })).toBeEnabled()
   })
 })
+
+// DF129 RC5: the recovery panel (docs/modes/run-recovery.md#implementation-rc5)
+describe('Recovery panel (DF129 RC5)', () => {
+  /** A plan run streaming, then lost: the status main pushes with the interruption. */
+  async function interrupted(
+    t: Awaited<ReturnType<typeof renderRun>>,
+    patch: { programHash?: string; reason?: 'connectionLost' | 'controllerReset' } = {},
+  ) {
+    const plan = t.plan()
+    const setup = plan.setups[0]!
+    const ops = setup.operations
+    if (t.machine.status.job === undefined) await streaming(t)
+    t.machine.outcome = {
+      ok: false,
+      error: { code: 'machine.connection', message: 'connection lost', issues: [], frames: [] },
+    }
+    const lost = patch.reason !== 'controllerReset'
+    t.machine.status = {
+      ...closedStatus(),
+      connection: {
+        state: lost ? 'closed' : 'open',
+        timeScale: 1,
+        ...(lost
+          ? {
+              lost: { target: 'virtual' as const },
+              reconnect: { phase: 'waiting' as const, attempt: 1, nextAt: Date.now() + 4000 },
+            }
+          : { target: 'virtual' as const }),
+      },
+      ...(lost ? {} : { state: 'Alarm', homed: false }),
+    }
+    t.machine.push({
+      lastRun: {
+        jobId: 'run-1',
+        planId: plan.id,
+        setupId: setup.id,
+        outcome: 'failed',
+        operations: ops.map((o) => o.id),
+        interruption: {
+          reason: patch.reason ?? 'connectionLost',
+          at: '2026-11-27T14:32:07Z',
+          startedAt: '2026-11-27T14:09:07Z',
+          lines: 20,
+          sent: 19,
+          acknowledged: 17,
+          executing: 16,
+          executingFrom: 'estimate',
+          lastReport: {
+            at: '2026-11-27T14:32:06.800Z',
+            state: 'Run',
+            mpos: [-290, -190, -51],
+            wpos: [12, 10, -1.5],
+            feed: 600,
+            spindle: 18000,
+          },
+          workZero: { start: [0, 0, 0], last: [0, 0, 0] },
+          tool: { n: 1, name: 'Flat 6' },
+          operation: { planOperationId: ops[0]!.id, label: 'Pocket 1' },
+          spindle: { dir: 'cw', rpm: 18000 },
+          programHash: patch.programHash ?? 'hash-1',
+          suggestion: { line: 15, kind: 'pass' },
+          safest: { line: 10, kind: 'operation', label: 'Pocket 1 · tool 1: Flat 6' },
+        },
+      },
+    })
+  }
+
+  async function streaming(t: Awaited<ReturnType<typeof renderRun>>) {
+    const plan = t.plan()
+    const setup = plan.setups[0]!
+    t.machine.push({
+      state: 'Run',
+      ...t.machine.job('streaming', {
+        plan: {
+          planId: plan.id,
+          planName: plan.name,
+          setupId: setup.id,
+          setupName: setup.name,
+          setup: 1,
+          setups: 1,
+        },
+      }),
+    })
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await within(inspector).findByText(plan.name)
+  }
+
+  it('the sheet, then one step at a time: reconnect, check, home, the work zero, resume near where it stopped', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    await interrupted(t)
+    // the failure dialog is the short, calm sheet
+    const sheet = await screen.findByRole('dialog', { name: 'The run was interrupted' })
+    expect(within(sheet).getByText(/23 min into the run/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /stopped with an error/ })).toBeNull()
+    await t.user.click(within(sheet).getByRole('button', { name: 'Show the steps' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const panel = within(inspector).getByRole('region', { name: 'The run was interrupted' })
+    // no "Start run" while the panel shows
+    expect(within(inspector).queryByRole('button', { name: 'Start run' })).toBeNull()
+    // where the job was, each with its source
+    expect(panel).toHaveTextContent('Pocket 1 (operation 1 of')
+    expect(panel).toHaveTextContent('Tool 1: Flat 6')
+    expect(panel).toHaveTextContent('X 12.000 Y 10.000 Z -1.500')
+    expect(panel).toHaveTextContent('0.2 s before the run ended')
+    expect(panel).toHaveTextContent('It was cutting around lines 16–17')
+    expect(panel).toHaveTextContent('may have continued up to line 19')
+    expect(panel).toHaveTextContent('Estimated from the last status report.')
+    // step 1: the safety line and the live reconnect state
+    const steps = within(panel).getByRole('list', { name: 'Steps' })
+    expect(within(steps).getByRole('button', { name: /Make it safe/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(panel).toHaveTextContent('The machine may still be moving')
+    expect(panel).toHaveTextContent(/Reconnecting… attempt 1 failed, next in [1-4] s/)
+    await expectNoAxeViolations()
+    await t.user.click(within(panel).getByRole('button', { name: 'Reconnect now' }))
+    expect(t.bridge.recoveries).toEqual(['reconnectNow'])
+    // reconnected: locked, not homed; step 1 ticks itself, step 2 opens
+    t.machine.push({
+      connection: {
+        state: 'open',
+        target: 'virtual',
+        timeScale: 1,
+        reconnect: { phase: 'reconnected', attempt: 2 },
+      },
+      state: 'Alarm',
+      homed: false,
+    })
+    expect(await within(steps).findByRole('button', { name: /Check the machine/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(panel).toHaveTextContent('Reconnected. The controller restarted')
+    await t.user.click(within(panel).getByRole('checkbox', { name: /The bit is intact/ }))
+    await t.user.click(within(panel).getByRole('checkbox', { name: /Chips are cleared/ }))
+    await t.user.click(within(panel).getByRole('button', { name: 'Checked' }))
+    expect(panel).toHaveTextContent('2 of 3 checked.')
+    // step 3: home (the virtual machine: no confirmation)
+    await t.user.click(await within(panel).findByRole('button', { name: 'Home the machine' }))
+    expect(t.callsOf('run.machine.home').length).toBeGreaterThanOrEqual(2)
+    // step 4: the work zero as during the run; the stock was not ticked: re-zero X/Y
+    expect(await within(panel).findByText(/The controller kept the work zero/)).toBeVisible()
+    expect(panel).toHaveTextContent('You did not tick “the stock has not moved”')
+    // Go to the last position: GoTo's safe order, confirmed first
+    await t.user.click(within(panel).getByRole('button', { name: 'Go to the last position' }))
+    const go = await screen.findByRole('dialog', { name: 'Go to the last position?' })
+    expect(within(go).getByRole('list')).toHaveTextContent(/Up to Z .*Across to X/)
+    await t.user.click(within(go).getByRole('button', { name: 'Move' }))
+    await waitFor(() =>
+      expect(t.callsOf('run.machine.jog').map((a) => (a as { to?: number[] }).to?.[0])).toContain(
+        -290,
+      ),
+    )
+    await t.user.click(within(panel).getByRole('button', { name: 'The work zero is right' }))
+    // step 5: the options, the suggestion first and marked
+    const near = await within(panel).findByRole('button', { name: /Resume near where it stopped/ })
+    expect(near).toHaveTextContent('Recommended')
+    expect(near).toHaveTextContent('line 15')
+    expect(
+      within(panel).getByRole('button', { name: /Resume from the operation’s start/ }),
+    ).toHaveTextContent('line 10')
+    await expectNoAxeViolations()
+    await t.user.click(near)
+    // the RC3 pre-flight at the suggested line, bound to the run's program
+    const preflight = await screen.findByRole('dialog', { name: 'Start run?' })
+    const start = await within(preflight).findByRole('button', { name: 'Start at line 15' })
+    await waitFor(() => expect(start).toBeEnabled())
+    await t.user.click(start)
+    expect(t.callsOf('run.job.start').at(-1)).toMatchObject({
+      planId: t.plan().id,
+      fromLine: 15,
+      programHash: 'hash-1',
+    })
+  })
+
+  it('a program changed since the run: the pre-flight says so and does not start at the line', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    await interrupted(t, { programHash: 'another', reason: 'controllerReset' })
+    await t.user.click(await screen.findByRole('button', { name: 'Later' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const panel = within(inspector).getByRole('region', { name: 'The run was interrupted' })
+    // a controller reset: no "Make it safe" step (the reset stopped it)
+    expect(within(panel).queryByRole('button', { name: /Make it safe/ })).toBeNull()
+    expect(panel).toHaveTextContent('The controller restarted by itself')
+    t.machine.push({ state: 'Idle', homed: true })
+    await t.user.click(within(panel).getByRole('button', { name: /Choose how to continue/ }))
+    await t.user.click(within(panel).getByRole('button', { name: /Resume near where it stopped/ }))
+    const preflight = await screen.findByRole('dialog', { name: 'Start run?' })
+    expect(
+      await within(preflight).findByText(
+        'The plan changed since the run: resume from an operation instead.',
+      ),
+    ).toBeVisible()
+    expect(within(preflight).getByRole('button', { name: /Start/ })).toBeDisabled()
+  })
+
+  it('"The machine lost power" after a Stop; "Dismiss…" asks once (Q171)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await streaming(t)
+    t.machine.outcome = {
+      ok: false,
+      error: { code: 'op.aborted', message: 'aborted', issues: [], frames: [] },
+    }
+    const { job: _job, ...idle } = t.machine.status
+    t.machine.status = idle
+    t.machine.push({ state: 'Idle' })
+    const power = await within(inspector).findByRole('button', { name: 'The machine lost power' })
+    expect(power).toHaveAccessibleDescription(/marks the position lost/)
+    await t.user.click(power)
+    expect(t.bridge.recoveries).toEqual(['powerLost'])
+    // main answers with the record: the panel takes the run section
+    await interrupted(t, { reason: 'controllerReset' })
+    const panel = await within(inspector).findByRole('region', { name: 'The run was interrupted' })
+    await t.user.click(within(panel).getByRole('button', { name: 'Dismiss…' }))
+    expect(panel).toHaveTextContent('Forget where the job stopped?')
+    await t.user.click(within(panel).getByRole('button', { name: 'Forget it' }))
+    expect(t.bridge.recoveries).toEqual(['powerLost', 'dismiss'])
+  })
+})

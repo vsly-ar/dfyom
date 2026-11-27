@@ -36,6 +36,7 @@ import type {
   LibraryWindowState,
   ShapeEditorTarget,
   WindowKind,
+  RunRecoveryAction,
 } from '../../../shared/preload-api'
 import type { LibraryChange } from '../../../core/library/library'
 import type { AsyncAppResult } from '../../../shared/result'
@@ -107,6 +108,8 @@ export interface FakeBridge extends PreloadApi {
   readonly runFileOpens: (string | undefined)[]
   /** DF129 RC4: `run.reconnect` actions, in order. */
   readonly reconnects: ('cancel' | 'simulate')[]
+  /** DF129 RC5: the recovery panel's actions, in order. */
+  readonly recoveries: RunRecoveryAction[]
   /** Main hands the window a gCode file to show in Run mode (DF93). */
   emitShowRunFile(path: string): void
   setLocalHttp(state: LocalHttpState): void
@@ -232,6 +235,7 @@ export function createFakeBridge(
   const runFiles = new Map<string, string | null>()
   const runFileOpens: (string | undefined)[] = []
   const reconnects: ('cancel' | 'simulate')[] = []
+  const recoveries: RunRecoveryAction[] = []
   const runFileShows = channel<string>()
   let runFileChoice: string | null = null
   let recentRunFiles: string[] = []
@@ -334,9 +338,14 @@ export function createFakeBridge(
         return Promise.resolve(null)
       },
       record: () => Promise.resolve(null),
+      recovery(action) {
+        recoveries.push(action)
+        return Promise.resolve(null)
+      },
     },
     runFileOpens,
     reconnects,
+    recoveries,
     setRunFile(path, text) {
       runFiles.set(path, text)
     },

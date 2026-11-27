@@ -20,6 +20,7 @@ import { Dro } from './Dro'
 import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
+import { RecoveryPanel } from './RecoveryPanel'
 import { RunFileSection } from './RunFile'
 import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
@@ -71,7 +72,15 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const overrideMachine = useMachineOverrideLimits(doc)
   const resumable =
     file === undefined && setupChange === undefined && canResume(status.lastRun, plan, setupId)
-  const startable = job === undefined && (file !== undefined || doc !== undefined)
+  // DF129 RC5: an interrupted run's record replaces "Start run" with the recovery panel
+  const recovering = status.lastRun?.interruption !== undefined && job === undefined
+  const startable = !recovering && job === undefined && (file !== undefined || doc !== undefined)
+  const powerLostOffered =
+    !recovering &&
+    job === undefined &&
+    (ended?.kind === 'stopped' || ended?.kind === 'failed') &&
+    isConnected(status)
+  const powerWhy = useId()
 
   return (
     <>
@@ -115,7 +124,25 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
               }
             />
           ) : null}
-          {job === undefined && ended ? <EndNote ended={ended} /> : null}
+          {job === undefined && ended && !recovering ? <EndNote ended={ended} /> : null}
+          {/* DF129 RC5: the recovery panel in place of "Start run" after an interrupted run */}
+          {recovering ? <RecoveryPanel doc={doc} /> : null}
+          {/* Q171: after a Stop or a failure, the machine's power may have gone unseen */}
+          {powerLostOffered ? (
+            <div className={styles['powerLost']}>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-describedby={powerWhy}
+                onClick={() => void a.recovery('powerLost')}
+              >
+                {runMessages.recovery.powerLost}
+              </Button>
+              <p id={powerWhy} className={styles['hint']}>
+                {runMessages.recovery.powerLostHint}
+              </p>
+            </div>
+          ) : null}
           {job === undefined && doc === undefined && file === undefined ? (
             <EmptyState
               icon={RunIcon}

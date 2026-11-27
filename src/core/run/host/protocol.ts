@@ -216,6 +216,11 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
    */
   z.object({ kind: z.literal('simulateLostConnection') }),
   /**
+   * DF129 RC5 (Q171): the machine lost power while the controller stayed on USB power: the
+   * connection forgets that it is homed (GRBL cannot know); not during a job.
+   */
+  z.object({ kind: z.literal('forgetHoming') }),
+  /**
    * Feed hold (`!`) of a manual cycle (Probe Z, hardening DF82); answers once the controller
    * reports `Hold:0`. A run holds through `job.pause` (jobControl). Not during homing.
    */

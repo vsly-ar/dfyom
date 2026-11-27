@@ -426,3 +426,120 @@ describe('"Simulate a lost connection" on the virtual machine', { timeout: 60_00
     expect(s.mpos[0]).toBeLessThanOrEqual(before[0] + 1e-6)
   })
 })
+
+describe('the recovery record on the virtual machine (DF129 RC5)', { timeout: 60_000 }, () => {
+  const connect = async () => {
+    const client = new MachineClient({
+      factory: inProcessHostFactory({ timers: systemTimerHost }),
+      logLevel: 'warn',
+    })
+    clients.push(client)
+    const settings = Object.fromEntries(Object.entries(FAST).map(([k, v]) => [k, v]))
+    expectOk(
+      await client.connect({
+        kind: 'virtual',
+        settings,
+        homing: true,
+        timeScale: 1,
+        machineKey: 'k',
+        position: [-500, -500, -500],
+        prepare: { workZero: [-400, -300, -50] },
+      }),
+    )
+    return client
+  }
+  // two passes: each a rapid over, a plunge, then cuts
+  const program = {
+    lines: [
+      'G21 G90',
+      'G0 Z5',
+      'G0 X0 Y0',
+      'G1 Z-1 F300',
+      ...Array.from({ length: 60 }, (_, i) => `G1 X${-(i + 1)} F600`),
+      'G0 Z5',
+      'G0 X0 Y-5',
+      'G1 Z-1 F300',
+      ...Array.from({ length: 60 }, (_, i) => `G1 X${-(i + 1)} F600`),
+    ],
+    sections: [],
+  }
+  const about = { file: { name: 'a.nc', path: '/a.nc' }, origin: { programHash: 'h' } }
+
+  it('an interrupted file run: lastRun.interruption with the suggestion; Reconnect now; Dismiss', async () => {
+    const client = await connect()
+    const started = expectOk(
+      await client.startJob(
+        'job-1',
+        program,
+        { progress: () => {}, phase: () => {} },
+        { workZero: client.status().workZero, machineKey: 'k' },
+        about,
+      ),
+    )
+    expect(await waitFor(() => (client.status().job?.line ?? 0) > 70)).toBe(true)
+    expectOk(await client.simulateConnectionLoss())
+    expectErrCode(await started.ended, 'machine.connection')
+    const last = client.status().lastRun
+    expect(last).toMatchObject({
+      jobId: 'job-1',
+      file: { path: '/a.nc' },
+      outcome: 'failed',
+      interruption: { reason: 'connectionLost', programHash: 'h', lines: program.lines.length },
+    })
+    const i = last!.interruption!
+    expect(i.executing).toBeGreaterThan(0)
+    expect(i.executing).toBeLessThanOrEqual(i.acknowledged)
+    expect(i.acknowledged).toBeLessThanOrEqual(i.sent)
+    expect(i.lastReport?.wpos).toBeDefined()
+    // the latest pass start at or before the executing line
+    expect(i.suggestion?.line).toBe(i.executing >= 67 ? 67 : 4)
+    expect(i.safest?.line).toBe(4)
+    // "Reconnect now" while waiting: an attempt at once (the simulated cable is still out)
+    expect(await waitFor(() => client.status().connection.reconnect?.phase === 'waiting')).toBe(
+      true,
+    )
+    const attempts = client.status().connection.reconnect?.attempt ?? 0
+    expectOk(client.reconnectNow())
+    expect(
+      await waitFor(() => (client.status().connection.reconnect?.attempt ?? 0) > attempts),
+    ).toBe(true)
+    expect(
+      await waitFor(() => client.status().connection.reconnect?.phase === 'reconnected', 30_000),
+    ).toBe(true)
+    // the record outlives the reconnect, until dismissed
+    expect(client.status().lastRun?.interruption).toBeDefined()
+    client.dismissInterruption()
+    expect(client.status().lastRun).toBeUndefined()
+  })
+
+  it('"The machine lost power" after a Stop: interrupted, the operation start, not homed', async () => {
+    const client = await connect()
+    // nothing ended yet
+    expectErrCode(await client.markMachinePowerLost(), 'run.state')
+    const started = expectOk(
+      await client.startJob(
+        'job-2',
+        program,
+        { progress: () => {}, phase: () => {} },
+        { workZero: client.status().workZero, machineKey: 'k' },
+        about,
+      ),
+    )
+    expect(await waitFor(() => (client.status().job?.line ?? 0) > 70)).toBe(true)
+    expectOk(await client.controlJob('job-2', 'stop'))
+    expectErrCode(await started.ended, 'op.aborted')
+    // a stopped file run keeps no record (DF93)…
+    expect(client.status().lastRun).toBeUndefined()
+    expect(await waitFor(() => client.status().state === 'Idle')).toBe(true)
+    expect(client.status().homed).toBe(true)
+    // …until the operator says the machine lost power
+    expectOk(await client.markMachinePowerLost())
+    expect(client.status().lastRun?.interruption).toMatchObject({
+      reason: 'machinePowerLost',
+      // no operation starts in this program: its first pass is the operation's start
+      suggestion: { line: 4 },
+    })
+    expect(client.runRecord()).toMatchObject({ state: 'interrupted', reason: 'machinePowerLost' })
+    expect(await waitFor(() => !client.status().homed)).toBe(true)
+  })
+})

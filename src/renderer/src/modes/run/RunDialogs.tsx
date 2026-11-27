@@ -10,7 +10,10 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
-import { useReplica } from '../../shell/ShellContext'
+import { useReplica, useShell } from '../../shell/ShellContext'
+import type { Interruption } from '../../../../core/run/interruption'
+import type { RunStatus } from '../../../../core/run/service'
+import { reasonText } from './RecoveryPanel'
 import { JogPad, useJogControls } from './JogPad'
 import { activeJob, formatLength, runGates, surfaceName } from './machine-state'
 import { canResume, planRunInfo, resumeChanges, resumePoints } from './plan-info'
@@ -456,6 +459,18 @@ function FailureDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Elem
   const planId = useRun((s) => s.planId)
   const setupId = useRun((s) => s.setupId)
   if (ended?.kind !== 'failed') return null
+  // DF129 RC5: an interrupted run gets the short sheet pointing to the recovery panel
+  const interruption =
+    status.lastRun?.jobId === ended.jobId ? status.lastRun.interruption : undefined
+  if (interruption !== undefined)
+    return (
+      <InterruptedSheet
+        open={open}
+        onClose={() => store.getState().closeFailure()}
+        interruption={interruption}
+        status={status}
+      />
+    )
   const plan = planId === undefined ? undefined : doc?.plans[planId]
   // M5: resume after the cause is fixed (the pre-flight gates still apply)
   const resumable = canResume(status.lastRun, plan, setupId)
@@ -499,6 +514,65 @@ function FailureDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Elem
         {error.code === 'machine.error' || alarm ? <p>{m.didHold}</p> : null}
         <p>{lost ? m.lostNext : lostPosition ? m.nextHome : m.nextCheck}</p>
       </div>
+    </Dialog>
+  )
+}
+
+/**
+ * DF129 RC5: replaces the failure dialog of an interrupted run: what happened in one line, the
+ * safety line while a real machine may still be moving, and "Show the steps" (Run mode, where the
+ * recovery panel is). Calm: an info title, no error styling but the safety line.
+ */
+function InterruptedSheet({
+  open,
+  onClose,
+  interruption,
+  status,
+}: {
+  open: boolean
+  onClose: () => void
+  interruption: Interruption
+  status: RunStatus
+}): React.JSX.Element {
+  const { ui } = useShell()
+  const m = runMessages.recovery
+  const mayMove = status.connection.state !== 'open' && status.connection.lost?.target === 'serial'
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+      title={m.title}
+      description={m.sheetDescription}
+      footer={
+        <RunDialogFooter>
+          <DialogClose>
+            <Button variant="ghost">{m.later}</Button>
+          </DialogClose>
+          <Button
+            variant="primary"
+            icon={<Icon name="arrow-right" />}
+            autoFocus
+            onClick={() => {
+              ui.getState().setMode('run')
+              onClose()
+            }}
+          >
+            {m.showSteps}
+          </Button>
+        </RunDialogFooter>
+      }
+    >
+      <p className={styles['why']}>{reasonText(interruption)}</p>
+      {mayMove ? (
+        <div className={styles['notice']} data-tone="danger" role="alert">
+          <Icon name="warning" />
+          <div>
+            <p className={styles['why']}>{runMessages.failure.lostText}</p>
+          </div>
+        </div>
+      ) : null}
     </Dialog>
   )
 }

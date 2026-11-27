@@ -14,7 +14,7 @@ import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
 import type { SettingsCheck } from '../../../../core/run/settings-check'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
+import type { CallReply, PreloadApi, RunRecoveryAction } from '../../../../shared/preload-api'
 import { useSettings, useShell } from '../../shell/ShellContext'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { activeJob, isHeld } from './machine-state'
@@ -116,6 +116,20 @@ export interface CheckedProgramView {
   readonly lines: readonly string[]
   readonly sections: readonly { readonly fromLine: number; readonly label: string }[]
   readonly points: readonly ResumePoint[]
+}
+
+/**
+ * DF129 RC5: what the user did in the recovery panel (per window): "The machine is stopped", the
+ * checklist's ticks and "Checked", "The work zero is right", and the step they opened.
+ */
+export interface RecoveryUi {
+  readonly jobId: string
+  readonly safe: boolean
+  readonly ticks: readonly string[]
+  readonly checked: boolean
+  readonly zeroOk: boolean
+  /** The step the user opened (else the current one is open). */
+  readonly open?: string | undefined
 }
 
 /** The gCode panel's window state (DF84): open, height (rem) and whether it follows the run. */
@@ -241,6 +255,13 @@ export interface RunState {
   readonly goTo: GoToRequest | undefined
   /** DF128: "Lift to the top first", per window (off by default). */
   readonly goToLiftTop: boolean
+  /**
+   * DF129 RC5: the program hash a start line opened from the recovery panel refers to (the
+   * interrupted run's program); the pre-flight refuses a preview of another program.
+   */
+  readonly startHash: string | undefined
+  /** DF129 RC5: the recovery panel's steps in this window, for the interruption of `jobId`. */
+  readonly recoveryUi: RecoveryUi | undefined
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -291,6 +312,15 @@ export interface RunState {
    * (`simulate`, the virtual machine during a run); a refusal shows as the action error.
    */
   reconnect(action: 'cancel' | 'simulate'): Promise<void>
+  /** DF129 RC5: the recovery panel's main-side actions; a refusal shows as the action error. */
+  recovery(action: RunRecoveryAction): Promise<void>
+  /** DF129 RC5: the panel's own state for the interruption of `jobId`. */
+  setRecoveryUi(jobId: string, patch: Partial<Omit<RecoveryUi, 'jobId'>>): void
+  /**
+   * DF129 RC5: the pre-flight opened from the recovery panel at `at` (the interrupted run's plan
+   * and setup chosen), bound to `programHash` (the interrupted run's program).
+   */
+  openRecoveryStart(at: StartAt, programHash: string | undefined): void
   home(): Promise<void>
   unlock(): Promise<void>
   jog(axis: Axis, mm: number, feed: number): Promise<void>
@@ -320,6 +350,8 @@ export interface RunState {
     confirm?: true
     skipUnticked?: true
   }): Promise<void>
+  /** DF129 RC5: G54 back to `g54` (machine, mm), the interrupted run's work zero. */
+  restoreWorkZero(g54: readonly [number, number, number]): Promise<void>
   /** "Zero on this point": G54 X/Y so the current position gets these work coordinates. */
   setWorkZeroAt(x: number, y: number): Promise<void>
   /** `run.override.set` (M6). */
@@ -466,6 +498,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       startedLeadIn: undefined,
       preflightCheck: { state: 'idle' },
       startAt: { kind: 'beginning' },
+      startHash: undefined,
+      recoveryUi: undefined,
       startProgram: undefined,
       pending: [],
       probeJobId: undefined,
@@ -543,11 +577,17 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setPreflightOpen: (preflightOpen) =>
         set(
           preflightOpen
-            ? { preflightOpen, resumeFrom: undefined, startAt: { kind: 'beginning' } }
+            ? {
+                preflightOpen,
+                resumeFrom: undefined,
+                startAt: { kind: 'beginning' },
+                startHash: undefined,
+              }
             : {
                 preflightOpen,
                 preflightCheck: { state: 'idle' },
                 startAt: { kind: 'beginning' },
+                startHash: undefined,
                 startProgram: undefined,
               },
         ),
@@ -612,6 +652,31 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         const error = await bridge.run.reconnect(action)
         set({ actionError: error ?? undefined })
       },
+      async recovery(action) {
+        const error = await bridge.run.recovery(action)
+        set({ actionError: error ?? undefined })
+      },
+      setRecoveryUi: (jobId, patch) =>
+        set((s) => {
+          const base: RecoveryUi =
+            s.recoveryUi?.jobId === jobId
+              ? s.recoveryUi
+              : { jobId, safe: false, ticks: [], checked: false, zeroOk: false }
+          return { recoveryUi: { ...base, ...patch } }
+        }),
+      openRecoveryStart(at, programHash) {
+        const last = get().status.lastRun
+        set((s) => ({
+          ...(last?.planId === undefined ? {} : { planId: last.planId }),
+          ...(last?.setupId === undefined ? {} : { setupId: last.setupId }),
+          preflightOpen: true,
+          resumeFrom: undefined,
+          setupChange: undefined,
+          startAt: at,
+          startHash: programHash,
+          ...(startLineOf(at) === undefined ? {} : { gcode: { ...s.gcode, open: true } }),
+        }))
+      },
       home: () => job('run.machine.home'),
       unlock: async () => void (await call('run.machine.unlock')),
       async jog(axis, mm, feed) {
@@ -658,6 +723,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         await call('run.align.goto', { planId, setupId, to })
       },
       alignTick: async (change) => void (await call('run.align.tick', change)),
+      async restoreWorkZero(g54) {
+        const p = get().status.mpos
+        const values = [p[0] - g54[0], p[1] - g54[1], p[2] - g54[2]]
+        await call('run.workZero.set', { axes: ['x', 'y', 'z'], values })
+      },
       async setWorkZeroAt(x, y) {
         const z = get().status.wpos[2]
         await call('run.workZero.set', { axes: ['x', 'y'], values: [x, y, z] })
@@ -673,6 +743,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           setupChangeOpen: false,
           resumeFrom: undefined,
           startAt: { kind: 'beginning' } as const,
+          startHash: undefined,
           startProgram: undefined,
         }
         if (file?.state === 'ready') {

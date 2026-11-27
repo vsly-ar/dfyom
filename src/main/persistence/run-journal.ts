@@ -52,6 +52,11 @@ export function createRunJournalStore(o: {
         }
       })
     },
+    // after any queued save: "Dismiss" in the recovery panel (DF129 RC5)
+    discard() {
+      next = undefined
+      tail = tail.then(() => discardRunJournal(o.appData, o.log, fs))
+    },
     flush: () => tail,
   }
 }

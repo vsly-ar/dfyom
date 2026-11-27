@@ -21,6 +21,12 @@ import {
   type TargetKind,
 } from './host/protocol'
 import { RunFileSchema, RunPlanSchema, type FileJobAbout, type JobAbout } from './service'
+import {
+  EXECUTING_SOURCES,
+  INTERRUPTION_REASONS,
+  type InterruptionReason,
+  type RunOrigin,
+} from './interruption'
 
 /** The journal's own format; another one at launch is discarded (pre-alpha, no migration). */
 export const JOURNAL_FORMAT = 1
@@ -28,25 +34,10 @@ export const JOURNAL_FORMAT = 1
 /** At most one periodic write per this many ms (Q159); events write at once. */
 export const JOURNAL_INTERVAL_MS = 1000
 
-/** Why a run ended without DFYOM wanting it to (docs/modes/run-recovery.md#what-dfyom-keeps). */
-export const INTERRUPTION_REASONS = [
-  'connectionLost',
-  'controllerReset',
-  'hostExit',
-  'machinePowerLost',
-  'appCrashed',
-] as const
-export type InterruptionReason = (typeof INTERRUPTION_REASONS)[number]
+export { INTERRUPTION_REASONS, EXECUTING_SOURCES, type InterruptionReason } from './interruption'
 
 export const JOURNAL_STATES = ['running', 'interrupted', 'stopped', 'failed', 'done'] as const
 export type JournalState = (typeof JOURNAL_STATES)[number]
-
-/**
- * Where the executing line comes from: `reported` – GRBL's `Ln:` (a controller built with line
- * numbers, a program with `N` words); `estimate` – DF84's estimate from `Bf` and the position;
- * `planner` – the acknowledged lines minus a full planner (no estimate yet).
- */
-export const EXECUTING_SOURCES = ['reported', 'estimate', 'planner'] as const
 
 /**
  * Motion lines GRBL may hold besides the one moving: its planner plans up to 15 blocks ahead; one
@@ -78,6 +69,13 @@ export const RunJournalSchema = z.object({
     file: RunFileSchema.exactOptional(),
     /** SHA-256 (hex) of the program's lines joined with `\n`; absent where main cannot hash. */
     programHash: z.string().max(100).exactOptional(),
+    /**
+     * DF129 RC5: a run started at a line: the original program's hash, the line and the lead-in's
+     * length, so its lines map back to the original program (docs/modes/run-recovery.md#implementation-rc5).
+     */
+    resumed: z
+      .object({ programHash: z.string().max(100).exactOptional(), fromLine: Line, leadIn: Line })
+      .exactOptional(),
     lines: Line,
     sections: z.array(z.object({ fromLine: Line, label: z.string().max(500) })).readonly(),
     toolChanges: z
@@ -165,6 +163,8 @@ export type UsbIdentity = NonNullable<RunJournal['machine']['usb']>
  */
 export interface RunJournalPort {
   save(journal: RunJournal): void
+  /** DF129 RC5: removes the journal after any queued save ("Dismiss" in the recovery panel). */
+  discard?(): void
 }
 
 /** At most one periodic write per `intervalMs` (Q159); an event write always goes and restarts it. */
@@ -279,6 +279,8 @@ export interface RecorderStart {
   }
   readonly workZero: Vec3
   readonly programHash?: string | undefined
+  /** DF129 RC5: what the run's lines refer to (a start at a line: the original program). */
+  readonly origin?: RunOrigin | undefined
   readonly arcTolerance?: number | undefined
   /** Epoch ms. */
   readonly now: number
@@ -341,6 +343,17 @@ export class RunRecorder {
           : {}),
         ...(about !== undefined && 'file' in about ? { file: { ...about.file } } : {}),
         ...(start.programHash === undefined ? {} : { programHash: start.programHash }),
+        ...(start.origin?.resumed === undefined
+          ? {}
+          : {
+              resumed: {
+                ...(start.origin.programHash === undefined
+                  ? {}
+                  : { programHash: start.origin.programHash }),
+                fromLine: start.origin.resumed.fromLine,
+                leadIn: start.origin.resumed.leadIn,
+              },
+            }),
         lines: program.lines.length,
         sections: program.sections.map((s) => ({ ...s })),
         toolChanges: this.changes.map((c) => ({ ...c })),
@@ -492,6 +505,23 @@ export class RunRecorder {
       updatedAt: iso(now),
     }
     this.throttle.take(now, true)
+    return true
+  }
+
+  /**
+   * DF129 RC5 (Q171): the operator says the machine lost power while the controller stayed on USB
+   * power: a run that ended (stopped, failed or interrupted) becomes `interrupted` /
+   * `machinePowerLost`. Answers whether it changed (then write it).
+   */
+  markPowerLost(now: number): boolean {
+    const st = this.journal.state
+    if (st === 'running' || st === 'done') return false
+    this.journal = {
+      ...this.journal,
+      state: 'interrupted',
+      reason: 'machinePowerLost',
+      updatedAt: iso(now),
+    }
     return true
   }
 

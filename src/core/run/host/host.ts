@@ -628,6 +628,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         // the sender reports the closed port: `connectionLost` follows, as for a real cable
         c.unplug()
         return Ok(undefined)
+      case 'forgetHoming':
+        if (jobBusy) return stateError('not while a run is going', state)
+        c.homed = false
+        return Ok(undefined)
       case 'reset':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
