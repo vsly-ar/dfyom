@@ -467,7 +467,7 @@ function OffMarker({ ctx, id }: { ctx: ListContext; id: string }): React.JSX.Ele
 }
 
 /** Day of an ISO time, as the user's locale writes it ("27 Nov 2026"). */
-function markDay(at: string): string {
+export function markDay(at: string): string {
   const d = new Date(at)
   return Number.isNaN(d.getTime())
     ? at

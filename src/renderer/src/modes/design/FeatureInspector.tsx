@@ -41,6 +41,7 @@ import { partOperationIconProps } from './operation-icon'
 import { ToolField } from './ToolField'
 import type { DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
+import { CutField } from './CutField'
 
 const m = designMessages
 const f = m.features
@@ -260,6 +261,8 @@ export function FeatureInspector({
           name={feature.name}
           onCommit={(name) => void update({ name })}
         />
+        {/* DF135 C3: the same mark as the row menu's (cut-state.md#implementation-c3) */}
+        <CutField part={part} id={feature.id} />
         <InspectorGroup title={f.kindLabel(feature.kind)}>
           <p className={styles['muted']}>{f.placeholder}</p>
           <dl ref={factsRef} className={styles['featureFacts']}>

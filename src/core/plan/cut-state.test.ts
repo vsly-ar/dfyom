@@ -465,3 +465,26 @@ describe('cut state C2: marks from Run (Q196–Q198 as revised)', () => {
     expect(e.issues[0]).toMatchObject({ rule: 'unknownPlan' })
   })
 })
+
+describe('cut state Q199: clear the marks for a new blank', () => {
+  it('everything cut: no program; clearing the marks (one undo step) brings the whole program back', async () => {
+    const { s, svc } = await setup()
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const program = expectOk(await exportPlan(s.d.doc, planId, svc as never)).text
+    await s.run('design.part.update', {
+      partId: s.partId,
+      alreadyCut: ['facing1', 'pocket1'],
+      cutByRun: planId,
+    })
+    await s.run('project.apply', {})
+    const none = expectErrCode(await exportPlan(s.d.doc, planId, svc as never), 'plan.check')
+    expect(none.issues.map((i) => i.rule)).toEqual(['allCut'])
+    // `s.run` checks the undo law: one step restores the list and the marks
+    await s.run('design.part.update', { partId: s.partId, alreadyCut: [] })
+    const part = s.d.doc.parts[s.partId]!
+    expect(part.alreadyCut).toBeUndefined()
+    expect(part.alreadyCutMarks).toBeUndefined()
+    await s.run('project.apply', {})
+    expect(expectOk(await exportPlan(s.d.doc, planId, svc as never)).text).toBe(program)
+  })
+})

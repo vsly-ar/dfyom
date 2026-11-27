@@ -214,7 +214,15 @@ function scriptMachine(bridge: FakeBridge): Machine {
   return Object.assign(m, { job })
 }
 
-async function renderRun(opts: { bottom?: boolean; plate?: string; points?: boolean } = {}) {
+async function renderRun(
+  opts: {
+    bottom?: boolean
+    plate?: string
+    points?: boolean
+    /** DF135 Q199: every top-level operation marked already cut; the plan in this status. */
+    allCut?: 'draft' | 'settledDesign'
+  } = {},
+) {
   const s = await planSetup()
   // a touch plate on the library machine, copied into the plan (M4)
   if (opts.plate !== undefined)
@@ -226,9 +234,19 @@ async function renderRun(opts: { bottom?: boolean; plate?: string; points?: bool
   // a bottom facing too: setups Bottom, Top (task E2)
   if (opts.bottom === true)
     await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
+  if (opts.allCut !== undefined)
+    await s.run('design.part.update', {
+      partId: s.partId,
+      alreadyCut: s
+        .part()
+        .operations.filter((o) => o.featureId === undefined)
+        .map((o) => o.id),
+    })
   const planId = await s.create(
     opts.plate === undefined ? {} : { machineLibraryItemId: s.machineId },
   )
+  if (opts.allCut === 'settledDesign')
+    await s.run('plan.status.set', { planId, status: 'settledDesign' })
   // DF78: an alignment point on the last setup
   if (opts.points === true)
     await s.run('plan.alignment.set', {
@@ -544,6 +562,49 @@ describe('Run mode', () => {
     await within(preflight).findByText('Inside the travel at this work zero.')
     await waitFor(() => expect(start).toBeEnabled())
     expect(t.callsOf('run.job.check')).toHaveLength(2)
+    await expectNoAxeViolations()
+  })
+
+  it('pre-flight: everything marked already cut offers Clear marks; a draft plan then runs it all (DF135 Q199)', async () => {
+    const t = await renderRun({ allCut: 'draft' })
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = within(screen.getByRole('dialog', { name: 'Start run?' }))
+    const offer = within(preflight.getByRole('group', { name: 'Already cut' }))
+    expect(
+      offer.getByText(/^Everything in .* is marked already cut\. Cutting a new blank\?/),
+    ).toBeVisible()
+    const start = preflight.getByRole('button', { name: 'Start run' })
+    expect(start).toBeDisabled()
+    expect(start).toHaveAccessibleDescription(/^Nothing to cut in .*: every operation is marked/)
+    // no program to check
+    expect(t.callsOf('run.job.check')).toEqual([])
+    await expectNoAxeViolations()
+    await t.user.click(offer.getByRole('button', { name: 'Clear marks' }))
+    await waitFor(() => expect(t.plan().design.part.alreadyCut).toBeUndefined())
+    expect(t.callsOf('design.part.update').at(-1)).toMatchObject({ alreadyCut: [] })
+    expect(t.callsOf('project.apply')).toHaveLength(1)
+    await preflight.findByText('Inside the travel at this work zero.')
+    await waitFor(() => expect(start).toBeEnabled())
+    expect(preflight.queryByRole('group', { name: 'Already cut' })).toBeNull()
+  })
+
+  it('pre-flight: a plan that is not a draft keeps its copy of the marks and says so (DF135 Q199)', async () => {
+    const t = await renderRun({ allCut: 'settledDesign' })
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = within(screen.getByRole('dialog', { name: 'Start run?' }))
+    const offer = within(preflight.getByRole('group', { name: 'Already cut' }))
+    expect(offer.getByText(/\(Settled design\) keeps its own copy of the marks/)).toBeVisible()
+    await t.user.click(offer.getByRole('button', { name: 'Clear marks' }))
+    await offer.findByText(/^The marks are cleared in Design\./)
+    expect(offer.queryByRole('button', { name: 'Clear marks' })).toBeNull()
+    expect(t.callsOf('project.apply')).toEqual([])
+    expect(preflight.getByRole('button', { name: 'Start run' })).toBeDisabled()
     await expectNoAxeViolations()
   })
 

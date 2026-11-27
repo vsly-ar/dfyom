@@ -799,6 +799,12 @@ export const designMessages = {
       `Its ${plans === 1 ? 'plan is' : `${plans} plans are`} removed too. Undo brings both back.`,
     confirmAction: 'Remove part',
     count: (n: number) => (n === 1 ? '1 part' : `${n} parts`),
+    /** DF135 Q199 (cut-state.md § A new blank): the part's already-cut marks, all at once. */
+    clearCut: 'Clear cut marks',
+    clearCutDescription:
+      'For a new blank: every operation is cut again. Undo brings the marks back.',
+    noCut: 'Nothing in this part is marked already cut.',
+    cutCleared: (n: number) => (n === 1 ? 'Cleared 1 cut mark' : `Cleared ${n} cut marks`),
   },
 
   /** Split parts 4a (ui.md § Split part): the split editor, its preview and read-only pieces. */
@@ -1004,6 +1010,10 @@ export const designMessages = {
     /** DF135 C2: a mark set by a real run, with its date; changed since (Q198 as revised). */
     cutByRunTitle: (date: string) =>
       `Cut by a run on ${date}: the stock no longer has this material. Plans keep it as removed and export nothing for it.`,
+    /** DF135 C3: the inspector's switch of the same mark. */
+    cutField: 'Already cut',
+    cutFieldInfo:
+      'The stock no longer has this material (cut by a program, by hand, or there when the stock arrived). Plans keep it as removed and export nothing for it.',
     cutChanged: 'Changed',
     cutChangedTitle: (date: string) =>
       `Changed since the run cut it on ${date}: the stock still has the shape the run cut. Plans export nothing for it.`,

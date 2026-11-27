@@ -730,6 +730,16 @@ export const runMessages = {
     airCut:
       'First run of this program? Run it in the air: spindle off, Z zero raised above the stock.',
     notFinalized: 'A real machine runs only finalized plans. Finalize the plan in Plan mode first.',
+    /** DF135 Q199 (cut-state.md § A new blank): every operation of the setup is already cut. */
+    allCut: (setup: string) =>
+      `Everything in ${setup} is marked already cut. Cutting a new blank? Clear the marks to cut it all again.`,
+    allCutGate: (setup: string) =>
+      `Nothing to cut in ${setup}: every operation is marked already cut.`,
+    clearMarks: 'Clear marks',
+    allCutSnapshot: (plan: string, status: string) =>
+      `${plan} (${status}) keeps its own copy of the marks: after clearing them, rebuild it in Plan (Settled design, then Rebuild).`,
+    allCutCleared: (plan: string) =>
+      `The marks are cleared in Design. ${plan} keeps its own copy until it is rebuilt in Plan (Settled design, then Rebuild).`,
     settingsMismatch: 'The controller’s settings differ from the plan’s machine (see Connection).',
     cancel: 'Cancel',
     /** Resume mode (M5, docs/modes/run-machine.md#section-resume-m5). */

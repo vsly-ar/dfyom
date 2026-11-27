@@ -2,12 +2,15 @@
 // program, the window that started it marks the run's finished design operations already cut
 // (one `design.part.update { alreadyCut, cutByRun }`, a pending design change like a hand mark)
 // and the run section says so with Undo; after a stop or an interruption, once no resume is
-// pending, it offers the finished operations instead. The virtual machine marks nothing.
-// Doc: docs/modes/cut-state.md#marking, #implementation-c2
+// pending, it offers the finished operations instead. The virtual machine marks nothing. The
+// pre-flight's offer to clear the marks for a new blank when its setup is cut in full (Q199).
+// Doc: docs/modes/cut-state.md#marking, #implementation-c2, #a-new-blank-q199
 import { useEffect } from 'react'
 import type { PartDTO } from '../../../../core/design/part.dto'
+import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { runCutMarks } from '../../../../core/run/cut-marks'
+import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { useCall } from '../../shell/hooks'
 import { Button, Icon } from '../../ui'
@@ -192,6 +195,57 @@ export function CutMarksView({
             {m.notNow}
           </Button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Q199 (cut-state.md#a-new-blank-q199): the pre-flight's offer when every operation of the setup
+ * is already cut (the plan's design copy). Clear marks clears the part's marks in Design (one undo
+ * step); a draft plan then follows at once (`project.apply`), a plan that is not a draft keeps
+ * its copy (a snapshot) until it is rebuilt in Plan, and says so.
+ */
+export function AllCutOffer({
+  doc,
+  plan,
+  setupName,
+}: {
+  doc: ProjectDoc
+  plan: PlanDTO
+  setupName: string
+}): React.JSX.Element {
+  const call = useCall()
+  const live = doc.parts[plan.design.part.id]
+  const marks = live?.alreadyCut?.length ?? 0
+  const draft = plan.status === 'draft'
+  const p = runMessages.preflight
+  const clear = async () => {
+    if (live !== undefined && marks > 0) {
+      const r = await call('design.part.update', { partId: live.id, alreadyCut: [] })
+      if (!r.ok) return
+    }
+    if (draft) await call('project.apply', {})
+  }
+  return (
+    <div className={styles['notice']} role="group" aria-label={m.region}>
+      <Icon name="info" />
+      <div>
+        <p className={styles['why']}>{p.allCut(setupName)}</p>
+        {draft ? null : (
+          <p className={styles['hint']}>
+            {marks > 0
+              ? p.allCutSnapshot(plan.name, planMessages.statuses[plan.status])
+              : p.allCutCleared(plan.name)}
+          </p>
+        )}
+        {draft || marks > 0 ? (
+          <div className={styles['cutActions']}>
+            <Button size="sm" icon={<Icon name="undo" />} onClick={() => void clear()}>
+              {p.clearMarks}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   )

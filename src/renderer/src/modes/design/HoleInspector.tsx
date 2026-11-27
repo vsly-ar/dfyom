@@ -82,6 +82,7 @@ import {
   dfmNames,
 } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
+import { CutField } from './CutField'
 
 const m = designMessages
 const t = m.inspector
@@ -534,6 +535,8 @@ export function HoleInspector({
           name={feature.name}
           onCommit={(name) => void update({ name }, 'name')}
         />
+        {/* DF135 C3: the same mark as the row menu's (cut-state.md#implementation-c3) */}
+        <CutField part={part} id={feature.id} />
 
         <InspectorGroup title={h.groups.position}>
           {onField}
