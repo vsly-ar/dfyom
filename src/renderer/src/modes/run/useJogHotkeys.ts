@@ -16,6 +16,7 @@ import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
 import type { JogKeyStyle } from '../../../../shared/settings'
 import type { RunStatus } from '../../../../core/run/service'
 import { useRun, useRunStore } from './run-store'
+import { useJogGuardSync } from './useJogGuardSync'
 
 /**
  * DF128 GT2 (Q157): whether a `G` key press opens the Go to dialog: the plain key (no modifier,
@@ -142,7 +143,10 @@ export function useJogHotkeyListener(opts: {
   }, [active, press])
 }
 
-/** Run mode's jog hotkeys, with the window's jog step and feed (mounted while in Run mode). */
+/**
+ * Run mode's jog hotkeys, with the window's jog step and feed (mounted while in Run mode); also
+ * keeps the jog guard's setup current (DF133 RW3). No key bypasses the guard.
+ */
 export function JogHotkeys({ doc }: { doc: ProjectDoc | undefined }): null {
   const style = useSettings((s) => s.settings.jogKeys)
   const status = useRun((s) => s.status)
@@ -158,5 +162,6 @@ export function JogHotkeys({ doc }: { doc: ProjectDoc | undefined }): null {
     controls,
   })
   useGoToHotkey()
+  useJogGuardSync()
   return null
 }

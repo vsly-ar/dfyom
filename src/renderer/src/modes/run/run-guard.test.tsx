@@ -1,0 +1,273 @@
+// Jogs through the workholding guard in the app (hardening DF133 RW3), against the fake bridge
+// bound to a real project runtime with a toe clamp and pushed run statuses: without the guard
+// (no items, not homed, G54 unset) the pad sends exactly today's commands; with it a step and a
+// hold toward the clamp become a jog to the stop point, the notice names the clamp once the
+// machine is there, "Jog past once" lets one jog through and re-arms, the Jog menu's switch turns
+// it off until reconnect (the status line in the warning colour), a jog starting while the machine
+// still moves after a cancel is not sent; the Z note after a tool change (Q190); axe.
+// Doc: docs/modes/run-workholding.md#jogs, #implementation-rw3
+import { act, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
+import { planSetup } from '../../../../core/plan/plan.fixture'
+import type { Footprint } from '../../../../core/plan/workholding/obstacles'
+import { closedStatus, type RunStatus } from '../../../../core/run/service'
+import type { CallReply } from '../../../../shared/preload-api'
+import { App } from '../../App'
+import { createShell, ShellProvider } from '../../shell/ShellContext'
+import { createFakeBridge } from '../../test/bridge'
+import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { runStoreOf } from './run-store'
+
+vi.mock('@react-three/fiber', () => ({
+  Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
+    <div data-testid={rest['data-testid']} />
+  ),
+}))
+vi.mock('../../viewport/Scene', () => ({
+  Scene: () => null,
+  CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
+}))
+
+const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
+const OPEN = { connection: { state: 'open', target: 'virtual', timeScale: 1 } } as const
+const G54 = [-200, -150, -60] as const
+const envelope = { travel: [800, 600, 100], homingMask: 0, pullOff: 1, softLimits: true }
+
+const xs = (f: Footprint) => (f.kind === 'circle' ? [f.center[0]] : f.points.map((p) => p[0]))
+const ys = (f: Footprint) => (f.kind === 'circle' ? [f.center[1]] : f.points.map((p) => p[1]))
+
+async function renderGuard(withItems = true) {
+  const s = await planSetup()
+  const { kind: _, ...m } = machineValues()
+  const machineId = (
+    (await s.run('library.machine.add', {
+      values: { ...libraryInput({ ...m, name: 'ER11 router' }), holder: { preset: 'er11' } },
+    })) as { id: string }
+  ).id
+  const planId = await s.create({ machineLibraryItemId: machineId })
+  const setupId = s.plan(planId).setups[0]!.id
+  if (withItems)
+    await s.run('plan.workholding.set', {
+      planId,
+      setupId,
+      items: [{ kind: 'toeClamp', edge: 'vMin', top: '20' }],
+    })
+  const bridge = createFakeBridge()
+  bridge.bind(s.d)
+  let status = closedStatus()
+  bridge.handle('run.status.get', () => ok(status))
+  bridge.handle('run.machine.jog', () => ok({}))
+  bridge.handle('run.machine.jogCancel', () => ok({}))
+  const push = (patch: Partial<RunStatus>) => {
+    status = { ...status, ...patch }
+    act(() => bridge.emitRunStatus(status))
+  }
+  /** The tool tip at work position `w` (the setup's zero unmoved: WCS = setup frame), Idle. */
+  const at = (w: readonly [number, number, number], patch: Partial<RunStatus> = {}) =>
+    push({
+      state: 'Idle',
+      wpos: [...w],
+      mpos: [w[0] + G54[0], w[1] + G54[1], w[2] + G54[2]],
+      ...patch,
+    })
+  const shell = createShell(bridge)
+  shell.ui.getState().setMode('run')
+  const r = renderUi(
+    <ShellProvider shell={shell}>
+      <App />
+    </ShellProvider>,
+  )
+  const run = () => runStoreOf(bridge)
+  const jogs = () => bridge.calls.filter((c) => c.name === 'run.machine.jog').map((c) => c.args)
+  const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  await within(nav()).findByRole('button', { name: 'Connect' })
+  // connected, homed, G54 set, a 10 mm step
+  push({ ...OPEN, homed: true, workZero: [...G54], envelope: structuredClone(envelope) as never })
+  act(() => run().getState().setJogStep(10))
+  return { ...r, s, push, at, run, jogs, nav }
+}
+
+type T = Awaited<ReturnType<typeof renderGuard>>
+
+/** The clamp's X extent and Y middle, the guard's margin and the tool's radius. */
+async function clamp(t: T) {
+  await waitFor(() => expect(t.run().getState().guardSetup).toBeDefined())
+  const g = t.run().getState().guardSetup!
+  const all = g.setup.prisms.map((p) => p.footprint)
+  const minX = Math.min(...all.flatMap(xs))
+  const midY = (Math.min(...all.flatMap(ys)) + Math.max(...all.flatMap(ys))) / 2
+  return { minX, midY, margin: g.setup.margin, radius: g.setup.envelope[0]!.radius }
+}
+
+const jogButton = (t: T, name: string) => within(t.nav()).getByRole('button', { name })
+const notice = (t: T) => t.nav().querySelector('[data-guard-notice] [role="status"]')
+
+describe('jogs through the workholding guard (DF133 RW3)', () => {
+  it('without items, not homed or with G54 unset: exactly today’s commands, no notice line', async () => {
+    const t = await renderGuard(false)
+    t.at([0, 0, 5])
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    expect(t.jogs()[0]).toEqual({ by: [10, 0, 0], feed: expect.any(Number) })
+    expect(t.nav().querySelector('[data-guard-notice]')).toBeNull()
+    // a hold: today's continuous jog to the travel edge
+    await act(() => t.run().getState().jogHoldStart('y', -1, 2000))
+    expect(t.jogs()[1]).toEqual({ by: [0, -1, 0], feed: 2000, continuous: true })
+    act(() => t.run().getState().jogHoldEnd())
+  })
+
+  it('G54 never set: no guard, today’s step even into the clamp', async () => {
+    const u = await renderGuard(true)
+    const c = await clamp(u)
+    u.push({ workZero: [0, 0, 0], wpos: [c.minX - 20, c.midY, 5], mpos: [c.minX - 20, c.midY, 5] })
+    act(() => u.run().getState().setJogStep(50))
+    await u.user.click(jogButton(u, 'Jog X+'))
+    await waitFor(() => expect(u.jogs()).toHaveLength(1))
+    expect(u.jogs()[0]).toEqual({ by: [50, 0, 0], feed: expect.any(Number) })
+  })
+
+  it('a step toward the clamp stops at the margin; the notice names it; Jog past once lets one through', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    const start = [c.minX - 20, c.midY, 5] as const
+    t.at(start)
+    // the guard's line is reserved now, empty
+    await waitFor(() => expect(notice(t)).toHaveTextContent(/^$/))
+    act(() => t.run().getState().setJogStep(50))
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    const sent = t.jogs()[0] as { to: [number, number, number]; by?: unknown }
+    expect(sent.by).toBeUndefined()
+    const stop = c.minX - c.margin - c.radius
+    expect(sent.to[0]! - G54[0]).toBeLessThan(stop)
+    expect(sent.to[0]! - G54[0]).toBeGreaterThanOrEqual(stop - 0.02)
+    expect(sent.to[1]).toBeCloseTo(start[1] + G54[1], 6)
+    expect(sent.to[2]).toBeCloseTo(start[2] + G54[2], 6)
+    // the notice once the machine is there (not while it is on its way)
+    t.push({ state: 'Jog', mpos: [sent.to[0]! - 5, sent.to[1]!, sent.to[2]!] })
+    expect(notice(t)).toHaveTextContent(/^$/)
+    t.at([sent.to[0] - G54[0], sent.to[1] - G54[1], sent.to[2] - G54[2]])
+    await waitFor(() =>
+      expect(notice(t)).toHaveTextContent(/^Stopped 2 mm from Toe clamp 1 \(tool\)\.$/),
+    )
+    const past = jogButton(t, 'Jog past once')
+    expect(past).toHaveAccessibleDescription(
+      'The next jog or Go to within 30 s is not checked against the workholding.',
+    )
+    await expectNoAxeViolations()
+
+    // further in: nothing sent, the notice says why
+    act(() => t.run().getState().setJogStep(1))
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() =>
+      expect(notice(t)).toHaveTextContent(
+        'Not moved: the tool would come within the margin of Toe clamp 1.',
+      ),
+    )
+    expect(t.jogs()).toHaveLength(1)
+
+    // Jog past once: the next jog is today's command, then the guard is back
+    await t.user.click(jogButton(t, 'Jog past once'))
+    expect(notice(t)).toHaveTextContent('Next jog unguarded.')
+    expect(within(t.nav()).queryByRole('button', { name: 'Jog past once' })).toBeNull()
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(t.jogs()).toHaveLength(2))
+    expect(t.jogs()[1]).toEqual({ by: [1, 0, 0], feed: expect.any(Number) })
+    expect(notice(t)).toHaveTextContent(/^$/)
+    t.at([sent.to[0] + 1 - G54[0], sent.to[1] - G54[1], sent.to[2] - G54[2]])
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(notice(t)).toHaveTextContent(/^Not moved/))
+    expect(t.jogs()).toHaveLength(2)
+    // moving out is allowed: today's step
+    await t.user.click(jogButton(t, 'Jog X−'))
+    await waitFor(() => expect(t.jogs()).toHaveLength(3))
+    expect(t.jogs()[2]).toEqual({ by: [-1, 0, 0], feed: expect.any(Number) })
+  })
+
+  it('a hold toward the clamp is a jog to the stop point; released early, no notice; a start while moving is refused', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.minX - 20, c.midY, 5])
+    await waitFor(() => expect(notice(t)).not.toBeNull())
+    await act(() => t.run().getState().jogHoldStart('x', 1, 2000))
+    const sent = t.jogs()[0] as { to: number[]; continuous?: boolean }
+    expect(sent.continuous).toBeUndefined()
+    expect(sent.to[0]! - G54[0]).toBeLessThan(c.minX - c.margin - c.radius)
+    t.push({ state: 'Jog', mpos: [sent.to[0]! - 8, sent.to[1]!, sent.to[2]!] })
+    // released before the stop point: cancelled (0x85) as today, no "Stopped" notice
+    act(() => t.run().getState().jogHoldEnd())
+    await waitFor(() => expect(screen.queryAllByText(/Stopped/)).toHaveLength(0))
+    // still decelerating (Jog), no queued end: a guarded step is not sent
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(notice(t)).toHaveTextContent(/^Not moved: wait for the machine/))
+    expect(t.jogs()).toHaveLength(1)
+  })
+
+  it('the Jog menu’s switch turns the guard off until reconnect; the status line warns', async () => {
+    const t = await renderGuard()
+    const c = await clamp(t)
+    t.at([c.minX - 20, c.midY, 5])
+    within(t.nav()).getByRole('button', { name: 'Jog options' }).focus()
+    await t.user.keyboard('{Enter}')
+    const item = await screen.findByRole('menuitemradio', { name: /Workholding guard/ })
+    expect(item).toHaveAttribute('aria-checked', 'true')
+    await expectNoAxeViolations()
+    await t.user.click(item)
+    expect(t.run().getState().guardOff).toBe(true)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const line = await waitFor(() => {
+      const l = document.querySelector('[data-workholding-trust]')
+      expect(l).toHaveTextContent('Workholding guard off.')
+      return l!
+    })
+    expect(line).toHaveAttribute('data-tone', 'warning')
+    act(() => t.run().getState().setJogStep(50))
+    await t.user.click(jogButton(t, 'Jog X+'))
+    await waitFor(() => expect(t.jogs()).toHaveLength(1))
+    expect(t.jogs()[0]).toEqual({ by: [50, 0, 0], feed: expect.any(Number) })
+    // a reconnect turns it back on
+    t.push(closedStatus())
+    t.push({
+      ...OPEN,
+      homed: true,
+      workZero: [...G54],
+      envelope: structuredClone(envelope) as never,
+    })
+    expect(t.run().getState().guardOff).toBe(false)
+    await waitFor(() =>
+      expect(document.querySelector('[data-workholding-trust]')).toHaveTextContent(
+        'Checks the clamps as placed in Plan, at the work zero.',
+      ),
+    )
+  })
+
+  it('after a tool-change wait, the Z note until the work zero Z is set (Q190)', async () => {
+    const t = await renderGuard()
+    await clamp(t)
+    t.at([0, -50, 30])
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const line = () => document.querySelector('[data-workholding-trust]')
+    await waitFor(() =>
+      expect(line()).toHaveTextContent('Checks the clamps as placed in Plan, at the work zero.'),
+    )
+    const job = {
+      jobId: 'run-1',
+      phase: 'toolChange' as const,
+      line: 1,
+      startedAt: '2026-11-27T10:00:00Z',
+      elapsedSeconds: 1,
+      toolChange: { n: 1, name: 'Flat 6' },
+    }
+    t.push({ job })
+    await waitFor(() =>
+      expect(line()).toHaveTextContent(
+        'Checks the clamps as placed in Plan, at the work zero. Z not set for this tool yet: heights may be off by the difference in tool length.',
+      ),
+    )
+    // Probe Z / Set Z zero: G54 Z changes, the note goes
+    t.push({ workZero: [G54[0], G54[1], G54[2] - 1.5] })
+    await waitFor(() => expect(line()).not.toHaveTextContent('Z not set'))
+  })
+})

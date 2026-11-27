@@ -103,16 +103,14 @@ describe('Run scene workholding (DF133 RW1)', () => {
     // connected, not homed: outlined, no holder at the (unknown) position
     t.push({ ...OPEN, state: 'Alarm', mpos: [-100, -100, -10], wpos: [-100, -100, -10] })
     await waitFor(() => expect(line()).toHaveAttribute('data-workholding-trust', 'notHomed'))
-    expect(line()).toHaveTextContent(
-      'Clamps outlined: home the machine to place them at the work zero.',
-    )
+    expect(line()).toHaveTextContent('Home the machine to check jogs against the workholding.')
     expect(probe.run!.workholding!.outlined).toBe(true)
     expect(probe.run!.holder).toBeUndefined()
 
     // homed, G54 never set: the items would stand at the machine origin, hidden
     t.push({ state: 'Idle', homed: true, mpos: [-1, -1, -1], wpos: [-1, -1, -1] })
     await waitFor(() => expect(probe.run?.workholding).toBeUndefined())
-    expect(line()).toHaveTextContent('Clamps hidden: set the work zero to place them.')
+    expect(line()).toHaveTextContent('Set the work zero to check jogs against the workholding.')
     // the position is known: the holder at the tool marker
     expect(probe.run!.holder?.tip).toEqual([-1, -1, -1])
 
@@ -120,9 +118,7 @@ describe('Run scene workholding (DF133 RW1)', () => {
     t.push({ workZero: [-200, -150, -60], mpos: [-190, -130, -55], wpos: [10, 20, 5] })
     await waitFor(() => expect(probe.run?.workholding?.outlined).toBeUndefined())
     expect(probe.run!.workholding!.solids).toEqual(planned)
-    expect(line()).toHaveTextContent(
-      'Clamps drawn as placed in Plan, at the work zero. Jogs are not checked against them.',
-    )
+    expect(line()).toHaveTextContent('Checks the clamps as placed in Plan, at the work zero.')
     const ghost = probe.run!.holder!
     expect(ghost.tip).toEqual([10, 20, 5])
     expect(ghost.colliding).toBe(false)
