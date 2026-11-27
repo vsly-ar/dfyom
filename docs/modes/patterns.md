@@ -135,7 +135,7 @@ Follows [ui.md § Features (v0.4)](../conventions/ui.md#features-v04). The L-rev
   - **Cut:** depth, Invert.
   - **Chamfer:** a toggle, then width and angle.
   - **Read-out:** "312 cells · web 2.0 mm · 14 slivers dropped".
-- **Presets…** in the inspector header opens the Presets dialog (DF107, [below](#presets-dialog-and-more-presets-df107)): Staggered holes, Honeycomb, Rounded squares, Diamonds, Triangles (flip), Slots (obround), Grille (hex of small circles), and since DF107 Circle grid, Waffle, Octagons, Louvres, Speaker grille (polar) and Lightening holes. Picking a preset sets cell, lattice, gap and (P5) `alternate`, and nothing else. These are cnc-code's lattice-plus-cell entries, without its special generators (Q125).
+- **Presets…** in the inspector header opens the Presets dialog (DF107, [below](#presets-dialog-and-more-presets-df107)): Staggered holes, Honeycomb, Rounded squares, Diamonds, Triangles (flip), Slots (obround), Grille (hex of small circles), and since DF107 Circle grid, Waffle, Octagons, Louvres, Speaker grille (polar) and Lightening holes. Picking a preset sets cell, lattice, gap and (P5) `alternate`, and nothing else. These are cnc-code's lattice-plus-cell entries, without its special generators (Q125). Heatsink presets (fins, pin fins, radial fins) with a parameter step are planned in [pattern-presets.md](pattern-presets.md) (draft, DF136).
 - **Viewport:** while editing, the boundary less the margin is dashed and dropped or clipped cells show as ghosts. The thinnest web and finding markers are drawn. Clicking a cell selects the pattern.
 - **Later:** a scale and gap sample at real size with the tool drawn (cnc-code's active (i)), once the Field info views framework exists.
 
