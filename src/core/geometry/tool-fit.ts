@@ -361,7 +361,11 @@ export function toolFit(
       if (!ok)
         return {
           rule: 'type',
-          detail: 'a Line needs a V-bit (chamfer mill), a ball or a flat end mill',
+          // tapered-ball-nose.md#which-operations-can-use-it: Lines take one from T2 on
+          detail:
+            tool.type === 'taperedBallEndMill'
+              ? 'a Line cannot use a tapered ball end mill yet: pick a V-bit (chamfer mill), a ball or a flat end mill'
+              : 'a Line needs a V-bit (chamfer mill), a ball or a flat end mill',
           values: { needs: 'lineTool' },
         }
       if (tool.reach === undefined) return undefined

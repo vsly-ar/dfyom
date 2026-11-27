@@ -876,6 +876,29 @@ describe('postGrbl', () => {
     ])
   })
 
+  it('a tapered ball end mill: type word "tapered ball", the ball radius and angle per side (DF124)', () => {
+    const tapered: Block = {
+      kind: 'toolChange',
+      number: 1,
+      tool: {
+        name: 'Taper',
+        diameter: 3.175,
+        type: 'taperedBallEndMill',
+        tipDiameter: 0.5,
+        taperAngle: 3.6,
+      },
+    }
+    const opts = { ...OPTS, firstToolLoaded: false }
+    expect(body(expectOk(postGrblLines(program([tapered, spin()]), opts))).slice(0, 2)).toEqual([
+      '(DFYOM TOOL CHANGE 1: Taper, 3.175 mm tapered ball R0.25 3.6 deg)',
+      'M0 ;Install T1 Taper, 3.175 mm tapered ball R0.25 3.6 deg, then zero Z',
+    ])
+    const inch = program([tapered, spin()], { units: 'in' })
+    expect(expectOk(postGrblLines(inch, opts)).find((l) => l.startsWith('(DFYOM TOOL'))).toBe(
+      '(DFYOM TOOL CHANGE 1: Taper, 0.125 in tapered ball R0.0098 3.6 deg)',
+    )
+  })
+
   it('pauses for the first tool when it is not loaded; no dwell with spinUpSeconds 0', () => {
     const lines = expectOk(
       postGrblLines(program([tool(), spin(), rapid(1, 2, 10)]), {

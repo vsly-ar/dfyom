@@ -11,7 +11,7 @@ import type { CommandContext } from '../commands/context'
 import { ItemIdSchema } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { deepEqual, takeSnapshot } from '../library/snapshot'
-import { TOOL_TYPES } from '../library/tool.dto'
+import { GENERALIZED_TOOL_TYPES } from '../library/tool.dto'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { fieldContext } from './operation'
@@ -22,7 +22,7 @@ const Len = z.string().min(1).max(64)
 export const ToolArg = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('generalized'),
-    type: z.enum(TOOL_TYPES),
+    type: z.enum(GENERALIZED_TOOL_TYPES),
     diameter: Len,
     cornerRadius: Len.optional(),
     angle: z.string().min(1).max(64).optional(),

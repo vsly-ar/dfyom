@@ -164,11 +164,15 @@ export function ToolFields({
         <Field label={m.type} messages={messages('type')}>
           {/* one type for chamfer mills and V-bits (H-F): "V-bit" in its hint (task U4) */}
           <Select
-            options={TOOL_TYPES.map((t) => ({
-              value: t,
-              label: m.types[t],
-              ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
-            }))}
+            // a tapered ball end mill is offered once the form has its fields
+            // (tapered-ball-nose.md § Library window, T3); one the agent added keeps its type
+            options={TOOL_TYPES.filter((t) => t !== 'taperedBallEndMill' || values.type === t).map(
+              (t) => ({
+                value: t,
+                label: m.types[t],
+                ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
+              }),
+            )}
             value={values.type}
             onValueChange={(type) => commit(withToolType(values, type, units))}
           />

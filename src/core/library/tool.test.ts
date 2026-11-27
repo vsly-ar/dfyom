@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { deg, feed, flatEndMillValues, len, num, rpm } from './library.fixture'
-import { Tool } from './tool'
+import { taperHeights, Tool } from './tool'
 import { ToolValuesDtoSchema } from './tool.dto'
 
 const load = (raw: unknown) =>
@@ -88,6 +88,84 @@ describe('Tool', () => {
       ['angle', 'notAllowed'],
       ['tipDiameter', 'notAllowed'],
     ])
+  })
+
+  // docs/modes/tapered-ball-nose.md#tool-model (DF124 T1): the user's R0.25 3.6° on a 1/8" shank
+  const tapered = () => ({
+    ...flat(),
+    name: 'Tapered R0.25 3.6°',
+    type: 'taperedBallEndMill',
+    diameter: len('1/8"'),
+    shankDiameter: len('1/8"'),
+    tipDiameter: len('0.5'),
+    taperAngle: deg('3.6'),
+    fluteLength: len('22'),
+    overallLength: len('38'),
+    presets: [],
+  })
+
+  it('a tapered ball end mill: DC = large end, ball Ø in tipDiameter, 3.6° per side round-trips', () => {
+    const t = expectOk(load(tapered()))
+    expect(t.type).toBe('taperedBallEndMill')
+    expect(t.diameter.canonical).toBeCloseTo(3.175, 12)
+    expect(t.tipDiameterMm).toBe(0.5)
+    expect(t.taperAngle.unwrap().canonical).toBe(3.6)
+    expect(t.effectiveCornerRadius.toNumber()).toBe(0.25) // r = tip / 2, derived
+    expect(t.toDTO()).toEqual(tapered())
+    // the doc's example: the cone reaches the 1/8" shank 21.5 mm above the tip
+    const h = t.taper.unwrap()
+    expect(h.tangent).toBeCloseTo(0.25 * (1 - Math.sin((3.6 * Math.PI) / 180)), 12)
+    expect(h.largeEnd).toBeCloseTo(21.5, 1)
+    expect(taperHeights(0.5, 1.8, 3.175).largeEnd).toBeCloseTo(42.8, 1) // 3.6° included
+    expect(expectOk(load(flat())).taper.isNone()).toBe(true)
+  })
+
+  it('a tapered ball end mill: tip and taper angle required and in range, the rest not stored', () => {
+    expect(issues({ ...tapered(), tipDiameter: undefined, taperAngle: undefined })).toEqual([
+      ['tipDiameter', 'required'],
+      ['taperAngle', 'required'],
+    ])
+    for (const a of ['0.5', '1.5', '30'])
+      expect(
+        expectOk(load({ ...tapered(), taperAngle: deg(a) })).taperAngle.unwrap().canonical,
+      ).toBe(Number(a))
+    expect(issues({ ...tapered(), taperAngle: deg('0.4') })).toEqual([['taperAngle', 'range']])
+    expect(issues({ ...tapered(), taperAngle: deg('30.1') })).toEqual([['taperAngle', 'range']])
+    expect(issues({ ...tapered(), tipDiameter: len('0') })).toEqual([['tipDiameter', 'range']])
+    expect(issues({ ...tapered(), tipDiameter: len('1/8"') })).toEqual([['tipDiameter', 'range']])
+    expect(
+      issues({
+        ...tapered(),
+        cornerRadius: len('0.25'),
+        angle: deg('7.2'),
+        pointAngle: deg('118'),
+      }),
+    ).toEqual([
+      ['cornerRadius', 'notAllowed'],
+      ['pointAngle', 'notAllowed'],
+      ['angle', 'notAllowed'],
+    ])
+    // only a tapered ball stores a taper angle; a chamfer mill keeps its optional tip
+    expect(issues({ ...flat(), taperAngle: deg('3.6') })).toEqual([['taperAngle', 'notAllowed']])
+    expect(
+      issues({
+        ...flat(),
+        type: 'chamferMill',
+        presets: [],
+        angle: deg('15'),
+        taperAngle: deg('3.6'),
+      }),
+    ).toEqual([['taperAngle', 'notAllowed']])
+    expect(issues({ ...flat(), type: 'ballEndMill', tipDiameter: len('0.5') })).toEqual([
+      ['tipDiameter', 'notAllowed'],
+    ])
+    // the refusals say what to change
+    const e = expectErrCode(load({ ...tapered(), taperAngle: deg('45') }), 'model.invariant')
+    expect(e.issues[0]!.message).toMatch(/0\.5° and 30° per side/)
+    // no rule against the cone's height (Q153: a Library form hint only)
+    expect(
+      expectOk(load({ ...tapered(), taperAngle: deg('1.8'), fluteLength: len('20') })).type,
+    ).toBe('taperedBallEndMill')
   })
 
   it('checks lengths and the flute count', () => {

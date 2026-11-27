@@ -9,7 +9,7 @@ import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { quantityFromDTO } from '../library/item'
 import type { Tool } from '../library/tool'
-import { CHAMFER_MILL_ANGLE, type ToolType } from '../library/tool.dto'
+import { CHAMFER_MILL_ANGLE, type GeneralizedToolType, type ToolType } from '../library/tool.dto'
 import { Quantity } from '../quantity/quantity'
 import type { UnitSystem } from '../project/document'
 import { Rational } from '../quantity/rational'
@@ -17,7 +17,8 @@ import type { DesignToolDTO } from './part.dto'
 
 export interface GeneralizedTool {
   readonly kind: 'generalized'
-  readonly type: ToolType
+  /** Never a tapered ball end mill: a library tool only (tapered-ball-nose.md#tool-model). */
+  readonly type: GeneralizedToolType
   readonly diameter: Quantity
   /** RE: bull nose only, 0 < RE < DC/2. */
   readonly cornerRadius: Option<Quantity>
@@ -35,6 +36,7 @@ export const TOOL_TYPE_LABEL: Record<ToolType, string> = {
   ballEndMill: 'ball end mill',
   drill: 'drill',
   chamferMill: 'chamfer mill',
+  taperedBallEndMill: 'tapered ball end mill',
 }
 
 /** Issues of a generalized tool's values (paths relative to the tool); none = valid. */

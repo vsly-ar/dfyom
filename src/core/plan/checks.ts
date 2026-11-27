@@ -158,10 +158,15 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
   const stepped = i.ops.some((o) => o.kind === 'chamfer' && o.stepdown.isSome())
   const types: readonly ToolType[] = stepped ? ['flatEndMill'] : TOOL_TYPES_FOR[kind]
   if (!types.includes(tool.type)) {
+    // a tapered ball end mill cuts Lines from T2 on (docs/modes/tapered-ball-nose.md#which-operations-can-use-it)
+    const later =
+      tool.type === 'taperedBallEndMill' && kind === 'line'
+        ? ' (tapered ball end mills: not yet)'
+        : ''
     add(
       'tool',
       'toolType',
-      `a ${stepped ? 'stepped chamfer' : kind} needs a ${types.join(' or ')}`,
+      `a ${stepped ? 'stepped chamfer' : kind} needs a ${types.join(' or ')}${later}`,
       {
         toolType: tool.type,
       },

@@ -31,6 +31,7 @@ const TYPE_NAMES: Readonly<Record<ToolpathTool['type'], string>> = {
   ballEndMill: 'ball end mill',
   drill: 'drill',
   chamferMill: 'chamfer mill',
+  taperedBallEndMill: 'tapered ball end mill',
 }
 
 export function programTool(t: ToolpathTool): ProgramTool {

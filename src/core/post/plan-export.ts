@@ -292,6 +292,12 @@ export async function exportPlan(
         name: input.tool.name,
         diameter: input.tool.diameter.canonical,
         type: input.tool.type,
+        ...(input.tool.type === 'taperedBallEndMill' && {
+          tipDiameter: input.tool.tipDiameterMm,
+          ...(input.tool.taperAngle.isSome() && {
+            taperAngle: input.tool.taperAngle.unwrap().canonical,
+          }),
+        }),
       },
       stickout: input.stickout,
       label,

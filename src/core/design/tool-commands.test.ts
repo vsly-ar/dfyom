@@ -19,7 +19,7 @@ import type { DfmWarning } from '../geometry/model'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { Library } from '../library/library'
 import { createMemoryLibraryStorage } from '../library/memory-storage'
-import type { ToolType } from '../library/tool.dto'
+import type { GeneralizedToolType, ToolType } from '../library/tool.dto'
 import { newProjectDoc, type UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { testStock } from './design.fixture'
@@ -168,7 +168,7 @@ describe('tool field model', () => {
   it('a generalized tool: diameter > 0; RE only and required for a bull nose, 0 < RE < DC/2', () => {
     const q = (s: string) => expectOk(Quantity.parse(s, { kind: 'length', defaultUnit: 'mm' }))
     const deg = (s: string) => expectOk(Quantity.parse(s, { kind: 'angle', defaultUnit: 'deg' }))
-    const g = (type: ToolType, d: string, re?: string, angle?: string) =>
+    const g = (type: GeneralizedToolType, d: string, re?: string, angle?: string) =>
       checkGeneralizedTool({
         kind: 'generalized',
         type,
@@ -315,6 +315,48 @@ describe('design.operation.tool.set / lock / unlock', () => {
       'model.invariant',
     )
     expect(m.issues[0]).toMatchObject({ path: ['tool', 'angle'], rule: 'required' })
+  })
+
+  // docs/modes/tapered-ball-nose.md#agent-api (DF124 T1): library.tool.add takes the type, the
+  // tool field only as a library tool, and no operation fits it before T2
+  it('a tapered ball end mill: library.tool.add stores it; never generalized; fits no operation yet', async () => {
+    const s = await setup()
+    const taper = { tipDiameter: '0.5', taperAngle: '3.6', shankDiameter: '1/8"' }
+    const id = await s.addTool('taperedBallEndMill', '1/8"', taper)
+    const stored = s.library
+      .list('tool')
+      .items.find((i) => i.id === id)!
+      .values.toDTO()
+    expect(stored).toMatchObject({ type: 'taperedBallEndMill', taperAngle: { source: '3.6' } })
+    const bad = await s.failWith(
+      'library.tool.add',
+      { values: toolInput('taperedBallEndMill', '1/8"', { ...taper, taperAngle: '45' }) },
+      'model.invariant',
+    )
+    expect(bad.issues.map((i) => [i.path.at(-1), i.rule])).toEqual([['taperAngle', 'range']])
+    expect(bad.issues[0]!.message).toMatch(/per side/)
+    const none = await s.failWith(
+      'library.tool.add',
+      { values: toolInput('taperedBallEndMill', '1/8"') },
+      'model.invariant',
+    )
+    expect(none.issues.map((i) => [i.path.at(-1), i.rule])).toEqual([
+      ['tipDiameter', 'required'],
+      ['taperAngle', 'required'],
+    ])
+    await s.pocket()
+    const args = (tool: object) => ({ partId: s.partId, operationId: 'pocket1', tool })
+    await s.failWith(
+      'design.operation.tool.set',
+      args(generalized('taperedBallEndMill', '3')),
+      'input.malformed',
+    )
+    // a library tapered ball is not a candidate (type), and set anyway it warns dfm.toolUnfit
+    expect(s.candidates('pocket1').unfitting.map((u) => u.toolLibraryItemId)).not.toContain(id)
+    await s.run('design.operation.tool.set', args({ kind: 'specific', toolLibraryItemId: id }))
+    expect(s.warnings().find((w) => w.code === 'dfm.toolUnfit')).toMatchObject({
+      params: { rule: 'type' },
+    })
   })
 
   it('lock pins the current tool (none yet: model.invariant); unlock keeps the tool', async () => {

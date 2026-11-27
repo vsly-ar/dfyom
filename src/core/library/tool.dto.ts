@@ -11,15 +11,33 @@ export const TOOL_TYPES = [
   'ballEndMill',
   'drill',
   'chamferMill',
+  // docs/modes/tapered-ball-nose.md#tool-model (hardening DF124): library tools only
+  'taperedBallEndMill',
 ] as const
 export type ToolType = (typeof TOOL_TYPES)[number]
 
-/** End mills (flat, bull nose, ball): not a drill, not a chamfer mill. */
+/**
+ * The types a generalized tool (the design tool field's `{ kind: "generalized" }`) can have: every
+ * type but the tapered ball end mill, which has no standard series (tapered-ball-nose.md#tool-model).
+ */
+export const GENERALIZED_TOOL_TYPES = [
+  'flatEndMill',
+  'bullNoseEndMill',
+  'ballEndMill',
+  'drill',
+  'chamferMill',
+] as const satisfies readonly ToolType[]
+export type GeneralizedToolType = (typeof GENERALIZED_TOOL_TYPES)[number]
+
+/** End mills (flat, bull nose, ball): not a drill, a chamfer mill or a tapered ball end mill. */
 export const isEndMillType = (t: ToolType): boolean =>
   t === 'flatEndMill' || t === 'bullNoseEndMill' || t === 'ballEndMill'
 
 /** Included angle range of a chamfer mill / V-bit (docs/modes/design-v0.4.md#chamfer-mill-tool-type). */
 export const CHAMFER_MILL_ANGLE = { min: 10, max: 150 } as const
+
+/** Taper angle per side of a tapered ball end mill (docs/modes/tapered-ball-nose.md#tool-model, Q150). */
+export const TAPER_ANGLE = { min: 0.5, max: 30 } as const
 
 export const TOOL_MATERIALS = ['carbide', 'hss', 'other'] as const
 export type ToolMaterial = (typeof TOOL_MATERIALS)[number]
@@ -59,9 +77,14 @@ export const ToolValuesDtoSchema = z.object({
   fluteCount: quantityDto('scalar').describe('NOF: whole number ≥ 1'),
   pointAngle: quantityDto('angle').optional().describe('SIG: drill only, 0° < SIG < 180°'),
   angle: quantityDto('angle').optional().describe('Included angle: chamferMill only, 10°–150°'),
+  taperAngle: quantityDto('angle')
+    .optional()
+    .describe('Per side: taperedBallEndMill only, 0.5°–30°'),
   tipDiameter: quantityDto('length')
     .optional()
-    .describe('chamferMill only: 0 ≤ tip < DC; absent = pointed'),
+    .describe(
+      'chamferMill (absent = pointed) or taperedBallEndMill (ball Ø, required): 0 ≤ tip < DC',
+    ),
   toolMaterial: z.enum(TOOL_MATERIALS).optional(),
   coating: z.string().max(COATING_MAX).optional(),
   presets: z.array(CuttingPresetDtoSchema).default([]).describe('Feeds-and-speeds presets'),
