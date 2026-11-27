@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { feed, len, machineValues, num, rpm, watt } from './library.fixture'
+import { HOLDER_PRESETS, holderEdited, presetHolderDTO } from './holder'
+import { HOLDER_PRESET_IDS } from './holder.dto'
 import { Machine } from './machine'
 import { MachineValuesDtoSchema } from './machine.dto'
 
@@ -130,5 +132,80 @@ describe('Machine', () => {
     expect(issues({ ...machineValues(), probePlateThickness: len('0') })).toEqual([
       ['probePlateThickness', 'positive'],
     ])
+  })
+
+  describe('holder (tool-holder.md#model, DF132 H1)', () => {
+    const er11 = {
+      preset: 'er11' as const,
+      nutDiameter: len('19'),
+      nutLength: len('12'),
+      bodyDiameter: len('52'),
+      maxShank: len('7'),
+    }
+
+    it('round-trips a holder; none by default', () => {
+      const full = { ...machineValues(), holder: er11 }
+      const m = expectOk(load(full))
+      const h = m.holder.unwrap()
+      expect([h.nutDiameter.canonical, h.nutLength.canonical, h.bodyDiameter.canonical]).toEqual([
+        19, 12, 52,
+      ])
+      expect(h.preset.unwrap()).toBe('er11')
+      expect(m.toDTO()).toEqual(full)
+      expect(expectOk(load(machineValues())).holder.isNone()).toBe(true)
+      // measured, no preset and no collet capacity
+      const measured = { nutDiameter: len('20'), nutLength: len('14'), bodyDiameter: len('20') }
+      expect(expectOk(load({ ...machineValues(), holder: measured })).toDTO().holder).toEqual(
+        measured,
+      )
+    })
+
+    it('a preset alone fills the sizes; given sizes win over the preset', () => {
+      const m = expectOk(load({ ...machineValues(), holder: { preset: 'er16' } }))
+      expect(m.toDTO().holder).toEqual(presetHolderDTO('er16'))
+      const edited = expectOk(
+        load({ ...machineValues(), holder: { preset: 'er11', nutDiameter: len('22') } }),
+      )
+      const dto = edited.toDTO().holder!
+      expect(dto.nutDiameter!.exact).toEqual({ num: '22', den: '1' })
+      expect(dto.nutLength).toEqual(presetHolderDTO('er11').nutLength)
+      expect(holderEdited(dto)).toBe(true)
+      expect(holderEdited(presetHolderDTO('er11'))).toBe(false)
+    })
+
+    it('without a preset the nut and body sizes are required', () => {
+      expect(issues({ ...machineValues(), holder: { nutDiameter: len('19') } })).toEqual([
+        ['holder.nutLength', 'required'],
+        ['holder.bodyDiameter', 'required'],
+      ])
+    })
+
+    it('sizes are > 0 and the body is at least the nut', () => {
+      expect(
+        issues({
+          ...machineValues(),
+          holder: { ...er11, nutLength: len('0'), bodyDiameter: len('18'), maxShank: len('-1') },
+        }),
+      ).toEqual([
+        ['holder.nutLength', 'positive'],
+        ['holder.maxShank', 'positive'],
+        ['holder.bodyDiameter', 'atLeastNutDiameter'],
+      ])
+      expect(
+        expectOk(load({ ...machineValues(), holder: { ...er11, bodyDiameter: len('19') } })),
+      ).toBeDefined()
+      expectErrCode(load({ ...machineValues(), holder: { preset: 'er8' } }), 'input.malformed')
+    })
+
+    it('every preset builds a valid holder (body ≥ nut, capacity under the nut)', () => {
+      expect(Object.keys(HOLDER_PRESETS)).toEqual([...HOLDER_PRESET_IDS])
+      for (const id of HOLDER_PRESET_IDS) {
+        const h = expectOk(load({ ...machineValues(), holder: { preset: id } })).holder.unwrap()
+        expect(h.bodyDiameter.canonical).toBeGreaterThan(h.nutDiameter.canonical)
+        expect(h.maxShank.unwrap().canonical).toBeLessThan(h.nutDiameter.canonical)
+      }
+      const trim = presetHolderDTO('trimRouter')
+      expect(trim.maxShank!.exact).toEqual({ num: '127', den: '20' }) // 1/4" = 6.35 mm, exact
+    })
   })
 })

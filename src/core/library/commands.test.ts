@@ -196,6 +196,51 @@ describe('library commands', () => {
     )
   })
 
+  it('a machine holder from a preset id alone; edited sizes; issues below values (DF132 H1)', async () => {
+    const { d } = await setup()
+    const { id } = await add(d, 'machine', {
+      ...libraryInput(machineValues()),
+      holder: { preset: 'er11' },
+    })
+    const got = expectOk(d.query('library.machine.get', { id }, agent)).value as {
+      holder: { preset: string; nutDiameter: { source: string }; maxShank: { source: string } }
+    }
+    expect(got.holder).toMatchObject({
+      preset: 'er11',
+      nutDiameter: { source: '19', defaultUnit: 'mm' },
+      maxShank: { source: '7' },
+    })
+    const up = expectOk(
+      await d.dispatch(
+        'library.machine.update',
+        {
+          id,
+          revision: 1,
+          values: {
+            ...libraryInput(machineValues()),
+            holder: { preset: 'er11', nutDiameter: '0.875' },
+          },
+          units: 'inch',
+        },
+        agent,
+      ),
+    ).value as { holder: { nutDiameter: { source: string }; nutLength: { source: string } } }
+    expect(up.holder.nutDiameter.source).toBe('0.875')
+    expect(up.holder.nutLength.source).toBe('12')
+    const bad = expectErrCode(
+      await d.dispatch(
+        'library.machine.add',
+        { values: { ...libraryInput(machineValues()), holder: { nutDiameter: '19' } } },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(bad.issues.map((i) => i.path.join('.'))).toEqual([
+      'values.holder.nutLength',
+      'values.holder.bodyDiameter',
+    ])
+  })
+
   it('stock variants (DF13): one level under a root stock; kept on update; block remove', async () => {
     const { d } = await setup()
     const root = await add(d, 'stock', libraryInput(stockValues()))

@@ -20,6 +20,7 @@ import {
   quantityFromDTO,
   toOption,
 } from './item'
+import { checkHolder, holderFromDTO, holderToDTO, type Holder } from './holder'
 import type { HomingCorner, MachineValuesDTO, Rigidity } from './machine.dto'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 
@@ -86,6 +87,11 @@ export interface MachineProps {
    * (docs/modes/run-machine.md#probing-and-re-zero-m4, hardening M4).
    */
   readonly probePlateThickness: Option<Quantity>
+  /**
+   * Collet nut and spindle body; None = the tool is checked as a cylinder up to infinity (WH-F)
+   * (docs/modes/tool-holder.md#model, hardening DF132).
+   */
+  readonly holder: Option<Holder>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -140,6 +146,7 @@ export class Machine implements MachineProps {
     readonly spoilboardThickness: Option<Quantity>,
     readonly probePlateSize: Option<Quantity>,
     readonly probePlateThickness: Option<Quantity>,
+    readonly holder: Option<Holder>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -176,6 +183,7 @@ export class Machine implements MachineProps {
       if (noseToTable.isSome()) checkPositive(c, ['noseToTable'], noseToTable.unwrap(), 'length')
       if (probePlateSize.isSome())
         checkPositive(c, ['probePlateSize'], probePlateSize.unwrap(), 'length')
+      if (holder.isSome()) checkHolder(c, ['holder'], holder.unwrap())
       if (spoilboardThickness.isSome()) {
         const board = spoilboardThickness.unwrap()
         const path = ['spoilboardThickness']
@@ -200,6 +208,7 @@ export class Machine implements MachineProps {
     Object.freeze(maxFeedRate)
     if (acceleration.isSome()) Object.freeze(acceleration.unwrap())
     if (stepsPerMm.isSome()) Object.freeze(stepsPerMm.unwrap())
+    if (holder.isSome()) Object.freeze(holder.unwrap())
     Object.freeze(spindle)
     Object.freeze(this)
   }
@@ -230,6 +239,7 @@ export class Machine implements MachineProps {
           p.spoilboardThickness,
           p.probePlateSize,
           p.probePlateThickness,
+          p.holder.map((h) => ({ ...h })),
         ),
     )
   }
@@ -267,6 +277,10 @@ export class Machine implements MachineProps {
       spoilboardThickness: optionalQuantityFromDTO(dto.spoilboardThickness, 'spoilboardThickness'),
       probePlateSize: optionalQuantityFromDTO(dto.probePlateSize, 'probePlateSize'),
       probePlateThickness: optionalQuantityFromDTO(dto.probePlateThickness, 'probePlateThickness'),
+      holder:
+        dto.holder === undefined
+          ? Ok(None)
+          : holderFromDTO(dto.holder, 'holder').map((h) => Some(h)),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -296,6 +310,7 @@ export class Machine implements MachineProps {
         spoilboardThickness: q.spoilboardThickness,
         probePlateSize: q.probePlateSize,
         probePlateThickness: q.probePlateThickness,
+        holder: q.holder,
       }),
     )
   }
@@ -335,6 +350,7 @@ export class Machine implements MachineProps {
       ...optionalQuantityDTO('spoilboardThickness', this.spoilboardThickness),
       ...optionalQuantityDTO('probePlateSize', this.probePlateSize),
       ...optionalQuantityDTO('probePlateThickness', this.probePlateThickness),
+      ...optionalField('holder', this.holder.map(holderToDTO)),
     } as MachineValuesDTO
   }
 
