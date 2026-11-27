@@ -196,6 +196,11 @@ export interface JobAbout {
   readonly order?: readonly string[]
   /** DF129 RC5: what the run's lines refer to (the original program of a start at a line). */
   readonly origin?: RunOrigin
+  /**
+   * DF129 RC6: the project the plan is in (its id, and its file once saved), so the recovery panel
+   * after a crash can offer "Open project" (docs/modes/run-recovery.md#implementation-rc6).
+   */
+  readonly project?: { readonly id: string; readonly path?: string }
 }
 
 /** DF93: what `run.job.start { file }` tells the machine port about a file run. */

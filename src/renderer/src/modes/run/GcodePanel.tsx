@@ -3,9 +3,13 @@
 // line (estimated in main from `Bf`, the acknowledged lines' planner blocks and the position)
 // highlighted, the lines in the planner and the lines sent marked. "Follow" keeps the executing
 // line in view; the user's own scroll turns it off. The program comes once per job from main
-// (`window.dfyom.run.program`, renderer only, no agent tool).
-// Doc: docs/modes/run.md#gcode-panel-df84, docs/conventions/ui.md#run-mode-safety-ui
+// (`window.dfyom.run.program`, renderer only, no agent tool). DF129 RC6: after an interrupted
+// run, the lines where it stopped are marked (from the executing estimate to the acknowledged
+// line, then the lines sent that may have run too) and scrolled into view.
+// Doc: docs/modes/run.md#gcode-panel-df84, docs/conventions/ui.md#run-mode-safety-ui,
+// docs/modes/run-recovery.md#implementation-rc6
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { streamedLine } from '../../../../core/run/interruption'
 import { resumePoints, scanProgram } from '../../../../core/run/recovery'
 import type { RunProgram, RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
@@ -53,6 +57,34 @@ export function runIndices(status: RunStatus, jobId: string | undefined): RunInd
     executing: job.executing,
     finished: job.phase === 'done',
   }
+}
+
+/** DF129 RC6: an interrupted run's lines in the program shown: certainly reached, possibly sent. */
+export interface InterruptedRange {
+  readonly from: number
+  readonly to: number
+  readonly sent: number
+}
+
+/**
+ * The interrupted run's range in `program` (the lines of the original program; a streamed
+ * program that starts with a resume's lead-in is shifted past it), or undefined.
+ */
+export function interruptedRange(
+  status: RunStatus,
+  program: RunProgram | undefined,
+): InterruptedRange | undefined {
+  const i = status.lastRun?.interruption
+  if (i === undefined || status.job !== undefined || program === undefined || i.executing < 1)
+    return undefined
+  const leadIn = program.sections[0]?.label === 'Lead-in' && program.sections[0].fromLine === 1
+  const map = (l: number) => streamedLine(l, leadIn ? i.resumedRun : undefined)
+  const from = map(i.executing)
+  if (from === undefined) return undefined
+  const to = map(Math.max(i.executing, i.acknowledged)) ?? from
+  const sent = map(Math.max(i.executing, i.acknowledged, i.sent)) ?? to
+  const n = program.lines.length
+  return { from: Math.min(from, n), to: Math.min(to, n), sent: Math.min(sent, n) }
 }
 
 /** The connected panel: run store state, the program fetched from main once per job. */
@@ -105,9 +137,20 @@ export function GcodePanel({ insetRight = 0 }: { insetRight?: number }): React.J
       ? (line: number) =>
           store.getState().startFromHere(line, resumePoints(scanProgram(filePrepared.lines)))
       : undefined
+  // RC6: the interrupted run's lines, in its own program or in the loaded file it ran
+  const lastFile = status.lastRun?.file
+  const interrupted =
+    startProgram !== undefined
+      ? undefined
+      : shown === program && program.value?.jobId === status.lastRun?.jobId
+        ? interruptedRange(status, program.value)
+        : shown === fileProgram && lastFile !== undefined && file?.path === lastFile.path
+          ? interruptedRange(status, fileProgram.value)
+          : undefined
   return (
     <GcodePanelView
       program={shown}
+      {...(interrupted === undefined ? {} : { interrupted })}
       run={startProgram === undefined ? runIndices(status, program.value?.jobId) : undefined}
       state={gcode}
       onChange={setGcode}
@@ -164,6 +207,8 @@ export interface GcodePanelViewProps {
   start?: number
   /** DF129 RC3: "Start from here…" in a row's context menu; absent = not offered. */
   onStartFromHere?: (line: number) => void
+  /** DF129 RC6: an interrupted run's lines (no run streams). */
+  interrupted?: InterruptedRange
 }
 
 export function GcodePanelView({
@@ -174,6 +219,7 @@ export function GcodePanelView({
   insetRight = 0,
   start,
   onStartFromHere,
+  interrupted,
 }: GcodePanelViewProps): React.JSX.Element {
   const bodyId = useId()
   const legendId = useId()
@@ -184,18 +230,22 @@ export function GcodePanelView({
     [p],
   )
   const total = p?.lines.length ?? 0
+  // a start line or a run take precedence over the interrupted run's range
+  const stopped = start === undefined && run === undefined ? interrupted : undefined
   const current =
     start !== undefined
       ? start
-      : run === undefined
-        ? undefined
-        : run.finished === true
-          ? total
-          : run.executing !== undefined && run.executing > 0
-            ? run.executing
-            : run.acknowledged > 0
-              ? run.acknowledged
-              : undefined
+      : stopped !== undefined
+        ? stopped.from
+        : run === undefined
+          ? undefined
+          : run.finished === true
+            ? total
+            : run.executing !== undefined && run.executing > 0
+              ? run.executing
+              : run.acknowledged > 0
+                ? run.acknowledged
+                : undefined
   const section = rows !== undefined && current !== undefined ? rows.sectionOf(current) : undefined
   const heightRem = gcodePanelRem(state)
   // the 3D view ends above the panel (AppShell's `.viewportCanvas` reads the inset)
@@ -250,9 +300,11 @@ export function GcodePanelView({
           <span className={styles['gcodeCount']}>
             {start !== undefined
               ? m.startLine(start)
-              : current !== undefined && run !== undefined && run.finished !== true
-                ? m.line(current, total)
-                : m.lines(total)}
+              : stopped !== undefined
+                ? m.interruptedAt(stopped.from, stopped.to)
+                : current !== undefined && run !== undefined && run.finished !== true
+                  ? m.line(current, total)
+                  : m.lines(total)}
           </span>
         ) : null}
         {state.open ? (
@@ -272,13 +324,18 @@ export function GcodePanelView({
           {p !== undefined && rows !== undefined ? (
             <>
               <p id={legendId} className={styles['gcodeLegend']}>
-                {start === undefined ? m.legend : m.startLegend}
+                {start !== undefined
+                  ? m.startLegend
+                  : stopped !== undefined
+                    ? m.interruptedLegend
+                    : m.legend}
               </p>
               <ProgramList
                 program={p}
                 rows={rows}
                 run={run}
                 start={start}
+                interrupted={stopped}
                 follow={state.follow}
                 legendId={legendId}
                 onUserScroll={() => state.follow && onChange({ follow: false })}
@@ -359,6 +416,7 @@ function ProgramList({
   rows,
   run,
   start,
+  interrupted,
   follow,
   legendId,
   onUserScroll,
@@ -368,6 +426,7 @@ function ProgramList({
   rows: ProgramRows
   run: RunIndices | undefined
   start: number | undefined
+  interrupted: InterruptedRange | undefined
   follow: boolean
   legendId: string
   onUserScroll(): void
@@ -400,7 +459,10 @@ function ProgramList({
   )
   const executing = run?.finished === true ? undefined : run?.executing
   const target =
-    start ?? executing ?? (run !== undefined && run.acknowledged > 0 ? run.acknowledged : 0)
+    start ??
+    interrupted?.from ??
+    executing ??
+    (run !== undefined && run.acknowledged > 0 ? run.acknowledged : 0)
   // a resumed run's lead-in (DF129 RC2: its own first section), muted until it runs
   const leadInEnd =
     program.sections[0]?.label === 'Lead-in' && program.sections[0].fromLine === 1
@@ -448,14 +510,28 @@ function ProgramList({
           : row.line === start
             ? 'start'
             : 'pending'
-        : lineState(row.line, run)
+        : interrupted !== undefined
+          ? row.line < interrupted.from
+            ? 'done'
+            : row.line <= interrupted.to
+              ? 'interrupted'
+              : row.line <= interrupted.sent
+                ? 'sent'
+                : 'pending'
+          : lineState(row.line, run)
     items.push(
       <div
         key={`l${row.line}`}
         role="listitem"
         aria-posinset={r + 1}
         aria-setsize={rows.count}
-        aria-current={state === 'executing' ? 'step' : state === 'start' ? 'location' : undefined}
+        aria-current={
+          state === 'executing'
+            ? 'step'
+            : state === 'start' || (state === 'interrupted' && row.line === interrupted?.from)
+              ? 'location'
+              : undefined
+        }
         data-state={state}
         data-line={row.line}
         data-lead-in={row.line < leadInEnd ? '' : undefined}

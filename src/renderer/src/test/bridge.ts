@@ -112,6 +112,8 @@ export interface FakeBridge extends PreloadApi {
   readonly recoveries: RunRecoveryAction[]
   /** Main hands the window a gCode file to show in Run mode (DF93). */
   emitShowRunFile(path: string): void
+  /** DF129 RC6: main asks the first window at launch to show the recovery panel. */
+  emitShowRecovery(): void
   setLocalHttp(state: LocalHttpState): void
   /** Push a part evaluation (main's mesh push); `get` / `getPlan` answer the last one per subject. */
   emitEvaluation(view: PartEvaluationView): void
@@ -237,6 +239,7 @@ export function createFakeBridge(
   const reconnects: ('cancel' | 'simulate')[] = []
   const recoveries: RunRecoveryAction[] = []
   const runFileShows = channel<string>()
+  const recoveryShows = channel<undefined>()
   let runFileChoice: string | null = null
   let recentRunFiles: string[] = []
   let recentProjects: readonly RecentProjectView[] = []
@@ -342,6 +345,7 @@ export function createFakeBridge(
         recoveries.push(action)
         return Promise.resolve(null)
       },
+      onShowRecovery: (listener) => recoveryShows.on(() => listener()),
     },
     runFileOpens,
     reconnects,
@@ -354,6 +358,9 @@ export function createFakeBridge(
     },
     emitShowRunFile(path) {
       runFileShows.emit(path)
+    },
+    emitShowRecovery() {
+      recoveryShows.emit(undefined)
     },
     async call(name, args, opts) {
       const gesture = opts?.gesture

@@ -310,6 +310,13 @@ export const runMessages = {
     startLine: (n: number) => `Starts at line ${n.toLocaleString('en-GB')}`,
     startFromHere: 'Start from here…',
     rowMenu: (n: number) => `Line ${n.toLocaleString('en-GB')}`,
+    /** DF129 RC6: an interrupted run's range of lines. */
+    interruptedLegend:
+      'Muted lines had run. The highlighted lines are where the run was interrupted; a hollow mark: sent, the controller may have run it too.',
+    interruptedAt: (from: number, to: number) =>
+      from === to
+        ? `Interrupted at line ${from.toLocaleString('en-GB')}`
+        : `Interrupted at lines ${from.toLocaleString('en-GB')}–${to.toLocaleString('en-GB')}`,
   },
 
   /**
@@ -903,6 +910,46 @@ export const runMessages = {
     powerLost: 'The machine lost power',
     powerLostHint:
       'If the machine’s power went while the controller stayed on USB: DFYOM marks the position lost and helps you resume.',
+    /** Q171 while idle: the Position table's menu (RC6). */
+    positionMenu: 'Position options',
+    powerLostItem: 'The machine lost power…',
+    powerLostItemHint: 'Marks the position lost, so the machine is homed before it moves',
+    powerLostTitle: 'The machine lost power?',
+    powerLostDescription:
+      'If the machine’s power went while the controller stayed on USB, the position shown is wrong. DFYOM marks it lost: home the machine before moving it.',
+    powerLostConfirm: 'Mark the position lost',
+    powerLostNotNow: 'Only while the machine is connected, homed and idle.',
+    /** RC6: the run the last session left interrupted (the journal at launch). */
+    launch: {
+      source: 'From',
+      plan: (plan: string, setup: number, setups: number, setupName: string) =>
+        setups > 1
+          ? `${plan}, setup ${setup} of ${setups} (${setupName})`
+          : `${plan} (${setupName})`,
+      project: (name: string) => `Project ${name}`,
+      untitled: 'An unsaved project: restore it from the start panel’s unsaved changes.',
+      openProject: 'Open project',
+      projectMissing: 'The project is no longer at its path.',
+      locateProject: 'Locate project…',
+      file: (name: string) => `File ${name}`,
+      openFile: 'Open file',
+      fileMissing: 'The file is no longer at its path.',
+      fileChanged:
+        'The file changed since the run, so it cannot resume by line. If you kept the original, locate it.',
+      locateFile: 'Locate file…',
+      located: 'This window has the file with the run’s content.',
+      notKept:
+        'DFYOM did not find its copy of the program, so it cannot suggest where to resume: choose an operation or a line.',
+      moving:
+        'The machine ran out the lines it had and stopped, but the spindle may still be on. If it is, switch it off or press the emergency stop. Connecting restarts the controller, which switches the spindle output off.',
+      connect: (port: string) => `Connect to ${port}`,
+      connectVirtual: 'Connect to the virtual machine',
+      connectHint:
+        'DFYOM does not connect by itself after a restart: the machine may have been moved, or nobody is near it.',
+      portMissing: (port: string) => `${port} is not listed: plug the machine in, then connect.`,
+      virtualNote:
+        'The virtual machine does not keep its work zero across a restart of DFYOM: restore the run’s work zero after homing.',
+    },
   },
 
   noPlan: 'Choose a plan in the navigator.',

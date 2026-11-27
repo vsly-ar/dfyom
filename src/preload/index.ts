@@ -72,6 +72,13 @@ ipcRenderer.on(IPC.runFileShow, (_e, file: unknown) => {
   else runFiles.listener(file)
 })
 
+/** DF129 RC6: main's "show the recovery panel" before Run mode subscribes waits here. */
+const showRecovery: { queued: boolean; listener?: () => void } = { queued: false }
+ipcRenderer.on(IPC.runShowRecovery, () => {
+  if (showRecovery.listener === undefined) showRecovery.queued = true
+  else showRecovery.listener()
+})
+
 /** The window argument as a kind; a project window when absent or unknown. */
 function windowKind(raw: string | undefined): WindowKind {
   return raw === 'library' || raw === 'shapes' ? raw : 'project'
@@ -106,6 +113,16 @@ const api: PreloadApi = {
     record: () => ipcRenderer.invoke(IPC.runRecord) as Promise<RunJournal | null>,
     recovery: (action) =>
       ipcRenderer.invoke(IPC.runRecovery, action) as Promise<AppErrorData | null>,
+    onShowRecovery(listener) {
+      showRecovery.listener = listener
+      if (showRecovery.queued) {
+        showRecovery.queued = false
+        listener()
+      }
+      return () => {
+        if (showRecovery.listener === listener) delete showRecovery.listener
+      }
+    },
   },
   call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {

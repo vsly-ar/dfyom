@@ -2118,3 +2118,130 @@ describe('Recovery panel (DF129 RC5)', () => {
     expect(t.bridge.recoveries).toEqual(['powerLost', 'dismiss'])
   })
 })
+
+describe('After a crash (DF129 RC6)', () => {
+  const lines = ['G21 G90', 'G0 Z5', 'G0 X0 Y0', 'G1 Z-1 F300', 'G1 X10 F600', 'G1 X20', 'G1 X30']
+  /** The record main restores at launch from a leftover journal: a file run on `machine`. */
+  function launched(
+    t: Awaited<ReturnType<typeof renderRun>>,
+    machine: { target: 'virtual' | 'serial'; port?: { path: string; baud: number } },
+    file: 'same' | 'changed' | 'missing' = 'same',
+  ) {
+    t.machine.push({
+      lastRun: {
+        jobId: 'run-9',
+        file: { name: 'lid.nc', path: '/w/lid.nc' },
+        outcome: 'failed',
+        interruption: {
+          reason: 'appCrashed',
+          at: '2026-11-27T14:32:07Z',
+          startedAt: '2026-11-27T14:09:07Z',
+          lines: lines.length,
+          sent: 7,
+          acknowledged: 6,
+          executing: 5,
+          executingFrom: 'estimate',
+          lastReport: {
+            at: '2026-11-27T14:32:06.800Z',
+            state: 'Run',
+            mpos: [-290.123456, -190.654321, -51.5],
+            wpos: [-1234.567, -2345.678, -101.5],
+            feed: 600,
+            spindle: 18000,
+          },
+          workZero: { start: [0, 0, 0], last: [0, 0, 0] },
+          spindle: { dir: 'cw', rpm: 18000 },
+          programHash: 'hash-9',
+          suggestion: { line: 4, kind: 'pass' },
+          launch: { machine, file, program: true },
+        },
+      },
+    })
+  }
+
+  it('offered at launch: Run mode, open the file, connect to the virtual machine; axe-clean', async () => {
+    const t = await renderRun()
+    t.bridge.setRunFile('/w/lid.nc', lines.join('\n'))
+    t.shell.ui.getState().setMode('design')
+    launched(t, { target: 'virtual' })
+    // main asks the first window to show the panel: Run mode
+    t.bridge.emitShowRecovery()
+    await waitFor(() => expect(t.shell.ui.getState().mode).toBe('run'))
+    await t.user.click(await screen.findByRole('button', { name: 'Inspector' }))
+    const inspector = await screen.findByRole('complementary', { name: 'Inspector' })
+    const panel = await within(inspector).findByRole('region', { name: 'The run was interrupted' })
+    expect(panel).toHaveTextContent('DFYOM was closed unexpectedly while the run was streaming')
+    expect(panel).toHaveTextContent('File lid.nc')
+    // the long coordinates: each axis one unbreakable piece
+    expect(within(panel).getAllByText(/^(X -1234\.567|Y -2345\.678)$/)).toHaveLength(2)
+    // the virtual machine: no "Make it safe" step (nothing ran on after the app went)
+    expect(within(panel).queryByRole('button', { name: /Make it safe/ })).toBeNull()
+    await expectNoAxeViolations()
+    await t.user.click(within(panel).getByRole('button', { name: 'Open file' }))
+    await waitFor(() =>
+      expect(within(panel).queryByRole('button', { name: 'Open file' })).toBeNull(),
+    )
+    // the checklist, then connect: never by itself after a restart (Q158)
+    await t.user.click(within(panel).getByRole('button', { name: 'Checked' }))
+    expect(
+      await within(panel).findByText(/DFYOM does not connect by itself after a restart/),
+    ).toBeVisible()
+    expect(t.callsOf('run.connection.open')).toHaveLength(0)
+    await t.user.click(
+      within(panel).getByRole('button', { name: 'Connect to the virtual machine' }),
+    )
+    await waitFor(() => expect(t.callsOf('run.connection.open')).toHaveLength(1))
+    expect(t.callsOf('run.connection.open')[0]).toMatchObject({ target: 'virtual' })
+  })
+
+  it('a serial machine: Make it safe first; a port that is not listed says so; a changed file', async () => {
+    const t = await renderRun()
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    launched(
+      t,
+      { target: 'serial', port: { path: '/dev/cu.usbmodem1101', baud: 115_200 } },
+      'changed',
+    )
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const panel = await within(inspector).findByRole('region', { name: 'The run was interrupted' })
+    expect(within(panel).getByRole('button', { name: /Make it safe/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(panel).toHaveTextContent('the spindle may still be on')
+    expect(panel).toHaveTextContent('The file changed since the run')
+    expect(within(panel).getByRole('button', { name: 'Locate file…' })).toBeVisible()
+    await t.user.click(
+      within(panel).getByRole('button', { name: 'Connect to /dev/cu.usbmodem1101' }),
+    )
+    expect(
+      await within(panel).findByText(
+        '/dev/cu.usbmodem1101 is not listed: plug the machine in, then connect.',
+      ),
+    ).toBeVisible()
+    expect(t.callsOf('run.connection.open')).toHaveLength(0)
+    await expectNoAxeViolations()
+  })
+
+  it('the Position menu: "The machine lost power…" while idle, confirmed (Q171)', async () => {
+    const t = await renderRun()
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const openMenu = async () => {
+      within(inspector).getByRole('button', { name: 'Position options' }).focus()
+      await t.user.keyboard('{Enter}')
+      return screen.findByRole('menuitem', { name: /The machine lost power/ })
+    }
+    // not connected: the entry says when it is offered
+    const off = await openMenu()
+    expect(off).toHaveAttribute('aria-disabled', 'true')
+    expect(off).toHaveTextContent('Only while the machine is connected, homed and idle.')
+    await t.user.keyboard('{Escape}')
+    await connectAndHome(t)
+    await t.user.click(await openMenu())
+    const ask = await screen.findByRole('alertdialog', { name: 'The machine lost power?' })
+    await expectNoAxeViolations()
+    await t.user.click(within(ask).getByRole('button', { name: 'Mark the position lost' }))
+    expect(t.bridge.recoveries).toEqual(['powerLost'])
+  })
+})

@@ -44,6 +44,7 @@ import { PLANNER_BLOCKS } from '../grbl/emulator/planner'
 import { reconcileStep, type AlignmentStep } from '../alignment'
 import { RunRecorder, type RunJournal, type RunJournalPort, type UsbIdentity } from '../journal'
 import { interruptionOf, type InterruptionReason } from '../interruption'
+import type { LaunchRecord } from '../launch'
 import { Reconnector, type ReconnectProgress } from './reconnect'
 import {
   ControllerInfoSchema,
@@ -547,8 +548,13 @@ export class MachineClient implements MachineService {
     const rec = this.record
     if (this.job !== undefined)
       return fail('run.state', 'not while a run is going', { where, data: { state: 'run' } })
-    if (rec === undefined || !rec.recorder.markPowerLost(this.now()))
-      return fail('run.state', 'no ended run to recover', { where, data: { state: 'none' } })
+    // the DRO menu while idle (no ended run to recover): only the position is lost
+    if (rec === undefined || !rec.recorder.markPowerLost(this.now())) {
+      if (this.conn?.state !== 'open') return this.notConnected()
+      await this.forgetHoming()
+      this.notify()
+      return Ok(undefined)
+    }
     if (rec.journaled) this.opts.journal?.save(rec.recorder.snapshot())
     const interruption = this.interruptionOf(rec.recorder.snapshot(), 'machinePowerLost', false)
     const about = this.lastAbout
@@ -556,16 +562,31 @@ export class MachineClient implements MachineService {
     if (last !== undefined) this.lastRun = { ...last, interruption }
     else if (about !== undefined && 'file' in about)
       this.lastRun = { jobId: rec.jobId, file: { ...about.file }, outcome: 'stopped', interruption }
-    if (this.conn?.state === 'open') {
-      const r = await this.request({
-        type: 'machine',
-        requestId: '',
-        action: { kind: 'forgetHoming' },
-      })
-      if (r.isErr()) this.log.warn({ code: r.unwrapErr().code }, 'could not mark the position lost')
-    }
+    if (this.conn?.state === 'open') await this.forgetHoming()
     this.notify()
     return Ok(undefined)
+  }
+
+  /** Q171: the host forgets that the machine is homed (the position is lost). */
+  private async forgetHoming(): Promise<void> {
+    const r = await this.request({
+      type: 'machine',
+      requestId: '',
+      action: { kind: 'forgetHoming' },
+    })
+    if (r.isErr()) this.log.warn({ code: r.unwrapErr().code }, 'could not mark the position lost')
+  }
+
+  /**
+   * DF129 RC6: the interrupted run found in the run journal at launch becomes the last run's record
+   * (`lastRun.interruption` with `launch`) and its kept program the last program (the gCode panel),
+   * unless a run already started or ended since. Doc: docs/modes/run-recovery.md#implementation-rc6
+   */
+  restoreLaunch(record: LaunchRecord): void {
+    if (this.job !== undefined || this.lastRun !== undefined || this.record !== undefined) return
+    this.lastRun = record.lastRun
+    if (record.program !== undefined) this.lastProgram = record.program
+    this.notify()
   }
 
   /**
@@ -907,6 +928,8 @@ export class MachineClient implements MachineService {
     if (serial && this.record?.jobId === jobId && this.record.recorder.state === 'running') {
       this.record.journaled = true
       this.opts.keepAwake?.(true)
+      // RC6: the original program first, so the start's journal finds it after a crash
+      this.opts.journal?.saveProgram?.(about?.origin?.resumed?.lines ?? program.lines)
       this.journal(true)
     }
     return Ok({ ended })

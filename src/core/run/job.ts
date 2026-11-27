@@ -737,6 +737,7 @@ async function checkAndStart(
           order: (plan.setups.find((s) => s.id === setupId)?.operations ?? []).map((o) => o.id),
         }),
     origin,
+    ...projectOf(ctx),
   }
   const started = await m.startJob(
     ctx.jobId,
@@ -751,6 +752,13 @@ async function checkAndStart(
   pause.started(started.isOk())
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { planId }))
   return Ok({ running: started.unwrap(), warnings })
+}
+
+/** DF129 RC6: the open project's id and file, for the run journal ("Open project" after a crash). */
+function projectOf(ctx: JobContext): Pick<JobAbout, 'project'> {
+  const p = ctx.services.project
+  if (p === undefined) return {}
+  return { project: { id: p.projectId, ...(p.filePath === null ? {} : { path: p.filePath }) } }
 }
 
 /** The operations' first lines in a resumed program: the one holding the line starts after the lead-in. */

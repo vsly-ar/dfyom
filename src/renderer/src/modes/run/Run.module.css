@@ -1496,7 +1496,28 @@
 
 .recoveryFacts dd {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+
+/* RC6: a coordinate never breaks inside its number; a narrow inspector wraps between axes */
+.coord {
+  white-space: nowrap;
+}
+
+/* RC6: where a run interrupted by a crash was from, with Open project / Open file */
+.launchSource {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* RC6: an interrupted run's range in the gCode panel (amber, as the safety notes) */
+.gcodeRow[data-state='interrupted'] {
+  background: var(--warning-subtle);
+  border-left-color: var(--warning);
+}
+
+.gcodeRow[data-state='interrupted'] .gcodeNumber {
+  color: var(--text);
 }
 
 .recoverySteps {

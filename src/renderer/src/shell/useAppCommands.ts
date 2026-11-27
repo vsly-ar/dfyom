@@ -104,6 +104,9 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
       latest.current.onMode('run')
       void runStoreOf(bridge).getState().loadFile(file)
     })
+    // DF129 RC6: a run the last session left interrupted: Run mode shows its recovery panel
+    // (docs/modes/run-recovery.md#implementation-rc6)
+    const offRecovery = bridge.run.onShowRecovery(() => latest.current.onMode('run'))
 
     const onKey = (e: KeyboardEvent) => {
       const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -148,6 +151,7 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
       offMenu()
       offOpenFile()
       offRunFile()
+      offRecovery()
       window.removeEventListener('keydown', onKey)
     }
   }, [bridge, files, ui, replica])

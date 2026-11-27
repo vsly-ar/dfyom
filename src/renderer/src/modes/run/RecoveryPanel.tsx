@@ -7,15 +7,19 @@
 // core/run/goto.ts and confirmed here), choose how to continue (the RC3 pre-flight at the suggested
 // resume point, the operation's start, a chosen line, or the beginning). Finished steps collapse
 // with a tick; later ones stay visible, greyed, a click away. Neutral surface, an info icon, no red
-// but the one safety line. `reasonText` and `RecoveryFacts` are shared with the crash path (RC6).
-// Doc: docs/modes/run-recovery.md#the-recovery-panel, #implementation-rc5,
+// but the one safety line. RC6: the same panel for a run the last session left interrupted (the
+// journal at launch, `interruption.launch`): where the run was from with "Open project" / "Open
+// file" / "Locate…", and "Connect to …" (never by itself, Q158) in place of the reconnect line.
+// Doc: docs/modes/run-recovery.md#the-recovery-panel, #implementation-rc5, #implementation-rc6,
 // docs/conventions/ui.md#run-mode-safety-ui
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { goToMoves, goToSafeZ, goToSeconds, type Vec3 } from '../../../../core/run/goto'
-import type { Interruption } from '../../../../core/run/interruption'
+import type { Interruption, LaunchInfo } from '../../../../core/run/interruption'
+import { programHash } from '../../../../core/run/recovery'
 import type { LastRun, RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
+import { useShell } from '../../shell/ShellContext'
 import { Button, Checkbox, ConfirmDialog, Dialog, DialogClose, Icon } from '../../ui'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
 import { useJogControls, useMachineJog } from './JogPad'
@@ -63,6 +67,25 @@ export function reasonText(i: Interruption): string {
 const xyz = (v: readonly number[], units: UnitSystem): string =>
   `X ${formatLength(v[0] ?? 0, units)} Y ${formatLength(v[1] ?? 0, units)} Z ${formatLength(v[2] ?? 0, units)}`
 
+/**
+ * A position as three unbreakable "X 120.400" pieces (RC6): a narrow inspector wraps between the
+ * axes, never inside a number.
+ */
+function Xyz({ v, units }: { v: readonly number[]; units: UnitSystem }): React.JSX.Element {
+  return (
+    <span className={styles['mono']}>
+      {(['X', 'Y', 'Z'] as const).map((a, k) => (
+        <span key={a}>
+          {k === 0 ? '' : ' '}
+          <span className={styles['coord']}>
+            {a} {formatLength(v[k] ?? 0, units)}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
 /** Same G54 within 1 µm per axis. */
 const sameZero = (a: readonly number[], b: readonly number[]): boolean =>
   a.every((v, k) => Math.abs(v - (b[k] ?? 0)) < 0.001)
@@ -106,10 +129,10 @@ export function RecoveryFacts({
         <>
           <dt>{m.lastSeen}</dt>
           <dd>
-            <span className={styles['mono']}>{xyz(r.wpos, units)}</span> {unit} ({m.work})
+            <Xyz v={r.wpos} units={units} /> {unit} ({m.work})
             <br />
             <span className={styles['hint']}>
-              <span className={styles['mono']}>{xyz(r.mpos, units)}</span> ({m.machine}) ·{' '}
+              <Xyz v={r.mpos} units={units} /> ({m.machine}) ·{' '}
               {m.seenBefore(Math.max(0, (Date.parse(i.at) - Date.parse(r.at)) / 1000).toFixed(1))}
             </span>
           </dd>
@@ -162,8 +185,15 @@ export function RecoveryPanel({ doc }: { doc: ProjectDoc | undefined }): React.J
   const set = (patch: Partial<Omit<RecoveryUi, 'jobId'>>) =>
     store.getState().setRecoveryUi(last.jobId, patch)
   const connected = isConnected(status)
-  // the machine may still run its buffer only after a lost link, until a reset reached it
-  const mayMove = i.reason === 'connectionLost' || i.reason === 'hostExit'
+  const launch = i.launch
+  // the machine may still run its buffer only after a lost link, until a reset reached it; after
+  // a crash (RC6) a real machine has stopped, but its spindle may still be on
+  const mayMove =
+    launch === undefined
+      ? i.reason === 'connectionLost' || i.reason === 'hostExit'
+      : launch.machine.target === 'serial'
+  const connect =
+    launch === undefined ? undefined : <LaunchConnect doc={doc} last={last} launch={launch} />
   const done: Record<StepKey, boolean> = {
     safe: connected || mine.safe,
     check: mine.checked,
@@ -217,6 +247,9 @@ export function RecoveryPanel({ doc }: { doc: ProjectDoc | undefined }): React.J
           : ''}
       </p>
       <RecoveryFacts interruption={i} last={last} units={units} />
+      {launch === undefined ? null : (
+        <LaunchSource doc={doc} last={last} interruption={i} launch={launch} />
+      )}
       <ol className={styles['recoverySteps']} aria-label={m.steps}>
         {keys.map((k, n) => {
           const st = state(k)
@@ -239,11 +272,12 @@ export function RecoveryPanel({ doc }: { doc: ProjectDoc | undefined }): React.J
                       status={status}
                       done={done.safe}
                       onStopped={() => set({ safe: true })}
+                      connect={connect}
                     />
                   ) : k === 'check' ? (
                     <CheckStep ui={mine} set={set} />
                   ) : k === 'home' ? (
-                    <HomeStep status={status} interruption={i} />
+                    <HomeStep status={status} interruption={i} connect={connect} />
                   ) : k === 'zero' ? (
                     <ZeroStep
                       doc={doc}
@@ -326,12 +360,18 @@ function SafeStep({
   status,
   done,
   onStopped,
+  connect,
 }: {
   status: RunStatus
   done: boolean
   onStopped: () => void
+  /** RC6: "Connect to …" after a crash, in place of the reconnect line. */
+  connect?: React.ReactNode
 }): React.JSX.Element {
-  if (isConnected(status)) return <p className={styles['why']}>{m.safe.reconnected}</p>
+  if (isConnected(status))
+    return (
+      <p className={styles['why']}>{connect === undefined ? m.safe.reconnected : m.safe.reset}</p>
+    )
   return (
     <>
       {/* the one safety line, while the machine may still be moving (run-machine.md M2) */}
@@ -341,11 +381,13 @@ function SafeStep({
         <div className={styles['notice']} data-tone="warning" role="note">
           <Icon name="warning" />
           <div>
-            <p className={styles['why']}>{m.safe.moving}</p>
+            <p className={styles['why']}>
+              {connect === undefined ? m.safe.moving : m.launch.moving}
+            </p>
           </div>
         </div>
       )}
-      <ReconnectLine status={status} />
+      {connect ?? <ReconnectLine status={status} />}
       {done ? null : (
         <div className={styles['buttons']}>
           <Button size="sm" onClick={onStopped}>
@@ -394,15 +436,18 @@ function CheckStep({
 function HomeStep({
   status,
   interruption,
+  connect,
 }: {
   status: RunStatus
   interruption: Interruption
+  /** RC6: "Connect to …" after a crash, in place of the reconnect line. */
+  connect?: React.ReactNode
 }): React.JSX.Element {
   const store = useRunStore()
   const pending = useRun((s) => s.pending)
   const [ask, setAsk] = useState(false)
   const a = store.getState()
-  if (!isConnected(status)) return <ReconnectLine status={status} />
+  if (!isConnected(status)) return <>{connect ?? <ReconnectLine status={status} />}</>
   if (status.homed) return <p className={styles['why']}>{m.home.homed}</p>
   const gate = runGates(status, { planChosen: true }).home
   const lock = status.state.startsWith('Alarm') && status.alarm === undefined
@@ -483,6 +528,9 @@ function ZeroStep({
         </div>
       )}
       {stockMoved ? <p className={styles['why']}>{m.zero.moved}</p> : null}
+      {known && !same && i.launch?.machine.target === 'virtual' ? (
+        <p className={styles['hint']}>{m.launch.virtualNote}</p>
+      ) : null}
       <div className={styles['recoveryGoTo']}>
         {last === undefined ? null : (
           <div>
@@ -664,10 +712,14 @@ function ChooseStep({
   const pending = useRun((s) => s.pending)
   const a = store.getState()
   const plan = last.planId === undefined ? undefined : doc?.plans[last.planId]
-  // the program the run was from must be in this window to resume it
+  const located = useLocatedFile(last, i)
+  // the program the run was from must be in this window to resume it (RC6: a located file with
+  // the run's content too)
   const haveProgram =
     plan !== undefined ||
-    (last.file !== undefined && file?.state === 'ready' && file.path === last.file.path)
+    (last.file !== undefined &&
+      file?.state === 'ready' &&
+      (file.path === last.file.path || located))
   const changed = plan !== undefined && resumeChanges(last, plan, last.setupId).changed
   const gate =
     runGates(status, { planChosen: true }).start ?? (haveProgram ? null : m.choose.noProgram)
@@ -683,7 +735,12 @@ function ChooseStep({
     onClick: () => void
     recommended?: boolean
   }[] = []
-  if (changed) {
+  // RC6: a file changed since the run resumes from the beginning only (Q170)
+  const fileChanged =
+    i.launch?.file === 'changed' && file?.state === 'ready' && file.path === last.file?.path
+  if (fileChanged) {
+    // nothing by line: the pre-flight would refuse it
+  } else if (changed) {
     options.push({
       key: 'resume',
       title: runMessages.progress.resumeFrom,
@@ -750,12 +807,214 @@ function ChooseStep({
           </li>
         ))}
       </ul>
+      {fileChanged ? <p className={styles['hint']}>{c.fileChanged}</p> : null}
       {gate === null ? (
         <p className={styles['hint']}>{c.after}</p>
       ) : (
         <p className={styles['hint']}>{gate}</p>
       )}
     </>
+  )
+}
+
+/**
+ * RC6: whether the window's loaded gCode file is not at the run's path but has the run's content
+ * (a file the user located after it moved): its program hashes as the run's.
+ */
+function useLocatedFile(last: LastRun, i: Interruption): boolean {
+  const file = useRun((s) => s.file)
+  const lines =
+    file?.state === 'ready' && last.file !== undefined && file.path !== last.file.path
+      ? file.prepared.lines
+      : undefined
+  const [hashed, setHashed] = useState<{ lines: readonly string[]; hash: string } | undefined>()
+  useEffect(() => {
+    if (lines === undefined) return
+    let live = true
+    void programHash(lines).then((hash) => {
+      if (live) setHashed({ lines, hash })
+    })
+    return () => {
+      live = false
+    }
+  }, [lines])
+  return (
+    lines !== undefined &&
+    hashed?.lines === lines &&
+    i.programHash !== undefined &&
+    hashed.hash === i.programHash
+  )
+}
+
+const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+/**
+ * RC6: where a run the last session left interrupted was from: the plan and setup with "Open
+ * project" (or "Locate project…" when its file is gone), or the file with "Open file" (only while
+ * its content is the run's, Q170; else "Locate file…"); and a note when the kept program copy
+ * was not found (no suggestion then).
+ */
+function LaunchSource({
+  doc,
+  last,
+  interruption: i,
+  launch,
+}: {
+  doc: ProjectDoc | undefined
+  last: LastRun
+  interruption: Interruption
+  launch: LaunchInfo
+}): React.JSX.Element {
+  const { files, bridge } = useShell()
+  const store = useRunStore()
+  const file = useRun((s) => s.file)
+  const located = useLocatedFile(last, i)
+  const l = m.launch
+  const project = launch.project
+  const projectPath = project?.path
+  const planHere = last.planId !== undefined && doc?.plans[last.planId] !== undefined
+  const runFile = last.file
+  const fileHere =
+    runFile !== undefined && file?.state === 'ready' && (file.path === runFile.path || located)
+  return (
+    <div className={styles['launchSource']}>
+      <dl className={`${styles['facts']} ${styles['recoveryFacts']}`} aria-label={l.source}>
+        <dt>{l.source}</dt>
+        <dd>
+          {launch.plan === undefined ? null : (
+            <>
+              {l.plan(
+                launch.plan.planName,
+                launch.plan.setup,
+                launch.plan.setups,
+                launch.plan.setupName,
+              )}
+              {projectPath === undefined ? null : (
+                <>
+                  <br />
+                  <span className={styles['hint']} title={projectPath}>
+                    {l.project(baseName(projectPath))}
+                  </span>
+                </>
+              )}
+            </>
+          )}
+          {runFile === undefined ? null : <span title={runFile.path}>{l.file(runFile.name)}</span>}
+        </dd>
+      </dl>
+      {launch.plan !== undefined && !planHere ? (
+        projectPath === undefined ? (
+          <p className={styles['hint']}>{l.untitled}</p>
+        ) : project?.missing === true ? (
+          <>
+            <p className={styles['why']}>{l.projectMissing}</p>
+            <div className={styles['buttons']}>
+              <Button
+                size="sm"
+                icon={<Icon name="open" />}
+                onClick={() => void files.getState().open()}
+              >
+                {l.locateProject}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className={styles['buttons']}>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Icon name="open" />}
+              onClick={() => void files.getState().openFile(projectPath)}
+            >
+              {l.openProject}
+            </Button>
+          </div>
+        )
+      ) : null}
+      {runFile !== undefined && !fileHere ? (
+        launch.file === 'same' ? (
+          <div className={styles['buttons']}>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Icon name="open" />}
+              onClick={() => void store.getState().loadFile(runFile.path)}
+            >
+              {l.openFile}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <p className={styles['why']}>
+              {launch.file === 'changed' ? l.fileChanged : l.fileMissing}
+            </p>
+            <div className={styles['buttons']}>
+              <Button
+                size="sm"
+                icon={<Icon name="open" />}
+                onClick={() => void bridge.run.openFile()}
+              >
+                {l.locateFile}
+              </Button>
+            </div>
+          </>
+        )
+      ) : null}
+      {located ? <p className={styles['hint']}>{l.located}</p> : null}
+      {launch.program || i.suggestion !== undefined ? null : (
+        <p className={styles['hint']}>{l.notKept}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * RC6: "Connect to /dev/cu.usbmodem1101" (the journal's port, or the port with its USB serial
+ * number when the OS gave it another path) or "Connect to the virtual machine": the user's own
+ * click, never automatic after a restart (Q158).
+ */
+function LaunchConnect({
+  doc,
+  last,
+  launch,
+}: {
+  doc: ProjectDoc | undefined
+  last: LastRun
+  launch: LaunchInfo
+}): React.JSX.Element {
+  const store = useRunStore()
+  const status = useRun((s) => s.status)
+  const [missing, setMissing] = useState(false)
+  const l = m.launch
+  const port = launch.machine.port?.path
+  const planId = last.planId !== undefined && doc?.plans[last.planId] ? last.planId : undefined
+  return (
+    <div className={styles['reconnectLine']}>
+      <div className={styles['buttons']}>
+        <Button
+          size="sm"
+          variant="primary"
+          icon={<Icon name="connect" />}
+          disabled={status.connection.state === 'connecting'}
+          onClick={() =>
+            void store
+              .getState()
+              .connectRecovery(launch.machine, planId)
+              .then((ok) => setMissing(!ok))
+          }
+        >
+          {launch.machine.target === 'serial' && port !== undefined
+            ? l.connect(port)
+            : l.connectVirtual}
+        </Button>
+      </div>
+      {missing && port !== undefined ? (
+        <p className={styles['why']} role="status">
+          {l.portMissing(port)}
+        </p>
+      ) : null}
+      <p className={styles['hint']}>{l.connectHint}</p>
+    </div>
   )
 }
 

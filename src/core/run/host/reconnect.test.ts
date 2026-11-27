@@ -514,8 +514,15 @@ describe('the recovery record on the virtual machine (DF129 RC5)', { timeout: 60
 
   it('"The machine lost power" after a Stop: interrupted, the operation start, not homed', async () => {
     const client = await connect()
-    // nothing ended yet
-    expectErrCode(await client.markMachinePowerLost(), 'run.state')
+    // nothing ended yet (RC6: the Position menu while idle): only the position is lost
+    expect(client.status().homed).toBe(true)
+    expectOk(await client.markMachinePowerLost())
+    expect(await waitFor(() => !client.status().homed)).toBe(true)
+    expect(client.status().lastRun).toBeUndefined()
+    expectOk(await client.machine({ kind: 'home' }))
+    expect(await waitFor(() => client.status().homed && client.status().state === 'Idle')).toBe(
+      true,
+    )
     const started = expectOk(
       await client.startJob(
         'job-2',
@@ -541,5 +548,50 @@ describe('the recovery record on the virtual machine (DF129 RC5)', { timeout: 60
     })
     expect(client.runRecord()).toMatchObject({ state: 'interrupted', reason: 'machinePowerLost' })
     expect(await waitFor(() => !client.status().homed)).toBe(true)
+  })
+})
+
+describe('the interrupted run found at launch (DF129 RC6)', () => {
+  it('becomes the last run with its program, until Dismiss; never over a newer record', () => {
+    const client = new MachineClient({
+      factory: inProcessHostFactory({ timers: systemTimerHost }),
+      logLevel: 'warn',
+    })
+    clients.push(client)
+    const interruption = {
+      reason: 'appCrashed' as const,
+      at: '2026-11-27T10:05:00.000Z',
+      startedAt: '2026-11-27T10:00:00.000Z',
+      lines: 3,
+      sent: 3,
+      acknowledged: 2,
+      executing: 2,
+      executingFrom: 'estimate' as const,
+      workZero: { start: [0, 0, 0] as const, last: [0, 0, 0] as const },
+      spindle: { dir: 'off' as const, rpm: 0 },
+      launch: { machine: { target: 'virtual' as const }, file: 'same' as const, program: true },
+    }
+    const lastRun = {
+      jobId: 'job-l',
+      file: { name: 'a.nc', path: '/a.nc' },
+      outcome: 'failed' as const,
+      interruption,
+    }
+    const program = {
+      jobId: 'job-l',
+      lines: ['G0 X1', 'G1 X2 F100', 'G1 X3'],
+      sections: [],
+      operations: [],
+    }
+    client.restoreLaunch({ lastRun, program })
+    expect(client.status().lastRun).toEqual(lastRun)
+    expect(client.program('job-l')?.lines).toEqual(program.lines)
+    // a second record (none in practice) does not replace the first
+    client.restoreLaunch({ lastRun: { ...lastRun, jobId: 'other' } })
+    expect(client.status().lastRun?.jobId).toBe('job-l')
+    // no connection: nothing reconnects by itself at launch (Q158); Dismiss forgets it
+    expect(client.status().connection.state).toBe('closed')
+    client.dismissInterruption()
+    expect(client.status().lastRun).toBeUndefined()
   })
 })

@@ -5,7 +5,8 @@
 // setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
 // reference and touch-off spot (DF69, ZRefLayer.tsx) and the setup's workholding
 // (WorkholdingLayer.tsx, workholding.md); an operation's rest after its roughing (DF122,
-// RestLayer.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx). Props only.
+// RestLayer.tsx); the open Go to dialog's path and target (DF128 GT2, GoToPath.tsx); an interrupted
+// run's last seen tool position as a translucent ghost tool (DF129 RC6). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -78,6 +79,11 @@ export interface RunScene {
    * path from the tool to a target marker; absent: none (docs/modes/run-goto.md#preview).
    */
   readonly goTo?: GoToOverlay | undefined
+  /**
+   * DF129 RC6: an interrupted run's last seen tool tip, in work coordinates: a translucent ghost
+   * tool (docs/modes/run-recovery.md#implementation-rc6); absent: none.
+   */
+  readonly ghost?: readonly [number, number, number] | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -188,7 +194,7 @@ export function RunLayer({
     attr.needsUpdate = true
     invalidate()
   }, [geometry, lines, done, outdated, palette, invalidate])
-  useEffect(() => invalidate(), [tool, invalidate])
+  useEffect(() => invalidate(), [tool, run.ghost, invalidate])
   const travel = useMemo(() => {
     if (envelope === undefined) return null
     const g = new BufferGeometry()
@@ -254,6 +260,23 @@ export function RunLayer({
           <meshBasicMaterial color={toolColour} />
         </mesh>
       </group>
+      {run.ghost ? (
+        // RC6: where the interrupted run was last seen, a see-through copy of the tool marker
+        <group position={[run.ghost[0], run.ghost[1], run.ghost[2]]}>
+          <mesh position={[0, 0, 3]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
+            <coneGeometry args={[3, 6, 24]} />
+            <meshBasicMaterial color={toolColour} transparent opacity={0.3} depthWrite={false} />
+          </mesh>
+          <mesh position={[0, 0, 16]} rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
+            <cylinderGeometry args={[3, 3, 20, 24]} />
+            <meshBasicMaterial color={toolColour} transparent opacity={0.18} depthWrite={false} />
+          </mesh>
+          <mesh raycast={noRaycast}>
+            <ringGeometry args={[4, 4.8, 32]} />
+            <meshBasicMaterial color={toolColour} transparent opacity={0.6} depthWrite={false} />
+          </mesh>
+        </group>
+      ) : null}
       {tool ? (
         // tool marker: a cone with its tip at the tool tip, and the shank above it
         <group position={[tool[0], tool[1], tool[2]]}>
