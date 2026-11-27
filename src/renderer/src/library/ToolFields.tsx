@@ -1,7 +1,9 @@
 // The tool form, shared by the Library window's editor (`full`: every field of library.md#tool in
 // the groups Geometry with the tool drawing, Presets, and Details collapsed: material, coating,
 // notes, DF1) and the quick "New tool…" dialog (`quick`: the fields v0.1 needs). Per-type fields
-// show for their type only (corner radius for a bull nose, point angle for a drill). Doc: docs/conventions/ui-library-window.md#layout, L4
+// show for their type only (corner radius for a bull nose, point angle for a drill); a tapered ball
+// end mill's in vendor order with their read-outs (tapered-ball-nose.md § Library window, T3).
+// Doc: docs/conventions/ui-library-window.md#layout, L4
 import { useState } from 'react'
 import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
@@ -10,6 +12,8 @@ import { Field, FieldInput, InspectorGroup, Select, type StepKind } from '../ui'
 import {
   followDraft,
   quantityText,
+  taperedNotes,
+  type QDto,
   toolName,
   withQuickOverall,
   withToolType,
@@ -40,6 +44,7 @@ type ToolQuantityField =
   | 'shankDiameter'
   | 'fluteCount'
   | 'pointAngle'
+  | 'taperAngle'
   | 'overallLength'
 /** Adjust steps per tool field (inspector-layout.md § Step assignment per field). */
 const TOOL_STEP: Record<ToolQuantityField, StepKind> = {
@@ -53,6 +58,7 @@ const TOOL_STEP: Record<ToolQuantityField, StepKind> = {
   fluteCount: 'count',
   angle: 'angle',
   pointAngle: 'angle',
+  taperAngle: 'angle',
 }
 
 /** Every field key of the tool form (issue mapping, focus on the first invalid one). */
@@ -69,6 +75,7 @@ export const TOOL_FIELDS: readonly string[] = [
   'pointAngle',
   'angle',
   'tipDiameter',
+  'taperAngle',
   'toolMaterial',
   'coating',
   'presets',
@@ -88,6 +95,7 @@ const DIMENSIONS: ReadonlySet<string> = new Set([
   'pointAngle',
   'angle',
   'tipDiameter',
+  'taperAngle',
 ])
 
 export function ToolFields({
@@ -124,7 +132,11 @@ export function ToolFields({
       .filter((x) => x !== undefined && x !== '')
       .join(' · ') || undefined
   const chamfer = values.type === 'chamferMill'
+  const tapered = values.type === 'taperedBallEndMill'
   const [focused, setFocused] = useState<ToolDimension | undefined>(undefined)
+  // the read-outs beside a tapered ball's fields and the Q153 hint, after the field's own issues
+  const notes = taperedNotes(values, units)
+  const fieldMessages = (f: string) => [...messages(f), ...(notes[f as keyof typeof notes] ?? [])]
   // recommended presets follow every change of the tool (library.md#recommended-presets)
   // the quick dialog keeps its hidden overall length longer than stickout and flutes (DF26)
   const commit = (draft: ToolDraft) =>
@@ -138,24 +150,50 @@ export function ToolFields({
     field: ToolQuantityField,
     kind: 'length' | 'scalar' | 'angle',
     icon: Parameters<typeof QuantityField>[0]['icon'],
-    opts: { optional?: boolean; info?: string; placeholder?: string } = {},
+    opts: { optional?: boolean; info?: string; placeholder?: string; label?: string } = {},
+    onCommit: (v: QuantityDTO | undefined) => void = (v) => set({ [field]: v }),
   ) => (
     <QuantityField
       field={field}
       stepKind={TOOL_STEP[field]}
       {...(field === 'fluteCount' ? { stepMax: 12 } : {})}
-      label={m[field as keyof typeof m] as string}
+      label={opts.label ?? (m[field as keyof typeof m] as string)}
       kind={kind}
       value={values[field] as QuantityDTO | undefined}
       units={units}
       icon={icon}
-      messages={messages}
+      messages={fieldMessages}
       info={opts.info}
       optional={opts.optional ?? false}
       placeholder={opts.placeholder}
-      onChange={(v) => set({ [field]: v })}
+      onChange={onCommit}
       onFocusField={onFocusField}
     />
+  )
+
+  // a tapered ball end mill in vendor order: tip, taper angle, shank, large end (DC); the shank
+  // shows in the quick dialog too, as the large end follows it
+  const taperedFields = (
+    <>
+      {quantity('tipDiameter', 'length', 'ballTip', { label: m.ballTip })}
+      {quantity('taperAngle', 'angle', 'taperAngle', {
+        label: m.taperAngle,
+        info: m.taperAngleNote,
+      })}
+      {quantity('shankDiameter', 'length', 'shank', { optional: true, info: m.shankNote }, (v) => {
+        const shank = v as QDto<'length'> | undefined
+        // the large end follows the shank while they are equal (a new one starts equal)
+        const follow = sameLength(values.diameter, values.shankDiameter)
+        set({ shankDiameter: shank, ...(follow && shank !== undefined ? { diameter: shank } : {}) })
+      })}
+      {quantity(
+        'diameter',
+        'length',
+        'diameter',
+        { label: m.largeEnd, info: m.largeEndNote },
+        (d) => set({ diameter: d as QDto<'length'> }),
+      )}
+    </>
   )
 
   const geometry = (
@@ -164,21 +202,17 @@ export function ToolFields({
         <Field label={m.type} messages={messages('type')}>
           {/* one type for chamfer mills and V-bits (H-F): "V-bit" in its hint (task U4) */}
           <Select
-            // a tapered ball end mill is offered once the form has its fields
-            // (tapered-ball-nose.md § Library window, T3); one the agent added keeps its type
-            options={TOOL_TYPES.filter((t) => t !== 'taperedBallEndMill' || values.type === t).map(
-              (t) => ({
-                value: t,
-                label: m.types[t],
-                ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
-              }),
-            )}
+            options={TOOL_TYPES.map((t) => ({
+              value: t,
+              label: m.types[t],
+              ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
+            }))}
             value={values.type}
             onValueChange={(type) => commit(withToolType(values, type, units))}
           />
         </Field>
       </Focusable>
-      {quantity('diameter', 'length', 'diameter')}
+      {tapered ? taperedFields : quantity('diameter', 'length', 'diameter')}
       {values.type === 'bullNoseEndMill' ? quantity('cornerRadius', 'length', 'corner') : null}
       {chamfer ? quantity('angle', 'angle', 'chamfer') : null}
       {chamfer
@@ -200,7 +234,7 @@ export function ToolFields({
             : quantityText(values.fluteLength),
         ),
       })}
-      {full
+      {full && !tapered
         ? quantity('shankDiameter', 'length', 'shank', { optional: true, info: m.shankNote })
         : null}
       {quantity('fluteCount', 'scalar', 'tool')}
@@ -286,4 +320,10 @@ export function ToolFields({
       </InspectorGroup>
     </>
   )
+}
+
+/** Two lengths are the same value (the large end still equals the shank it followed). */
+function sameLength(a: QuantityDTO | undefined, b: QuantityDTO | undefined): boolean {
+  if (a === undefined || b === undefined) return false
+  return a.exact.num === b.exact.num && a.exact.den === b.exact.den
 }

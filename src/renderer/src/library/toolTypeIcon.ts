@@ -9,6 +9,5 @@ export const TOOL_TYPE_ICON = {
   ballEndMill: 'ball-end-mill',
   drill: 'drill',
   chamferMill: 'chamfer-mill',
-  // its own icon comes with the Library form (tapered-ball-nose.md § Library window, T3)
-  taperedBallEndMill: 'ball-end-mill',
+  taperedBallEndMill: 'tapered-ball-end-mill',
 } as const satisfies Record<ToolType, IconName>

@@ -3,7 +3,7 @@
 // then edited and saved again, and the design tool field lists it. The context link "Edit in
 // library" is not used here (plan mode); the leave prompt and conflicts are covered by component
 // tests. The Workholding tab (WL3): duplicate the built-in toe clamp, change a size, make it the
-// default. Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
+// default. A tapered ball end mill (DF124 T3): typed in, read-outs and hint, saved and listed. Docs: docs/conventions/ui-library-window.md, docs/modes/workholding-library.md,
 // docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -18,7 +18,9 @@ import {
 } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
-const rendersDir = resolve(__dirname, '../design/features/renders')
+// DFYOM_RENDERS_DIR: another folder for review renders that are not kept in the repo
+const rendersDir =
+  process.env['DFYOM_RENDERS_DIR'] ?? resolve(__dirname, '../design/features/renders')
 
 /** With DFYOM_RENDERS=1: the Library window in light and dark (the theme is set in `main`). */
 async function render(main: Page, lib: Page, name: string): Promise<void> {
@@ -159,6 +161,60 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(row).toContainText('90°')
   await expect(row).not.toContainText('Unsaved')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('library window: a new tapered ball end mill, 1/8″ shank, R0.25 at 3.6° per side (DF124 T3)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const opened = dfyom.app.waitForEvent('window')
+  await page.getByRole('button', { name: 'Library', exact: true }).click()
+  const lib = await opened
+  await lib.waitForLoadState('domcontentloaded')
+  if (RENDERS) await lib.setViewportSize({ width: 1100, height: 760 })
+  await lib.getByRole('button', { name: 'New tool' }).click()
+  const editor = lib.getByRole('region', { name: 'Item editor' })
+  const grid = lib.getByRole('grid', { name: 'Tools' })
+
+  await editor.getByRole('combobox', { name: 'Type' }).click()
+  await lib.getByRole('option', { name: 'Tapered ball end mill' }).click()
+  // typed as the vendor lists it: tip, angle per side, shank; the large end follows the shank
+  await setField(editor, 'Tip diameter (ball)', '0.5')
+  await setField(editor, 'Taper angle (per side)', '1.8')
+  await setField(editor, 'Shank diameter', '1/8 in')
+  await expect(input(editor, 'Large end diameter')).toHaveValue('1/8 in')
+  // Q153: 1.8° on 20 mm flutes is a cone of 42.8 mm: the hint asks about the angle
+  await expect(editor.getByText(/is 1\.8° the angle per side\?/)).toBeVisible()
+  await render(page, lib, 'df124-t3-tapered-hint')
+  await setField(editor, 'Taper angle (per side)', '3.6')
+  await expect(editor.getByText(/the angle per side\?/)).toHaveCount(0)
+  await expect(editor.getByText('R 0.25 mm')).toBeVisible()
+  await expect(editor.getByText('7.2° included')).toBeVisible()
+  await expect(editor.getByText('Cone reaches Ø 3.175 mm at 21.5 mm.')).toBeVisible()
+  await input(editor, 'Taper angle (per side)').focus()
+  await expect(
+    editor.getByRole('img', { name: 'Tool drawing: taper angle highlighted' }),
+  ).toBeVisible()
+  await expect(editor.getByRole('heading', { name: 'Tapered ball R0.25 3.6°' })).toBeVisible()
+  await render(page, lib, 'df124-t3-tapered-ball')
+  await editor.getByRole('button', { name: 'Save' }).click()
+  await expect(grid.getByRole('row', { name: /Unsaved/ })).toHaveCount(0)
+  const row = grid.getByRole('row', { name: /Tapered ball R0.25 3.6°/ })
+  await expect(row).toContainText('3.6°/side')
+  await expect(row.locator('[title="Tapered ball end mill"] svg')).toHaveCount(1)
+
+  // stored: the values come back from the library after leaving the tab
+  await lib.getByRole('tab', { name: 'Machines' }).click()
+  await lib.getByRole('tab', { name: 'Tools' }).click()
+  await grid.getByRole('row', { name: /Tapered ball R0.25 3.6°/ }).click()
+  await expect(editor.getByRole('heading', { name: 'Tapered ball R0.25 3.6°' })).toBeVisible()
+  await expect(input(editor, 'Tip diameter (ball)')).toHaveValue('0.5')
+  await expect(input(editor, 'Taper angle (per side)')).toHaveValue('3.6')
+  await expect(input(editor, 'Shank diameter')).toHaveValue('1/8 in')
+  await expect(input(editor, 'Large end diameter')).toHaveValue('1/8 in')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

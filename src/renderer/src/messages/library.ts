@@ -244,6 +244,25 @@ export const libraryMessages = {
     pointAngle: 'Point angle',
     angle: 'Included angle',
     tipDiameter: 'Tip diameter',
+    /** A tapered ball end mill's fields (tapered-ball-nose.md § Library window, DF124 T3). */
+    taperAngle: 'Taper angle (per side)',
+    ballTip: 'Tip diameter (ball)',
+    largeEnd: 'Large end diameter',
+    taperAngleNote:
+      'The angle of one side to the axis, as vendors quote it: half the included angle.',
+    largeEndNote:
+      'Where the cone ends, the largest cutting diameter; follows the shank while the two are equal.',
+    /** The ball's radius beside its diameter: "R 0.25 mm". */
+    ballRadius: (r: string) => `R ${r}`,
+    /** The included angle beside the per-side one: "7.2° included". */
+    included: (deg: string) => `${deg}° included`,
+    /** The cone read-out (`taperHeights`): "Cone reaches Ø 3.175 mm at 21.5 mm". */
+    coneReaches: (dc: string, h: string) => `Cone reaches Ø ${dc} at ${h}.`,
+    /** Q153: the cone does not fit the flutes, the usual sign of an included angle typed per side. */
+    coneMismatch: (h: string, lcf: string, deg: string) =>
+      `The cone reaches the large end at ${h}, the flutes end at ${lcf}: is ${deg}° the angle per side?`,
+    /** The item list's Angle cell of a tapered ball end mill: "3.6°/side". */
+    perSide: (deg: string) => `${deg}°/side`,
     toolMaterial: 'Tool material',
     materials: { carbide: 'Carbide', hss: 'HSS', other: 'Other' } satisfies Record<
       ToolMaterial,
@@ -255,10 +274,11 @@ export const libraryMessages = {
     drawing: (focused: string | undefined) =>
       focused === undefined ? 'Tool drawing' : `Tool drawing: ${focused} highlighted`,
     /** The drawing label's name of a highlighted dimension (the symbol, unless a word reads better). */
-    drawingNames: { angle: 'included angle', tipDiameter: 'tip diameter' } as Record<
-      string,
-      string
-    >,
+    drawingNames: {
+      angle: 'included angle',
+      tipDiameter: 'tip diameter',
+      taperAngle: 'taper angle',
+    } as Record<string, string>,
     /** The legend under the drawing (DF48): each symbol it shows with its field's name. */
     legend: 'Dimensions in the drawing',
     /** ISO 13399 symbols of the drawing's dimensions. */
@@ -272,7 +292,14 @@ export const libraryMessages = {
       pointAngle: 'SIG',
       angle: 'SIG',
       tipDiameter: 'DCN',
+      // no ISO 13399 letter; vendors write "TA" (tapered-ball-nose.md § The tool)
+      taperAngle: 'TA',
     },
+    /** The legend's names that differ for a tapered ball end mill (its DC is the cone's large end). */
+    taperedLegend: {
+      diameter: 'Large end diameter',
+      tipDiameter: 'Tip diameter (ball)',
+    } as Record<string, string>,
     presets: {
       caption: 'Cutting presets',
       hint: 'Feeds and speeds per material class; plans pick the one for the stock.',

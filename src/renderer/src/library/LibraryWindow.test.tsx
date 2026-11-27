@@ -462,6 +462,100 @@ describe('Library window', () => {
     expect(row(/Chamfer 15° Ø6/)).toHaveTextContent('15°')
   })
 
+  it('DF124 T3: a new tapered ball end mill: fields in vendor order, read-outs, the Q153 hint, drawing, Angle column', async () => {
+    const { user, row, editor, library } = await renderLibrary()
+    await user.click(screen.getByRole('button', { name: 'New tool' }))
+    within(editor()).getByRole('combobox', { name: 'Type' }).focus()
+    await user.keyboard('{Enter}')
+    await user.click(
+      within(await screen.findByRole('listbox')).getByRole('option', {
+        name: 'Tapered ball end mill',
+      }),
+    )
+    // vendor order: tip, taper angle, shank, large end, then the flutes
+    const labels = [...editor().querySelectorAll<HTMLInputElement>('input[type="text"]')].map(
+      (i) => i.getAttribute('aria-label') ?? i.labels?.[0]?.textContent,
+    )
+    const at = (l: string) => labels.indexOf(l)
+    expect(at('Tip diameter (ball)')).toBeGreaterThan(-1)
+    expect(at('Taper angle (per side)')).toBe(at('Tip diameter (ball)') + 1)
+    expect(at('Shank diameter')).toBe(at('Tip diameter (ball)') + 2)
+    expect(at('Large end diameter')).toBe(at('Tip diameter (ball)') + 3)
+    expect(at('Flute length')).toBe(at('Tip diameter (ball)') + 4)
+    expect(at('Diameter')).toBe(-1)
+    // typical 1/8″ bit: R0.25 at 3.6° per side on its shank, the cone fits the 20 mm flutes
+    const field = (label: string) => within(editor()).getByLabelText(label, { selector: 'input' })
+    const tip = field('Tip diameter (ball)')
+    const angle = field('Taper angle (per side)')
+    await user.clear(tip)
+    await user.type(tip, '0.5{Enter}')
+    await user.clear(angle)
+    await user.type(angle, '3.6{Enter}')
+    expect(await within(editor()).findByText('R 0.25 mm')).toBeInTheDocument()
+    expect(within(editor()).getByText('7.2° included')).toBeInTheDocument()
+    expect(within(editor()).getByText('Cone reaches Ø 3.175 mm at 21.5 mm.')).toBeInTheDocument()
+    expect(within(editor()).queryByText(/the angle per side\?/)).toBeNull()
+    // Q153: 3.6° included typed as 1.8° per side: the cone runs past the flutes, a hint only
+    await user.clear(angle)
+    await user.type(angle, '1.8{Enter}')
+    expect(
+      await within(editor()).findByText(
+        'The cone reaches the large end at 42.8 mm, the flutes end at 20 mm: is 1.8° the angle per side?',
+      ),
+    ).toBeInTheDocument()
+    expect(within(editor()).getByText('3.6° included')).toBeInTheDocument()
+    await user.clear(angle)
+    await user.type(angle, '3.6{Enter}')
+    await waitFor(() => expect(within(editor()).queryByText(/the angle per side\?/)).toBeNull())
+    // the drawing names the taper angle when its field is focused; the legend its own names
+    await user.click(angle)
+    expect(
+      await within(editor()).findByRole('img', { name: 'Tool drawing: taper angle highlighted' }),
+    ).toBeInTheDocument()
+    const legend = editor().querySelector<HTMLElement>(
+      'dl[aria-label="Dimensions in the drawing"]',
+    )!
+    expect(legend).toHaveTextContent('TATaper angle (per side)')
+    expect(legend).toHaveTextContent('DCLarge end diameter')
+    expect(legend).toHaveTextContent('DCNTip diameter (ball)')
+    await waitFor(() =>
+      expect(
+        within(editor()).getByRole('heading', { name: 'Tapered ball R0.25 3.6°' }),
+      ).toBeInTheDocument(),
+    )
+    expect(
+      row(/Tapered ball R0.25/).querySelector('[title="Tapered ball end mill"] svg'),
+    ).not.toBeNull()
+    await expectNoAxeViolations()
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(row(/Tapered ball R0.25 3.6°/)).not.toHaveTextContent('Unsaved'))
+    expect(
+      library
+        .list('tool')
+        .items.map((i) => i.toDTO())
+        .find((t) => t.name === 'Tapered ball R0.25 3.6°'),
+    ).toMatchObject({
+      type: 'taperedBallEndMill',
+      diameter: { source: '3.175' },
+      shankDiameter: { source: '3.175' },
+      tipDiameter: { source: '0.5' },
+      taperAngle: { source: '3.6' },
+    })
+    expect(row(/Tapered ball R0.25 3.6°/)).toHaveTextContent('3.6°/side')
+    // the large end follows the shank until one is typed
+    const shank = field('Shank diameter')
+    await user.clear(shank)
+    await user.type(shank, '4{Enter}')
+    await waitFor(() => expect(field('Large end diameter')).toHaveValue('4'))
+    const large = field('Large end diameter')
+    await user.clear(large)
+    await user.type(large, '3.5{Enter}')
+    await user.clear(shank)
+    await user.type(shank, '6{Enter}')
+    await waitFor(() => expect(field('Shank diameter')).toHaveValue('6'))
+    expect(field('Large end diameter')).toHaveValue('3.5')
+  })
+
   it('offers Reload or Overwrite when the item changed elsewhere', async () => {
     const { user, row, editor, d, get, flat6 } = await renderLibrary()
     await user.click(row(/Flat 6/))

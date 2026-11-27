@@ -294,6 +294,21 @@ const ICONS = {
       <path data-accent="" d="M8 15H12" />
     </>
   ),
+  // DF124 T3: a tapered ball end mill's ball tip, its diameter across the ball
+  ballTip: (
+    <>
+      <path d="M5 2H15L11.8 14.5A1.9 1.9 0 0 1 8.2 14.5Z" />
+      <path data-accent="" d="M8.2 14.5H11.8" />
+    </>
+  ),
+  // DF124 T3: the taper angle per side, between one flank and a line parallel to the axis
+  taperAngle: (
+    <>
+      <path d="M6 2H14L11 16H9Z" />
+      <path d="M14 2V15" strokeDasharray="1.5 1.2" />
+      <path data-accent="" d="M14 12A10 10 0 0 1 11.9 11.8" />
+    </>
+  ),
   spindle: (
     <>
       <circle cx="10" cy="10" r="2" />

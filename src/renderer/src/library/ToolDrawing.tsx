@@ -2,7 +2,10 @@
 // mill) with its ISO 13399 dimensions (DC, RE, LCF, OAL, SIG, DMM, DCN, stickout). A chamfer mill
 // (task U4) is a shank with a wider head ending in a cone with a tip flat: DC across the top of the
 // cone, the included angle as an arc between the flanks, the tip (DCN) the flat at the bottom, LCF
-// along the flank. The dimension of the focused field is
+// along the flank. A tapered ball end mill (DF124 T3) is the shank narrowing in a cone to a ball
+// tip, schematic as the chamfer mill: DC across the cone's large end, the ball's diameter (DCN)
+// across the ball, the taper angle (TA) between a flank and a line parallel to the axis, LCF up to
+// where the cone meets the shank. The dimension of the focused field is
 // drawn as an amber line, as in the field illustrations; the others stay grey. Decorative for the
 // form (the fields carry the values), so it is an image with a label naming the highlighted one.
 // A legend under it names each ISO symbol it shows ("DC Diameter", DF48).
@@ -21,6 +24,7 @@ export type ToolDimension =
   | 'pointAngle'
   | 'angle'
   | 'tipDiameter'
+  | 'taperAngle'
 
 const S = libraryMessages.tool.symbols
 const T = libraryMessages.tool
@@ -31,6 +35,7 @@ function shown(type: ToolType): ToolDimension[] {
     'diameter',
     ...(type === 'bullNoseEndMill' ? (['cornerRadius'] as const) : []),
     ...(type === 'chamferMill' ? (['angle', 'tipDiameter'] as const) : []),
+    ...(type === 'taperedBallEndMill' ? (['tipDiameter', 'taperAngle'] as const) : []),
     ...(type === 'drill' ? (['pointAngle'] as const) : []),
     'fluteLength',
     'overallLength',
@@ -56,7 +61,39 @@ const HEAD = 132
 const CONE = 150
 const CTIP = CONE + (CR - CT)
 
+// tapered ball end mill: the cone from the shank (half-width R) at TCONE down to a ball of radius
+// BR centred at BY, tangent to it; drawn about 9° per side so the cone and its angle read (the
+// real 0.5°–30° is a value, the drawing a schematic, tapered-ball-nose.md § Library window)
+const TCONE = 144
+const BR = 4
+const BY = TIP - BR
+/** Where the right flank from (X1, TCONE) touches the ball (the left one mirrors it). */
+const TANGENT = (() => {
+  const dx = X1 - AX
+  const dy = TCONE - BY
+  const d = Math.hypot(dx, dy)
+  const toP = Math.atan2(dy, dx)
+  const a = toP + Math.acos(BR / d)
+  return { x: AX + BR * Math.cos(a), y: BY + BR * Math.sin(a) }
+})()
+const round = (v: number) => Math.round(v * 100) / 100
+/** The flank's unit direction, from the large end down to the ball. */
+const FLANK = (() => {
+  const dx = TANGENT.x - X1
+  const dy = TANGENT.y - TCONE
+  const d = Math.hypot(dx, dy)
+  return { x: dx / d, y: dy / d }
+})()
+/** The taper angle's arc radius about the flank's top. */
+const TA_R = 40
+
 function body(type: ToolType): string {
+  if (type === 'taperedBallEndMill') {
+    const tx = round(TANGENT.x)
+    const lx = round(2 * AX - TANGENT.x)
+    const ty = round(TANGENT.y)
+    return `M${X0} ${TOP}H${X1}V${TCONE}L${tx} ${ty}A${BR} ${BR} 0 0 1 ${lx} ${ty}L${X0} ${TCONE}Z`
+  }
   if (type === 'chamferMill')
     return `M${X0} ${TOP}H${X1}V${HEAD}H${AX + CR}V${CONE}L${AX + CT} ${CTIP}H${AX - CT}L${AX - CR} ${CONE}V${HEAD}H${X0}Z`
   if (type === 'drill') return `M${X0} ${TOP}H${X1}V${TIP}L${AX} ${TIP + 10}L${X0} ${TIP}Z`
@@ -112,8 +149,13 @@ export function ToolDrawing({
 }): React.JSX.Element {
   const tip = tipY(type)
   const chamfer = type === 'chamferMill'
-  // the stickout line: beside the shank, or beside a chamfer mill's wider head
-  const sx = chamfer ? AX + CR + 30 : X1 + 20
+  const tapered = type === 'taperedBallEndMill'
+  // the stickout line: beside the shank, or beside a chamfer mill's wider head (a tapered ball's
+  // clears the taper angle's label)
+  const sx = chamfer ? AX + CR + 30 : tapered ? X1 + 30 : X1 + 20
+  // a tapered ball's flutes end where the cone meets the shank
+  const lcfTop = tapered ? TCONE : FLUTE
+  const legendName = (d: ToolDimension) => (tapered ? (T.taperedLegend[d] ?? T[d]) : T[d])
   const name =
     focused === undefined ? undefined : (libraryMessages.tool.drawingNames[focused] ?? S[focused])
   const helix = [0, 20, 40, 60, 80]
@@ -134,6 +176,11 @@ export function ToolDrawing({
         {/* flutes: helix hints below the shank (a chamfer mill: one flute edge on the cone) */}
         {chamfer ? (
           <path className={styles['flutes']} d={`M${AX + 8} ${CONE}L${AX + 2} ${CTIP}`} />
+        ) : tapered ? (
+          <path
+            className={styles['flutes']}
+            d={`M${X0} ${TCONE}H${X1}M${AX + 6} ${TCONE + 6}L${AX + 1} ${BY - 2}`}
+          />
         ) : (
           <path className={styles['flutes']} d={`M${X0} ${FLUTE}H${X1}${helix}`} />
         )}
@@ -166,10 +213,10 @@ export function ToolDrawing({
             focused={focused}
             label={S.fluteLength}
             lx={64}
-            ly={(FLUTE + tip) / 2}
+            ly={(lcfTop + tip) / 2}
             anchor="end"
           >
-            <path d={`M${X0 - 4} ${FLUTE}H68M72 ${FLUTE}V${tip}M${X0 - 4} ${tip}H68`} />
+            <path d={`M${X0 - 4} ${lcfTop}H68M72 ${lcfTop}V${tip}M${X0 - 4} ${tip}H68`} />
           </Dim>
         )}
         <Dim
@@ -180,7 +227,9 @@ export function ToolDrawing({
           ly={(COLLET + tip) / 2}
           anchor="start"
         >
-          <path d={`M${sx} ${COLLET}V${tip}M${sx - (chamfer ? 4 : 16)} ${tip}H${sx + 4}`} />
+          <path
+            d={`M${sx} ${COLLET}V${tip}M${sx - (chamfer || tapered ? 4 : 16)} ${tip}H${sx + 4}`}
+          />
         </Dim>
         <Dim id="shankDiameter" focused={focused} label={S.shankDiameter} lx={AX} ly={10}>
           <path
@@ -222,6 +271,28 @@ export function ToolDrawing({
             </Dim>
           </>
         ) : null}
+        {tapered ? (
+          <>
+            {/* the taper angle: between a line parallel to the axis (dashed) and the flank */}
+            <Dim
+              id="taperAngle"
+              focused={focused}
+              label={S.taperAngle}
+              lx={X1 + 4}
+              ly={TCONE + TA_R + 8}
+              anchor="start"
+            >
+              <path d={`M${X1} ${TCONE}V${TCONE + TA_R + 4}`} strokeDasharray="3 2" />
+              <path
+                d={`M${X1} ${TCONE + TA_R}A${TA_R} ${TA_R} 0 0 1 ${round(X1 + TA_R * FLANK.x)} ${round(TCONE + TA_R * FLANK.y)}`}
+              />
+            </Dim>
+            {/* the ball's diameter: across the ball at its centre */}
+            <Dim id="tipDiameter" focused={focused} label={S.tipDiameter} lx={AX} ly={tip + 10}>
+              <path d={`M${AX - BR} ${BY}H${AX + BR}`} />
+            </Dim>
+          </>
+        ) : null}
         {type === 'bullNoseEndMill' ? (
           <Dim
             id="cornerRadius"
@@ -254,7 +325,7 @@ export function ToolDrawing({
           {shown(type).map((d) => (
             <div key={d} data-active={focused === d || undefined}>
               <dt>{S[d]}</dt>
-              <dd>{T[d]}</dd>
+              <dd>{legendName(d)}</dd>
             </div>
           ))}
         </dl>

@@ -50,6 +50,9 @@ describe('field illustrations', () => {
       'stickout',
       'shank',
       'tipDiameter',
+      // DF124 T3: a tapered ball end mill's tip and taper angle
+      'ballTip',
+      'taperAngle',
       'spindle',
       'plunge',
       'stepover',
