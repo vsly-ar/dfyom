@@ -10,7 +10,8 @@ import { generatePocket } from '../toolpath/pocket'
 import { drillingInput, facingInput, pocketInput } from '../toolpath/testing/fixtures'
 import { testPartToolpaths } from '../toolpath/testing/test-part'
 import { TEST_STOCK } from '../geometry/testing/test-part'
-import { checkCase, TOOLS, type SetupCase } from './links.fixture'
+import { workholdingObstacles } from '../plan/workholding/obstacles'
+import { checkCase, loweredReplay, TOOLS, type SetupCase } from './links.fixture'
 
 describe('safe links on the virtual machine', () => {
   it(
@@ -129,6 +130,108 @@ describe('safe links on the virtual machine', () => {
       expect(results['undefined']).toBe(5)
       expect(results['0']).toBe(6)
       expect(results['12']).toBe(6)
+    },
+  )
+
+  // DF132 H4 (docs/modes/tool-holder.md#testing): a clamp 8–10 mm beside the link between two
+  // pockets of one tool run. The Ø6 tool clears it, the ER11 nut (Ø19, 12 mm stickout) only
+  // because the holder floor lifts the link; the replay checks the nut and body independently
+  it(
+    'a link beside a clamp keeps the collet nut 5 mm above it; lowered by the margin + 0.5 mm it fails',
+    { timeout: 60_000 },
+    async () => {
+      const stock = { length: 160, width: 100, thickness: 20 }
+      const d6 = TOOLS.d6
+      const heights = { clearanceHeight: 20, retractHeight: 2 }
+      const pocketAt = (id: string, x: number) =>
+        generatePocket(
+          pocketInput(
+            stock,
+            {
+              kind: 'pocket',
+              id,
+              onZ: 0,
+              shape: { center: [x, 30], contour: { kind: 'circle', radius: 4 } },
+              depth: 3,
+              floorRadius: 0,
+            },
+            d6,
+            { heights },
+          ),
+        ).unwrap()
+      const clamp = { x: [75, 85] as const, y: [39, 49] as const, top: 15 }
+      const obstacles = workholdingObstacles(
+        [
+          {
+            itemId: 'clamp',
+            footprint: {
+              kind: 'polygon',
+              points: [
+                [75, 39],
+                [85, 39],
+                [85, 49],
+                [75, 49],
+              ],
+            },
+            zMin: -Infinity,
+            zMax: clamp.top,
+          },
+        ],
+        2,
+      )
+      const ops = [
+        { tp: pocketAt('p1', 30), tool: d6, stickout: 12 },
+        { tp: pocketAt('p2', 130), tool: d6, stickout: 12 },
+      ]
+      const settings = {
+        retraction: 'minimum' as const,
+        clearance: 20,
+        margin: 2,
+        obstacles,
+        stock: [stock.length, stock.width, stock.thickness] as const,
+        rates: [3000, 3000, 1000] as const,
+      }
+      const holder = {
+        boxes: [clamp],
+        margin: 2,
+        above: 5,
+        envelopes: [
+          [
+            { radius: 9.5, above: 12 },
+            { radius: 26, above: 24 },
+          ],
+        ],
+      }
+      // without the holder floor: the link at the stock's margin, the nut 1 mm under the clamp top
+      const tool: SetupCase = {
+        ops,
+        settings: { ...settings, stock: [...settings.stock], rates: [...settings.rates] },
+        what: 'clamp beside the link, tool only',
+        // the items known, no holder: the replay checks the tool against them
+        holder: { ...holder, envelopes: [] },
+      }
+      const bare = await checkCase(tool)
+      expect(bare.links.links[0]).toMatchObject({ low: true, level: 2 })
+      expect(await loweredReplay({ ...tool, holder }, bare, 1, bare.links.links[0]!.level)).toEqual(
+        [expect.stringContaining('the holder (Ø19)')],
+      )
+      // with it: the nut's bottom at the clamp's top + 5 (15 + 5 − 12)
+      const c: SetupCase = {
+        ...tool,
+        settings: {
+          ...tool.settings,
+          holder: { nutDiameter: 19, nutLength: 12, bodyDiameter: 52, above: 5 },
+        },
+        holder,
+        what: 'clamp beside the link, ER11',
+      }
+      const r = await checkCase(c)
+      const link = r.links.links[0]!
+      expect(link).toMatchObject({ low: true, level: 8 })
+      // mutation: lowered by the margin + 0.5 mm, the replay catches the nut
+      expect(await loweredReplay(c, r, 1, link.level - 2.5)).toEqual([
+        expect.stringContaining('the holder (Ø19)'),
+      ])
     },
   )
 })

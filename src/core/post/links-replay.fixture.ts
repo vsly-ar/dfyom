@@ -34,6 +34,29 @@ export interface ReplayCheck {
    * the generators' own and are checked for collisions only, the others are links.
    */
   readonly fullRapids?: ReadonlySet<string>
+  /**
+   * DF132 H4: modelled items. Links may leave the cleared footprint (the items are known), keep
+   * the tool the margin and the holder `above` over every item (needs `fullRapids`).
+   */
+  readonly holder?: HolderReplay
+}
+
+/**
+ * The items and the holder floor, independently (docs/modes/tool-holder.md#testing): the items as
+ * boxes in the setup frame and each tool's stepped envelope; on every link rapid the tool keeps
+ * its tip the `margin` over a box it comes within its radius + the margin of, and each holder
+ * cylinder so near a box keeps its bottom `above` over the box's top.
+ */
+export interface HolderReplay {
+  readonly boxes: readonly {
+    readonly x: readonly [number, number]
+    readonly y: readonly [number, number]
+    readonly top: number
+  }[]
+  readonly margin: number
+  readonly above: number
+  /** Per tool number (1-based): cylinders by radius and bottom above the tip (mm). */
+  readonly envelopes: readonly (readonly { readonly radius: number; readonly above: number }[])[]
 }
 
 export interface ReplayMove {
@@ -197,6 +220,11 @@ export async function replayRapids(
     const across =
       link && (Math.abs(m.from[0] - m.to[0]) > 1e-6 || Math.abs(m.from[1] - m.to[1]) > 1e-6)
     const R = t.diameter / 2
+    const h = check.holder
+    if (h !== undefined && across) {
+      const low = holderLow(h, R, h.envelopes[m.tool - 1] ?? [], m.from, m.to)
+      if (low !== undefined) failures.push(`link "${m.line}": ${low}`)
+    }
     // Z is linear along a move: wholly above the stock top (and the margin) needs no samples,
     // and the footprint matters only below the clamps' need
     const low = Math.min(m.from[2], m.to[2])
@@ -218,6 +246,8 @@ export async function replayRapids(
       }
       if (across && !foot.covers(p, R + LINK_RADIAL_MARGIN, R, [m.from, m.to])) {
         const c = check.clampHeight
+        // modelled items (DF132 H4 cases): checked above, the material alone here
+        if (h !== undefined) continue
         if (c === undefined) {
           failures.push(`link "${m.line}" leaves the cleared footprint without a clamp height`)
           break
@@ -230,6 +260,31 @@ export async function replayRapids(
     }
   }
   return { seconds, moves, links, heightmap: hm, failures }
+}
+
+/** The first point of a->b where a cylinder of `envelope` passes too low over a box, or undefined. */
+function holderLow(
+  h: HolderReplay,
+  radius: number,
+  envelope: readonly { readonly radius: number; readonly above: number }[],
+  a: Vec3,
+  b: Vec3,
+): string | undefined {
+  const parts = [
+    { radius, above: 0, keep: h.margin },
+    ...envelope.map((c) => ({ ...c, keep: h.above })),
+  ]
+  for (const p of along(a, b))
+    for (const box of h.boxes)
+      for (const c of parts) {
+        const bottom = p[2] + c.above
+        if (bottom >= box.top + c.keep - TOL) continue
+        const dx = Math.max(box.x[0] - p[0], 0, p[0] - box.x[1])
+        const dy = Math.max(box.y[0] - p[1], 0, p[1] - box.y[1])
+        if (Math.hypot(dx, dy) - c.radius < h.margin - TOL)
+          return `${c.above === 0 ? 'the tool' : 'the holder'} (Ø${2 * c.radius}) at Z${r3(bottom)} passes ${r3(bottom - box.top)} mm over an item at ${p.map(r3).join(',')}`
+      }
+  return undefined
 }
 
 /** Points along a straight move, at most STEP apart, both ends included. */

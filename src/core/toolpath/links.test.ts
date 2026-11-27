@@ -8,6 +8,7 @@ import type { Move, Toolpath, ToolpathTool, Vec3 } from './model'
 import { generatePocket } from './pocket'
 import { generateProfile } from './profile'
 import { StockHeights, toolSurface } from './stock-heights'
+import { checkWorkholding } from '../plan/workholding/check'
 import { workholdingObstacles } from '../plan/workholding/obstacles'
 import { moveEnd } from './stats'
 import { turnToolpath } from './wcs'
@@ -312,6 +313,109 @@ describe('planLinks', () => {
     }
     // the case the field decides: over the stock top + 3
     expect(planLinks(cases[3]![0], settings(cases[3]![1])).links[0]).toMatchObject({ level: 3 })
+  })
+
+  // DF132 H4 (tool-holder.md § Travel links at clearance): the holder floor. A block 8 mm beside
+  // the link line (Y30): the Ø6 tool clears it (3 + 2 mm margin), the ER11 nut (Ø19) does not
+  describe('the holder floor', () => {
+    const ER11 = { nutDiameter: 19, nutLength: 12, bodyDiameter: 52, above: 5 }
+    const block = (y0: number, y1: number, top: number) =>
+      workholdingObstacles(
+        [
+          {
+            itemId: 'clamp',
+            footprint: {
+              kind: 'polygon',
+              points: [
+                [45, y0],
+                [55, y0],
+                [55, y1],
+                [45, y1],
+              ],
+            },
+            zMin: -Infinity,
+            zMax: top,
+          },
+        ],
+        2,
+      )
+    const STICKOUT = 6
+    const ops = (stickout: number | null = STICKOUT) =>
+      [pocket('a', 25, 30), pocket('b', 75, 30)].map((tp) => ({
+        ...op(tp, D6),
+        ...(stickout === null ? {} : { stickout }),
+      }))
+    const near = block(38, 48, 8)
+
+    it('raises a link the nut would pass over an item: item top + 5 mm − the stickout', () => {
+      // the tool alone: over the stock (Z2), the item is beyond its corridor
+      expect(planLinks(ops(), settings({ obstacles: near })).links[0]).toMatchObject({
+        low: true,
+        level: 2,
+      })
+      const r = planLinks(ops(), settings({ obstacles: near, holder: ER11 }))
+      // the nut's bottom at the item's top + 5: 8 + 5 − 6
+      expect(r.links[0]).toMatchObject({ low: true, level: 7 })
+      expect(r.collisions).toEqual([])
+    })
+
+    it('the body counts from the nut top; a far item, no stickout, no items or no holder change nothing', () => {
+      // 16 mm from the line: beyond the nut (9.5 + 2), within the body (26 + 2); top 20:
+      // 20 + 5 − 6 − 12 = 7
+      const body = planLinks(ops(), settings({ obstacles: block(46, 56, 20), holder: ER11 }))
+      expect(body.links[0]).toMatchObject({ low: true, level: 7 })
+      const today = (over: Partial<LinkSettings>, o = ops()) => {
+        const with_ = planLinks(o, settings(over))
+        const { holder: _, ...without } = over
+        expect(with_).toEqual(planLinks(o, settings(without)))
+      }
+      today({ obstacles: block(70, 80, 8), holder: ER11 })
+      today({ obstacles: near, holder: ER11 }, ops(null))
+      today({ holder: ER11, clampHeight: 0 })
+      // the shorter stickout of the two operations decides
+      const mixed = ops()
+      mixed[1] = { ...mixed[1]!, stickout: 4 }
+      expect(
+        planLinks(mixed, settings({ obstacles: near, holder: ER11 })).links[0]!.level,
+      ).toBeCloseTo(9, 9)
+    })
+
+    it('the workholding check agrees: no holder hit on the linked moves; without the floor or lowered, the nut hits', () => {
+      const prisms = near.prisms
+      const holder = { nutDiameter: 19, nutLength: 12, bodyDiameter: 52 }
+      const check = (toolpaths: readonly Toolpath[]) =>
+        checkWorkholding({
+          operations: toolpaths.map((tp, i) => ({
+            planOperationId: `op${i}`,
+            tool: { diameter: 6, stickout: STICKOUT, holder },
+            moves: allMoves(tp),
+          })),
+          prisms,
+          margin: 2,
+          clearanceZ: 10,
+        }).collisions.map((c) => c.kind)
+      const linked = planLinks(ops(), settings({ obstacles: near, holder: ER11 }))
+      expect(check(linked.toolpaths)).toEqual([])
+      // mutation: the floor left out, the link at Z2 carries the nut into the item
+      expect(check(planLinks(ops(), settings({ obstacles: near })).toolpaths)).toEqual(['holder'])
+      // mutation: the link lowered below the item's top + margin − the stickout (Z4)
+      const low = linked.toolpaths.map((tp, i) =>
+        i !== 0
+          ? tp
+          : {
+              ...tp,
+              passes: tp.passes.map((p) => ({
+                ...p,
+                moves: p.moves.map((m): Move =>
+                  m.kind === 'rapid' && Math.abs(m.to[2] - 7) < 1e-9
+                    ? { kind: 'rapid', to: [m.to[0], m.to[1], 3.5] }
+                    : m,
+                ),
+              })),
+            },
+      )
+      expect(check(low)).toEqual(['holder'])
+    })
   })
 
   it('never links across a pause, and full keeps every toolpath', () => {

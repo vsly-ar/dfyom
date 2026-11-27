@@ -27,13 +27,20 @@ import {
 } from '../toolpath/testing/fixtures'
 import { random } from '../toolpath/testing/region-fixtures'
 import { exportGrbl, type GrblExport } from './export'
-import { moveKey, replayRapids, type Replay } from './links-replay.fixture'
+import { moveKey, replayRapids, type HolderReplay, type Replay } from './links-replay.fixture'
 import { exportInput, operation, OPTS, testMachine } from './post.fixture'
 
 export interface SetupCase {
-  readonly ops: readonly { readonly tp: Toolpath; readonly tool: ToolpathTool }[]
+  readonly ops: readonly {
+    readonly tp: Toolpath
+    readonly tool: ToolpathTool
+    /** DF132 H4: the stickout the holder floor uses. */
+    readonly stickout?: number
+  }[]
   readonly settings: LinkSettings
   readonly what: string
+  /** DF132 H4: the replay's independent holder check. */
+  readonly holder?: HolderReplay
 }
 
 const MACHINE = testMachine()
@@ -42,6 +49,7 @@ function linkOps(c: SetupCase): LinkOperation[] {
   return c.ops.map((o, i) => ({
     toolpath: o.tp,
     tool: o.tool,
+    ...(o.stickout === undefined ? {} : { stickout: o.stickout }),
     pauseBefore: i === 0 || c.ops[i - 1]!.tool.id !== o.tool.id,
   }))
 }
@@ -74,6 +82,7 @@ async function replay(c: SetupCase, e: GrblExport, fullRapids?: ReadonlySet<stri
     margin: c.settings.margin,
     ...(c.settings.clampHeight === undefined ? {} : { clampHeight: c.settings.clampHeight }),
     ...(fullRapids === undefined ? {} : { fullRapids }),
+    ...(c.holder === undefined ? {} : { holder: c.holder }),
   })
 }
 
@@ -282,6 +291,21 @@ export function randomSetup(seed: number): SetupCase {
     },
     what: `seed ${seed}`,
   }
+}
+
+/**
+ * The mutation test of one link: `c`'s link `index` lowered to `z`, exported and replayed against
+ * the full program's rapids; the replay's failures.
+ */
+export async function loweredReplay(
+  c: SetupCase,
+  r: Checked,
+  index: number,
+  z: number,
+): Promise<readonly string[]> {
+  const e = exported(c, lowered(r.links, index, z), MACHINE)
+  const fullRapids = new Set(r.full.moves.filter((m) => m.rapid).map(moveKey))
+  return (await replay(c, e, fullRapids)).failures
 }
 
 /** `links` with link `index` lowered to `z` (its up, across and down moves). */

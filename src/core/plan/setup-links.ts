@@ -13,6 +13,7 @@ import { toolpathTool } from '../toolpath/inputs'
 import {
   planLinks,
   type LinkEdit,
+  type LinkHolder,
   type LinkOperation,
   type LinkSettings,
   type LinksSummary,
@@ -20,7 +21,7 @@ import {
   type SetupLinks,
 } from '../toolpath/links'
 import type { Toolpath, Vec3 } from '../toolpath/model'
-import type { PlanWarning } from './checks'
+import { STICKOUT_CLEARANCE, type PlanWarning } from './checks'
 import type { PlanOperationInput } from './inputs'
 import type { SetupDTO } from './plan.dto'
 import { setupWorkholding } from './workholding/setup'
@@ -39,7 +40,8 @@ export function setupClampHeight(s: Pick<SetupDTO, 'clampHeight'>): number | und
 
 /**
  * The link settings of a setup (mm). With workholding items their obstacles bound the links and
- * the clamp height is ignored (it stays the fallback for a setup without items).
+ * the clamp height is ignored (it stays the fallback for a setup without items); with a holder on
+ * the machine too, the nut and body stay above them (DF132 H4, `holderFloor`).
  */
 export function linkSettings(
   setup: SetupDTO,
@@ -59,6 +61,7 @@ export function linkSettings(
     margin: len(setup.retractHeight),
     ...(clampHeight === undefined ? {} : { clampHeight }),
     ...(items ? { obstacles: holding.obstacles } : {}),
+    ...(items ? linkHolder(machine, holding.obstacles.margin) : {}),
     stock: [size.x[1], size.y[1], size.z[1]],
     ...machine.mapOr<{ rates?: Vec3 }>({}, (m) => ({
       rates: [
@@ -67,6 +70,24 @@ export function linkSettings(
         m.maxFeedRate.z.canonical,
       ] as Vec3,
     })),
+  }
+}
+
+/**
+ * The machine's holder for the links (tool-holder.md § Implementation (H4)): its sizes in mm, and
+ * the nut and body kept the workholding margin, at least `STICKOUT_CLEARANCE`, above the items.
+ */
+function linkHolder(machine: Option<Machine>, margin: number): { holder?: LinkHolder } {
+  const h = machine.andThen((m) => m.holder)
+  if (h.isNone()) return {}
+  const { nutDiameter, nutLength, bodyDiameter } = h.unwrap()
+  return {
+    holder: {
+      nutDiameter: nutDiameter.canonical,
+      nutLength: nutLength.canonical,
+      bodyDiameter: bodyDiameter.canonical,
+      above: Math.max(margin, STICKOUT_CLEARANCE),
+    },
   }
 }
 

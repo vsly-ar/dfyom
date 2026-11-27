@@ -34,29 +34,79 @@ export interface LinkOperation {
 
 /** What the links read of the setup's workholding (`WorkholdingObstacles` in plan/workholding). */
 export interface LinkObstacles {
+  /** mm `floorAlong` keeps around every item, sideways and above (the workholding margin). */
+  readonly margin: number
   /** The lowest safe Z over the items for a tool of `radius` along a→b (XY); −∞ when none is near. */
   floorAlong(a: readonly [number, number], b: readonly [number, number], radius: number): number
+}
+
+/**
+ * The machine's tool holder over the links (hardening DF132 H4, docs/modes/tool-holder.md#travel-links-at-clearance):
+ * the collet nut from the nose up `nutLength`, the spindle body above it to infinity (mm).
+ */
+export interface LinkHolder {
+  readonly nutDiameter: number
+  readonly nutLength: number
+  readonly bodyDiameter: number
+  /**
+   * How far the nut and body stay above an item's top on a link (mm): the workholding margin, at
+   * least the minimum stickout's 5 mm (`STICKOUT_CLEARANCE`), so a link the floor raised never
+   * asks for a longer stickout in the read-out (tool-holder.md § Implementation (H4)).
+   */
+  readonly above: number
+}
+
+/**
+ * The holder floor (DF132 H4): the lowest tip Z at which the nut and the body of a tool with
+ * `stickout` pass every item near a→b. For each part, where the corridor grown by its radius
+ * (+ the margin) meets an item: item top + `above` − the part's height above the tip. −∞ without
+ * a holder, items or a stickout (today's links).
+ */
+export function holderFloor(
+  obstacles: LinkObstacles | undefined,
+  holder: LinkHolder | undefined,
+  a: readonly [number, number],
+  b: readonly [number, number],
+  stickout: number | undefined,
+): number {
+  if (obstacles === undefined || holder === undefined || stickout === undefined) return -Infinity
+  // floorAlong is the item's top + margin: swap the margin for `above`
+  const lift = holder.above - obstacles.margin
+  const nut = obstacles.floorAlong(a, b, holder.nutDiameter / 2) + lift - stickout
+  const body =
+    obstacles.floorAlong(a, b, holder.bodyDiameter / 2) + lift - stickout - holder.nutLength
+  return Math.max(nut, body)
 }
 
 /** The floor outside the cleared footprint: none with modelled items, else the clamp height. */
 const clampOf = (s: LinkSettings): number =>
   s.obstacles !== undefined ? -Infinity : (s.clampHeight ?? Infinity)
 
-/** The corridor's need: the field and clamps (`corridorFloor`) and the modelled items. */
+/** The tool of a link: its radius and its stickout (the holder floor's; absent = none). */
+interface LinkTool {
+  readonly radius: number
+  readonly stickout: number | undefined
+}
+
+/**
+ * The corridor's need: the field and clamps (`corridorFloor`), the modelled items and the
+ * holder floor over them (DF132 H4).
+ */
 function linkFloor(
   f: StockHeights,
   a: Vec3,
   b: Vec3,
-  radius: number,
+  tool: LinkTool,
   s: LinkSettings,
   clamp = clampOf(s),
 ): number {
-  const need = corridorFloor(f, a, b, radius, s.margin, clamp)
+  const need = corridorFloor(f, a, b, tool.radius, s.margin, clamp)
   // the items are in the setup frame, the moves in the WCS: add a moved zero back (alignment S12)
   const [zx, zy] = s.zero ?? [0, 0]
-  const items =
-    s.obstacles?.floorAlong([a[0] + zx, a[1] + zy], [b[0] + zx, b[1] + zy], radius) ?? -Infinity
-  return Math.max(need, items)
+  const sa: [number, number] = [a[0] + zx, a[1] + zy]
+  const sb: [number, number] = [b[0] + zx, b[1] + zy]
+  const items = s.obstacles?.floorAlong(sa, sb, tool.radius) ?? -Infinity
+  return Math.max(need, items, holderFloor(s.obstacles, s.holder, sa, sb, tool.stickout))
 }
 
 export interface LinkSettings {
@@ -73,6 +123,11 @@ export interface LinkSettings {
    * segment, and `clampHeight` is ignored. Its data (prisms, margin) is part of the cache key.
    */
   readonly obstacles?: LinkObstacles
+  /**
+   * The machine's tool holder (DF132 H4): with `obstacles`, every link also keeps the nut and the
+   * body above the items (`holderFloor`). Absent = the tool alone (today's links).
+   */
+  readonly holder?: LinkHolder
   /** The stock as it sits in the setup: X, Y extents and thickness (mm). */
   readonly stock: Vec3
   /** The machine's max rate per axis (mm/min), for the link times; absent = not timed. */
@@ -370,8 +425,13 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
         }
         let link = full
         if (field !== undefined && entry[2] < clearance - EPS) {
-          const r = op.tool.diameter / 2
-          const needFor = (clamp: number) => linkFloor(field!, exit, entry, r, s, clamp)
+          // one tool run: the shorter stickout of the two operations (each checks its own moves)
+          const stickouts = [prev.stickout, op.stickout].filter((v) => v !== undefined)
+          const tool: LinkTool = {
+            radius: op.tool.diameter / 2,
+            stickout: stickouts.length === 0 ? undefined : Math.min(...stickouts),
+          }
+          const needFor = (clamp: number) => linkFloor(field!, exit, entry, tool, s, clamp)
           const levelFor = (need: number) =>
             Math.max(exit[2], entry[2], need === -Infinity ? -Infinity : roundUp(need))
           const floor = needFor(clampOf(s))
@@ -386,7 +446,7 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
               head: legs.head.map(moveEnd),
             }
             link = { ...full, level, floor, low: true, seconds: seconds(level), edit }
-            collisions.push(...guard(field, i, exit, [...legs.tail, ...legs.head], r, s))
+            collisions.push(...guard(field, i, exit, [...legs.tail, ...legs.head], tool, s))
           } else if (s.clampHeight !== undefined || s.obstacles !== undefined)
             link = { ...full, floor }
           else {
@@ -457,14 +517,15 @@ function linkMoves(exit: Vec3, entry: Vec3, level: number): { tail: Move[]; head
 /**
  * The export guard (safe-links.md#verification-on-the-virtual-machine, 1): every rapid written
  * for a link is vertical or horizontal, at most the clearance height, and every horizontal one
- * runs at or above its corridor's floor in the field as it is at that time.
+ * runs at or above its corridor's floor in the field as it is at that time, the items and the
+ * holder floor (DF132 H4).
  */
 function guard(
   f: StockHeights,
   index: number,
   exit: Vec3,
   moves: readonly Move[],
-  radius: number,
+  tool: LinkTool,
   s: LinkSettings,
 ): LinkCollision[] {
   const out: LinkCollision[] = []
@@ -476,7 +537,7 @@ function guard(
     if (m.kind !== 'rapid' || (!vertical && !horizontal) || to[2] > s.clearance + EPS)
       out.push({ index, from: at, to, needed: s.clearance })
     else if (horizontal && !vertical) {
-      const needed = linkFloor(f, at, to, radius, s)
+      const needed = linkFloor(f, at, to, tool, s)
       if (to[2] < needed - GUARD_SLACK) out.push({ index, from: at, to, needed })
     }
     at = to
