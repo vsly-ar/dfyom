@@ -346,7 +346,7 @@ export const libraryMessages = {
       /** library.md#recommended-presets */
       recommended: 'Recommended',
       recommendedHint:
-        'Follows the calculator for this tool and material, for no particular machine. Editing a value unticks it.',
+        'Follows the calculator for this tool and material, for no particular machine. In a plan, adapted down to the plan’s machine. Editing a value unticks it.',
       recommendedNoClass: 'Choose a material to follow the calculator.',
       recommendedBadTool: 'Fix the tool’s values to follow the calculator.',
     },

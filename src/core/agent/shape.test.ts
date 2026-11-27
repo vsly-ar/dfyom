@@ -374,6 +374,8 @@ describe('plan.get', () => {
           feeds: {
             spindleSpeed: { value: 18000, unit: 'rpm' },
             stepover: { value: 2.4000000000000004 },
+            // DF139: a recommended preset adapted down to the plan machine
+            stepdown: { value: 1.6, source: 'preset', adapted: { from: 1.8, reason: 'power' } },
           },
         },
         { id: 'op2', kind: 'drilling', feeds: { spindleSpeed: null } },
@@ -431,7 +433,8 @@ describe('plan.get', () => {
                 kind: 'pocket',
                 designOperationIds: ['pocket1'],
                 tool: '6 mm end mill',
-                feeds: { spindleSpeed: 18000, stepover: 2.4 },
+                feeds: { spindleSpeed: 18000, stepover: 2.4, stepdown: 1.6 },
+                adapted: { stepdown: { from: 1.8, reason: 'power' } },
                 seconds: 30,
                 toolpath: 'current',
               },

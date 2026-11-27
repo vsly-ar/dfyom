@@ -22,6 +22,7 @@ import type {
 } from '../../../../core/plan/plan.dto'
 import { setupCorner as coreSetupCorner } from '../../../../core/plan/setup-header'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
+import type { AdaptReason } from '../../../../core/feeds-speeds/preset'
 import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
 import { ALLOWED, TRANSITIONS } from '../../../../core/plan/status'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -436,6 +437,8 @@ export interface FeedView {
   readonly value: number
   readonly unit: string
   readonly source: FeedSource
+  /** DF139: a recommended preset's value lowered to the plan machine (stored value, why). */
+  readonly adapted?: { readonly from: number; readonly reason: AdaptReason }
   readonly locked: boolean
   /** Auto mode: the value without the field's own entry. */
   readonly recommended: { readonly value: number; readonly unit: string } | null

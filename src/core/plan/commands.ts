@@ -45,7 +45,7 @@ import {
 import { PlanWarningSchema, type PlanWarning } from './checks'
 import { namedPlanMessages } from './labels'
 import { evaluateOperation, planFindings } from './evaluate'
-import { feedModeIssues, type LockState } from './feeds'
+import { feedModeIssues, type LockState, type ResolvedFeed } from './feeds'
 import { planThroughDepth } from './through'
 import {
   knownSurfaceId,
@@ -1467,11 +1467,27 @@ function effectiveClearances(plan: PlanDTO, units: UnitSystem) {
   })
 }
 
+/**
+ * DF139: a recommended preset's value lowered to the plan machine; absent when not adapted.
+ * Doc: docs/architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139
+ */
+const AdaptedDTO = z
+  .object({
+    from: z.number().describe('The stored preset value (same unit)'),
+    reason: z.enum(['spindleRange', 'maxFeedRate', 'maxFeedRateZ', 'power']),
+  })
+  .optional()
+  .describe('Recommended preset adapted down to the plan machine')
+
+const adaptedOf = (v: ResolvedFeed) =>
+  v.adapted === undefined ? {} : { adapted: { ...v.adapted } }
+
 const FeedValue = z
   .object({
     value: z.number(),
     unit: z.string(),
     source: z.enum(['override', 'preset', 'calculator', 'strategy']),
+    adapted: AdaptedDTO,
     locked: z.boolean().describe('Locked: the other recommendations follow this value'),
     recommended: z
       .object({ value: z.number(), unit: z.string() })
@@ -1597,6 +1613,7 @@ const operationList = defineQuery({
                 value: v.value,
                 unit: v.unit,
                 source: v.source,
+                ...adaptedOf(v),
                 locked: r.locked.includes(f),
                 recommended: r.recommended[f].mapOr(null, (value) => ({ value, unit: v.unit })),
                 lock: lockDTO(r.locks[f]),
@@ -1653,6 +1670,7 @@ const FeedExplained = z
     value: Num,
     unit: z.string(),
     source: z.enum(['override', 'preset', 'calculator', 'strategy']),
+    adapted: AdaptedDTO,
     derivation: z.array(StepSchema).nullable().describe('calculator source only'),
   })
   .nullable()
@@ -1755,6 +1773,7 @@ const operationFeedsGet = defineQuery({
             value: v.value,
             unit: v.unit,
             source: v.source,
+            ...adaptedOf(v),
             derivation: v.derivation === undefined ? null : v.derivation.map(stepToDTO),
           })),
         ),

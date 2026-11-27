@@ -33,6 +33,8 @@ import {
 } from '../feeds-speeds/suggest'
 import { lockIssue, powerLockIssue, type LockIssue, type LockLimits } from '../feeds-speeds/locks'
 import type { MaterialRow } from '../feeds-speeds/data'
+import { adaptPreset, type AdaptedField, type PresetValues } from '../feeds-speeds/preset'
+import type { UnitSystem } from '../project/document'
 import type { FeedField, PlanOperationDTO } from './plan.dto'
 
 export type FeedSource = 'override' | 'preset' | 'calculator' | 'strategy'
@@ -43,6 +45,11 @@ export interface ResolvedFeed {
   readonly source: FeedSource
   /** The calculator's explanation (`calculator` only). */
   readonly derivation?: readonly DerivationStep[]
+  /**
+   * A recommended preset's value lowered to the plan machine (`preset` only, DF139): the stored
+   * value and why. Doc: docs/architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139
+   */
+  readonly adapted?: AdaptedField
 }
 
 export type Overrides = Readonly<Partial<Record<FeedField, Quantity>>>
@@ -80,6 +87,8 @@ export interface FeedsInput {
   readonly finishAllowance?: number
   /** Pocket/profile: the resolved finish stepdown (mm), the finishing pass's axial engagement. */
   readonly finishStepdown?: number
+  /** The plan's unit system: the rounding of adapted recommended presets (DF139); default mm. */
+  readonly units?: UnitSystem
 }
 
 export type FeedWarningCode = CuttingWarningCode | 'feeds.lockInactive'
@@ -242,19 +251,68 @@ const given = (value: number, source: FeedSource, field: FeedField): ResolvedFee
   source,
 })
 
-function presetValue(preset: Option<CuttingPreset>, field: FeedField): Option<ResolvedFeed> {
-  return preset
-    .andThen((p): Option<Quantity> => {
-      switch (field) {
-        case 'stepdown':
-          return p.stepdown
-        case 'stepover':
-          return p.stepover
-        default:
-          return Some(p[field])
-      }
-    })
-    .map((q) => given(q.canonical, 'preset', field))
+/** A preset's stored value of `field` (canonical). */
+function storedValue(p: CuttingPreset, field: FeedField): Option<number> {
+  switch (field) {
+    case 'stepdown':
+      return p.stepdown.map((q) => q.canonical)
+    case 'stepover':
+      return p.stepover.map((q) => q.canonical)
+    default:
+      return Some(p[field].canonical)
+  }
+}
+
+/** A preset's values for one operation: stored, or adapted to the plan machine (DF139). */
+interface PresetUse {
+  readonly value: (field: FeedField) => Option<ResolvedFeed>
+  /** A recommended preset's power is above the budget even at the chip-load floor. */
+  readonly powerExceeded: boolean
+}
+
+/**
+ * The preset's values: a recommended preset with a plan machine is adapted down to it (Q211,
+ * Q212: only `recommended: true`); others give their stored values.
+ * Doc: docs/architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139
+ */
+function presetUse(
+  i: FeedsInput,
+  engagement: Engagement,
+  data?: readonly MaterialRow[],
+): PresetUse {
+  const stored = (field: FeedField) =>
+    i.preset.andThen((p) => storedValue(p, field)).map((v) => given(v, 'preset', field))
+  if (i.preset.isNone() || i.machine.isNone() || i.preset.unwrap().recommended !== true)
+    return { value: stored, powerExceeded: false }
+  const p = i.preset.unwrap()
+  const values: Record<string, number> = {}
+  for (const f of ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown'] as const)
+    storedValue(p, f).map((v) => (values[f] = v))
+  const stepdown: Option<number> = p.stepdown.isNone() ? fallback('stepdown', i) : None
+  const stepover = storedValue(p, 'stepover').orElse(() => fallback('stepover', i))
+  const a = adaptPreset(
+    values as PresetValues,
+    {
+      tool: i.tool,
+      materialClass: i.materialClass,
+      engagement,
+      ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
+      ...(stepover.isSome() ? { stepover: stepover.unwrap() } : {}),
+    },
+    i.machine.unwrap(),
+    i.units ?? 'mm',
+    ...(data === undefined ? [] : [data]),
+  )
+  return {
+    powerExceeded: a.powerExceeded,
+    value: (field) => {
+      if (field === 'stepover') return stored(field)
+      const v = a.values[field]
+      if (v === undefined) return None
+      const adapted = a.adapted[field]
+      return Some({ ...given(v, 'preset', field), ...(adapted === undefined ? {} : { adapted }) })
+    },
+  }
 }
 
 /** The calculator's engagement: the strategy's (facing: its stepover, never an entered one). */
@@ -350,11 +408,12 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
   let locks = perField<LockState>(() => HIDDEN)
   let lockEngagement = engagement
 
+  let presetPowerExceeded = false
   if (auto !== 'on') {
+    const preset = presetUse(i, engagement, data)
+    presetPowerExceeded = preset.powerExceeded
     fields = perField((f) =>
-      applicable.includes(f)
-        ? or(entered(f), () => or(presetValue(i.preset, f), () => strategy(f)))
-        : None,
+      applicable.includes(f) ? or(entered(f), () => or(preset.value(f), () => strategy(f))) : None,
     )
     if (i.auto && noData.isSome()) {
       // as before locks: the missing data matters when it leaves a field without a value
@@ -440,7 +499,14 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
     }
     const checked =
       data === undefined ? checkCutting(base, values) : checkCutting(base, values, data)
-    warnings.push(...checked)
+    // DF139: an adapted recommended preset's own values still above the budget at the chip-load
+    // floor; an entered value warns as before
+    const ownValues = !applicable.some((f) =>
+      fields[f].mapOr(false, (v) => v.source === 'override'),
+    )
+    warnings.push(
+      ...(presetPowerExceeded && ownValues ? checked.map(adaptedPowerWarning) : checked),
+    )
     used = data === undefined ? cuttingAt(base, values) : cuttingAt(base, values, data)
     // DF74: the finishing pass's own feed, and whether the feed limit makes it rub
     const allowance = i.finishAllowance ?? 0
@@ -549,6 +615,23 @@ function finishRubbing(
       `the machine's ${num(maxFeed, 0)} mm/min feed limit (X/Y) stops a faster finishing feed.` +
       fix,
     params,
+  }
+}
+
+/**
+ * DF139: `feeds.powerExceeded` on an adapted recommended preset: the adaptation already lowered
+ * the stepdown and the feed as far as they go, so the fix is another tool or a shallower cut.
+ */
+function adaptedPowerWarning<W extends FeedWarning>(w: W): W {
+  if (w.code !== 'feeds.powerExceeded') return w
+  const share = w.params['loadLimit']
+  const spindle =
+    typeof share === 'number' && share < 1
+      ? `${Math.round(share * 100)} % of the spindle's power`
+      : 'the spindle'
+  return {
+    ...w,
+    message: `Cutting power exceeds ${spindle} even with the preset adapted: use a smaller tool or a shallower cut.`,
   }
 }
 

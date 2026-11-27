@@ -959,6 +959,70 @@ export interface CheckWarning extends CuttingWarning {
 }
 
 /**
+ * The final-value check's model of a cut (chip load and power at given values), shared with the
+ * recommended-preset adaptation so an adapted value is judged exactly as the check judges it
+ * (docs/architecture/feeds-speeds.md#recommended-presets-on-the-plan-machine-hardening-df139).
+ */
+export interface CheckModel {
+  readonly row: MaterialRow
+  /** `fz` (milling, mm/tooth) or `fn` (drilling, mm/rev) range of the band. */
+  readonly range: Range
+  readonly isDrill: boolean
+  /** The axial engagement fixed by the strategy (helix pitch, chamfer depth); else the stepdown. */
+  readonly fixedAp: number | undefined
+  /** Chip thinning F3 × F5 (capped) at `values`; 1 for drilling. */
+  chipThinning(values: CuttingValues): number
+  /** The chip after thinning (milling) or feed per revolution (drilling) at `values`. */
+  chipLoad(values: CuttingValues): number
+  /**
+   * F7 and its budget (`loadLimit · Pavail` at `values.n`, kW) at `values`; None for drilling,
+   * without an axial engagement or without the machine's spindle power.
+   */
+  power(values: CuttingValues): Option<{ readonly pc: number; readonly budget: number }>
+}
+
+/** The check model of `input` (its `locked` ignored); None without data. */
+export function checkModel(
+  input: CuttingInput,
+  data: readonly MaterialRow[] = MATERIAL_DATA,
+): Option<CheckModel> {
+  const found = contextOf(input, data)
+  if ('noData' in found) return None
+  const c = found.ctx
+  const { tool, machine, engagement: e } = input
+  const isDrill = e.kind === 'drill'
+  const D = c.D
+  const RE = tool.effectiveCornerRadius.toNumber()
+  const z = tool.fluteCount.canonical
+  const ae = (v: CuttingValues) => (e.kind === 'stepover' ? Math.min(v.ae ?? e.ae, D) : D)
+  const apOf = (v: CuttingValues) => fixedAp(e) ?? v.ap
+  const k = (v: CuttingValues): number => {
+    if (isDrill) return 1
+    const ap = apOf(v)
+    return chipThinning(rctf(ae(v), D), ap === undefined ? 1 : actf(RE, ap))
+  }
+  const chipLoad = (v: CuttingValues) => (isDrill ? v.vf / v.n : v.vf / (v.n * z * k(v)))
+  const spindle = machine.andThen((m) => m.power.map((p) => ({ p, max: m.maxSpeed })))
+  return Some({
+    row: c.row,
+    range: c.range,
+    isDrill,
+    fixedAp: fixedAp(e),
+    chipThinning: k,
+    chipLoad,
+    power: (v) => {
+      const ap = apOf(v)
+      if (isDrill || ap === undefined || spindle.isNone()) return None
+      const { p, max } = spindle.unwrap()
+      return Some({
+        pc: rowCuttingPower(c.row, materialRemovalRate(ae(v), ap, v.vf), chipLoad(v)),
+        budget: availablePower(p, v.n, max) * loadLimit(c.row),
+      })
+    },
+  })
+}
+
+/**
  * Final-value check (docs/architecture/feeds-speeds.md#final-value-check): chip load against
  * the data range and cutting power, on the values that will be used, entered ones included.
  * `input.locked` is ignored. No data → no warnings (the calculator reports `feeds.noData`).
@@ -969,40 +1033,31 @@ export function checkCutting(
   values: CuttingValues,
   data: readonly MaterialRow[] = MATERIAL_DATA,
 ): readonly CheckWarning[] {
-  const found = contextOf(input, data)
-  if ('noData' in found || !(values.n > 0) || !(values.vf > 0)) return []
-  const c = found.ctx
-  const { tool, machine, engagement: e } = input
+  const found = checkModel(input, data)
+  if (found.isNone() || !(values.n > 0) || !(values.vf > 0)) return []
+  const m = found.unwrap()
   const on =
     (field: CheckWarning['field']) =>
     (w: CuttingWarning): CheckWarning => ({ ...w, field })
-  if (e.kind === 'drill')
-    return chipLoadWarnings(values.vf / values.n, c.range, true).map(on('feedRate'))
-  const D = c.D
-  const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
-  const ap = fixedAp(e) ?? values.ap
-  const RE = tool.effectiveCornerRadius.toNumber()
-  const z = tool.fluteCount.canonical
-  const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
-  const fz = values.vf / (values.n * z * k)
-  const out: CheckWarning[] = chipLoadWarnings(fz, c.range, false).map(on('feedRate'))
-  const power = machine.andThen((m) => m.power)
-  if (ap !== undefined && power.isSome()) {
-    const budget =
-      availablePower(power.unwrap(), values.n, machine.unwrap().maxSpeed) * loadLimit(c.row)
-    const pc = rowCuttingPower(c.row, materialRemovalRate(ae, ap, values.vf), fz)
+  const out: CheckWarning[] = chipLoadWarnings(m.chipLoad(values), m.range, m.isDrill).map(
+    on('feedRate'),
+  )
+  m.power(values).map(({ pc, budget }) => {
     if (pc > budget * (1 + EPS))
       out.push({
         ...warn(
           'feeds.powerExceeded',
-          `Cutting power exceeds ${spindleWords(c.row)}: reduce stepdown, stepover or feed.`,
-          powerParams(c.row, pc, budget),
+          `Cutting power exceeds ${spindleWords(m.row)}: reduce stepdown, stepover or feed.`,
+          powerParams(m.row, pc, budget),
         ),
-        field: fixedAp(e) === undefined ? 'stepdown' : 'feedRate',
+        field: m.fixedAp === undefined ? 'stepdown' : 'feedRate',
       })
-  }
+  })
   return out
 }
+
+/** Relative tolerance of the power comparison (the final-value check's). */
+export const CHECK_EPS = EPS
 
 /**
  * The derived display values (surface speed, chip load after chip thinning, Q, Pc, spindle load)

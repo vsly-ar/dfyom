@@ -58,7 +58,7 @@ export const CuttingPresetDtoSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      'Follows the calculator: speed, feed, plunge and stepdown are replaced by its recommendation on every save (needs materialClass; send false to enter your own values)',
+      'Follows the calculator: speed, feed, plunge and stepdown are replaced by its recommendation on every save (needs materialClass; send false to enter your own values); a plan adapts them down to its machine',
     ),
 })
 export type CuttingPresetDTO = z.output<typeof CuttingPresetDtoSchema>

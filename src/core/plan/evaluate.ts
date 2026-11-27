@@ -208,6 +208,7 @@ export function evaluateOperation(
       ...(kind === 'facing' && ops[0]?.kind === 'facing'
         ? { facingDepth: ops[0].depth.canonical }
         : {}),
+      units: plan.units,
       ...(strategy.kind === 'drilling' ? { helixPitch: strategy.helixPitch } : {}),
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
       ...(strategy.kind === 'chamfer' || strategy.kind === 'line'

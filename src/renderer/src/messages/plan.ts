@@ -1,6 +1,7 @@
 // User-facing strings of plan mode (task 3.7). Labels follow docs/modes/plan-v0.1.md; terms from
 // docs/glossary.md. Doc: docs/conventions/ui.md#internationalization, #plan-mode-task-37
 import type { OperationKind } from '../../../core/design/part.dto'
+import type { AdaptReason } from '../../../core/feeds-speeds/preset'
 import type { PlanWarning } from '../../../core/plan/checks'
 import { withoutOperationName } from '../../../core/plan/labels'
 import type { FeedField, PlanStatus } from '../../../core/plan/plan.dto'
@@ -692,6 +693,35 @@ export const planMessages = {
     noPresets: 'The tool has no cutting presets.',
     machines: (names: string) => `Machines: ${names}`,
     chipLoad: (mm: string) => `Chip load ${mm} per tooth`,
+    /** DF139: a recommended preset adapted down to the plan machine (feeds-speeds.md). */
+    adapted: {
+      title: (machine: string | undefined) =>
+        machine === undefined ? 'Adapted for the machine:' : `Adapted for ${machine}:`,
+      field: {
+        spindleSpeed: 'speed',
+        feedRate: 'feed',
+        plungeRate: 'plunge',
+        stepdown: 'stepdown',
+        stepover: 'stepover',
+      } satisfies Record<FeedField, string>,
+      reason: {
+        spindleRange: 'spindle range',
+        maxFeedRate: 'X/Y max feed',
+        maxFeedRateZ: 'Z max feed',
+        power: 'spindle power',
+      } satisfies Record<AdaptReason, string>,
+      /** The tooltip: the limit that set the value, and what followed it. */
+      tip: {
+        spindleRange: (range: string | undefined, follows: boolean) =>
+          `${range === undefined ? 'Outside the spindle range.' : `Spindle range ${range}.`}${follows ? ' The feed follows the speed, so the chip load stays.' : ''}`,
+        maxFeedRate: (max: string | undefined, follows: boolean) =>
+          `${max === undefined ? 'Above the X/Y max feed.' : `X/Y max feed ${max}.`}${follows ? ' The speed follows the feed, so the chip load stays.' : ''}`,
+        maxFeedRateZ: (max: string | undefined) =>
+          max === undefined ? 'Above the Z max feed.' : `Z max feed ${max}.`,
+        power: (power: string | undefined) =>
+          `The preset needs more power than the ${power === undefined ? 'spindle' : `${power} spindle`} gives at this speed: the stepdown is reduced first, then the feed, down to the minimum chip load.`,
+      },
+    },
     feeds: {
       spindleSpeed: 'Spindle speed',
       feedRate: 'Feed rate',
