@@ -19,6 +19,7 @@ export const STATUS = {
   systemGcLock: 9,
   softLimitError: 10,
   overflow: 11,
+  checkDoor: 13,
   travelExceeded: 15,
   invalidJogCommand: 16,
   unsupportedCommand: 20,

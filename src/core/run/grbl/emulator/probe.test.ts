@@ -148,6 +148,54 @@ describe('fault hooks', () => {
     expect(outLines(emu)).toContain("Grbl 1.1h ['$' for help]")
   })
 
+  // DF134: a limit switch hit while idle (the user cleaning the machine after a run)
+  it('setLimitPin: a press while idle is a hard limit; ignored in Alarm; Pn and Check Limits', () => {
+    const emu = emulator({ homing: true, settings: { 21: 1 } })
+    send(emu, '$X\n')
+    emu.setLimitPin('x', true)
+    expect(outLines(emu)).toEqual(['ALARM:1', '[MSG:Reset to continue]'])
+    expect(send(emu, '?')).toEqual([])
+    // released before the reset: GRBL ignores pin changes in Alarm
+    emu.setLimitPin('x', false)
+    expect(outLines(emu)).toEqual([])
+    emu.receive(Uint8Array.of(0x18))
+    expect(outLines(emu)).toEqual(["Grbl 1.1h ['$' for help]", "[MSG:'$H'|'$X' to unlock]"])
+    expect(statusOf(emu)).toMatch(/^<Alarm\|/)
+    expect(statusOf(emu)).not.toContain('Pn:')
+    // pressed again: no alarm in Alarm, but every report shows it, and a reset checks the limits
+    emu.setLimitPin('z', true)
+    expect(outLines(emu)).toEqual([])
+    expect(statusOf(emu)).toContain('|Pn:Z')
+    emu.receive(Uint8Array.of(0x18))
+    expect(outLines(emu)).toEqual([
+      "Grbl 1.1h ['$' for help]",
+      '[MSG:Check Limits]',
+      "[MSG:'$H'|'$X' to unlock]",
+    ])
+    // GRBL unlocks with a pressed switch; letting go of it while Idle is a pin change: ALARM:1
+    expect(send(emu, '$X\n')).toEqual(['[MSG:Caution: Unlocked]', 'ok'])
+    emu.setLimitPin('z', false)
+    expect(outLines(emu)).toEqual(['ALARM:1', '[MSG:Reset to continue]'])
+  })
+
+  it('setLimitPin without hard limits ($21=0): only Pn, no alarm', () => {
+    const emu = emulator()
+    emu.readOutput()
+    emu.setLimitPin('y', true)
+    expect(outLines(emu)).toEqual([])
+    expect(statusOf(emu)).toMatch(/^<Idle\|.*\|Pn:Y/)
+  })
+
+  it('the safety door open: Pn:D, and $X and $H are refused (error:13)', () => {
+    const emu = emulator({ homing: true })
+    emu.readOutput()
+    emu.setDoorPin(true)
+    emu.readOutput()
+    expect(statusOf(emu)).toContain('|Pn:D')
+    expect(send(emu, '$X\n')).toEqual(['error:13'])
+    expect(send(emu, '$H\n')).toEqual(['error:13'])
+  })
+
   it('setSilent: nothing is answered until it speaks again', () => {
     const emu = probing()
     emu.setSilent(true)

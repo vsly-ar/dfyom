@@ -100,7 +100,19 @@ export const HostStatusSchema = z.object({
   buffer: z.object({ blocks: z.number(), rx: z.number() }).exactOptional(),
   /** Feed, rapid, spindle overrides in % from the last `Ov` (docs/modes/run-machine.md#overrides-m6). */
   overrides: z.object({ feed: Num, rapid: Num, spindle: Num }).exactOptional(),
-  alarm: z.object({ code: z.number().int(), text: z.string() }).exactOptional(),
+  /**
+   * The last alarm until `$H` or `$X` clears it. `reset`: the controller was reset since, so a
+   * critical alarm (1, 2) no longer blocks; GRBL waits locked for `$H` or `$X` (DF134,
+   * docs/modes/run-machine.md#after-a-hard-limit-df134).
+   */
+  alarm: z
+    .object({ code: z.number().int(), text: z.string(), reset: z.literal(true).exactOptional() })
+    .exactOptional(),
+  /**
+   * DF134: the controller's input pins active in the last report (`Pn:`, e.g. `X` a limit switch
+   * still pressed, `D` the safety door open); absent when none.
+   */
+  pins: z.string().max(16).exactOptional(),
   /** `$32=1` (DF85): the spindle output drives a laser; no spindle speed override. */
   laserMode: z.literal(true).exactOptional(),
   lastMessage: z.string().max(500).exactOptional(),
@@ -191,6 +203,10 @@ export type RapidOverride = (typeof RAPID_OVERRIDES)[number]
 /** Probe defaults (docs/modes/run-machine.md#probing-and-re-zero-m4), mm and mm/min. */
 export const PROBE_DEFAULTS = { maxTravel: 25, feed: 50, retract: 2 } as const
 
+/** DF134: the virtual machine's inputs that can be simulated (limit switches, the safety door). */
+export const SIMULATED_INPUTS = ['x', 'y', 'z', 'door'] as const
+export type SimulatedInput = (typeof SIMULATED_INPUTS)[number]
+
 export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('home') }),
   z.object({ kind: z.literal('unlock') }),
@@ -217,6 +233,16 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
    * real one is, for practising recovery (docs/modes/run-recovery.md#implementation-rc4).
    */
   z.object({ kind: z.literal('simulateLostConnection') }),
+  /**
+   * DF134: one of the virtual machine's inputs pressed or released (virtual only): a limit switch
+   * (`x`/`y`/`z`, a hard limit with `$21=1`) or the safety door, for practising the alarm flow
+   * (docs/modes/run-machine.md#after-a-hard-limit-df134).
+   */
+  z.object({
+    kind: z.literal('simulateInput'),
+    input: z.enum(SIMULATED_INPUTS),
+    pressed: z.boolean(),
+  }),
   /**
    * DF129 RC5 (Q171): the machine lost power while the controller stayed on USB power: the
    * connection forgets that it is homed (GRBL cannot know); not during a job.

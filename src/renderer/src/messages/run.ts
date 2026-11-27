@@ -141,6 +141,11 @@ export const runMessages = {
     busy: 'Not while the machine is moving.',
     running: 'Not while a run is going.',
     criticalAlarm: 'Reset the machine first (Reset (immediate)), then home it.',
+    /** DF134: `Pn:` shows a limit switch still pressed (homing would take it for home). */
+    limitPressed: (axes: readonly string[]) =>
+      `Release the ${axes.join(' and ')} limit switch${axes.length > 1 ? 'es' : ''} first.`,
+    /** DF134: `Pn:D`: GRBL refuses to home or unlock while the safety door is open. */
+    doorOpen: 'Close the safety door first.',
     noPlan: 'Choose a plan first.',
     nothingToStop: 'Nothing to stop: the machine is not moving.',
     otherPlan: 'The connection emulates another plan’s machine. Disconnect to switch plans.',
@@ -169,7 +174,7 @@ export const runMessages = {
         next: ['Home the machine.', 'Unlock only to jog an axis off a limit switch first.'],
       },
       1: {
-        what: 'A limit switch tripped while moving; the position is lost.',
+        what: 'A limit switch tripped; the controller stopped everything and the position may be lost.',
         next: [
           'Reset (immediate).',
           'Check what tripped it: a crash, chips, a loose wire.',
@@ -220,6 +225,46 @@ export const runMessages = {
       },
     } as Readonly<Record<number, { what: string; next: readonly string[] }>>,
     other: { what: '', next: ['Reset (immediate), then home the machine.'] },
+    /**
+     * DF134: after Reset (immediate) from a hard or soft limit the controller waits locked: home
+     * (recommended) or unlock, one line why (docs/modes/run-machine.md#after-a-hard-limit-df134).
+     */
+    afterReset: {
+      title: (code: number) => `Alarm ${code}: reset done, still locked`,
+      choice: {
+        1: 'Home the machine (recommended): a hard limit stops the motors at once, so steps may be lost. Unlock keeps the position and the work zero as they are.',
+        2: 'Home the machine (recommended), or unlock: the controller kept the position and the work zero.',
+      } as Readonly<Record<number, string>>,
+      limitPressed: (axes: readonly string[]) =>
+        `The ${axes.join(' and ')} limit switch${axes.length > 1 ? 'es are' : ' is'} still pressed. Release it, then home. If the axis rests on its switch, unlock and jog it off (letting go may trip the alarm once more: reset again).`,
+    },
+    /** DF134: `Pn:` letters in words, for "Inputs active: …". */
+    pins: {
+      label: 'Inputs active',
+      names: {
+        X: 'X limit switch',
+        Y: 'Y limit switch',
+        Z: 'Z limit switch',
+        P: 'probe',
+        D: 'safety door',
+        H: 'feed hold button',
+        R: 'reset / emergency stop',
+        S: 'cycle start button',
+      } as Readonly<Record<string, string>>,
+    },
+    /**
+     * DF134: the safety door outside a run (no Resume there): close it, then reset; GRBL keeps the
+     * position when it was not moving.
+     */
+    door: {
+      region: 'Safety door',
+      open: 'Safety door open',
+      openWhat: 'The safety door (or the input wired to it) is open: the controller holds.',
+      openNext: 'Close it.',
+      closed: 'Safety door closed',
+      closedWhat: 'The controller waits for a cycle start before it takes commands again.',
+      closedNext: 'Reset (immediate) to continue; the position and the work zero are kept.',
+    },
   },
 
   /** Connect to a real controller (docs/modes/run-machine.md#ports-and-the-port-picker). */

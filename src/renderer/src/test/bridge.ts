@@ -345,6 +345,7 @@ export function createFakeBridge(
         recoveries.push(action)
         return Promise.resolve(null)
       },
+      simulateInput: () => Promise.resolve(null),
       onShowRecovery: (listener) => recoveryShows.on(() => listener()),
     },
     runFileOpens,

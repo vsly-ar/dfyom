@@ -110,6 +110,11 @@ export class LoopbackPort implements ControllerTransport {
     this.inner.controllerSide((e) => e.setDoorPin(open))
   }
 
+  /** DF134: a limit switch pressed or released at the current time (a hard limit with `$21=1`). */
+  limitPin(axis: 'x' | 'y' | 'z', pressed: boolean): void {
+    this.inner.controllerSide((e) => e.setLimitPin(axis, pressed))
+  }
+
   /** The controller's clock against the timers from now on (e.g. 1 to catch a move in Run). */
   setTimeScale(scale: TimeScale): void {
     this.clock.setScale(scale)

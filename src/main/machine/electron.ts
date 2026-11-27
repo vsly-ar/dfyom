@@ -4,6 +4,7 @@ import { BrowserWindow, ipcMain, powerSaveBlocker, utilityProcess } from 'electr
 import type { MachineClient, MachineHostFactory } from '../../core/run/host/client'
 import type { RunProgram, RunStatus } from '../../core/run/service'
 import type { RunJournal } from '../../core/run/journal'
+import { SIMULATED_INPUTS, type SimulatedInput } from '../../core/run/host/protocol'
 import type { AppErrorData } from '../../shared/errors/app-error'
 import { IPC, RUN_STATUS_IPC_CHANNEL } from '../../shared/preload-api'
 
@@ -49,6 +50,7 @@ export function registerRunRecoveryIpc(
     | 'reconnectNow'
     | 'dismissInterruption'
     | 'markMachinePowerLost'
+    | 'simulateInput'
   >,
   isWindow: (webContentsId: number) => boolean,
 ): void {
@@ -62,6 +64,17 @@ export function registerRunRecoveryIpc(
     const r = await machine.simulateConnectionLoss()
     return r.isOk() ? null : r.unwrapErr().toWireData()
   })
+  // DF134: a virtual machine input (practice, end-to-end tests); the client refuses a real machine
+  ipcMain.handle(
+    IPC.runSimulateInput,
+    async (event, input: unknown, pressed: unknown): Promise<AppErrorData | null> => {
+      if (!isWindow(event.sender.id)) return null
+      if (!(SIMULATED_INPUTS as readonly unknown[]).includes(input) || typeof pressed !== 'boolean')
+        return null
+      const r = await machine.simulateInput(input as SimulatedInput, pressed)
+      return r.isOk() ? null : r.unwrapErr().toWireData()
+    },
+  )
   ipcMain.handle(IPC.runRecord, (event): RunJournal | null =>
     isWindow(event.sender.id) ? (machine.runRecord() ?? null) : null,
   )

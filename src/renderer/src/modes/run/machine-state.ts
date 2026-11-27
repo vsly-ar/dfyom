@@ -2,6 +2,7 @@
 // right now (and why not), DRO formatting. Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-v0.1.md#status
 import type { UnitSystem } from '../../../../core/project/document'
+import { limitSwitches } from '../../../../core/run/grbl/status'
 import type { RunStatus } from '../../../../core/run/service'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { runMessages as m } from '../../messages/run'
@@ -22,8 +23,23 @@ export function activeJob(s: RunStatus): RunStatus['job'] {
   return s.job !== undefined && !TERMINAL_PHASES.has(s.job.phase) ? s.job : undefined
 }
 
+/** ALARM:1/2 not yet followed by a reset: GRBL answers nothing but the reset. */
 export const isCriticalAlarm = (s: RunStatus): boolean =>
-  s.alarm !== undefined && CRITICAL_ALARMS.has(s.alarm.code)
+  s.alarm !== undefined && CRITICAL_ALARMS.has(s.alarm.code) && s.alarm.reset !== true
+
+/**
+ * DF134: a critical alarm the controller was reset from: GRBL waits locked for `$H` (recommended:
+ * a hard limit stops the motors at once) or `$X` (docs/modes/run-machine.md#after-a-hard-limit-df134).
+ */
+export const isResetAlarm = (s: RunStatus): boolean =>
+  isConnected(s) &&
+  s.alarm !== undefined &&
+  CRITICAL_ALARMS.has(s.alarm.code) &&
+  s.alarm.reset === true &&
+  s.state.startsWith('Alarm')
+
+/** DF134: the safety door's input is active (`Pn:D`): GRBL refuses `$H` and `$X`. */
+export const doorPinOpen = (s: RunStatus): boolean => s.pins?.includes('D') === true
 
 /**
  * GRBL's start-up lock (DF46, docs/modes/run.md#run-mode-presentation-df46): `Alarm` with no
@@ -123,9 +139,13 @@ export function runGates(s: RunStatus, opts: { planChosen: boolean }): RunGates 
   const alarm = st.startsWith('Alarm')
   const idle = st === 'Idle'
   const moving = !idle && !alarm
+  // DF134: a pressed limit switch or an open door, said before the click (the host refuses too)
+  const door = doorPinOpen(s) ? m.why.doorOpen : null
+  const limits = limitSwitches(s.pins)
+  const pressed = limits.length > 0 ? m.why.limitPressed(limits) : null
   return {
-    home: critical ?? (job ? m.why.running : moving ? m.why.busy : null),
-    unlock: critical ?? (job ? m.why.running : alarm ? null : moving ? m.why.busy : null),
+    home: critical ?? (job ? m.why.running : moving ? m.why.busy : (door ?? pressed)),
+    unlock: critical ?? (job ? m.why.running : alarm ? door : moving ? m.why.busy : null),
     jog:
       critical ??
       (job && !atToolChange

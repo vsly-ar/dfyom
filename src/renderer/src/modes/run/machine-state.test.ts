@@ -122,6 +122,22 @@ describe('runGates', () => {
     })
     expect(g.home).toMatch(/^Reset the machine first/)
   })
+
+  // DF134: Reset (immediate) used to leave every control on "Reset the machine first"
+  it('after the reset: home and unlock allowed; a pressed switch or an open door says what to do', () => {
+    const reset = { state: 'Alarm', alarm: { code: 1, text: '', reset: true as const } }
+    expect(runGates(open(reset), { planChosen: true })).toMatchObject({ home: null, unlock: null })
+    const pressed = runGates(open({ ...reset, pins: 'XZ' }), { planChosen: true })
+    expect(pressed).toMatchObject({
+      home: 'Release the X and Z limit switches first.',
+      unlock: null,
+    })
+    const door = runGates(open({ ...reset, pins: 'D' }), { planChosen: true })
+    expect(door).toMatchObject({
+      home: 'Close the safety door first.',
+      unlock: 'Close the safety door first.',
+    })
+  })
 })
 
 describe('formatting', () => {

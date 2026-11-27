@@ -9,10 +9,17 @@
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
 import { Button, Icon } from '../../ui'
-import { isConnected, isCriticalAlarm, needsHoming } from './machine-state'
+import { limitSwitches } from '../../../../core/run/grbl/status'
+import { activeJob, isConnected, isCriticalAlarm, isResetAlarm, needsHoming } from './machine-state'
 import styles from './Run.module.css'
 
 const m = runMessages.alarm
+
+/** DF134: the active `Pn:` inputs in words ("X limit switch, safety door"), or undefined. */
+export function pinsText(pins: string | undefined): string | undefined {
+  if (pins === undefined || pins === '') return undefined
+  return [...pins].map((p) => m.pins.names[p] ?? p).join(', ')
+}
 
 /** True while the panel shows: connected and in Alarm (or a critical alarm awaiting its reset). */
 export function inAlarm(s: RunStatus): boolean {
@@ -25,11 +32,20 @@ export function AlarmPanel({ status }: { status: RunStatus }): React.JSX.Element
   const info = code === undefined ? m.codes[0]! : (m.codes[code] ?? m.other)
   // the start-up lock is the next step, not an error (DF46): the badge's words, neutral colours
   const lock = needsHoming(status)
+  // DF134: reset from a hard or soft limit: home (recommended) or unlock, or release a switch first
+  const afterReset = code !== undefined && isResetAlarm(status)
+  const pressed = limitSwitches(status.pins)
+  const steps = afterReset
+    ? [pressed.length > 0 ? m.afterReset.limitPressed(pressed) : (m.afterReset.choice[code] ?? '')]
+    : info.next
+  const pins = pinsText(status.pins)
   const title = lock
     ? runMessages.state.needsHoming
     : code === undefined
       ? m.lockedTitle
-      : runMessages.state.alarm(code)
+      : afterReset
+        ? m.afterReset.title(code)
+        : runMessages.state.alarm(code)
   return (
     <section
       className={styles['alarmPanel']}
@@ -42,15 +58,50 @@ export function AlarmPanel({ status }: { status: RunStatus }): React.JSX.Element
         {info.what === '' ? null : <p className={styles['why']}>{info.what}</p>}
         <p className={styles['alarmNext']}>{m.next}</p>
         <ol className={styles['alarmSteps']}>
-          {info.next.map((step) => (
+          {steps.map((step) => (
             <li key={step}>{step}</li>
           ))}
         </ol>
+        {pins === undefined ? null : (
+          <p className={styles['hint']}>
+            {m.pins.label}: {pins}
+          </p>
+        )}
         {status.alarm?.text ? (
           <p className={styles['hint']}>
             {m.grbl}: {status.alarm.text}
           </p>
         ) : null}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * DF134: the safety door outside a run job (a run's door hold has the toolbar's Resume): open →
+ * close it; closed → GRBL waits for a cycle start, so Reset (immediate) continues (the position
+ * kept: nothing moved). Neutral like the start-up lock; the badge says the state.
+ */
+export function DoorPanel({ status }: { status: RunStatus }): React.JSX.Element | null {
+  if (!isConnected(status) || !status.state.startsWith('Door') || activeJob(status) !== undefined)
+    return null
+  const closed = status.state === 'Door:0'
+  const pins = pinsText(status.pins)
+  return (
+    <section className={styles['alarmPanel']} data-kind="lock" aria-label={m.door.region}>
+      <Icon name="info" />
+      <div>
+        <h3 className={styles['alarmTitle']}>{closed ? m.door.closed : m.door.open}</h3>
+        <p className={styles['why']}>{closed ? m.door.closedWhat : m.door.openWhat}</p>
+        <p className={styles['alarmNext']}>{m.next}</p>
+        <ol className={styles['alarmSteps']}>
+          <li>{closed ? m.door.closedNext : m.door.openNext}</li>
+        </ol>
+        {pins === undefined ? null : (
+          <p className={styles['hint']}>
+            {m.pins.label}: {pins}
+          </p>
+        )}
       </div>
     </section>
   )
