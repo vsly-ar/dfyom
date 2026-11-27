@@ -56,6 +56,8 @@ export const ROW_ICON: Readonly<Record<CloneRowKind, IconName>> = {
   arc: 'row-arc',
   point: 'row-point',
   along: 'row-along',
+  // DF126 M2 draws its own icon; the menu does not offer mirror rows yet (M1: agent only)
+  mirror: 'row-point',
 }
 
 /** The fields of each row kind in the order the inspector shows them (ui.md § Clones table). */
@@ -90,6 +92,8 @@ export const ROW_FIELD_ORDER: Readonly<
   ],
   // shape, Spacing / Count and start are laid out by the row editor itself
   along: [{ key: 'start', kind: 'length' }],
+  // flip and about are laid out by the M2 mirror card (clones-mirror.md § UI)
+  mirror: [{ key: 'at', kind: 'length' }],
 }
 
 /** The field of a row that carries the 100-instance error when the row crosses the limit. */
@@ -106,6 +110,8 @@ export function countField(row: RowArg): string {
       return 'u'
     case 'along':
       return row['count'] !== undefined ? 'count' : 'spacing'
+    case 'mirror':
+      return 'flip'
   }
 }
 
@@ -266,6 +272,8 @@ export function newRow(
       const shape = alongShapes(shapes)[0]
       return shape === undefined ? undefined : { kind, shapeId: shape.id, count: 3 }
     }
+    case 'mirror':
+      return { kind, flip: 'u' }
   }
 }
 

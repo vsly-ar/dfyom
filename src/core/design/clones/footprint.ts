@@ -9,12 +9,12 @@
  */
 import type { Bounds2, Region } from '../../geometry/2d/model'
 import { chainBounds, regionArea, regionLoops } from '../../geometry/2d/model'
-import { translateRegion } from '../../geometry/2d/place'
+import { orientRegion, translateRegion } from '../../geometry/2d/place'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { OperationGeometry, Shape } from '../../geometry/model'
 import { shapeOutline } from '../../geometry/outline'
 import { grooveWidth, lineMaxDepth } from '../../geometry/line'
-import type { UV } from './path'
+import type { Flip, UV } from './path'
 
 /** The Minkowski sum of the box centre ± (hu, hv) and a disk of radius `r` (a circle: hu = hv = 0). */
 export interface RoundBox {
@@ -213,14 +213,41 @@ function partsOverlap(
   return both.isErr() || regionArea(both.unwrap()) > TOUCH
 }
 
-/** The footprint and its copy moved by `d` share area. */
+/**
+ * The footprint and its copy moved by `d` share area; with `other`, the footprint and `other`
+ * moved by `d` (a mirrored instance's flipped footprint, clones-mirror.md).
+ */
 export function footprintsOverlap(
   parts: readonly FootprintPart[],
   d: UV,
   port: Region2dPort | undefined,
+  other: readonly FootprintPart[] = parts,
 ): boolean {
   const all = footprintBounds(parts)
-  const moved = footprintBounds(parts, d)
+  const moved = footprintBounds(other, d)
   if (all === undefined || moved === undefined || !strictlyOverlap(all, moved)) return false
-  return parts.some((a) => parts.some((b) => partsOverlap(a, b, d, port)))
+  return parts.some((a) => other.some((b) => partsOverlap(a, b, d, port)))
+}
+
+/** A flip as a cache key: '' for none. */
+export const flipKey = (f: Flip | undefined): string =>
+  `${f?.u === true ? 'u' : ''}${f?.v === true ? 'v' : ''}`
+
+/**
+ * The footprint flipped about the face frame axes (u → −u, v → −v): what a mirrored instance's
+ * footprint is before its translation (clones-mirror.md § Clones of Clones, … Checks).
+ */
+export function flipFootprint(parts: readonly FootprintPart[], f: Flip): FootprintPart[] {
+  const su = f.u === true ? -1 : 1
+  const sv = f.v === true ? -1 : 1
+  // x → −x is the mirror; y → −y the mirror then a half turn; both a half turn
+  const o =
+    su < 0 && sv < 0
+      ? { rotation: 180, mirror: false }
+      : { rotation: sv < 0 ? 180 : 0, mirror: true }
+  return parts.flatMap((p): FootprintPart[] => {
+    if (p.kind === 'box') return [{ ...p, cu: su * p.cu, cv: sv * p.cv }]
+    const r = regionPart(orientRegion(p.region, o))
+    return r === undefined ? [] : [r]
+  })
 }

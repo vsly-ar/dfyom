@@ -18,7 +18,7 @@ export interface ClonePathData {
     readonly centre?: UV
     readonly points: readonly {
       readonly at: UV
-      readonly kind: 'clone' | 'skipped' | 'closes' | 'duplicate'
+      readonly kind: 'clone' | 'skipped' | 'closes' | 'duplicate' | 'onLine'
       readonly n?: number
     }[]
   }[]
@@ -131,7 +131,8 @@ export function clonePathOverlay(
   const ghosts: { loops: Vec3[][]; dashed: boolean }[] = []
   for (const r of data.rows)
     for (const p of r.points) {
-      if (p.n === undefined || p.kind === 'closes') continue
+      // a mirror image on its original is dropped silently (clones-mirror.md, Q165)
+      if (p.n === undefined || p.kind === 'closes' || p.kind === 'onLine') continue
       const skipped = p.kind === 'skipped'
       const hint = o.interactive && p.kind !== 'duplicate' ? o.hint?.(p.n, skipped) : undefined
       markers.push({

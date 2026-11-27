@@ -102,6 +102,7 @@ export function recalculateFeatures(
       before: next.slice(0, start),
       ownedId: (role) => ownedOperationId(feature.id, role),
       shapes,
+      after: next.slice(end),
     })
     if (expanded.isErr()) return expanded
     const owned = materialize(f, expanded.unwrap(), next.slice(start, end))
