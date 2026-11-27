@@ -303,6 +303,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
               line: conn.sender.line ?? 0,
               ...(conn.sender.sent === undefined ? {} : { sent: conn.sender.sent }),
               ...(conn.ackedAtReport === undefined ? {} : { ackedAtReport: conn.ackedAtReport }),
+              ...(s?.line === undefined ? {} : { reportedLine: s.line }),
               ...(job.toolChange === undefined ? {} : { toolChange: job.toolChange }),
               ...(job.phase === 'programPause' && wait !== undefined && 'pause' in wait
                 ? { pause: wait.pause }
@@ -1164,8 +1165,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             if (conn === c && c.job === undefined) void readWorkZero(c)
           }, 0)
         break
-      case 'connectionLost':
+      case 'connectionLost': {
         log.warn({ reason: e.reason }, 'connection lost')
+        // DF129: the lines written since the last (throttled) status, before the connection goes:
+        // the run record's upper bound (docs/modes/run-recovery.md#implementation-rc1)
+        const last = conn === c ? hostStatus() : undefined
+        if (last !== undefined) post({ type: 'status', status: last })
         post({ type: 'event', kind: 'connectionLost', data: { reason: e.reason } })
         // the connection is gone: main closes it and starts a fresh host on the next open
         if (conn === c) {
@@ -1175,6 +1180,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           void c.sender.close()
         }
         return
+      }
     }
     status.now()
   }

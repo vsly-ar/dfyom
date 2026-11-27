@@ -235,6 +235,8 @@ export interface SenderStatus {
   readonly buffer?: { readonly blocks: number; readonly rx: number }
   /** The last `Ov` (GRBL sends it every 10–20 reports); absent until the first. */
   readonly overrides?: Overrides
+  /** `Ln:`: the `N` number executing (a controller built with line numbers only, DF129). */
+  readonly line?: number
 }
 
 export type SenderEvent =
@@ -1053,6 +1055,7 @@ export class GrblSender {
       spindle: report.spindle ?? prev?.spindle ?? 0,
       ...(report.buffer === undefined ? {} : { buffer: report.buffer }),
       ...(this.overrides === undefined ? {} : { overrides: this.overrides }),
+      ...(report.line === undefined ? {} : { line: report.line }),
     }
     for (const l of [...this.statusListeners]) l(this.latest)
     if (this.lostAcknowledgement(report)) return
