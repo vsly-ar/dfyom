@@ -154,6 +154,28 @@ export function runGates(s: RunStatus, opts: { planChosen: boolean }): RunGates 
 }
 
 /**
+ * DF128: whether a DRO value may open the Go to dialog (docs/modes/run-goto.md#checks): the
+ * position known, no run job (a tool-change or pause wait has its own jog pad).
+ */
+export function goToOpenGate(s: RunStatus): Gate {
+  if (!isConnected(s)) return m.why.notConnected
+  if (!s.homed) return m.goTo.unknown
+  return activeJob(s) !== undefined ? m.why.running : null
+}
+
+/**
+ * DF128: why Go cannot start now, or null: the open gate, then the jog gate's reasons (alarm,
+ * hold, door, homing …), a jog still running, a spindle reported running.
+ */
+export function goToGate(s: RunStatus): Gate {
+  return (
+    goToOpenGate(s) ??
+    runGates(s, { planChosen: false }).jog ??
+    (s.state.startsWith('Jog') ? m.goTo.jogging : s.spindle > 0 ? m.goTo.spindleOn : null)
+  )
+}
+
+/**
  * Stop's gate (DF35, docs/modes/run.md#stop-only-when-something-can-be-stopped-df35): allowed with
  * a run job or while the machine moves or is held; otherwise why there is nothing to stop.
  */

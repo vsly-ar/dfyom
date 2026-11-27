@@ -1,7 +1,8 @@
 // Jog hotkeys in Run mode (DF88): the chosen style's keys jog like the pad's buttons – a press
 // shorter than the hold delay jogs one step, a key held past it jogs continuously until its
 // keyup (jog cancel) – and Escape stops a jog. Active only while connected, without a run job,
-// with the jog gate open; never while typing or in a dialog without a jog pad (`jog-keys.ts`).
+// with the jog gate open and the Go to dialog closed (DF128); never while typing or in a dialog
+// without a jog pad (`jog-keys.ts`).
 // Listens on the window in the capture phase, so a focused control cannot swallow a key.
 // Doc: docs/conventions/ui.md#jog-hotkeys
 import { useEffect, useRef, useState } from 'react'
@@ -110,9 +111,12 @@ export function JogHotkeys({ doc }: { doc: ProjectDoc | undefined }): null {
   const style = useSettings((s) => s.settings.jogKeys)
   const status = useRun((s) => s.status)
   const controls = useJogControls(doc)
+  // DF128: off while the Go to dialog is open, wherever the focus is (run-goto.md#keyboard);
+  // Escape still stops a jog
+  const goToOpen = useRun((s) => s.goTo !== undefined)
   useJogHotkeyListener({
     style,
-    active: jogHotkeysActive(status, style),
+    active: !goToOpen && jogHotkeysActive(status, style),
     canStop: isConnected(status) && activeJob(status) === undefined,
     jogging: status.state.startsWith('Jog'),
     controls,
