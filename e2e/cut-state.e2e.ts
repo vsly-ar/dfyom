@@ -5,7 +5,7 @@
 // renders of the plan with the cut row (df135-cut-{light,dark}.png; review captures, not asserted).
 // Q199 (a new blank): with Pocket 2 marked too, the part menu's Clear cut marks clears both (Undo
 // brings them back); Run's pre-flight on the setup cut in full offers Clear marks, and the draft
-// plan then has a program again.
+// plan then has a program again. C3: the inspector's Already cut switch marks Pocket 1 again.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -213,5 +213,13 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   await page.keyboard.press('ControlOrMeta+1')
   await expect(pocket1).not.toContainText('Cut')
   await expect(pocket2).not.toContainText('Cut')
+
+  // ── C3: the inspector's Already cut switch marks Pocket 1 again ─────────────────────────────
+  await pocket1.click()
+  const cutSwitch = inspector.getByRole('switch', { name: 'Already cut' })
+  await expect(cutSwitch).not.toBeChecked()
+  await cutSwitch.click()
+  await expect(pocket1).toContainText('Cut')
+  await expect(cutSwitch).toBeChecked()
   expect(dfyom.rendererErrors).toEqual([])
 })

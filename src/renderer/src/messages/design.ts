@@ -1010,6 +1010,10 @@ export const designMessages = {
     /** DF135 C2: a mark set by a real run, with its date; changed since (Q198 as revised). */
     cutByRunTitle: (date: string) =>
       `Cut by a run on ${date}: the stock no longer has this material. Plans keep it as removed and export nothing for it.`,
+    /** DF135 C3: the inspector's switch of the same mark. */
+    cutField: 'Already cut',
+    cutFieldInfo:
+      'The stock no longer has this material (cut by a program, by hand, or there when the stock arrived). Plans keep it as removed and export nothing for it.',
     cutChanged: 'Changed',
     cutChangedTitle: (date: string) =>
       `Changed since the run cut it on ${date}: the stock still has the shape the run cut. Plans export nothing for it.`,

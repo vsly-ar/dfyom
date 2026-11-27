@@ -78,6 +78,7 @@ import { RoughingGroup } from './RoughingGroup'
 import { patternRoughing } from './roughing-view'
 import { defaultUnit, dfmNames, onChoices, quantityOf, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
+import { CutField } from './CutField'
 
 const m = designMessages
 const t = m.inspector
@@ -613,6 +614,8 @@ export function PatternInspector({
           name={feature.name}
           onCommit={(name) => void update({ name }, 'name')}
         />
+        {/* DF135 C3: the same mark as the row menu's (cut-state.md#implementation-c3) */}
+        <CutField part={part} id={feature.id} />
         <div className={styles['turnRow']}>
           {heatsinkRows !== undefined ? (
             <ReadoutList rows={heatsinkRows} label={p.heatsinkReadout} data-pattern-readout />

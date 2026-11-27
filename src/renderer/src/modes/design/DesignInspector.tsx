@@ -93,6 +93,7 @@ import {
   type DesignWarnings,
 } from './useDesign'
 import { facingDepthSuggestion } from './facing-depth'
+import { CutField } from './CutField'
 
 const m = designMessages
 const t = m.inspector
@@ -618,6 +619,8 @@ function OperationInspector({
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={refusalText(summary, part.dto)} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />
+        {/* DF135 C3: the same mark as the row menu's (cut-state.md#implementation-c3) */}
+        <CutField part={part} id={op.id} />
         <OperationFields
           ctx={ctx}
           tool={<ToolField part={part} op={op} warnings={opWarnings} />}

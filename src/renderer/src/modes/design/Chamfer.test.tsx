@@ -294,6 +294,41 @@ describe('chamfer UI (U4)', () => {
     expect(pocket).not.toHaveTextContent(/Already cut/)
   })
 
+  it("the inspector's Already cut switch sets the same mark; none on a row that is off (DF135 C3)", async () => {
+    const { user, part, d } = await renderDesign(async (dd) => {
+      ;(
+        await dd.dispatch(
+          'design.pocket.add',
+          {
+            partId: partId(dd),
+            shape: { kind: 'circle', center: ['30', '30'], diameter: '10' },
+            depth: '3',
+          },
+          ui,
+        )
+      ).unwrap()
+    })
+    const pocket = await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+    await user.click(pocket)
+    const cut = await within(inspector()).findByRole('switch', { name: 'Already cut' })
+    expect(cut).not.toBeChecked()
+    expect(cut).toHaveAccessibleDescription(/The stock no longer has this material/)
+    await user.click(cut)
+    await waitFor(() => expect(part().alreadyCut).toEqual(['pocket1']))
+    await waitFor(() => expect(cut).toBeChecked())
+    expect(pocket).toHaveTextContent(/Cut: Already cut/)
+    await expectNoAxeViolations()
+    await user.click(cut)
+    await waitFor(() => expect(part()).not.toHaveProperty('alreadyCut'))
+    // a row that is off offers no mark (as its row menu)
+    ;(
+      await d.dispatch('design.part.update', { partId: partId(d), disabled: ['pocket1'] }, ui)
+    ).unwrap()
+    await waitFor(() =>
+      expect(within(inspector()).queryByRole('switch', { name: 'Already cut' })).toBeNull(),
+    )
+  })
+
   it('chamfers a rectangle pocket from its row menu: Edge by name, Depth, no Diameter (edge chamfers E1)', async () => {
     const { user, part, chamfer } = await renderDesign(async (d) => {
       ;(
