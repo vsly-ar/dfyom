@@ -612,6 +612,30 @@ describe('Run mode', () => {
     )
   })
 
+  // docs/modes/tool-holder.md#run-mode (DF132 H3)
+  it('tool change whose stickout a clamp decides shows the reason line', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    t.machine.push({
+      state: 'Idle',
+      ...t.machine.job('toolChange', {
+        toolChange: {
+          n: 2,
+          name: 'Flat 6, 6 mm flat, min stickout 36 mm',
+          stickoutReason: 'Collet nut must clear Toe clamp 1, holder ER11',
+        },
+      }),
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Tool change 2' })
+    expect(
+      within(dialog).getByText(
+        'Collet nut must clear Toe clamp 1, holder ER11: chuck the tool with at least the stickout above.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('note')).toHaveTextContent('Collet nut must clear')
+    await expectNoAxeViolations()
+  })
+
   it('a failed run opens a blocking dialog with what happened and what to do next', async () => {
     const t = await renderRun()
     await connectAndHome(t)

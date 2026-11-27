@@ -264,8 +264,8 @@ describe('tool changes and pauses', () => {
     expect(r.emu.trace.lines.map((l) => l.text)).not.toContain(pause)
   })
 
-  // docs/modes/z-reference.md#exported-gcode (DF69)
-  it('a tool change carries the Z reference lines before its marker', async () => {
+  // docs/modes/z-reference.md#exported-gcode (DF69); DF132 H3's stickout reason line
+  it('a tool change carries the Z reference and stickout reason lines before its marker', async () => {
     const r = await connected(machine())
     const p = start(r, [
       ...head,
@@ -274,6 +274,8 @@ describe('tool changes and pauses', () => {
       'X50 Y30',
       '(Z0 for tool 2: Facing 1 floor, 0.50 below the stock top)',
       '(Touch off Z here, X50 Y30: set Z0 on that surface)',
+      // DF132 H3: the clamp that decides the stickout (docs/modes/tool-holder.md#run-mode)
+      '(Collet nut must clear Toe clamp 1, holder ER11)',
       '(Stop the spindle)',
       marker,
       'M0 ;Stop spindle, install T2 3 mm flat, 3 mm flat, then zero Z',
@@ -289,6 +291,7 @@ describe('tool changes and pauses', () => {
         spot: 'X50 Y30',
         level: -0.5,
         at: [50, 30],
+        stickoutReason: 'Collet nut must clear Toe clamp 1, holder ER11',
       },
     })
     await drive(r.clock, r.sender.freshStatus())

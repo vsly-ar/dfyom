@@ -976,6 +976,52 @@ describe('postGrbl', () => {
     )
   })
 
+  // DF132 H3: docs/modes/tool-holder.md#run-mode
+  it('a clamp that decides the stickout: a reason line before a pausing marker, the M0 keeps the number', () => {
+    const change = (number: number, item: string, holder?: string): Block => ({
+      kind: 'toolChange',
+      number,
+      tool: {
+        name: `Flat ${number}`,
+        diameter: 6,
+        type: 'flatEndMill',
+        stickoutNeeded: 36,
+        stickoutReason: {
+          part: number === 1 ? 'nut' : 'body',
+          item,
+          ...(holder ? { holder } : {}),
+        },
+      },
+    })
+    const run = (first: boolean) =>
+      expectOk(
+        postGrblLines(
+          program([
+            change(1, 'Toe clamp 1', 'ER11'),
+            spin(),
+            rapid(1, 2, 10),
+            change(2, 'A very long clamp name that goes on and on past the line limit'),
+            spin(),
+            rapid(1, 2, 10),
+          ]),
+          { ...OPTS, firstToolLoaded: first },
+        ),
+      )
+    const lines = run(false)
+    const at = (prefix: string) => lines.findIndex((l) => l.startsWith(prefix))
+    expect(lines[at('(DFYOM TOOL CHANGE 1') - 1]).toBe(
+      '(Collet nut must clear Toe clamp 1, holder ER11)',
+    )
+    expect(lines[at('(DFYOM TOOL CHANGE 1') + 1]).toBe(
+      'M0 ;Install T1 Flat 1, 6 mm flat, min stickout 36 mm, then zero Z',
+    )
+    const second = lines[at('(DFYOM TOOL CHANGE 2') - 1]!
+    expect(second).toMatch(/^\(Spindle body must clear A very long clamp name[^()]*\)$/)
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(70)
+    // a loaded first tool does not pause: no reason line for it
+    expect(run(true).filter((l) => l.includes('must clear'))).toHaveLength(1)
+  })
+
   it('pauses for the first tool when it is not loaded; no dwell with spinUpSeconds 0', () => {
     const lines = expectOk(
       postGrblLines(program([tool(), spin(), rapid(1, 2, 10)]), {

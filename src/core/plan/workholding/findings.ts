@@ -12,7 +12,7 @@ import type { Toolpath } from '../../toolpath/model'
 import { toGeneratorInputs } from '../../toolpath/inputs'
 import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
 import { setupZero } from '../alignment'
-import type { PlanWarning } from '../checks'
+import { STICKOUT_CLEARANCE, type PlanWarning } from '../checks'
 import { HOLDER_PRESET_NAMES, type Holder } from '../../library/holder'
 import type { PlanOperationInput } from '../inputs'
 import { aidName, planOpLabel } from '../labels'
@@ -24,6 +24,7 @@ import { heldFindings } from './held'
 import { rangeFindings } from './devices'
 import { highestTop } from './obstacles'
 import { setupWorkholding, type SetupWorkholding } from './setup'
+import { clampTerms, stickoutNeed } from './stickout'
 
 /** Rounded for messages (params keep the exact value). */
 const mm = (v: number): string => String(Math.round(v * 100) / 100)
@@ -108,6 +109,7 @@ export function checkOperations(
           : {}),
       },
       moves: back(toolpath).passes.flatMap((p) => p.moves),
+      ...(input.stickoutNeeded === undefined ? {} : { stickoutNeeded: input.stickoutNeeded }),
     }
   })
 }
@@ -176,6 +178,9 @@ export function moveFindings(
   })
   const out: PlanWarning[] = []
   const holderOf = (id: string) => operations.find((o) => o.planOperationId === id)?.tool.holder
+  // DF132 H3: the minimum stickout with the clamp term names the stickout that clears the holder
+  const needs = stickoutsOf(h, operations, zero)
+  const shown = (v: number) => Math.ceil(v * 10 - 1e-6) / 10
   for (const c of result.collisions) {
     const name = itemName(h, c.itemId)
     if (c.kind === 'holder' && c.part !== undefined) {
@@ -186,7 +191,8 @@ export function moveFindings(
         .filter((x) => x !== undefined)
         .join(', ')
       const part = PART_WORD[c.part]
-      const at = Math.ceil((c.needed ?? 0) * 10 - 1e-6) / 10
+      const needed = Math.max(c.needed ?? 0, needs?.get(c.planOperationId)?.needed ?? 0)
+      const at = shown(needed)
       out.push({
         code: 'plan.workholding.collision',
         severity: 'error',
@@ -194,7 +200,7 @@ export function moveFindings(
         planOperationId: c.planOperationId,
         field: 'stickout',
         rule: 'holder',
-        params: params(c),
+        params: { ...params(c), neededStickout: needed },
       })
       continue
     }
@@ -211,6 +217,35 @@ export function moveFindings(
       planOperationId: c.planOperationId,
       rule: c.kind,
       params: params(c),
+    })
+  }
+  // DF132 H3: `shortStickout` when the clamp term decides and the nut or body clears the item
+  // only by less than STICKOUT_CLEARANCE (inside the margin it is the collision above)
+  const collided = new Set(result.collisions.map((c) => c.planOperationId))
+  for (const o of operations) {
+    const need = needs?.get(o.planOperationId)
+    const stickout = o.tool.stickout
+    if (need === undefined || need.reason.kind !== 'workholding' || stickout === undefined) continue
+    if (collided.has(o.planOperationId) || stickout >= need.needed - 1e-6) continue
+    const { itemId, part } = need.reason
+    const word = PART_WORD[part ?? 'nut']
+    const at = shown(need.needed)
+    out.push({
+      code: 'plan.check',
+      severity: 'warning',
+      message: `stickout ${mm(stickout)} mm is shorter than the ${at} mm ${itemName(h, itemId ?? '')} needs under the ${word}: the ${word} passes within ${STICKOUT_CLEARANCE} mm of its top; chuck the tool with at least ${at} mm out`,
+      planOperationId: o.planOperationId,
+      field: 'stickout',
+      rule: 'shortStickout',
+      params: {
+        setupId: setup.id,
+        stickout,
+        needed: need.needed,
+        itemId: itemId ?? '',
+        part: part ?? 'nut',
+        x: need.reason.x ?? 0,
+        y: need.reason.y ?? 0,
+      },
     })
   }
   for (const c of result.breakthrough)
@@ -237,6 +272,113 @@ export function moveFindings(
 
 const maxTop = (h: SetupWorkholding, itemId: string) =>
   Math.max(...h.prisms.filter((p) => p.itemId === itemId).map((p) => p.zMax))
+
+/**
+ * What decides a minimum stickout (DF132 H3, `plan_get`'s `toolRuns[].stickoutReason`): the
+ * deepest cut (DF130) or a workholding item under the collet nut or spindle body, with the
+ * deciding move's point in the WCS.
+ * Doc: docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term
+ */
+export interface StickoutReason {
+  readonly kind: 'cut' | 'workholding'
+  readonly planOperationId: string
+  readonly itemId?: string
+  readonly itemName?: string
+  readonly part?: 'nut' | 'body'
+  readonly x?: number
+  readonly y?: number
+}
+
+/** An operation's minimum stickout (mm, not rounded) with the clamp term, and its reason. */
+export interface OperationStickout {
+  readonly needed: number
+  readonly reason: StickoutReason
+}
+
+/**
+ * The minimum stickout of each operation (with DF130's `stickoutNeeded`) of one setup's program
+ * with the clamp term; undefined when nothing is checked: no item with a prism, or no operation
+ * whose tool has a holder (the read-out is DF130's then).
+ */
+function stickoutsOf(
+  h: SetupWorkholding,
+  operations: readonly CheckOperation[],
+  zero: readonly [number, number],
+): Map<string, OperationStickout> | undefined {
+  if (h.prisms.length === 0 || operations.every((o) => o.tool.holder === undefined))
+    return undefined
+  const terms = clampTerms({ operations, prisms: h.prisms, margin: h.margin })
+  const out = new Map<string, OperationStickout>()
+  for (const o of operations) {
+    if (o.stickoutNeeded === undefined) continue
+    const need = stickoutNeed(o.stickoutNeeded, terms.get(o.planOperationId))
+    const c = need.clamp
+    out.set(o.planOperationId, {
+      needed: need.needed,
+      reason:
+        c === undefined
+          ? { kind: 'cut', planOperationId: o.planOperationId }
+          : {
+              kind: 'workholding',
+              planOperationId: o.planOperationId,
+              itemId: c.itemId,
+              itemName: itemName(h, c.itemId),
+              part: c.part,
+              x: c.at[0] - zero[0],
+              y: c.at[1] - zero[1],
+            },
+    })
+  }
+  return out
+}
+
+/**
+ * `stickoutsOf` for one setup's program (`operations` as `checkOperations` gives them, in the
+ * setup frame; the reason's X and Y in the WCS, less the work `zero`).
+ */
+export function setupStickouts(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  operations: readonly CheckOperation[],
+  zero: readonly [number, number] = [0, 0],
+): Map<string, OperationStickout> | undefined {
+  return stickoutsOf(setupWorkholding(setup, plan.stock), operations, zero)
+}
+
+/** The read-out's minimum stickout of one plan operation (`planStickouts`). */
+export type PlanStickout =
+  ({ readonly clamps: 'checked' } & OperationStickout) | { readonly clamps: 'pending' }
+
+/**
+ * The read-out's minimum stickout per plan operation (DF132 H3) over the cached toolpaths:
+ * `checked` with the clamp term where the operation's toolpath is current; `pending` (the caller
+ * keeps DF130's value: "clamps not yet checked") where it is missing or stale, in a setup that has
+ * items with a prism on a machine with a holder. Operations not listed: DF130's value, nothing to
+ * check.
+ */
+export function planStickouts(
+  plan: LoadedPlan,
+  inputs: readonly PlanOperationInput[] | undefined,
+  current: (input: PlanOperationInput) => Toolpath | undefined,
+  port?: Region2dPort,
+): Map<string, PlanStickout> {
+  const out = new Map<string, PlanStickout>()
+  if (plan.machine.mapOr(true, (m) => m.holder.isNone())) return out
+  for (const setup of plan.setups) {
+    if (setupWorkholding(setup, plan.stock).prisms.length === 0) continue
+    const ready = (inputs ?? []).flatMap((input) => {
+      const toolpath = input.setup.id === setup.id ? current(input) : undefined
+      return toolpath === undefined ? [] : [{ input, toolpath }]
+    })
+    const zero = setupZero(plan, setup, port)
+    const needs = setupStickouts(plan, setup, checkOperations(ready, zero), zero)
+    for (const op of setup.operations) {
+      const need = needs?.get(op.id)
+      out.set(op.id, need === undefined ? { clamps: 'pending' } : { ...need, clamps: 'checked' })
+    }
+  }
+  return out
+}
 
 /**
  * `plan.workholding.unmachined`: per facing or pocket, one finding for the material the keep-out
@@ -393,4 +535,22 @@ export function checkedWorkholdingFindings(
       )
   }
   return { findings: out, unchecked }
+}
+
+/**
+ * DF132 H3: one `shortStickout` per operation. Where the clamp term decides (the workholding
+ * check's finding, with `params.itemId`), DF130's deepest-cut finding of the same operation is
+ * dropped: the clamp's number is the larger. In place.
+ * Doc: docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term
+ */
+export function dropShadowedShortStickout(findings: PlanWarning[]): void {
+  const short = (f: PlanWarning) => f.code === 'plan.check' && f.rule === 'shortStickout'
+  const clamped = new Set(
+    findings.filter((f) => short(f) && 'itemId' in f.params).map((f) => f.planOperationId),
+  )
+  if (clamped.size === 0) return
+  const keep = findings.filter(
+    (f) => !(short(f) && !('itemId' in f.params) && clamped.has(f.planOperationId)),
+  )
+  findings.splice(0, findings.length, ...keep)
 }

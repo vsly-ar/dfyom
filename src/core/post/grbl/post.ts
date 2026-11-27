@@ -251,6 +251,8 @@ class Writer {
    */
   private workholdingComments(w: NonNullable<SetupHeader['workholding']>): void {
     for (const line of w.items) this.comment(`Workholding: ${line}`)
+    // DF132 H3: the holder the moves were checked with (docs/modes/tool-holder.md#run-mode)
+    if (w.holder !== undefined) this.comment(`Holder: ${w.holder}`)
     const margin = formatNumber(Math.round(w.margin * this.units.perMm * 1000) / 1000, 3)
     this.comment(`Every move checked: ${margin} ${this.p.units} clear of the workholding`)
   }
@@ -370,6 +372,14 @@ class Writer {
       this.clearance(false)
     }
     if (pauses && zRef !== undefined) this.touchOff(number, zRef)
+    // DF132 H3: what decides the stickout when a clamp does, for Run mode's tool-change dialog
+    // (docs/modes/tool-holder.md#run-mode); the M0 text keeps only the number
+    const why = tool.stickoutReason
+    if (pauses && why !== undefined) {
+      const head = `${why.part === 'nut' ? 'Collet nut' : 'Spindle body'} must clear `
+      const tail = why.holder === undefined ? '' : `, holder ${why.holder}`
+      this.lines.push(`(${fitName(head, why.item, tail, MAX_LINE_BYTES - 2)})`)
+    }
     // Before the marker: the marker line must be followed directly by M0 (sender rule).
     if (!first && manual) this.comment('Stop the spindle')
     const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}${this.taper(tool)}`

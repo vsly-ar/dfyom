@@ -429,6 +429,19 @@ export interface FeedView {
   readonly lock: LockView
 }
 
+/** `plan.operation.list`'s `stickoutReason` (DF132 H3). */
+export interface StickoutReasonView {
+  readonly kind: 'cut' | 'workholding'
+  readonly planOperationId: string
+  /** `pending`: a toolpath is not current, the clamps are not yet checked. */
+  readonly clamps: 'checked' | 'pending' | 'none'
+  readonly itemId?: string
+  readonly itemName?: string
+  readonly part?: 'nut' | 'body'
+  readonly x?: number
+  readonly y?: number
+}
+
 /** One row of `plan.operation.list`. */
 export interface PlanOperationView {
   readonly id: string
@@ -439,8 +452,13 @@ export interface PlanOperationView {
   /** Auto mode (calculator): on, off (a preset is used), or unavailable with the reason. */
   readonly auto: 'on' | 'off' | { readonly unavailable: string }
   readonly stickout: number | null
-  /** Minimum stickout (mm, DF130): deepest cut + 5 mm for the collet nut; null without a tool. */
+  /**
+   * Minimum stickout (mm, DF130; DF132 H3): max(deepest cut, clamp under the holder) + 5 mm; null
+   * without a tool.
+   */
   readonly stickoutNeeded?: number | null
+  /** DF132 H3: what decides it (docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term). */
+  readonly stickoutReason?: StickoutReasonView | null
   readonly feeds: Readonly<Record<FeedField, FeedView | null>>
   readonly chipLoad: number | null
   /** Resolved strategy parameters (mm, °), defaults included. */

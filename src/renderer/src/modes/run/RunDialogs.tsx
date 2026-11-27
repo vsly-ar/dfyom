@@ -359,6 +359,15 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
             </div>
           </div>
         ) : null}
+        {/* DF132 H3: the clamp under the collet nut that decides the stickout (tool-holder.md#run-mode) */}
+        {tc.stickoutReason === undefined ? null : (
+          <div className={styles['notice']} role="note">
+            <Icon name="info" />
+            <div>
+              <p className={styles['why']}>{m.stickoutReason(tc.stickoutReason)}</p>
+            </div>
+          </div>
+        )}
         <ol className={styles['steps']}>
           {m.steps(tc.name, tc.surface, tc.spot).map((s) => (
             <li key={s}>{s}</li>

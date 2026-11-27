@@ -463,6 +463,58 @@ describe('plan.get', () => {
     })
   })
 
+  // DF132 H3: docs/modes/tool-holder.md#agent-api
+  it('gives a tool run the reason of its minimum stickout when a holder is checked', () => {
+    const key = 'plan.operation.list {"planId":"plan-1"}'
+    const rows = (reason: object) => ({
+      ...peeks,
+      [key]: {
+        operations: [
+          { ...peeks[key].operations[0], stickoutNeeded: 36, stickoutReason: reason },
+          peeks[key].operations[1],
+        ],
+      },
+    })
+    const runOf = (reason: object) => {
+      const shaper = new ResultShaper(fakeSession(rows(reason)))
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      const setups = (valueOf(r) as { plan: { setups: { toolRuns: Record<string, unknown>[] }[] } })
+        .plan.setups
+      return setups[0]!.toolRuns[0]!
+    }
+    const clamp = {
+      kind: 'workholding',
+      planOperationId: 'op1',
+      clamps: 'checked',
+      itemId: 'wh1',
+      itemName: 'Toe clamp 1',
+      part: 'nut',
+      x: 20,
+      y: 66.5,
+    }
+    expect(runOf(clamp)).toEqual({
+      tool: '6 mm end mill',
+      operations: ['op1'],
+      seconds: 30,
+      stickoutNeeded: 36,
+      stickoutReason: {
+        kind: 'workholding',
+        operationId: 'op1',
+        itemId: 'wh1',
+        item: 'Toe clamp 1',
+        part: 'nut',
+        at: [20, 66.5],
+      },
+    })
+    expect(
+      runOf({ kind: 'cut', planOperationId: 'op1', clamps: 'pending' })['stickoutReason'],
+    ).toEqual({ kind: 'cut', operationId: 'op1', clamps: 'pending' })
+    // nothing to check (no holder or no items): DF130's number alone
+    expect(runOf({ kind: 'cut', planOperationId: 'op1', clamps: 'none' })).not.toHaveProperty(
+      'stickoutReason',
+    )
+  })
+
   // DF90: the stored setting stays; the height the workholding raised it to is beside it
   it('gives the effective clearance when the workholding raised it', () => {
     const shaper = new ResultShaper(fakeSession(peeks))

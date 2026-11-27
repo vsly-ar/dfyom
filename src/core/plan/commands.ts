@@ -92,7 +92,11 @@ import { checkPart, sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
 import { workholdingSet } from './workholding/commands'
 import { reresolveCopy } from './workholding/devices'
-import { workholdingFindings } from './workholding/findings'
+import {
+  dropShadowedShortStickout,
+  planStickouts,
+  workholdingFindings,
+} from './workholding/findings'
 import { setupWorkholding } from './workholding/setup'
 import { defaultClearance } from './build'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
@@ -1471,6 +1475,20 @@ const lockDTO = (l: LockState) =>
     ? { state: l.state, rule: l.rule, reason: l.reason }
     : { state: l.state }
 
+/** DF132 H3: what decides a minimum stickout (docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term). */
+const StickoutReasonDTO = z.object({
+  kind: z.enum(['cut', 'workholding']),
+  planOperationId: z.string(),
+  clamps: z
+    .enum(['checked', 'pending', 'none'])
+    .describe('pending: toolpaths not current, clamps not yet checked; none: no holder or items'),
+  itemId: z.string().optional(),
+  itemName: z.string().optional(),
+  part: z.enum(['nut', 'body']).optional(),
+  x: z.number().optional().describe('mm, WCS'),
+  y: z.number().optional().describe('mm, WCS'),
+})
+
 const operationList = defineQuery({
   name: 'plan.operation.list',
   summary:
@@ -1496,7 +1514,10 @@ const operationList = defineQuery({
         stickoutNeeded: z
           .number()
           .nullable()
-          .describe('mm: deepest cut + 5 mm collet nut; null without a tool'),
+          .describe('mm: max(deepest cut, clamp under the holder) + 5 mm; null without a tool'),
+        stickoutReason: StickoutReasonDTO.nullable().describe(
+          'What decides stickoutNeeded; null without a tool',
+        ),
         feeds: z.object(
           Object.fromEntries(FEED_FIELDS.map((f) => [f, FeedValue])) as Record<
             FeedField,
@@ -1521,9 +1542,22 @@ const operationList = defineQuery({
     if (loaded.isErr()) return loaded
     const plan = loaded.unwrap()
     const port = ctx.services.region2d
+    // DF132 H3: the clamp term over the current toolpaths (tool-holder.md#minimum-stickout-gains-the-clamp-term)
+    const cache = ctx.services.toolpaths
+    const holderChecked = plan.machine.mapOr(false, (m) => m.holder.isSome())
+    const inputs =
+      holderChecked && cache !== undefined
+        ? planOperationInputs(doc, args.planId, undefined, port).mapOr<
+            PlanOperationInput[] | undefined
+          >(undefined, (v) => v)
+        : undefined
+    const stickouts = holderChecked
+      ? planStickouts(plan, inputs, (i) => cache?.get(i.inputHash), port)
+      : new Map()
     return Ok({
       operations: plan.operations.map((op) => {
         const e = evaluateOperation(plan, op, undefined, undefined, port)
+        const so = stickouts.get(op.id)
         const snap = plan.dto.snapshots.find((s) => s.id === op.tool)
         const feeds = Object.fromEntries(
           FEED_FIELDS.map((f) => [
@@ -1560,7 +1594,19 @@ const operationList = defineQuery({
           presetName: e.preset.mapOr(null, (p) => p.name),
           auto,
           stickout: e.stickout.unwrapOr(null as unknown as number),
-          stickoutNeeded: e.stickoutNeeded.unwrapOr(null as unknown as number),
+          stickoutNeeded:
+            so?.clamps === 'checked' && e.stickoutNeeded.isSome()
+              ? so.needed
+              : e.stickoutNeeded.unwrapOr(null as unknown as number),
+          stickoutReason: e.stickoutNeeded.isNone()
+            ? null
+            : so?.clamps === 'checked'
+              ? { ...so.reason, clamps: 'checked' as const }
+              : {
+                  kind: 'cut' as const,
+                  planOperationId: op.id,
+                  clamps: so === undefined ? ('none' as const) : ('pending' as const),
+                },
           feeds,
           chipLoad: e.feeds.andThen((f) => f.chipLoad).unwrapOr(null as unknown as number),
           strategy: strategy as Record<string, number | string>,
@@ -1960,6 +2006,7 @@ const warningList = defineQuery({
             params: {},
           },
         ]
+    dropShadowedShortStickout(findings)
     const stale = planStale(dto.unwrap(), doc, ctx.services.library?.lookup, ctx.services.region2d)
     for (const c of stale.libraryCopies)
       if (c.blocked !== null)

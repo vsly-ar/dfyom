@@ -627,6 +627,9 @@ export const runMessages = {
         : `Touch off the new tool on ${surface}${spot === undefined ? '' : ` at ${spot}`} and set Z zero there.`,
       'Continue the run.',
     ],
+    /** DF132 H3: the program's reason line before the marker ("Collet nut must clear Toe clamp 2, holder ER11"). */
+    stickoutReason: (reason: string) =>
+      `${reason}: chuck the tool with at least the stickout above.`,
     setZ: 'Set Z zero here',
     continue: 'Continue',
     later: 'Close (stay paused)',

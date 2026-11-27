@@ -9,7 +9,9 @@
 // a menu of the eligible surfaces with "Default" on top (`plan.operation.update { zRef }` on the
 // run's first operation); a `plan.zRef` finding of the run shows its icon beside it. Hovering
 // "Z from" or focusing a row shows that run's reference in the viewport (`previewZRef`).
-// DF130: each run's minimum stickout under its operations ("Needs ≥ 25.5 mm stickout").
+// DF130: each run's minimum stickout under its operations ("Needs ≥ 25.5 mm stickout"); DF132 H3:
+// the clamp under the collet nut that decides it, or "Clamps not yet checked" while a toolpath is
+// not current (docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term).
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
 import { useRef, useState, type KeyboardEvent } from 'react'
@@ -329,12 +331,22 @@ export function ToolChanges({
           const names = run.operations.map((o) => planOperationName(plan, o))
           const isCarried = i === 0 && carried !== undefined && before !== undefined
           // DF130: the run's minimum stickout, rounded up as the program writes it
+          const rowsOf = run.operations.map((o) => opRows?.find((r) => r.id === o.id))
           const needed =
             run.tool === undefined
               ? undefined
-              : runStickoutNeeded(
-                  run.operations.map((o) => opRows?.find((r) => r.id === o.id)?.stickoutNeeded),
-                )
+              : runStickoutNeeded(rowsOf.map((r) => r?.stickoutNeeded))
+          // DF132 H3: what decides it (the first operation with the run's number)
+          const reason = rowsOf.find(
+            (r) => needed !== undefined && r?.stickoutNeeded === needed,
+          )?.stickoutReason
+          const pending = rowsOf.some((r) => r?.stickoutReason?.clamps === 'pending')
+          const shown = (mm: number) =>
+            stickoutText(shownStickout(mm, units === 'inch'), units === 'inch')
+          const clamp =
+            reason?.kind === 'workholding'
+              ? { part: reason.part ?? 'nut', item: reason.itemName ?? '' }
+              : undefined
           return (
             <li
               key={run.operations.map((o) => o.id).join('+')}
@@ -371,10 +383,21 @@ export function ToolChanges({
                 </span>
                 <span className={styles['ops']}>{names.join(', ')}</span>
                 {needed === undefined ? null : (
-                  <span className={styles['stickout']} title={m.stickoutTitle}>
-                    {m.stickout(
-                      stickoutText(shownStickout(needed, units === 'inch'), units === 'inch'),
-                    )}
+                  <span
+                    className={styles['stickout']}
+                    title={
+                      clamp !== undefined
+                        ? m.stickoutClampTitle(clamp.part, clamp.item)
+                        : pending
+                          ? m.stickoutPendingTitle
+                          : m.stickoutTitle
+                    }
+                  >
+                    {clamp !== undefined
+                      ? m.stickoutClamp(shown(needed), clamp.part, clamp.item)
+                      : pending
+                        ? m.stickoutPending(shown(needed))
+                        : m.stickout(shown(needed))}
                   </span>
                 )}
                 {zRun(run.operations[0]!.id) === undefined ? null : (

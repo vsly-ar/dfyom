@@ -39,6 +39,8 @@ export interface CheckOperation {
   readonly tool: CheckTool
   /** The final moves in the WCS (drill cycles allowed; they are expanded). */
   readonly moves: readonly Move[]
+  /** DF130's minimum stickout (deepest cut + 5 mm), for H3's read-out and messages (DF132). */
+  readonly stickoutNeeded?: number
 }
 
 export interface CheckInput {
@@ -91,7 +93,8 @@ export interface WorkholdingCheck {
   readonly minGap: number | null
 }
 
-interface Segment {
+/** A straight piece of a move in XY (an arc's chord carries its sagitta and lowest Z). */
+export interface Segment {
   readonly a: Vec3
   readonly b: Vec3
   /** Arc chords: the sagitta to subtract, and the arc's lowest Z for the whole chord. */
@@ -127,6 +130,22 @@ function arcSegments(from: Vec3, m: Extract<Move, { kind: 'arc' }>): Segment[] {
   return out
 }
 
+/** An operation's moves as the check walks them: drill cycles expanded (retract, pecks). */
+export function checkMoves(op: CheckOperation): Exclude<Move, { kind: 'drill' }>[] {
+  const moves: Exclude<Move, { kind: 'drill' }>[] = []
+  for (const m of op.moves)
+    if (m.kind === 'drill') {
+      moves.push({ kind: 'rapid', to: [m.at[0], m.at[1], m.retract] })
+      moves.push(...expandDrill(m, PECK_CLEARANCE))
+    } else moves.push(m)
+  return moves
+}
+
+/** A move from `start` as XY segments: a line as itself, an arc as chords at its lowest Z. */
+export function moveSegments(start: Vec3, m: Exclude<Move, { kind: 'drill' }>): Segment[] {
+  return m.kind === 'arc' ? arcSegments(start, m) : [{ a: start, b: m.to, slack: 0 }]
+}
+
 /** The part of segment ab below `z` (parameter range), or undefined. */
 function below(s: Segment, z: number): { a: Vec3; b: Vec3 } | undefined {
   const za = s.a[2]
@@ -155,12 +174,7 @@ export function checkWorkholding(input: CheckInput): WorkholdingCheck {
     const envelope = toolEnvelope(op.tool, op.tool.stickout, op.tool.holder)
     const R = envelope[0]!.radius
     const holder = envelope.slice(1)
-    const moves: Exclude<Move, { kind: 'drill' }>[] = []
-    for (const m of op.moves)
-      if (m.kind === 'drill') {
-        moves.push({ kind: 'rapid', to: [m.at[0], m.at[1], m.retract] })
-        moves.push(...expandDrill(m, PECK_CLEARANCE))
-      } else moves.push(m)
+    const moves = checkMoves(op)
     moves.forEach((m, index) => {
       const from = pos
       pos = m.to
@@ -172,8 +186,7 @@ export function checkWorkholding(input: CheckInput): WorkholdingCheck {
         : start[2] >= clearanceZ - eps && m.to[2] >= clearanceZ - eps
           ? 'link'
           : 'rapid'
-      const segs: Segment[] =
-        m.kind === 'arc' ? arcSegments(start, m) : [{ a: start, b: m.to, slack: 0 }]
+      const segs = moveSegments(start, m)
       if (cut && input.fixturePlate !== undefined) {
         const lowest = Math.min(start[2], m.to[2])
         const key = `b:${op.planOperationId}`

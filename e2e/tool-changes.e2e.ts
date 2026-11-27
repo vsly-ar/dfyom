@@ -11,6 +11,8 @@
 // onto the faced floor names it and its spot, shows them in the viewport, moves back over the spot
 // after a jog away, and Probe Z lays the virtual plate on the floor (G54 Z 0.5 mm lower).
 // DF130: each run shows its minimum stickout ("Needs ≥ 6 mm stickout"; renders df130-stickout-*.png).
+// DF132 H3: with an ER11 holder and a toe clamp, the run names the clamp under the holder once the
+// toolpaths are current ("(clamps not yet checked)" before).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
@@ -76,7 +78,7 @@ const endMill = (name: string, diameter: string, stepover: string) => ({
 /** A bottom facing, a narrow top pocket (Flat 3) and a wide one (Flat 6), and the plan. */
 async function twoToolPlan(
   page: Page,
-  opts: { topFacing?: boolean; plate?: string } = {},
+  opts: { topFacing?: boolean; plate?: string; holder?: object } = {},
 ): Promise<void> {
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   const stock = await call<{ id: string }>('library.stock.add', {
@@ -101,6 +103,7 @@ async function twoToolPlan(
       programUnits: 'mm',
       toolChanger: 'none',
       ...(opts.plate === undefined ? {} : { probePlateThickness: opts.plate }),
+      ...(opts.holder === undefined ? {} : { holder: opts.holder }),
     },
   })
   await call('project.create', { name: 'Two tools', unitSystem: 'mm' })
@@ -189,6 +192,51 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
   await page.mouse.up()
   await expect(runs.nth(0)).toContainText('Flat 6')
   await expect(title).toContainText('1 tool change')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+// DF132 H3: docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term
+test('setup inspector: a clamp under the holder decides a run’s stickout (DF132 H3)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await twoToolPlan(page, { holder: { preset: 'er11' } })
+  const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
+  const { plans } = await call<{ plans: { id: string }[] }>('plan.list')
+  const planId = plans[0]!.id
+  const { plan } = await call<{ plan: { setups: { id: string; name: string }[] } }>('plan.get', {
+    planId,
+  })
+  const top = plan.setups.find((s) => s.name === 'Top')!
+  // a 25 mm toe clamp at the front, 13 mm from the wide pocket’s wall pass
+  await call('plan.workholding.set', {
+    planId,
+    setupId: top.id,
+    items: [
+      { kind: 'toeClamp', edge: 'vMin', at: '65', width: '28', grip: '10', reach: '18', top: '25' },
+    ],
+  })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  await setups.getByRole('button', { name: /^2\. Top/ }).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  const runs = inspector
+    .getByRole('list', { name: 'Tool runs of Top in machining order' })
+    .locator(':scope > li')
+  await expect(runs.nth(0)).toContainText('Needs ≥ 6 mm stickout (clamps not yet checked)')
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
+  // the Flat 6 run: the clamp under the holder; the Flat 3 run: its pocket is out of reach
+  await expect(runs.nth(0)).toContainText(
+    /Needs ≥ [\d.]+ mm stickout: the (collet nut|spindle body) must clear Toe clamp 1/,
+  )
+  await expect(runs.nth(1)).toContainText('Needs ≥ 6 mm stickout')
+  await expect(runs.nth(1)).not.toContainText('clamp')
   expect(dfyom.rendererErrors).toEqual([])
 })
 

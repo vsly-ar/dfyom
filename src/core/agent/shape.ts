@@ -401,14 +401,21 @@ export class ResultShaper {
         const z = zRefOf.get(r.operations[0]!.id)
         const at = z?.['at'] as [number, number] | undefined
         // DF130: the run's minimum stickout (plan-v0.1.md#minimum-stickout-hardening-df130)
-        const needed = runStickoutNeeded(
-          r.operations.map((o) => ops.get(o.id)?.['stickoutNeeded'] as number | null | undefined),
+        const neededOf = (id: string) =>
+          ops.get(id)?.['stickoutNeeded'] as number | null | undefined
+        const needed = runStickoutNeeded(r.operations.map((o) => neededOf(o.id)))
+        // DF132 H3: what decides the run's number (tool-holder.md#agent-api)
+        const reason = stickoutReasonOf(
+          r.operations.map((o) => ops.get(o.id)?.['stickoutReason']),
+          r.operations.findIndex((o) => needed !== undefined && neededOf(o.id) === needed),
+          length,
         )
         return {
           tool: nameOf(r.tool),
           operations: r.operations.map((o) => o.id),
           seconds,
           stickoutNeeded: needed === undefined ? null : shownStickout(needed, inch),
+          ...(reason === undefined ? {} : { stickoutReason: reason }),
           ...(z === undefined
             ? {}
             : {
@@ -488,6 +495,35 @@ const SIDES: readonly Side[] = ['xMin', 'xMax', 'yMin', 'yMax']
  * A setup's reach past the stock (mm) in the project's units, rounded up to 0.1 mm or 0.01 in
  * (DF59, llm-api.md#result-size).
  */
+/**
+ * A tool run's `stickoutReason` (DF132 H3, docs/modes/tool-holder.md#agent-api) from its
+ * operations' `plan.operation.list` reasons and the index of the one deciding the number: kind,
+ * operation, the item and part with the point (display units) when a clamp decides,
+ * `clamps: "pending"` while an operation's toolpath is not current. Omitted when the deepest cut
+ * decides and nothing is checked (no holder or no items): DF130's number, nothing to explain.
+ */
+function stickoutReasonOf(
+  reasons: readonly unknown[],
+  decides: number,
+  length: (v: number) => number,
+): Obj | undefined {
+  const r = reasons[decides]
+  if (!isObj(r)) return undefined
+  const pending = reasons.some((x) => isObj(x) && x['clamps'] === 'pending')
+  if (r['kind'] !== 'workholding' && !pending && r['clamps'] !== 'checked') return undefined
+  const num = (k: string) => (typeof r[k] === 'number' ? length(r[k] as number) : undefined)
+  const x = num('x')
+  const y = num('y')
+  return {
+    kind: r['kind'],
+    operationId: r['planOperationId'],
+    ...(r['itemId'] === undefined ? {} : { itemId: r['itemId'], item: r['itemName'] }),
+    ...(r['part'] === undefined ? {} : { part: r['part'] }),
+    ...(x === undefined || y === undefined ? {} : { at: [x, y] }),
+    ...(pending ? { clamps: 'pending' } : {}),
+  }
+}
+
 function overreachIn(mm: Record<Side, number>, inch: boolean): Record<Side, number> {
   const [per, step] = inch ? [1 / 25.4, 100] : [1, 10]
   const up = (v: number) => Math.ceil(v * per * step - 1e-9) / step || 0
