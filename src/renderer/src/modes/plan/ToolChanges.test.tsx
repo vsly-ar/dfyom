@@ -48,7 +48,10 @@ const toolpath = {
 
 async function renderTop(
   setup?: (s: PlanSetup, planId: string) => Promise<void>,
-  opts: { zRefs?: boolean } = {},
+  opts: {
+    zRefs?: boolean
+    bridge?: (b: ReturnType<typeof createFakeBridge>, s: PlanSetup, planId: string) => void
+  } = {},
 ) {
   // DF69: Z references need the 2D regions (without them `zRefs` is empty: no "Z from")
   const s = await planSetup(opts.zRefs === true ? { services: { region2d: nodeRegion2d() } } : {})
@@ -58,6 +61,7 @@ async function renderTop(
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   bridge.handle('plan.toolpath.get', () => ok({ toolpath, stale: false }))
+  opts.bridge?.(bridge, s, planId)
   const shell = createShell(bridge)
   shell.ui.getState().setMode('plan')
   const r = renderUi(
@@ -140,6 +144,55 @@ describe('Tool changes (DF66)', () => {
       'title',
       'Deepest cut of this tool run + 5 mm for the collet nut: chuck the tool with at least this much out.',
     )
+  })
+
+  // DF132 H3: docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term
+  it('names the clamp under the collet nut that decides a run’s stickout, or that clamps are not yet checked', async () => {
+    type Row = { id: string; stickoutNeeded: number | null; stickoutReason: unknown }
+    const t = await renderTop(undefined, {
+      bridge: (b, s, planId) =>
+        b.handle('plan.operation.list', () => {
+          const rows = (s.query('plan.operation.list', { planId }) as { operations: Row[] })
+            .operations
+          const top = s.plan(planId).setups[1]!.operations
+          // the facing run: a clamp decides; the drill run: its toolpath is not current yet
+          return ok({
+            operations: rows.map((r) =>
+              r.id === top[0]!.id
+                ? {
+                    ...r,
+                    stickoutNeeded: 36,
+                    stickoutReason: {
+                      kind: 'workholding',
+                      planOperationId: r.id,
+                      clamps: 'checked',
+                      itemId: 'wh1',
+                      itemName: 'Toe clamp 1',
+                      part: 'nut',
+                      x: 20,
+                      y: 66.5,
+                    },
+                  }
+                : r.id === top[1]!.id
+                  ? {
+                      ...r,
+                      stickoutReason: { kind: 'cut', planOperationId: r.id, clamps: 'pending' },
+                    }
+                  : r,
+            ),
+          })
+        }),
+    })
+    const clamp = 'Needs ≥ 36 mm stickout: the collet nut must clear Toe clamp 1'
+    await waitFor(() => expect(t.runs()[0]).toHaveTextContent(clamp))
+    expect(within(t.runs()[0]!).getByText(clamp)).toHaveAttribute(
+      'title',
+      'Toe clamp 1 under the collet nut + 5 mm: chuck the tool with at least this much out.',
+    )
+    expect(t.runs()[1]).toHaveTextContent(/Needs ≥ [\d.]+ mm stickout \(clamps not yet checked\)/)
+    // no holder or no items: DF130's read-out unchanged
+    expect(t.runs()[4]).not.toHaveTextContent(/clamp/)
+    await expectNoAxeViolations(t.inspector())
   })
 
   it('moves a run as a block with Alt+↑/↓ and by its grip, one move each', async () => {

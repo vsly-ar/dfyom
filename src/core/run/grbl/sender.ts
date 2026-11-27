@@ -113,8 +113,16 @@ const ZREF_LEVEL = /, (\d+(?:\.\d+)?) below the stock top$/
 const SPOT_XY = /^X(-?\d+(?:\.\d+)?) Y(-?\d+(?:\.\d+)?)$/
 /** A units word in a line's code (comments stripped). */
 const UNITS_WORD = /G2([01])(?![0-9.])/i
-/** Lines before a marker searched for them (the manual spindle's stop comment sits between). */
-const ZREF_LOOKBACK = 4
+/**
+ * DF132 H3: the clamp that decides the tool run's stickout, before a marker
+ * (docs/modes/tool-holder.md#run-mode).
+ */
+const STICKOUT_REASON_LINE = /^\(((?:Collet nut|Spindle body) must clear [^()]*)\)$/
+/**
+ * Lines before a marker searched for them (the manual spindle's stop comment and the stickout
+ * reason sit between).
+ */
+const ZREF_LOOKBACK = 5
 /** A line whose code (comments stripped) contains `M0`/`M00`: GRBL pauses there. */
 const PROGRAM_PAUSE = /M0*0(?![0-9.])/i
 
@@ -139,6 +147,8 @@ export interface ToolChangeInfo {
   readonly level?: number
   /** DF69: the spot in work coordinates (mm), with `spot`. */
   readonly at?: readonly [number, number]
+  /** DF132 H3: "Collet nut must clear Toe clamp 2, holder ER11" when a clamp decides the stickout. */
+  readonly stickoutReason?: string
 }
 
 /** mm per program unit at line `i`: the last `G20`/`G21` before it (none = mm). */
@@ -155,10 +165,12 @@ function programPerUnit(lines: readonly string[], i: number): number {
 function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): ToolChangeInfo {
   let surface: string | undefined
   let spot: string | undefined
+  let reason: string | undefined
   for (let k = Math.max(0, i - ZREF_LOOKBACK); k < i; k++) {
     const line = lines[k] ?? ''
     surface = ZREF_LINE.exec(line)?.[1] ?? surface
     spot = SPOT_LINE.exec(line)?.[1] ?? spot
+    reason = STICKOUT_REASON_LINE.exec(line)?.[1] ?? reason
   }
   const k = surface === undefined ? 1 : programPerUnit(lines, i)
   const level = surface === undefined ? undefined : ZREF_LEVEL.exec(surface)
@@ -170,6 +182,7 @@ function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): 
     ...(surface === undefined || spot === undefined ? {} : { spot }),
     ...(level == null ? {} : { level: -Number(level[1]) * k || 0 }),
     ...(xy === null ? {} : { at: [Number(xy[1]) * k, Number(xy[2]) * k] as const }),
+    ...(reason === undefined ? {} : { stickoutReason: reason }),
   }
 }
 

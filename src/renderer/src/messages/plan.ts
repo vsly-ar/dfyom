@@ -447,6 +447,14 @@ export const planMessages = {
     stickout: (length: string) => `Needs ≥ ${length} stickout`,
     stickoutTitle:
       'Deepest cut of this tool run + 5 mm for the collet nut: chuck the tool with at least this much out.',
+    /** DF132 H3: a clamp under the holder decides (docs/modes/tool-holder.md#minimum-stickout-gains-the-clamp-term). */
+    stickoutClamp: (length: string, part: 'nut' | 'body', item: string) =>
+      `Needs ≥ ${length} stickout: the ${part === 'nut' ? 'collet nut' : 'spindle body'} must clear ${item}`,
+    stickoutClampTitle: (part: 'nut' | 'body', item: string) =>
+      `${item} under the ${part === 'nut' ? 'collet nut' : 'spindle body'} + 5 mm: chuck the tool with at least this much out.`,
+    stickoutPending: (length: string) => `Needs ≥ ${length} stickout (clamps not yet checked)`,
+    stickoutPendingTitle:
+      'Deepest cut of this tool run + 5 mm for the collet nut. Generate the toolpaths to check the collet nut against the workholding.',
     refused: (message: string) => `Not moved: ${message}`,
     /** DF69: the tool run's Z reference surface (docs/modes/z-reference.md#ui). */
     zFrom: 'Z from',

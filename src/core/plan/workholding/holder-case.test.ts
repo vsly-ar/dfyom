@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { Ok } from '../../../shared/result'
 import { expectErrCode, expectOk } from '../../../shared/testing/result'
 import { createInProcessWorkers } from '../../commands/jobs'
+import { uiSource } from '../../commands/testing'
 import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
 import { len, libraryInput, machineValues } from '../../library/library.fixture'
 import { exportPlan, withoutAppVersion } from '../../post/plan-export'
@@ -46,8 +47,12 @@ const ORACLE_BOX = [{ x: [-18, 10], y: [36, 64], top: 25 }] as const
  * A 6 mm deep pocket X16–54: its wall pass runs 9 mm from the clamp, so the Ø6 tool keeps 6 mm,
  * the Ø19 ER11 nut (25 mm stickout: the tool's flute length) none.
  */
-async function holderCase(holder: object | undefined) {
-  const s = await planSetup({ part: false, stock: STOCK, services: { region2d } })
+async function holderCase(holder: object | undefined, opts: { toolpaths?: boolean } = {}) {
+  const s = await planSetup({
+    part: false,
+    stock: STOCK,
+    services: opts.toolpaths === true ? services() : { region2d },
+  })
   await s.run('design.pocket.add', {
     partId: s.partId,
     shape: {
@@ -146,6 +151,99 @@ describe('a clamp the Ø6 tool clears but the ER11 nut hits (DF132 H2)', () => {
         params: { shank: 8, maxShank: 7 },
         message: expect.stringContaining('larger than the ER11 collet takes (up to Ø7 mm)'),
       }),
+    ])
+  })
+})
+
+type Row = { id: string; stickoutNeeded: number | null; stickoutReason: unknown }
+
+// DF132 H3: the clamp term in the minimum stickout (tool-holder.md#minimum-stickout-gains-the-clamp-term)
+describe('the minimum stickout with the clamp under the ER11 nut (DF132 H3)', () => {
+  const rowOf = (s: { query: (n: string, a: object) => unknown }, planId: string) =>
+    (s.query('plan.operation.list', { planId }) as { operations: Row[] }).operations[0]!
+  const generate = async (s: Awaited<ReturnType<typeof holderCase>>['s'], planId: string) => {
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, uiSource()))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+  }
+
+  it('without a holder: DF130 exactly (6 mm deep + 5), nothing to check', async () => {
+    const { s, planId } = await holderCase(undefined, { toolpaths: true })
+    await generate(s, planId)
+    const row = rowOf(s, planId)
+    expect(row.stickoutNeeded).toBe(11)
+    expect(row.stickoutReason).toEqual({ kind: 'cut', planOperationId: row.id, clamps: 'none' })
+    const text = withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
+    expect(text).toContain('min stickout 11 mm')
+    expect(text).not.toContain('(Holder:')
+  })
+
+  it('with an ER11: DF130 until the toolpath is current, then the clamp under the nut decides', async () => {
+    const { s, planId, planOperationId, warnings } = await holderCase(
+      { preset: 'er11' },
+      { toolpaths: true },
+    )
+    expect(rowOf(s, planId)).toMatchObject({
+      stickoutNeeded: 11,
+      stickoutReason: { kind: 'cut', clamps: 'pending' },
+    })
+    await generate(s, planId)
+    // clamp top 25 − the pocket floor −6 + 5 mm, beside the wall pass 9 mm from the clamp
+    const row = rowOf(s, planId)
+    expect(row.stickoutNeeded).toBeCloseTo(36, 6)
+    expect(row.stickoutReason).toEqual({
+      kind: 'workholding',
+      planOperationId,
+      clamps: 'checked',
+      itemId: expect.any(String),
+      itemName: 'Toe clamp 1',
+      part: 'nut',
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+    // the collision names the same number
+    const hit = warnings().find((w) => w.code === 'plan.workholding.collision')!
+    expect(hit.message).toContain('chuck the tool with at least 36 mm out')
+    expect(hit.params['neededStickout']).toBeCloseTo(36, 6)
+    // between the check's 2 mm margin and the read-out's 5 mm: the shortStickout warning names the clamp
+    await s.run('plan.operation.update', { planId, planOperationId, stickout: '34' })
+    await generate(s, planId)
+    const short = warnings().filter((w) => w.rule === 'shortStickout')
+    expect(short).toEqual([
+      expect.objectContaining({
+        code: 'plan.check',
+        severity: 'warning',
+        field: 'stickout',
+        planOperationId,
+        message: expect.stringContaining(
+          'stickout 34 mm is shorter than the 36 mm Toe clamp 1 needs under the collet nut: the collet nut passes within 5 mm of its top; chuck the tool with at least 36 mm out',
+        ),
+        params: expect.objectContaining({ stickout: 34, needed: 36, part: 'nut' }),
+      }),
+    ])
+    expect(warnings().map((w) => w.code)).not.toContain('plan.workholding.collision')
+    // the program: the run's number in the header and marker, the holder line after the items
+    await s.run('plan.operation.update', { planId, planOperationId, stickout: '36' })
+    const text = withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
+    expect(text).toContain('min stickout 36 mm')
+    expect(text).toMatch(
+      /\(Workholding: Toe clamp 1[^)]*\)\n\(Holder: ER11 nut dia 19 x 12 mm, body dia 52 mm\)\n/,
+    )
+    expect(warnings().filter((w) => w.rule === 'shortStickout')).toEqual([])
+  })
+
+  it('a stickout inside the margin: the collision, and only DF130’s own shortStickout', async () => {
+    const { s, planId, planOperationId, warnings } = await holderCase(
+      { preset: 'er11' },
+      { toolpaths: true },
+    )
+    await s.run('plan.operation.update', { planId, planOperationId, stickout: '8' })
+    await generate(s, planId)
+    expect(warnings().filter((w) => w.rule === 'shortStickout')).toEqual([
+      expect.objectContaining({ params: { stickout: 8, depth: 6, needed: 11 } }),
+    ])
+    expect(warnings().filter((w) => w.code === 'plan.workholding.collision')).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('at least 36 mm out') }),
     ])
   })
 })

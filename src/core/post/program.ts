@@ -23,6 +23,16 @@ export interface ProgramTool {
    * tool-change messages; absent = not written (grbl.md#pause-messages-hardening-df63).
    */
   readonly stickoutNeeded?: number
+  /**
+   * DF132 H3: the workholding item under the collet nut or spindle body that decides
+   * `stickoutNeeded`, and the holder's preset name; written as a comment before the tool-change
+   * marker for Run mode's dialog (docs/modes/tool-holder.md#run-mode). Absent = the deepest cut.
+   */
+  readonly stickoutReason?: {
+    readonly part: 'nut' | 'body'
+    readonly item: string
+    readonly holder?: string
+  }
 }
 
 /**
@@ -110,7 +120,12 @@ export interface SetupHeader {
    * ("Toe clamp 1: front X125 grip 10 top Z12", program units) and the margin the program keeps
    * (mm); absent = none modelled (the DF59 clamp note stays).
    */
-  readonly workholding?: { readonly items: readonly string[]; readonly margin: number }
+  readonly workholding?: {
+    readonly items: readonly string[]
+    readonly margin: number
+    /** DF132 H3: the machine's holder ("ER11 nut dia 19 x 12 mm, body dia 52 mm"); absent = none. */
+    readonly holder?: string
+  }
 }
 
 export interface MachiningProgram {

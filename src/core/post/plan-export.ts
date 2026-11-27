@@ -35,11 +35,14 @@ import type { LinkSettings } from '../toolpath/links'
 import type { Toolpath } from '../toolpath/model'
 import {
   checkOperations,
+  holderSizes,
   moveFindings,
+  setupStickouts,
   staticWorkholdingFindings,
 } from '../plan/workholding/findings'
+import type { HolderSizes } from '../plan/workholding/envelope'
 import { deviceLabel } from '../plan/workholding/devices'
-import { itemSummary } from '../plan/workholding/items'
+import { itemSummary, lengthText } from '../plan/workholding/items'
 import { setupWorkholding } from '../plan/workholding/setup'
 
 /** The generator string of exported programs' header, without the app version. */
@@ -271,15 +274,46 @@ export async function exportPlan(
         params: { z: c.to[2], needed: c.needed },
       })),
     })
-  // DF130: each tool run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130)
-  const runNeeded = toolRuns(all.map((x) => ({ tool: x.toolSnapshotId, needed: x.stickoutNeeded })))
-  const neededAt = runNeeded.flatMap((r) =>
-    r.operations.map(() => runStickoutNeeded(r.operations.map((o) => o.needed))),
+  const finalPath = (i: number) =>
+    (i < from ? undefined : links?.toolpaths[i - from]) ?? generated[i]!.toolpath
+  // the items are in the setup frame, the moves in the WCS: a moved work zero is added back
+  // (docs/modes/alignment.md S12, as workholdingFindings does)
+  const zero = all[0]!.setup.zero ?? [0, 0]
+  const checked = checkOperations(
+    all.map((input, i) => ({ input, toolpath: finalPath(i) })),
+    zero,
   )
+  // DF130: each tool run's minimum stickout (docs/modes/plan-v0.1.md#minimum-stickout-hardening-df130);
+  // DF132 H3: with the clamp term over the final moves (tool-holder.md#minimum-stickout-gains-the-clamp-term)
+  const needs = setupStickouts(plan, setup, checked, zero)
+  const holderName = plan.machine.andThen((m) => m.holder).map(holderSizes)
+  const runNeeded = toolRuns(
+    all.map((x) => ({
+      tool: x.toolSnapshotId,
+      needed: needs?.get(x.planOperationId)?.needed ?? x.stickoutNeeded,
+      reason: needs?.get(x.planOperationId)?.reason,
+    })),
+  )
+  const runOf = runNeeded.flatMap((r) => {
+    const needed = runStickoutNeeded(r.operations.map((o) => o.needed))
+    // the operation that decides the run's number (the first on a tie)
+    const decides = r.operations.find((o) => o.needed === needed)?.reason
+    const reason =
+      decides?.kind !== 'workholding'
+        ? undefined
+        : {
+            part: decides.part ?? ('nut' as const),
+            item: decides.itemName ?? 'an item',
+            ...holderName.mapOr<{ holder?: string }>({}, (h) =>
+              h.name === undefined ? {} : { holder: h.name },
+            ),
+          }
+    return r.operations.map(() => ({ needed, reason }))
+  })
   const operations: ExportOperation[] = all.map((input, i) => {
-    const stickoutNeeded = neededAt[i]
+    const { needed: stickoutNeeded, reason: stickoutReason } = runOf[i]!
     const { ids, label } = generated[i]!
-    const toolpath = (i < from ? undefined : links?.toolpaths[i - from]) ?? generated[i]!.toolpath
+    const toolpath = finalPath(i)
     const positions: Record<string, string> = {}
     for (const id of ids) {
       const text = positionComment(part, id)
@@ -306,6 +340,7 @@ export async function exportPlan(
           }),
         }),
         ...(stickoutNeeded === undefined ? {} : { stickoutNeeded }),
+        ...(stickoutReason === undefined ? {} : { stickoutReason }),
       },
       stickout: input.stickout,
       label,
@@ -315,13 +350,9 @@ export async function exportPlan(
   })
   opts.progress?.({ done: total, total })
   // the export guard (WH-E): the final moves, links included, against the setup's workholding
-  // the items are in the setup frame, the moves in the WCS: a moved work zero is added back
-  // (docs/modes/alignment.md S12, as workholdingFindings does)
-  const zero = all[0]!.setup.zero ?? [0, 0]
-  const checked = all.map((input, i) => ({ input, toolpath: operations[i]!.toolpath }))
   const guard = [
     ...staticWorkholdingFindings(plan, setup.id),
-    ...moveFindings(plan, setup, checkOperations(checked, zero), zero),
+    ...moveFindings(plan, setup, checked, zero),
   ].filter((f) => f.severity === 'error')
   const firstHit = guard[0]
   if (firstHit !== undefined)
@@ -378,6 +409,10 @@ export async function exportPlan(
                       : [line, `${i.name} device: ${device}`]
                   }),
                   margin: holding.margin,
+                  // DF132 H3: the holder the program was checked with (tool-holder.md#run-mode)
+                  ...holderName.mapOr<{ holder?: string }>({}, (h) => ({
+                    holder: holderLine(h, programUnits),
+                  })),
                 },
           ),
           ...clampLine(settings),
@@ -408,6 +443,16 @@ export async function exportPlan(
       ),
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/**
+ * The header's holder line (DF132 H3, tool-holder.md#run-mode) after the workholding lines:
+ * "ER11 nut dia 19 x 12 mm, body dia 52 mm" (program units; "dia" as the tool lines, ASCII).
+ */
+function holderLine(h: HolderSizes, units: 'mm' | 'in'): string {
+  const l = (v: number) => lengthText(v, units)
+  const name = h.name === undefined ? 'Nut' : `${h.name} nut`
+  return `${name} dia ${l(h.nutDiameter)} x ${l(h.nutLength)} ${units}, body dia ${l(h.bodyDiameter)} ${units}`
 }
 
 /**

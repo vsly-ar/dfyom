@@ -45,6 +45,8 @@ export const ToolChangeSchema = z.object({
   /** DF69: the surface's level (mm, setup frame, < 0) and the spot in work coordinates (mm). */
   level: Num.exactOptional(),
   at: z.tuple([Num, Num]).readonly().exactOptional(),
+  /** DF132 H3: the clamp that decides the stickout (docs/modes/tool-holder.md#run-mode). */
+  stickoutReason: z.string().max(500).exactOptional(),
 })
 
 export const RunSummarySchema = z.object({
