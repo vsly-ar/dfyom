@@ -67,9 +67,9 @@ Tasks, exit criteria (a lid for the v0.3 enclosure: countersunk and counterbored
 
 Tasks, exit criteria (the user cuts the v0.4 lid on their machine using only the app, and an agent over MCP designs one variant), the dogfood intake and questions Q47–Q54: [plans/hardening.md](plans/hardening.md).
 
-## v0.4 follow-up – LLM-first gaps (draft)
+## v0.4 follow-up – LLM-first gaps (accepted)
 
-**Draft** (2026-11-22). After v0.4 and the [hardening](#hardening--make-existing-features-work-well-draft) milestone, before v0.5: the user asked to investigate and fix the findings of the [LLM-first black-box test](plans/v0.4-llm-first.md#source) of the installed v0.3.2 app over MCP. Toward the [direction](#direction)'s last verification step (the user guiding agents through real projects) and real-machine readiness: an agent with the MCP tools only must take a reference model to safe programs and measure the result itself.
+**Accepted** by delegation (D70, 2026-11-26; proposed 2026-11-22); built except the real-agent rerun X3. After v0.4 and the [hardening](#hardening--make-existing-features-work-well-draft) milestone, before v0.5: the user asked to investigate and fix the findings of the [LLM-first black-box test](plans/v0.4-llm-first.md#source) of the installed v0.3.2 app over MCP. Toward the [direction](#direction)'s last verification step (the user guiding agents through real projects) and real-machine readiness: an agent with the MCP tools only must take a reference model to safe programs and measure the result itself.
 
 1. **Workholding** per setup (toe clamps, vise, screws, blocks, spoilboard / fixture plate, tape / vacuum): keep-out in toolpaths, links that hop over clamps, clearance from the highest item, a collision check of every move that guards the export ([workholding.md](modes/workholding.md)).
 2. **Reference query** for agents: depth levels, sections as shapes in one call, circular hole detection; taken into hardening as DF60 ([reference-tools.md](modes/reference-tools.md), levels and section → shape implemented).
