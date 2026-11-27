@@ -289,7 +289,11 @@ export interface PatternRecord {
   boundary: { min: [number, number]; max: [number, number] }
   /** A named shape as the boundary: its box centre at `center` (face frame), turned by `rotation`. */
   area?: { shapeId: string; center: [number, number]; rotation: number } | undefined
-  margin: number
+  /**
+   * The uncut border inside the boundary; H1 (docs/modes/pattern-presets.md#model-changes): or
+   * `[u, v]` in the face frame (the boundary eroded by an axis-aligned box of those half-sizes).
+   */
+  margin: number | [number, number]
   /** Absent = `whole`. */
   fit?: 'clip' | undefined
   invert?: true | undefined
@@ -319,7 +323,7 @@ export const PatternRecordSchema: z.ZodType<PatternRecord> = z.object({
   alternate: z.literal('flip').optional(),
   boundary: z.object({ min: pair, max: pair }),
   area: z.object({ shapeId: ShapeIdSchema, center: pair, rotation: num }).optional(),
-  margin: num,
+  margin: z.union([num, pair]),
   fit: z.literal('clip').optional(),
   invert: z.literal(true).optional(),
   clip: z.object({ min: pair, max: pair }).optional(),

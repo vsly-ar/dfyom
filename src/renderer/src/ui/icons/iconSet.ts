@@ -187,6 +187,30 @@ export const ICON_SET = {
       { d: 'M8 5.4l2.25 1.3v2.6L8 10.6L5.75 9.3V6.7z', a: true },
     ],
   },
+  // Heatsink presets H1 (pattern-presets.md § UI): the Presets dialog's Heatsink group, a section
+  // of a base with three tall fins, the middle fin the accent.
+  heatsink: {
+    label: 'Heatsink',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 14.5h13' },
+      { d: 'M2.5 14.5V5h2v9.5M11.5 14.5V5h2v9.5' },
+      { d: 'M7 14.5V2.5h2v12', a: true },
+    ],
+  },
+  // The Straight fins preset (top view): four slots running out of a frame's top and bottom, one
+  // the accent.
+  'fins-straight': {
+    label: 'Straight fins',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { rect: [1.5, 3, 13, 10, 1] },
+      { d: 'M4 1.5v13M6.65 1.5v13M12 1.5v13' },
+      { d: 'M9.35 1.5v13', a: true },
+    ],
+  },
   // Engraved patterns E3 (engraved-patterns.md § UI): three wavy grooves across the face, the
   // middle one the accent; strokes only, as the Groove's line work.
   engraving: {

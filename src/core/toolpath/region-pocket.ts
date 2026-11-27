@@ -47,6 +47,7 @@ import {
   type RingNode,
 } from './region-rings'
 import { clipRing, restArea, restLinkClear, type RestArea, type Run } from './region-rest'
+import type { SlotPass } from '../geometry/slots'
 
 /** A pocket of any region, placed in the setup's work plane (WCS XY, mm). */
 export interface RegionPocketOperation {
@@ -68,7 +69,16 @@ export interface RegionPocketOperation {
    * `restItems`); below it every node is cut whole.
    */
   readonly restAfter?: RestAfter | undefined
+  /**
+   * H1 slot rule (geometry/slots.ts): slots exactly as wide as the tool, taken out of `region` and
+   * cut once per level along their centre lines, after the region's rings of that level.
+   * Doc: docs/modes/pattern-presets.md#implementation-h1
+   */
+  readonly slots?: readonly SlotPass[] | undefined
 }
+
+/** Above the level just cut, a slot is entered by a rapid down to this height over it (mm). */
+export const SLOT_CLEARANCE = 0.5
 
 /**
  * What an earlier roughing pocket of the same region cleared, by its tool (DF108) and margins
@@ -140,7 +150,8 @@ export function generateRegionPocket(
       'stepover must be ≤ 0.9 × tool diameter',
       { stepover: cutting.stepover, max: 0.9 * tool.diameter },
     )
-  if (op.region.pieces.length === 0)
+  const slots = op.slots ?? []
+  if (op.region.pieces.length === 0 && slots.length === 0)
     issues.rule('invariant', 'operation.region', 'empty', 'the region is empty')
   const R = tool.diameter / 2
   const flatRadius = R - tool.cornerRadius
@@ -151,7 +162,7 @@ export function generateRegionPocket(
 
   // the wall's tool-centre region; a tool up to TOOL_FIT_TOLERANCE too wide is accepted (v0.1)
   let wall: Region = { pieces: [] }
-  if (issues.invariant.length === 0) {
+  if (issues.invariant.length === 0 && op.region.pieces.length > 0) {
     for (const d of [R, R - TOOL_FIT_TOLERANCE]) {
       const r = port.offset(op.region, d)
       if (r.isErr()) return Err(r.unwrapErr())
@@ -493,6 +504,67 @@ export function generateRegionPocket(
     return Ok(undefined)
   }
 
+  /**
+   * H1 slot rule: each slot once at level z along its centre line, from the end nearest the
+   * tool. Entered by a rapid down to `SLOT_CLEARANCE` over the level above (the slot is cleared
+   * there), then at an open end straight down at the plunge rate (the tool centre is past the
+   * stock edge), at a closed end by a ramp along the centre line (back and forth when short).
+   */
+  const cutSlots = (z: number, top: number): AppResult<void> => {
+    const left = [...slots]
+    let done = 0
+    while (left.length > 0) {
+      if (++done % PIECES_PER_STEP === 0) {
+        const g = steps.step()
+        if (g.isErr()) return Err(g.unwrapErr())
+      }
+      const here = xy()
+      const d = (p: Vec2) => (here === undefined ? 0 : Math.hypot(p[0] - here[0], p[1] - here[1]))
+      let pick = 0
+      let fromA = true
+      let best = Infinity
+      for (const [i, sl] of left.entries())
+        for (const [isA, p] of [
+          [true, sl.a],
+          [false, sl.b],
+        ] as const)
+          if (d(p) < best - 1e-9) {
+            best = d(p)
+            pick = i
+            fromA = isA
+          }
+      const sl = left.splice(pick, 1)[0]!
+      const [from, to, open] = fromA ? [sl.a, sl.b, sl.openA] : [sl.b, sl.a, sl.openB]
+      if (here === undefined || best > 1e-9) goTo(from)
+      const above = Math.min(retract, top + SLOT_CLEARANCE)
+      const pz = b.position![2]
+      if (pz > above + 1e-9) b.rapid(at(from, above))
+      const slotLen = Math.hypot(to[0] - from[0], to[1] - from[1])
+      if (open || !allowed.includes('ramp') || slotLen < tool.diameter - EPSILON || top - z <= 0)
+        b.line(at(from, z), cutting.plungeRate)
+      else {
+        if (b.position![2] > top + 1e-9) b.line(at(from, top), cutting.plungeRate)
+        // ramp along the centre line at rampAngle, turning at the ends, then back to the start
+        const ramp = (top - z) / tan
+        const u: Vec2 = [(to[0] - from[0]) / slotLen, (to[1] - from[1]) / slotLen]
+        let walked = 0
+        let pos = 0
+        let forward = true
+        while (walked < ramp - 1e-9) {
+          const step = Math.min(ramp - walked, forward ? slotLen - pos : pos)
+          pos += forward ? step : -step
+          walked += step
+          const zz = top - (top - z) * (walked / ramp)
+          b.line([from[0] + u[0] * pos, from[1] + u[1] * pos, zz], feed)
+          if (walked < ramp - 1e-9) forward = !forward
+        }
+        if (pos > 1e-9) b.line(at(from, z), feed)
+      }
+      b.line(at(to, z), feed)
+    }
+    return Ok(undefined)
+  }
+
   let top = cutTop(op.onZ, floor, input.material)
   // DF122: below the roughing's floor (its floor margin) the roughing cleared nothing
   const rest = op.restAfter
@@ -501,7 +573,7 @@ export function generateRegionPocket(
   // DF108: rest machining may leave no ring to cut (the roughing cleared every node)
   for (const [k, z] of roughZ.entries()) {
     const nodes = levelTree(z)
-    if (nodes.length === 0) continue
+    if (nodes.length === 0 && slots.length === 0) continue
     if (nodes === tree) leaves = treeLeaves.unwrap()
     else {
       if (fullLeaves === undefined) {
@@ -514,32 +586,37 @@ export function generateRegionPocket(
     const s = pass(k)
     if (s.isErr()) return Err(s.unwrapErr())
     b.pass('rough')
-    if (clipped !== undefined && nodes === tree) {
-      if (clipped.components.length === 0) continue
-      if (fullLeaves === undefined) {
-        const got = leafMap(fullTree)
-        if (got.isErr()) return Err(got.unwrapErr())
-        fullLeaves = got.unwrap()
+    if (clipped !== undefined && nodes === tree && nodes.length > 0) {
+      if (clipped.components.length === 0) {
+        if (slots.length === 0) continue
+      } else {
+        if (fullLeaves === undefined) {
+          const got = leafMap(fullTree)
+          if (got.isErr()) return Err(got.unwrapErr())
+          fullLeaves = got.unwrap()
+        }
+        leaves = fullLeaves
+        const r = cutRestLevel(clipped, z, top)
+        if (r.isErr()) return Err(r.unwrapErr())
       }
-      leaves = fullLeaves
-      const r = cutRestLevel(clipped, z, top)
-      if (r.isErr()) return Err(r.unwrapErr())
-      const pos = b.position!
-      b.rapid([pos[0], pos[1], retract])
-      top = z
-      continue
+    } else {
+      const left = [...nodes]
+      let visited = 0
+      while (left.length > 0) {
+        // an abort point per group of pieces within a level (patterns P1: a level of 2 000 cells)
+        if (++visited % PIECES_PER_STEP === 0) {
+          const g = steps.step()
+          if (g.isErr()) return Err(g.unwrapErr())
+        }
+        const r = nearestFirst(left)!
+        left.splice(left.indexOf(r), 1)
+        visit(r, z, top)
+      }
     }
-    const left = [...nodes]
-    let visited = 0
-    while (left.length > 0) {
-      // an abort point per group of pieces within a level (patterns P1: a level of 2 000 cells)
-      if (++visited % PIECES_PER_STEP === 0) {
-        const g = steps.step()
-        if (g.isErr()) return Err(g.unwrapErr())
-      }
-      const r = nearestFirst(left)!
-      left.splice(left.indexOf(r), 1)
-      visit(r, z, top)
+    // H1: the slots of this level, nearest end first (zigzag across the block)
+    if (slots.length > 0) {
+      const r = cutSlots(z, top)
+      if (r.isErr()) return Err(r.unwrapErr())
     }
     const pos = b.position!
     b.rapid([pos[0], pos[1], retract])
