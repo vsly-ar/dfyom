@@ -21,6 +21,7 @@ import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { TouchOffButton } from './TouchOffButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
+import { GoToDialog } from './GoToDialog'
 import { FilePreflightDialog } from './RunFile'
 import styles from './Run.module.css'
 
@@ -44,6 +45,7 @@ export function RunDialogs(): React.JSX.Element {
       ) : null}
       {doc ? <SetupChangeDialog doc={doc} /> : null}
       <WaitDialog doc={doc} />
+      <GoToDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>

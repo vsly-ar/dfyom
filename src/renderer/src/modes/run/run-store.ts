@@ -52,6 +52,12 @@ export type RunEnd =
 
 export type Axis = 'x' | 'y' | 'z'
 
+/** DF128: what the Go to dialog opens on (docs/modes/run-goto.md#what-the-user-does). */
+export interface GoToRequest {
+  readonly frame: 'work' | 'machine'
+  readonly axis: Axis
+}
+
 /** What "Connect" opens: the GRBL emulator or a real controller (docs/modes/run-machine.md#ui). */
 export type ConnectTo = 'virtual' | 'serial'
 /** A `softLimit` finding of `run.job.check` (a plan warning; `params` in mm). */
@@ -177,6 +183,13 @@ export interface RunState {
   readonly file: RunFileView | undefined
   /** DF93: the recently run gCode files (main's list), newest first. */
   readonly recentFiles: readonly string[]
+  /**
+   * DF128: the Go to dialog, while open: the frame and axis of the clicked DRO value. The jog
+   * hotkeys are off while it is set (docs/modes/run-goto.md#keyboard).
+   */
+  readonly goTo: GoToRequest | undefined
+  /** DF128: "Lift to the top first", per window (off by default). */
+  readonly goToLiftTop: boolean
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -185,6 +198,10 @@ export interface RunState {
   closeFile(): void
   refreshRecentFiles(): Promise<void>
   setPlan(planId: string | undefined): void
+  /** DF128: opens the Go to dialog on a frame, with that axis' field focused. */
+  openGoTo(request: GoToRequest): void
+  closeGoTo(): void
+  setGoToLiftTop(on: boolean): void
   setGcode(patch: Partial<GcodePanelState>): void
   setMachine(machineId: string | undefined): void
   setSetup(setupId: string | undefined): void
@@ -224,10 +241,13 @@ export interface RunState {
   setWorkZero(axes: readonly Axis[]): Promise<void>
   /** Z touch plate (`run.machine.probeZ`, M4): a job; a miss shows in the alarm panel. */
   probeZ(plateThickness: number): Promise<void>
-  /** DF69: jog to the touch-off spot (`touchOffMoves`), one jog after the other. */
+  /**
+   * DF69: jog to the touch-off spot (`touchOffMoves`), one jog after the other; DF128: the Go to
+   * steps. False when a jog was refused (the banner has why).
+   */
   moveTo(
     moves: readonly { readonly to: readonly [number, number, number]; readonly feed: number }[],
-  ): Promise<void>
+  ): Promise<boolean>
   /** DF78 alignment step: `run.align.goto` (the pointer to `zero`, a point, `next`, `previous`). */
   alignGoto(setupId: string, to: string): Promise<void>
   /** `run.align.tick`: tick or untick an entry, or confirm (`skipUnticked` after the prompt). */
@@ -378,6 +398,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       gcode: { open: false, height: GCODE_HEIGHT_REM, follow: true },
       file: undefined,
       recentFiles: [],
+      goTo: undefined,
+      goToLiftTop: false,
+      openGoTo: (goTo) => set({ goTo }),
+      closeGoTo: () => set({ goTo: undefined }),
+      setGoToLiftTop: (goToLiftTop) => set({ goToLiftTop }),
       async loadFile(path) {
         const name = fileNameOf(path)
         set({ file: { state: 'loading', path, name }, preflightCheck: { state: 'idle' } })
@@ -519,8 +544,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       async moveTo(moves) {
         for (const { to, feed } of moves) {
           const r = await call('run.machine.jog', { to: [...to], feed })
-          if (!r.ok) return
+          if (!r.ok) return false
         }
+        return true
       },
       async alignGoto(setupId, to) {
         const planId = get().planId

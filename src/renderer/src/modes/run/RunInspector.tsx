@@ -21,7 +21,7 @@ import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { RunFileSection } from './RunFile'
-import { activeJob, isConnected, runGates } from './machine-state'
+import { activeJob, goToOpenGate, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
 import styles from './Run.module.css'
 
@@ -81,6 +81,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
           status={status}
           units={units}
           zero={{ gate: gates.workZero, onZero: (axis) => void a.setWorkZero([axis]) }}
+          goTo={{ gate: goToOpenGate(status), onGoTo: a.openGoTo }}
         />
         {/* DF78 (Q107): the alignment step docked beside the DRO */}
         {doc === undefined ? null : <AlignmentPanel doc={doc} />}

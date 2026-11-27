@@ -434,6 +434,34 @@
   padding-left: var(--space-3);
 }
 
+/* DF128: a coordinate is a button that opens Go to; it looks like the value it shows (a
+   disabled one too: the DRO stays readable during a run) */
+.droGo {
+  padding: 0 var(--space-1);
+  margin: 0 calc(-1 * var(--space-1));
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.droGo:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.droGo:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.droGo:disabled {
+  cursor: default;
+}
+
 /* not homed (DF46): "—" in every cell and the reason, on a line reserved either way */
 .droTable[data-known='false'] .droWork,
 .droTable[data-known='false'] .droMachine {
@@ -1209,4 +1237,69 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   color: var(--text);
+}
+
+/* DF128: the Go to dialog (docs/modes/run-goto.md) */
+.goTo {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.goToModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.goTo > .hint {
+  margin-top: calc(-1 * var(--space-2));
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.goToFields {
+  display: grid;
+  /* one field per row: the Field layout (label column, control, support area) needs the width */
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.goToSteps {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.goToSteps .hint {
+  font-size: var(--text-sm);
+}
+
+.goToList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  /* reserved for three steps, so the dialog never jumps while typing */
+  min-height: calc(3 * var(--lh-sm) + 4px);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+/* the step on the left, its length on the right */
+.goToList li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+
+.goToList li[aria-current='step'] {
+  color: var(--text);
+  background: var(--accent-subtle);
+  border-radius: var(--radius-xs);
+  font-weight: var(--weight-medium);
+}
+
+.goTo > .why {
+  min-height: var(--lh-sm);
 }

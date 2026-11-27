@@ -346,7 +346,49 @@ export const runMessages = {
     /** DF88: the per-axis zero buttons in the table. */
     zero: '0',
     setZero: (axis: string) => `Set ${axis} zero`,
+    /** DF128: a coordinate's Go to button. */
+    goTo: (axis: string, value: string, frame: 'work' | 'machine') =>
+      `Go to: ${axis} ${value} ${frame}`,
     workZeroHint: 'Set the work zero (G54) per axis at the current tool position with its 0.',
+  },
+
+  /** DF128: the Go to dialog (docs/modes/run-goto.md). */
+  goTo: {
+    title: 'Go to',
+    description: 'Type where the spindle should go. Nothing moves until Go.',
+    frame: 'Frame',
+    work: 'Work (G54)',
+    machine: 'Machine (G53)',
+    mode: 'Target',
+    absolute: 'Absolute',
+    relative: 'Relative',
+    relativeFrame: 'Relative moves are the same in both frames.',
+    axis: (axis: string, unit: string) => `${axis} (${unit})`,
+    invalid: 'Not a length: type a number or an expression (12.5, 3/8in, 100 - 2).',
+    shortcuts: 'Fill in',
+    workZeroXY: 'Work zero XY',
+    workZero: 'Work zero',
+    machineTop: 'Machine top Z',
+    liftTop: 'Lift to the top first',
+    steps: 'Steps',
+    stepUp: (z: string) => `Up to Z ${z}`,
+    stepDown: (z: string) => `Down to Z ${z}`,
+    stepXY: (x: string, y: string) => `To X ${x} Y ${y}`,
+    feed: (xy: string, z: string, unit: string) =>
+      xy === z ? `at ${xy} ${unit}` : `at ${xy} ${unit} (Z ${z})`,
+    seconds: (s: number) => `about ${s} s`,
+    already: 'Already there.',
+    travel: (axis: string, target: string, min: string, max: string, unit: string) =>
+      `${axis} would leave the travel: the target is at machine ${target}, the travel is ${min} to ${max} ${unit}.`,
+    unknown: 'Home the machine first: the position is unknown.',
+    jogging: 'The machine is still jogging.',
+    spindleOn: 'Stop the spindle first.',
+    spindleReal: 'Make sure the spindle is off.',
+    moving: (n: number, of: number) => `Moving: step ${n} of ${of}`,
+    stopped: (x: string, y: string, z: string) => `Stopped at X ${x} Y ${y} Z ${z}.`,
+    go: 'Go',
+    stop: 'Stop',
+    cancel: 'Cancel',
   },
 
   progress: {

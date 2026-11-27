@@ -7,6 +7,8 @@ import {
   formatFeed,
   formatLength,
   formatStep,
+  goToGate,
+  goToOpenGate,
   fromMm,
   jogFeedRange,
   jogPresetOf,
@@ -248,5 +250,26 @@ describe('touchOffMoves', () => {
   it('names the surface without its level', () => {
     expect(surfaceName('Facing 1 floor, 0.50 below the stock top')).toBe('Facing 1 floor')
     expect(surfaceName('Pocket 2 floor')).toBe('Pocket 2 floor')
+  })
+})
+
+describe('goToGate (DF128)', () => {
+  it.each([
+    [closedStatus(), 'Connect to a machine first.', 'Connect to a machine first.'],
+    [
+      open({ homed: false, state: 'Alarm' }),
+      'Home the machine first: the position is unknown.',
+      'Home the machine first: the position is unknown.',
+    ],
+    [open(job('streaming')), 'Not while a run is going.', 'Not while a run is going.'],
+    [open(job('toolChange')), 'Not while a run is going.', 'Not while a run is going.'],
+    [open({ state: 'Alarm', alarm: { code: 9, text: '' } }), null, 'Home the machine first.'],
+    [open({ state: 'Hold:0' }), null, 'Not while the machine is moving.'],
+    [open({ state: 'Jog' }), null, 'The machine is still jogging.'],
+    [open({ spindle: 1000 }), null, 'Stop the spindle first.'],
+    [open(), null, null],
+  ] as const)('%#: opens %s, goes %s', (s, opens, goes) => {
+    expect(goToOpenGate(s)).toBe(opens)
+    expect(goToGate(s)).toBe(goes)
   })
 })
