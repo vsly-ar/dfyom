@@ -130,6 +130,8 @@ export {
   resetInspectorMemory,
   revealInInspector,
   SESSION_INSPECTOR_MEMORY,
+  useInspectorMemory,
+  useRememberedTab,
   type InspectorMemory,
 } from './InspectorGroup/memory'
 export { Term, type TermProps } from './Term/Term'

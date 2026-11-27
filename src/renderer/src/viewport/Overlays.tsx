@@ -9,6 +9,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Color, Quaternion, SRGBColorSpace, Vector3 } from 'three'
 import type { Palette, Rgb } from './colours'
+import { frameAxisLabel } from './frame-axis-label'
 import type { SurfaceGlyph, Vec3 } from './mesh'
 import styles from './Viewport.module.css'
 
@@ -155,7 +156,8 @@ export function PickGlyphs({
 }
 
 /** The selected operation's face frame: slim `u` and `v` arrows from the origin (thin shafts,
- * small heads), each labelled just past its tip on a chip that reads on any surface. */
+ * small heads), each labelled just past its tip on a chip that reads on any surface; an axis
+ * along a part axis names it with its sign, "u (−X)" (DF127). */
 export function FrameAxes({
   frame,
   palette,
@@ -173,7 +175,7 @@ export function FrameAxes({
       zIndexRange={[10, 0]}
       className={styles['axisLabel']}
     >
-      <span aria-hidden="true">{frame.labels[axis]}</span>
+      <span aria-hidden="true">{frameAxisLabel(frame.labels[axis], frame[axis])}</span>
     </Html>
   )
   return (

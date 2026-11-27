@@ -57,6 +57,24 @@ test('face picking and anchors: on by direction, side-face fields, anchor picker
   )
   // the face-frame axis labels are drawn at the axis tips (drei Html overlays in the canvas)
   await expect(viewport.locator('[class*="axisLabel"]')).toHaveCount(2)
+  // DF127: each names the part axis it lies along (the right side: u along +Y, v along +Z)
+  await expect(viewport.locator('[class*="axisLabel"]')).toHaveText(['u (+Y)', 'v (+Z)'])
+  if (process.env['DFYOM_RENDERS'] === '1' && process.env['DFYOM_RENDERS_DIR'] !== undefined)
+    for (const theme of ['light', 'dark'] as const) {
+      // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+      await page.evaluate((t) => {
+        const doc = (
+          globalThis as unknown as {
+            document: { documentElement: { setAttribute(n: string, v: string): void } }
+          }
+        ).document
+        doc.documentElement.setAttribute('data-theme', t)
+      }, theme)
+      await page.waitForTimeout(300)
+      await page.screenshot({
+        path: `${process.env['DFYOM_RENDERS_DIR']}/df127-axis-labels-${theme}.png`,
+      })
+    }
   // the right side is 60 × 20: keep the pocket on it
   await setField(inspector, 'Position u', '30')
   await setField(inspector, 'Position v', '10')

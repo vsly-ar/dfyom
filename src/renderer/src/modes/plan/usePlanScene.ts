@@ -78,6 +78,7 @@ import {
   snapClampAt,
   workholdingOverlay,
 } from './workholding-scene'
+import { useMeasuredFrom } from './workholding-from'
 import { shownZRefRun, snapSpot } from './z-spot'
 import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
 import { usePlanSelection } from './usePlan'
@@ -307,6 +308,8 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     const item = holding?.items.find((i) => i.id === heldClamp.itemId)
     if (item?.kind !== 'toeClamp' || Math.abs(item.at - heldClamp.at) < 1e-6) setHeldClamp(null)
   }, [heldClamp, holding])
+  // DF125: the chip reads the position as the inspector does (stock corner or work zero)
+  const xyFrom = useMeasuredFrom().from.xy
   const clamps = useMemo((): ClampDrag | undefined => {
     if (plan === undefined || setup === undefined || holding === undefined) return undefined
     if (!allows(plan, 'plan.workholding.set')) return undefined
@@ -338,7 +341,8 @@ export function usePlanScene(mode: AppMode): RunScene | null {
             ? half
             : (c.edge === 'vMax' ? s.width : s.length) - half
         const anchor: P = axis === 0 ? [at, across] : [across, at]
-        const where = `${EDGE_WORD[c.edge]} ${axis === 0 ? 'X' : 'Y'}${summaryLength(at - zero[axis], units === 'inch' ? 'in' : 'mm')}`
+        const shown = at - (xyFrom === 'zero' ? zero[axis] : 0)
+        const where = `${EDGE_WORD[c.edge]} ${axis === 0 ? 'X' : 'Y'}${summaryLength(shown, units === 'inch' ? 'in' : 'mm')}`
         return {
           itemId: c.id,
           axis,
@@ -369,7 +373,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
         if (Math.abs(at - c.at) > 1e-6) commit(itemId, at)
       },
     }
-  }, [plan, setup, holding, info, heldClamp, units, call, planStore])
+  }, [plan, setup, holding, info, heldClamp, units, call, planStore, xyFrom])
   // S22: while picking, the setup's valid sources are targets; a click adds that point
   const targets = useMemo((): AlignmentTarget[] => {
     if (plan === undefined || setup === undefined || picking !== setup.id) return []

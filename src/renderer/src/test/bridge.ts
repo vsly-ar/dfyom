@@ -382,6 +382,9 @@ export function createFakeBridge(
           ...current,
           ...patch,
           layouts: { ...current.layouts, ...(patch.layouts ?? {}) },
+          // merged by key, as main does (mergeSettings)
+          inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
+          inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },
         } as AppSettings
         settings.emit(current)
         return Promise.resolve({ ok: true, value: current, revision: 0 })

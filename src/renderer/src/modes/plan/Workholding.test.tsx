@@ -462,6 +462,58 @@ describe('Workholding in the setup inspector', () => {
     await waitFor(() => expect(t.section().querySelector('[data-arrange-result]')).toBeNull())
   })
 
+  it('reads and enters positions from the work zero and heights from the stock bottom (DF125)', async () => {
+    const t = await renderInspector(async (s, planId) => {
+      const setupId = s.plan(planId).setups[0]!.id
+      await s.run('plan.workholding.set', { planId, setupId, items: [clamp] })
+      await s.run('plan.setup.update', { planId, setupId, zero: { at: ['20', '10'] } })
+    })
+    const row = () => within(t.section()).getByRole('button', { name: /^Toe clamp 1/ })
+    await t.user.click(row())
+    const fields = within(t.section()).getByRole('group', { name: 'Item Toe clamp 1' })
+    const at = () => within(fields).getByLabelText('Position along the edge', { selector: 'input' })
+    // the defaults read as stored: from the stock corner, heights above Z0
+    expect(at()).toHaveValue('30')
+    expect(at()).toHaveAccessibleDescription(/From the front-left corner of the stock's up face\./)
+    expect(row()).toHaveTextContent('front X30 grip 10 top Z20')
+    await t.user.click(within(fields).getByRole('radio', { name: 'Work zero' }))
+    // from the work zero (20, 10): X 30 reads 10, as the DRO and the chip in the viewport
+    await waitFor(() => expect(at()).toHaveValue('10 mm'))
+    expect(at()).toHaveAccessibleDescription(/From the work zero: X\/Y as the DRO reads them\./)
+    expect(row()).toHaveTextContent('front X10 grip 10 top Z20')
+    await waitFor(() =>
+      expect(probe.scene?.workholding?.clamps?.handles[0]?.label).toBe(
+        'Toe clamp 1, front X10: drag along the edge, or use the arrow keys',
+      ),
+    )
+    // entered from the zero, stored in the setup frame
+    await t.user.clear(at())
+    await t.user.type(at(), '25{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toEqual({
+        planId: t.planId,
+        setupId: t.setupId,
+        items: [{ id: 'wh1', kind: 'toeClamp', at: '45 mm' }],
+      }),
+    )
+    await waitFor(() => expect(at()).toHaveValue('25 mm'))
+    // heights from the stock bottom: the top reads Z20 + T, an entry is stored less T
+    await t.user.click(within(fields).getByRole('radio', { name: 'Bottom' }))
+    const top = within(fields).getByLabelText('Top above stock bottom', { selector: 'input' })
+    const shown = Number.parseFloat((top as HTMLInputElement).value)
+    expect(shown).toBeGreaterThan(20)
+    const thickness = shown - 20
+    expect(row()).toHaveTextContent(`front X25 grip 10 top ${shown} above bottom`)
+    await t.user.clear(top)
+    await t.user.type(top, `${thickness + 30}{Enter}`)
+    await waitFor(() =>
+      expect(t.callsOf('plan.workholding.set').at(-1)).toMatchObject({
+        items: [{ id: 'wh1', kind: 'toeClamp', top: '30 mm' }],
+      }),
+    )
+    await expectNoAxeViolations()
+  })
+
   it('drags a toe clamp along its edge in the plan scene: snapped, one set on release (X2-6)', async () => {
     const t = await renderInspector(async (s, planId) => {
       const setupId = s.plan(planId).setups[0]!.id
