@@ -60,6 +60,7 @@ import {
   isGeneralShape,
   patternCells,
   recordOf,
+  shapeRotation,
   shapesOf,
   type Anchor,
   type FeatureOwner,
@@ -119,7 +120,7 @@ import { designToolToDTO, type DesignTool } from './tool'
 import { defaultSlotWidth, lengthSourceUp, resolveDesignTool } from './tool-choice'
 import { toGeometryInput } from './geometry-input'
 import { Tool } from '../library/tool'
-import { reanchor, type Extents } from './anchor'
+import { reanchor, shapeCentre, type Extents } from './anchor'
 import type { Region2dPort } from '../geometry/2d/port'
 import { exactExtents, placeShape, shapeFacts } from './placement'
 import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
@@ -363,6 +364,11 @@ export class Fields {
     )
     if (r.adjusted !== undefined) this.adjusted.push(r.adjusted)
     return { cornerRadius: r.cornerRadius, ...(r.round ? { round: true as const } : {}) }
+  }
+
+  /** A Fields on the same resolver whose results are not this one's (a look-ahead parse). */
+  scratch(): Fields {
+    return new Fields(this.units, this.resolver, this.env)
   }
 
   q(path: string, kind: FieldKind, source: string): Quantity {
@@ -829,12 +835,63 @@ function nextNumber(part: Part, kind: OperationKind): number {
   return max + 1
 }
 
-/** design.md: the last whole-face top facing's floor (DF145: never a region's), else `stock.top`. */
-export function defaultOn(ops: readonly Operation[]): string {
+/**
+ * design.md: the last top facing's floor, else `stock.top`: a whole-face facing's, or (hardening
+ * DF154) a region facing's whose region holds the feature's centre `at` (top face frame, mm). A
+ * region's floor is never the default of a feature placed elsewhere (DF145).
+ */
+export function defaultOn(
+  ops: readonly Operation[],
+  at?: { readonly stock: Stock; readonly center: readonly [number, number] },
+): string {
   const facing = ops.findLast(
-    (o) => o.kind === 'facing' && o.on === STOCK_TOP && o.region === undefined,
+    (o) =>
+      o.kind === 'facing' &&
+      o.on === STOCK_TOP &&
+      (o.region === undefined || (at !== undefined && regionHolds(o.region, at))),
   )
   return facing === undefined ? STOCK_TOP : `${facing.id}.floor`
+}
+
+/** Whether a facing region holds a point of the top face (a general shape: never, decided DF154). */
+function regionHolds(
+  region: NonNullable<Extract<Operation, { kind: 'facing' }>['region']>,
+  at: { readonly stock: Stock; readonly center: readonly [number, number] },
+): boolean {
+  const [u, v] = at.center
+  if (!Number.isFinite(u) || !Number.isFinite(v)) return false
+  if (region.kind === 'band') {
+    const w = region.width.canonical
+    const L = at.stock.length.canonical
+    const W = at.stock.width.canonical
+    switch (region.edge) {
+      case 'front':
+        return v < w
+      case 'back':
+        return v > W - w
+      case 'left':
+        return u < w
+      case 'right':
+        return u > L - w
+    }
+  }
+  const s = region.shape
+  if ((s.kind !== 'rectangle' && s.kind !== 'circle') || shapeRotation(s) !== 0) return false
+  const [cx, cy] = shapeCentre(s)
+  if (s.kind === 'circle') return Math.hypot(u - cx, v - cy) < s.diameter.canonical / 2
+  return Math.abs(u - cx) < s.length.canonical / 2 && Math.abs(v - cy) < s.width.canonical / 2
+}
+
+/** The `at` of `defaultOn` from a parsed centre (undefined when a coordinate did not parse). */
+export function centreAt(
+  stock: Stock | undefined,
+  center: readonly [Quantity | undefined, Quantity | undefined] | undefined,
+): { stock: Stock; center: [number, number] } | undefined {
+  const u = center?.[0]?.canonical
+  const v = center?.[1]?.canonical
+  return stock === undefined || u === undefined || v === undefined
+    ? undefined
+    : { stock, center: [u, v] }
 }
 
 export function findOperation(
@@ -921,6 +978,8 @@ interface BuildContext {
   readonly id: string
   readonly name: string
   readonly ops: readonly Operation[]
+  /** The part's stock (on add: the default `on` under a centre, DF154). */
+  readonly stock?: Stock
 }
 
 /** One operation kind: its parameter args and how args (plus the previous version) build it. */
@@ -1028,7 +1087,7 @@ const drillingSpec: KindSpec<typeof drillingParams, Extract<Operation, { kind: '
   kind: 'drilling',
   params: drillingParams,
   required: ['center', 'diameter'],
-  build: (a, prev, { f, id, name, ops }) => {
+  build: (a, prev, { f, id, name, ops, stock }) => {
     const bottom = a.bottom ?? prev?.bottom ?? 'through'
     // a bottom that does not use depth / pointAngle drops them; drillPoint defaults to 118°
     const depth: Option<Quantity> =
@@ -1045,16 +1104,18 @@ const drillingSpec: KindSpec<typeof drillingParams, Extract<Operation, { kind: '
           : prev !== undefined && prev.pointAngle.isSome()
             ? prev.pointAngle
             : Some(f.q('pointAngle', 'angle', DEFAULTS.pointAngle[f.units]))
+    const center: Point =
+      a.center !== undefined
+        ? [f.q('center.0', 'length', a.center[0]), f.q('center.1', 'length', a.center[1])]
+        : prev!.center
     return {
       kind: 'drilling',
       id,
       name,
       generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-      on: a.on ?? prev?.on ?? defaultOn(ops),
-      center:
-        a.center !== undefined
-          ? [f.q('center.0', 'length', a.center[0]), f.q('center.1', 'length', a.center[1])]
-          : prev!.center,
+      // DF154: on a region facing's floor when it lies under the hole
+      on: a.on ?? prev?.on ?? defaultOn(ops, centreAt(stock, center)),
+      center,
       diameter: f.val('diameter', 'length', a.diameter, prev?.diameter),
       bottom,
       depth,
@@ -1318,7 +1379,13 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(ops.length), env)
       const n = nextNumber(part, spec.kind)
       const id = `${ID_PREFIX[spec.kind]}${n}`
-      const built = spec.build(args, undefined, { f, id, name: args.name ?? `${label} ${n}`, ops })
+      const built = spec.build(args, undefined, {
+        f,
+        id,
+        name: args.name ?? `${label} ${n}`,
+        ops,
+        stock,
+      })
       const generalTolerance = f.tolerance(args.generalTolerance, NO_TOLERANCE)
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))

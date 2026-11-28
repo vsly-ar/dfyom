@@ -84,9 +84,9 @@ describe("the user's plate job (dogfood TG #492)", () => {
       region: { band: { edge: 'front', width: '22' } },
       tool: specific(finish),
     })
+    // DF154: no `on`: a hole in the band stands on the band's floor by default
     await s.run('design.hole.add', {
       partId,
-      on: 'facing1.floor',
       center: ['20', '11'],
       type: 'countersink',
       fastener: 'M6',
