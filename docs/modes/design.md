@@ -71,6 +71,41 @@ Surfaces: `facing1.floor` (the new top). Tool requirement: flat end mill (incl. 
 
 With a reference model, the depth that faces down to the reference's closest point is suggested on the Depth field and used by Add → Facing (DF4, [reference-model.md § Facing depth from the reference](reference-model.md#facing-depth-from-the-reference-df4)).
 
+#### Facing region (hardening DF145)
+
+Status: **draft** (2026-11-28, from the user's TG #492; awaits [Q230–Q231](#questions-q230q231)) · Intake: [hardening.md DF145](../plans/hardening.md#intake-user-feedback-goes-here)
+
+The user: "There's no way to limit facing operation to a region. Even if I add a dummy pocket 0.1mm deep to select the surface it creates, there's no way to put facing operation there as well. But I wanted to face only 22mm of the surface. So I used Pocket 2 as some kind of workaround." Today a facing always covers its whole stock face ([design-v0.2.md § Face targets](design-v0.2.md#face-targets-generalised-on)).
+
+**Proposal:** an optional `region` on the facing. Absent means the whole face, so stored facings load unchanged (no `schemaVersion` change).
+
+| `region`                              | Meaning (face frame of the facing's `on`)                                                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| absent: **Whole face**                | As today                                                                                                                                      |
+| `{ band: { edge, width } }`: **Band** | The strip `width` deep from one stock edge (`front`, `back`, `left`, `right` of the face), across the whole face: "22 mm from the front edge" |
+| `{ shape }`: **Shape**                | A rectangle, circle or named closed shape, placed as a pocket's shape; clipped to the face                                                    |
+
+- **Open and closed sides.** A side of the region on or beyond the stock edge is **open**: the rows run off the stock with the existing `overshoot`, as a whole facing. A side inside the face is a **boundary**: the tool stays inside the region (Q231), leaving a step of the facing depth there, its inside corners rounded by the tool radius.
+- **Toolpath:** facing's rows ([plan-v0.1.md § Facing](plan-v0.1.md#facing)), clipped to the tool-centre region (the region shrunk by R at boundaries, grown past the edge at open sides as [open sides](plan-v0.3.md#open-sides-df61) do). Rows enter from an open side (no ramp); a region with no open side ramps along its first row within the pocket's `rampAngle`. No finishing pass, no floor fillet, no roughing pass.
+- **How it differs from a shallow pocket** (the user's workaround): a pocket cuts offset rings with a finishing ring on every real wall, enters by helix or ramp, warns about corners and "no tool fits", and orders among pockets; an open-sided pocket already runs past the stock edge (DF61) but keeps its rings. A region facing keeps facing's rows, stepover by the flat diameter (surfacing bits included), side entry, its place first in the tool run and its cut-state handling ([cut-state.md](cut-state.md)).
+- **Surfaces:** `facingN.floor` stays, its patch the region ([construction-surfaces.md](construction-surfaces.md)). Only a whole-face facing becomes the default `on` of later pockets and drillings ([design-v0.2.md](design-v0.2.md#implementation-tasks-f1-f2)): a band's floor is offered in the `on` list, never picked by default.
+- **Rules and DFM:** `width` > 0 and ≤ the face's extent across that edge (`bandWidth`); a shape region that misses the face is `dfm.shapeOutsideFace`; a boundary corner tighter than the smallest flat end mill is the pocket's "no tool fits" check.
+- **Not covered:** facing `on` a pocket floor (the user's dummy-pocket attempt): a shape region replaces it.
+- **Decided here:** the inspector's Region row is a segmented choice **Whole face / Band / Shape**; Band shows an edge picker (the face drawn with its four edges) and Width; Shape reuses the pocket's shape fields. The viewport draws the region with its open sides dashed.
+
+##### Questions (Q230–Q231)
+
+1. **Q230 – Region model.** (1) **`region` on the facing: whole face, a band from one edge, or a shape** (above). (2) Only a shape region (a band is a rectangle you size yourself). (3) No change; let a facing stand `on` a pocket floor. _Recommendation: (1). The band is the user's case in one field, and it stays right when the stock changes; (3) keeps the dummy pocket._
+2. **Q231 – Boundary sides and margin.** (1) **The tool stays inside the region at boundaries; open sides take the existing `overshoot`; no extra margin field.** (2) The tool centre runs on the boundary (cuts R past it, no step left exactly at the line). (3) A signed `margin` that grows or shrinks the region. _Recommendation: (1). The region is what gets faced, as a pocket's shape is; to overlap a neighbouring facing, widen the band._
+
+##### Slices
+
+| Slice | Content                                                                                                                                                                                   | Done when                                                                                                                                                 |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR1   | **Core:** `region` in the model and DTO, removal region and floor patch, the default-`on` rule, rules and DFM, `region` on `design.facing.add/update` (≈ 0.3 K of `tools/list`, measured) | The user's part: a 22 mm band from the front edge evaluates to the band removed and nothing else; a whole-face facing is byte-equal (goldens)             |
+| FR2   | **Toolpath:** rows clipped to the region, open sides with `overshoot`, boundaries with the tool inside, side or ramp entry; cut-state stamps of the region                                | Heightmap test: the band faced flat to depth, 0 gouge past the boundary, leftover < 0.05 mm; a shape region with no open side ramps; virtual machine Idle |
+| FR3   | **UI:** the Region row (Whole face / Band / Shape), edge picker, viewport region with dashed open sides; component test with axe                                                          | The user faces 22 mm from the front edge in the installed app without a pocket                                                                            |
+
 ### Pocket
 
 Blind recess with flat floor; retained regions: inside corner radius and floor fillet ([fillets](../architecture/geometry.md#fillets-as-retained-regions)).
