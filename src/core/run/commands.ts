@@ -16,6 +16,7 @@ import { setupWorkholding } from '../plan/workholding/setup'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
+import { ROUTINE_DEFAULTS } from './probe-routines'
 import { STILL_STATES } from './grbl/sender'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
@@ -693,17 +694,6 @@ export const runMachineProbeZ = defineCommand({
   },
 })
 
-/** v0.5 RV4: routine defaults (docs/modes/run-probing.md#probe-settings-rv4), mm and mm/min. */
-export const ROUTINE_DEFAULTS = {
-  reach: 10,
-  zDistance: 25,
-  depth: 3,
-  clearance: 2,
-  fastFeed: 100,
-  slowFeed: 20,
-  moveFeed: 300,
-} as const
-
 const ProbedValueSchema = z.object({ value: z.number(), uncertainty: z.number() })
 const ProbeRoutineResultSchema = z.object({
   cycle: z.enum(['edge', 'corner', 'centre']),
@@ -781,7 +771,11 @@ export const runVirtualStock = defineCommand({
   title: () => 'Virtual stock',
   machine: false,
   agentTool: false,
-  args: z.object({ stock: VirtualStockSchema.optional(), touch: z.boolean() }),
+  args: z.object({
+    stock: VirtualStockSchema.optional(),
+    touch: z.boolean(),
+    toolDiameter: z.number().nonnegative().max(100).optional(),
+  }),
   result: Done,
   async run(_doc, args, ctx) {
     const r = await act(
@@ -790,6 +784,7 @@ export const runVirtualStock = defineCommand({
         kind: 'virtualStock',
         ...(args.stock === undefined ? {} : { stock: args.stock }),
         touch: args.touch,
+        ...(args.toolDiameter === undefined ? {} : { toolDiameter: args.toolDiameter }),
       },
       'run.virtual.stock',
     )

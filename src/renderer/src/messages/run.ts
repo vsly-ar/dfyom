@@ -331,6 +331,77 @@ export const runMessages = {
         : 'Probe input: open. Touch the clip to the plate to test it.',
   },
 
+  /** v0.5 RV5: Set X/Y zero (docs/modes/run-probing.md#set-xy-zero-rv5). */
+  xyZero: {
+    button: 'Set X/Y zero…',
+    undo: 'Undo zero change',
+    undoHint: (x: string, y: string, unit: string) =>
+      `Puts G54 back to X ${x} Y ${y} ${unit} (machine).`,
+    title: 'Set X/Y zero',
+    description:
+      'Pick a stock edge or corner, probe it or touch it with the bit, then set G54 so the plan’s zero lands right.',
+    pick: 'Edge or corner',
+    picks: {
+      '-1,-1': 'Front left corner (X− Y−)',
+      '0,-1': 'Front edge (Y−)',
+      '1,-1': 'Front right corner (X+ Y−)',
+      '-1,0': 'Left edge (X−)',
+      '1,0': 'Right edge (X+)',
+      '-1,1': 'Back left corner (X− Y+)',
+      '0,1': 'Back edge (Y+)',
+      '1,1': 'Back right corner (X+ Y+)',
+    } as Record<string, string>,
+    zeroOn: 'Plan zero: this corner.',
+    zeroNear: 'Plan zero: at the ring.',
+    noPlan: 'No plan: enter where the edge is in work coordinates.',
+    edgeIs: (axis: string) => `This edge is ${axis} =`,
+    method: 'Method',
+    probe: 'Probe',
+    touch: 'Touch',
+    probeKindNo:
+      'Probe X/Y needs an XYZ corner plate, the bit on a conductive stock or a 3D probe: set the probe kind in Machine settings (Probe), or touch the edge.',
+    probeGeometryNo:
+      'Set the corner plate’s thickness and wall offsets in Machine settings (Probe) to probe with it.',
+    bit: 'Bit Ø',
+    bitFromSpindle: (n: number) =>
+      `From tool ${n} in the spindle; enter a measured Ø if you have one.`,
+    bitEnter: 'No tool in the spindle is known: enter the bit’s Ø.',
+    ball: (d: string, unit: string) => `3D probe ball Ø ${d} ${unit} (Machine settings).`,
+    feeler: 'Feeler',
+    feelerHint: 'Paper ≈ 0.1 mm; 0 when the bit itself touches.',
+    probeSteps: (what: string, kind: 'xyzPlate' | 'tool' | '3d', reach: string, unit: string) =>
+      kind === 'xyzPlate'
+        ? `Hook the corner plate on the ${what}, put the clip on the bit and the bit over the plate top within ${reach} ${unit} of the ${what}. It probes Z on the plate, then each side from outside.`
+        : kind === 'tool'
+          ? `Put the clip on the bit and on the stock (it must conduct), and the bit over the stock top within ${reach} ${unit} of the ${what}. It probes Z, then each side from outside.`
+          : `Put the 3D probe over the stock top within ${reach} ${unit} of the ${what}. It probes Z, then each side from outside.`,
+    spindleOff: 'The spindle must be off. Nothing moves until you press Probe.',
+    probeGo: 'Probe',
+    probing: 'Probing…',
+    touchSteps: (what: string) =>
+      `Jog the bit beside the ${what}, below the top, with the feeler between. Use small steps (0.1 mm or a custom one) until the feeler just drags, then press Touching.`,
+    touching: (edge: string) => `Touching ${edge} edge`,
+    touched: (edge: string, at: string, unit: string) => `${edge} edge: touched at ${at} ${unit}.`,
+    input: (touching: boolean) => (touching ? 'Probe input: touching.' : 'Probe input: open.'),
+    measured: 'Measured',
+    edge: (edge: string, value: string, pm: string, unit: string) =>
+      `${edge} edge at ${value} ± ${pm} ${unit} (machine)`,
+    radiusNote: (d: string, unit: string) => `With the Ø ${d} ${unit} as entered.`,
+    newZero: 'New zero',
+    change: (axis: string, from: string, to: string, delta: string, unit: string) =>
+      `G54 ${axis}: ${from} → ${to} ${unit} (${delta})`,
+    review: 'Review',
+    set: 'Set zero',
+    back: 'Back',
+    cancel: 'Cancel',
+    gate: {
+      running: 'Not while a program runs.',
+      spindle: 'Stop the spindle first.',
+      invalid: 'Enter a valid Ø.',
+      touchFirst: 'Touch each edge first.',
+    },
+  },
+
   /** DF69: "Move to touch-off spot" at a tool change (docs/modes/z-reference.md#dfyom-run). */
   touchOff: {
     button: 'Move to touch-off spot',

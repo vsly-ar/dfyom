@@ -34,6 +34,8 @@ import { planLabel } from '../plan/model'
 import { useLibraryItems } from '../plan/usePlan'
 import {
   actionText,
+  activeJob,
+  formatLength,
   goToOpenGate,
   isConnected,
   isResetAlarm,
@@ -201,6 +203,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const updateSettings = useSettings((s) => s.update)
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
+  const zeroUndo = useRun((s) => s.zeroUndo)
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [homeOpen, setHomeOpen] = useState(false)
   const [dontAsk, setDontAsk] = useState(false)
@@ -252,6 +255,9 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const serial = connected ? status.connection.target === 'serial' : connectTo === 'serial'
   const units = useRunUnits(doc)
   const busy = (name: string) => pending.includes(name)
+  // v0.5 RV5: Set X/Y zero needs the work-zero gate and no program (the routine is a job)
+  const xyZeroGate =
+    gates.workZero ?? (activeJob(status) !== undefined ? runMessages.xyZero.gate.running : null)
   // one line per distinct reason (home, jog, work zero, disconnect), in that order
   const gated = [gates.home, gates.jog, gates.workZero, connected ? gates.disconnect : null]
   const reasons = [...new Set(gated.filter((r) => r !== null))].map((text, i) => ({
@@ -518,6 +524,31 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           onProbe={(t) => void a.probeZ(t)}
         />
         {plate === undefined ? <p className={styles['hint']}>{m.noPlate}</p> : null}
+        {/* v0.5 RV5: Set X/Y zero (run-probing.md#set-xy-zero-rv5) and the undo of its last set */}
+        <div className={styles['buttons']}>
+          <Button
+            disabled={xyZeroGate !== null}
+            {...(gates.workZero === null ? {} : { 'aria-describedby': ids.zero })}
+            onClick={() => a.setXyZeroOpen(true)}
+          >
+            {runMessages.xyZero.button}
+          </Button>
+          {zeroUndo === undefined ? null : (
+            <Button
+              variant="ghost"
+              icon={<Icon name="undo" />}
+              disabled={gates.workZero !== null}
+              title={runMessages.xyZero.undoHint(
+                formatLength(zeroUndo.before[0], units),
+                formatLength(zeroUndo.before[1], units),
+                runMessages.dro.units[units],
+              )}
+              onClick={() => void a.undoXyZero()}
+            >
+              {runMessages.xyZero.undo}
+            </Button>
+          )}
+        </div>
         {/* v0.5 RV3: Test probe, the probe input live from `Pn:P` (run-probing.md) */}
         {connected ? (
           <p className={styles['hint']} role="status">

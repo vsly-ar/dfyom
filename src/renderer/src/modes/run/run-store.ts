@@ -370,6 +370,15 @@ export interface RunState {
   readonly spindleTool: number | undefined
   /** DF133 (Q190): a tool-change wait began and the work zero Z was not set since. */
   readonly zUnset: boolean
+  /** v0.5 RV5: the Set X/Y zero dialog is open (docs/modes/run-probing.md#set-xy-zero-rv5). */
+  readonly xyZeroOpen: boolean
+  /**
+   * v0.5 RV5: the last X/Y zero this window set, for "Undo zero change": G54 X/Y before and
+   * after (MPos mm); dropped when the connection closes.
+   */
+  readonly zeroUndo: { readonly before: XY; readonly after: XY } | undefined
+  /** v0.5 RV5: the plan setup the virtual machine's stock was laid for, in this connection. */
+  readonly virtualStockKey: string | undefined
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -486,6 +495,23 @@ export interface RunState {
   restoreWorkZero(g54: readonly [number, number, number]): Promise<void>
   /** "Zero on this point": G54 X/Y so the current position gets these work coordinates. */
   setWorkZeroAt(x: number, y: number): Promise<void>
+  setXyZeroOpen(open: boolean): void
+  /**
+   * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
+   * failed or was stopped (the banner or the alarm panel says why).
+   */
+  probeRoutine(args: object): Promise<ProbeRoutineResult | undefined>
+  /**
+   * v0.5 RV5: G54 X and/or Y to these machine positions (`G10 L20` through `run.workZero.set`);
+   * true once set, remembered for `undoXyZero`.
+   */
+  setXyZero(g54: { readonly x?: number; readonly y?: number }): Promise<boolean>
+  /** v0.5 RV5: G54 X/Y back to before the last `setXyZero`. */
+  undoXyZero(): Promise<void>
+  /** v0.5 RV5 (virtual machine): lays the stock once per connection and setup (`key`). */
+  layVirtualStock(key: string, stock: VirtualStock): Promise<void>
+  /** v0.5 RV5 (virtual machine): the stock closes the probe input while touched (touch step). */
+  setVirtualTouch(on: boolean, toolDiameter?: number): Promise<void>
   /** `run.override.set` (M6). */
   override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
@@ -529,6 +555,31 @@ export function waitKey(status: RunStatus): string | undefined {
   if (job?.phase === 'toolChange' && job.toolChange) return `${job.jobId}:tc:${job.toolChange.n}`
   if (job?.phase === 'programPause') return `${job.jobId}:pause:${job.pause ?? 0}`
   return undefined
+}
+
+type XY = readonly [number, number]
+
+/** v0.5 RV4: `run.machine.probe`'s result (docs/modes/run-probing.md#xy-probing-rv4). */
+export interface ProbeRoutineResult {
+  readonly cycle: 'edge' | 'corner' | 'centre'
+  readonly top?: ProbedValue
+  readonly x?: ProbedValue
+  readonly y?: ProbedValue
+  readonly centre?: {
+    readonly x: ProbedValue
+    readonly y: ProbedValue
+    readonly diameter: ProbedValue
+  }
+  readonly start: readonly [number, number, number]
+}
+export interface ProbedValue {
+  readonly value: number
+  readonly uncertainty: number
+}
+/** v0.5 RV5: the virtual machine's stock (MPos box). */
+export interface VirtualStock {
+  readonly min: readonly [number, number, number]
+  readonly max: readonly [number, number, number]
 }
 
 interface JobInfo {
@@ -608,7 +659,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (track !== undefined) set(track(undefined))
       }
     }
-    const waitJob = async (jobId: string): Promise<void> => {
+    const waitJob = async (jobId: string): Promise<JobInfo | undefined> => {
       // job.wait caps one wait at MAX_WAIT_SECONDS (300); a run job can last hours, so wait again
       // while it is still running (the previous 600 s argument failed validation silently)
       let w = await bridge.call('job.wait', { jobId, timeoutSeconds: 300 })
@@ -617,6 +668,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       const info = w.ok ? (w.value as JobInfo) : undefined
       if (info?.outcome && !info.outcome.ok && info.outcome.error.code !== 'op.aborted')
         set({ actionError: info.outcome.error })
+      return info
     }
     const jobControl = (name: string) => async () => {
       const id = activeJob(get().status)?.jobId ?? get().jobId
@@ -786,6 +838,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       pastOnceUntil: undefined,
       spindleTool: undefined,
       zUnset: false,
+      xyZeroOpen: false,
+      zeroUndo: undefined,
+      virtualStockKey: undefined,
       startProgram: undefined,
       pending: [],
       probeJobId: undefined,
@@ -1121,6 +1176,51 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         const values = [p[0] - g54[0], p[1] - g54[1], p[2] - g54[2]]
         await call('run.workZero.set', { axes: ['x', 'y', 'z'], values })
       },
+      setXyZeroOpen: (xyZeroOpen) => set({ xyZeroOpen }),
+      async probeRoutine(args) {
+        const r = await call('run.machine.probe', args)
+        if (!r.ok) return undefined
+        const { jobId } = r.value as { jobId: string }
+        set({ probeJobId: jobId })
+        try {
+          const info = await waitJob(jobId)
+          return info?.outcome?.ok === true ? (info.outcome.value as ProbeRoutineResult) : undefined
+        } finally {
+          set({ probeJobId: undefined })
+        }
+      },
+      async setXyZero(g54) {
+        // G10 L20 at the current position (Idle: it does not move), as restoreWorkZero does
+        const s = get().status
+        const before: XY = [s.workZero[0], s.workZero[1]]
+        const after: XY = [g54.x ?? before[0], g54.y ?? before[1]]
+        const axes = [...(g54.x === undefined ? [] : ['x']), ...(g54.y === undefined ? [] : ['y'])]
+        if (axes.length === 0) return false
+        const values = [s.mpos[0] - after[0], s.mpos[1] - after[1], s.wpos[2]]
+        const r = await call('run.workZero.set', { axes, values })
+        if (!r.ok) return false
+        set({ zeroUndo: { before, after } })
+        return true
+      },
+      async undoXyZero() {
+        const u = get().zeroUndo
+        if (u === undefined) return
+        const s = get().status
+        const values = [s.mpos[0] - u.before[0], s.mpos[1] - u.before[1], s.wpos[2]]
+        const r = await call('run.workZero.set', { axes: ['x', 'y'], values })
+        if (r.ok) set({ zeroUndo: undefined })
+      },
+      async layVirtualStock(key, stock) {
+        if (get().virtualStockKey === key) return
+        const r = await call('run.virtual.stock', { stock, touch: false })
+        if (r.ok) set({ virtualStockKey: key })
+      },
+      setVirtualTouch: async (touch, toolDiameter) =>
+        void (await call(
+          'run.virtual.stock',
+          { touch, ...(toolDiameter === undefined ? {} : { toolDiameter }) },
+          { keepError: true },
+        )),
       async setWorkZeroAt(x, y) {
         const z = get().status.wpos[2]
         await call('run.workZero.set', { axes: ['x', 'y'], values: [x, y, z] })
@@ -1325,6 +1425,12 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       store.setState({ settingsCheck: undefined })
     if (status.connection.state === 'closed' && store.getState().setupChange !== undefined)
       store.setState({ setupChange: undefined, setupChangeOpen: false })
+    // v0.5 RV5: the undo and the virtual stock belong to the connection
+    if (
+      status.connection.state === 'closed' &&
+      (store.getState().zeroUndo !== undefined || store.getState().virtualStockKey !== undefined)
+    )
+      store.setState({ zeroUndo: undefined, virtualStockKey: undefined })
     // DF133 RW6: the new setup's zero is set (any G54 change), or the setup change is over
     const was = store.getState().setupChangeZero
     if (

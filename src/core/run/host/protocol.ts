@@ -330,6 +330,8 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     kind: z.literal('virtualStock'),
     stock: VirtualStockSchema.exactOptional(),
     touch: z.boolean(),
+    /** mm: the bit's Ø for the touch readout (a cylinder); absent: a point. */
+    toolDiameter: z.number().nonnegative().exactOptional(),
   }),
   /**
    * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1): on at `rpm`

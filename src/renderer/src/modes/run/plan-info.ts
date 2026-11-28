@@ -9,6 +9,7 @@ import { setupAlignment } from '../../../../core/plan/alignment'
 import { cutTest } from '../../../../core/plan/cut'
 import { planOpLabel } from '../../../../core/plan/labels'
 import { loadPlanDTO } from '../../../../core/plan/plan'
+import { PROBE_KINDS, type ProbeKind } from '../../../../core/library/machine.dto'
 import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
@@ -240,6 +241,59 @@ export function plateThickness(
   // v0.5 RV2: the plate is the shop's accessory, edited in Run's "Machine settings": the library
   // machine's first, the plan's copy when the library machine is gone or has none
   return lib(copy.libraryItemId) ?? plateOf(copy.values)
+}
+
+/** v0.5 RV4: the machine's probe as the Set X/Y zero dialog uses it (mm, mm/min). */
+export interface MachineProbe {
+  readonly kind: ProbeKind
+  readonly wallOffset?: readonly [number, number]
+  readonly tipDiameter?: number
+  readonly fastFeed?: number
+  readonly slowFeed?: number
+  readonly retract?: number
+  readonly plateThickness?: number
+  readonly plateSize?: number
+}
+
+const lengthOf = (v: unknown, kind: 'length' | 'feedRate' = 'length'): number | undefined => {
+  const dto = QuantityDtoSchema.safeParse(v)
+  if (!dto.success) return undefined
+  const q = Quantity.fromDTO(dto.data)
+  return q.isOk() && q.unwrap().kind === kind && q.unwrap().canonical >= 0
+    ? q.unwrap().canonical
+    : undefined
+}
+
+/**
+ * v0.5 RV4: the probe settings (run-probing.md#probe-settings-rv4), from the library machine first
+ * and the plan's copy when it is gone (as `plateThickness`); unset: a Z plate.
+ */
+export function machineProbe(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): MachineProbe {
+  const copy = plan?.snapshots.find((x) => x.id === plan.machine)
+  const lib = machines?.find((x) => x.id === (plan === undefined ? machineId : copy?.libraryItemId))
+  const v = (lib ?? copy?.values) as
+    | { probe?: Record<string, unknown>; probePlateThickness?: unknown; probePlateSize?: unknown }
+    | undefined
+  const p = v?.probe
+  const kind = PROBE_KINDS.find((k) => k === p?.['kind']) ?? 'zPlate'
+  const wx = lengthOf(p?.['wallOffsetX'])
+  const wy = lengthOf(p?.['wallOffsetY'])
+  const opt = (k: keyof MachineProbe, value: number | undefined) =>
+    value === undefined ? {} : { [k]: value }
+  return {
+    kind,
+    ...(wx === undefined || wy === undefined ? {} : { wallOffset: [wx, wy] as const }),
+    ...opt('tipDiameter', lengthOf(p?.['tipDiameter'])),
+    ...opt('fastFeed', lengthOf(p?.['fastFeed'], 'feedRate')),
+    ...opt('slowFeed', lengthOf(p?.['slowFeed'], 'feedRate')),
+    ...opt('retract', lengthOf(p?.['retract'])),
+    ...opt('plateThickness', lengthOf(v?.probePlateThickness)),
+    ...opt('plateSize', lengthOf(v?.probePlateSize)),
+  }
 }
 
 /** What the machine profile puts on the overrides (DF85, docs/modes/run-machine.md#overrides-m6). */

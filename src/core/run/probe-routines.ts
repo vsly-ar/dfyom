@@ -21,6 +21,17 @@ import {
 
 export { PROBE_KINDS, type ProbeKind } from '../library/machine.dto'
 
+/** v0.5 RV4: routine defaults (docs/modes/run-probing.md#probe-settings-rv4), mm and mm/min. */
+export const ROUTINE_DEFAULTS = {
+  reach: 10,
+  zDistance: 25,
+  depth: 3,
+  clearance: 2,
+  fastFeed: 100,
+  slowFeed: 20,
+  moveFeed: 300,
+} as const
+
 /** The kinds that can probe X/Y edges and corners. */
 export const XY_PROBE_KINDS: readonly ProbeKind[] = ['xyzPlate', 'tool', '3d']
 

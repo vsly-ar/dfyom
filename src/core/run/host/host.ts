@@ -693,6 +693,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         const stock = action.stock ?? c.virtualStock?.stock
         c.virtualStock = { ...(stock === undefined ? {} : { stock }), touch: action.touch }
         c.emulator.setProbeScene(touchScene(c))
+        c.emulator.setProbeTip({
+          shape: 'cylinder',
+          radius: action.touch ? (action.toolDiameter ?? 0) / 2 : 0,
+        })
         status.now()
         return Ok(undefined)
       }
