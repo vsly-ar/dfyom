@@ -21,6 +21,11 @@ export const lineMessages = {
   edges: { front: 'Front edge', back: 'Back edge', left: 'Left edge', right: 'Right edge' },
   distance: 'Distance from edge',
   parallelNote: 'Places a straight line across the whole face, this far from the edge.',
+  /** DF156: what the distance measures to, once a one-sided chamfer names the side that stays. */
+  distanceTo: 'Distance to',
+  distanceTos: { wall: 'Part wall', centreline: 'Centreline' },
+  wallNote: (slot: string) =>
+    `Places the line so the part’s wall is this far from the edge; the ${slot} slot lies on the offcut side.`,
   /** One path's shape: "Path 1". */
   path: (n: number) => `Path ${n}`,
   pathU: 'Position u',

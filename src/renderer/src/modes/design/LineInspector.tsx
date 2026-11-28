@@ -11,6 +11,7 @@
 import { useState } from 'react'
 import { lineLegend } from '../../../../core/design/engraving/legend'
 import { arcReadout } from '../../../../core/design/line-inline'
+import { lineCutter } from '../../../../core/design/tool-choice'
 import type { Quantity } from '../../../../core/quantity/quantity'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
@@ -36,8 +37,10 @@ import {
   geometryModeOf,
   lineAcross,
   parallelToEdge,
+  parallelToWall,
   pathsForMode,
   segmentLength,
+  type DistanceTo,
   type FaceEdge,
   type LineGeometryMode,
 } from './line-geometry'
@@ -243,7 +246,7 @@ function GeometryFields({
               {t.lengthReadout(lengthSource(Math.round(length * 1000) / 1000, ctx.units))}
             </p>
           )}
-          {ctx.readOnly ? null : <ParallelToEdge ctx={ctx} face={face} />}
+          {ctx.readOnly ? null : <ParallelToEdge ctx={ctx} op={op} face={face} />}
           {convert}
         </>
       ) : mode === 'arc' ? (
@@ -283,16 +286,34 @@ function faceSize(ctx: OperationFieldsContext, op: LineDTO): { length: number; w
  */
 function ParallelToEdge({
   ctx,
+  op,
   face,
 }: {
   ctx: OperationFieldsContext
+  op: LineDTO
   face: { length: number; width: number }
 }): React.JSX.Element {
   const [edge, setEdge] = useState<FaceEdge>('front')
   const [distance, setDistance] = useState<Quantity | undefined>(undefined)
-  const place = (e: FaceEdge, d: Quantity | undefined) => {
+  // DF156: with a side kept (a one-sided chamfer), the distance may name the part's wall
+  const wall = keptWall(ctx, op)
+  const [to, setTo] = useState<DistanceTo>('wall')
+  const measuredTo: DistanceTo = wall === undefined ? 'centreline' : to
+  const place = (e: FaceEdge, d: Quantity | undefined, m: DistanceTo) => {
     if (d === undefined) return
-    ctx.send({ paths: [parallelToEdge(e, d.canonical, face, ctx.units)] }, 'paths')
+    const path =
+      wall === undefined
+        ? parallelToEdge(e, d.canonical, face, ctx.units)
+        : parallelToWall(
+            op,
+            e,
+            d.canonical,
+            m === 'wall' ? wall.slot : 0,
+            wall.kept,
+            face,
+            ctx.units,
+          )
+    if (path !== undefined) ctx.send({ paths: [path] }, 'paths')
   }
   return (
     <InspectorGroup.More fields={[t.parallel]} rememberKey="line.parallel.more">
@@ -302,24 +323,61 @@ function ParallelToEdge({
           value={edge}
           onValueChange={(e) => {
             setEdge(e as FaceEdge)
-            place(e as FaceEdge, distance)
+            place(e as FaceEdge, distance, measuredTo)
           }}
         />
       </Field>
+      {wall === undefined ? null : (
+        <Field label={t.distanceTo} kind="toggle">
+          <SegmentedControl<DistanceTo>
+            label={t.distanceTo}
+            options={(['wall', 'centreline'] as const).map((m) => ({
+              value: m,
+              label: t.distanceTos[m],
+            }))}
+            value={to}
+            onValueChange={(m) => {
+              setTo(m)
+              place(edge, distance, m)
+            }}
+          />
+        </Field>
+      )}
       <QuantityInput
         label={t.distance}
         kind="length"
         stepKind="xy"
         defaultUnit={defaultUnit('length', ctx.units)}
         value={distance}
-        info={t.parallelNote}
+        info={
+          wall !== undefined && measuredTo === 'wall'
+            ? t.wallNote(lengthSource(wall.slot, ctx.units))
+            : t.parallelNote
+        }
         onCommit={(q) => {
           setDistance(q)
-          place(edge, q)
+          place(edge, q, measuredTo)
         }}
       />
     </InspectorGroup.More>
   )
+}
+
+/**
+ * DF156: the side a one-sided chamfer of the Line keeps and the slot's width (the Line's cutter:
+ * its flat end mill, else the Ø6 the design draws); undefined without such a chamfer.
+ */
+function keptWall(
+  ctx: OperationFieldsContext,
+  op: LineDTO,
+): { kept: 'left' | 'right'; slot: number } | undefined {
+  const chamfer = ctx.part.dto.operations.find(
+    (o) => o.kind === 'chamfer' && o.edgeOf === op.id && o.edgeSide !== undefined,
+  )
+  const kept = chamfer?.kind === 'chamfer' ? chamfer.edgeSide : undefined
+  const line = ctx.part.loaded?.part.operations.find((o) => o.id === op.id)
+  if (kept === undefined || line === undefined) return undefined
+  return { kept, slot: lineCutter(line, ctx.part.doc.snapshots, true).diameter }
 }
 
 /** The depth legend of a Line with levels: its paths' levels between Shallowest and Deepest. */
