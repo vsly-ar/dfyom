@@ -20,6 +20,7 @@ import { createJogPress, type JogPressHandlers } from './jog-press'
 import { JogStepPicker } from './JogStepPicker'
 import {
   clampJogFeed,
+  CUTTING_JOG_FEED_DEFAULT,
   formatFeed,
   jogFeedRange,
   jogStepMm,
@@ -46,6 +47,11 @@ export interface JogControls {
   /** The jog feed (mm/min) for X and Y. */
   readonly feed: number
   readonly feedRange: JogFeedRange
+  /**
+   * v0.5 RV1 (Q217): the spindle turns, so `feed` is the cutting jog feed (its own remembered
+   * value, default 600 mm/min) and the slider says so.
+   */
+  readonly cutting?: boolean
   setStep(stepMm: number): void
   setCustom(stepMm: number): void
   setFeed(feed: number): void
@@ -89,14 +95,20 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
   const windowCustom = useRun((s) => s.jogCustom)
   const windowFeed = useRun((s) => s.jogFeed)
   const feeds = useSettings((s) => s.settings.jogFeed)
+  const cuttingFeeds = useSettings((s) => s.settings.cuttingJogFeed)
+  // v0.5 RV1: while the spindle turns (whoever started it) the cutting jog feed applies
+  const cutting = useRun((s) => s.status.spindle > 0)
   const steps = useSettings((s) => s.settings.jogStep)
   const update = useSettings((s) => s.update)
   const keys = useSettings((s) => s.settings.jogKeys)
   const machine = useMachineJog(doc)
   const key = machine.key ?? NO_MACHINE_KEY
   const feedRange = jogFeedRange(units, machine.maxFeed)
-  const stored = feeds[key] ?? windowFeed
-  const feed = clampJogFeed(stored ?? JOG_FEED_DEFAULT, feedRange)
+  const stored = cutting ? cuttingFeeds[key] : (feeds[key] ?? windowFeed)
+  const feed = clampJogFeed(
+    stored ?? (cutting ? CUTTING_JOG_FEED_DEFAULT : JOG_FEED_DEFAULT),
+    feedRange,
+  )
   const storedStep = steps[key]
   const step = storedStep?.step ?? windowStep
   const custom = storedStep === undefined ? windowCustom : storedStep.custom
@@ -114,6 +126,7 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
     custom,
     feed,
     feedRange,
+    ...(cutting ? { cutting: true } : {}),
     setStep: (mm) => {
       a.setJogStep(mm)
       update({ jogStep: { [key]: { step: mm, ...(custom === undefined ? {} : { custom }) } } })
@@ -123,6 +136,7 @@ export function useJogControls(doc: ProjectDoc | undefined): JogControls {
       update({ jogStep: { [key]: { step: mm, custom: mm } } })
     },
     setFeed: (f) => {
+      if (cutting) return update({ cuttingJogFeed: { [key]: f } })
       a.setJogFeed(f)
       update({ jogFeed: { [key]: f } })
     },
@@ -165,7 +179,13 @@ export function JogPad({
   const hintId = useId()
   const [holding, setHolding] = useState<string | undefined>(undefined)
   // the slider's value while dragging; committed at the end of a drag or key press
-  const [dragFeed, setDragFeed] = useState<number | undefined>(undefined)
+  // a drag value belongs to the feed it started from: a stored feed, or the switch to and from the
+  // cutting jog feed (v0.5 RV1), ends it (Radix may report a key press's change after its commit)
+  const feedKey = `${controls.feed}|${controls.cutting === true}`
+  const [drag, setDrag] = useState<{ value: number; key: string } | undefined>(undefined)
+  const dragFeed = drag?.key === feedKey ? drag.value : undefined
+  const setDragFeed = (value: number | undefined) =>
+    setDrag(value === undefined ? undefined : { value, key: feedKey })
   const latest = useRef(controls)
   useEffect(() => {
     latest.current = controls
@@ -285,13 +305,13 @@ export function JogPad({
       />
       <div className={styles['jogFeed']}>
         <div className={styles['jogFeedHead']}>
-          <span aria-hidden="true">{m.jogFeed}</span>
+          <span aria-hidden="true">{controls.cutting === true ? m.cuttingJogFeed : m.jogFeed}</span>
           <span className={styles['jogFeedValue']} aria-hidden="true">
             {feedText}
           </span>
         </div>
         <Slider
-          label={m.jogFeed}
+          label={controls.cutting === true ? m.cuttingJogFeed : m.jogFeed}
           min={controls.feedRange.min}
           max={controls.feedRange.max}
           step={controls.feedRange.step}

@@ -425,6 +425,8 @@ export const libraryMessages = {
     minSpeedNote: 'Optional: flags speeds below the spindle’s range.',
     powerNote: 'Optional: enables the feeds-and-speeds power check.',
     homing: 'Homing',
+    /** v0.5 RV2: the homing group in Run's "Machine settings". */
+    homingLimits: 'Homing and limits',
     homingCorner: 'Homing corner',
     homingCornerNote: 'Where X and Y home ($23); Z always homes up.',
     homingCorners: {
@@ -437,6 +439,8 @@ export const libraryMessages = {
     pullOffNote: 'Optional ($27): unset = 1 mm.',
     softLimits: 'Soft limits ($20)',
     zHeight: 'Z height',
+    /** v0.5 RV2: the Run inspector's probe fields (variant `run`). */
+    probe: 'Probe',
     noseToTable: 'Spindle nose to table',
     noseToTableNote:
       'Optional: with Z homed, from the collet nut (where stickout is measured) down to the table. Checks that retracts stay below the Z+ limit.',

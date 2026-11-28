@@ -43,6 +43,13 @@ interface CommandMeta<A> {
    * full arg accepts. Doc: docs/architecture/llm-api.md#schemas (listed sketches)
    */
   readonly listedArgs?: ListedArgs
+  /**
+   * `false`: not an agent tool (not in `tools/list`, MCP or the CLI): a UI-first command whose
+   * tool would cost `tools/list` budget agents cannot use (v0.5 Q229: real machines are UI only
+   * anyway). The dispatcher still runs it for every source the permission policy allows.
+   * Doc: docs/architecture/commands.md#command-definition
+   */
+  readonly agentTool?: false
 }
 
 /** Top-level arg name → its sketch in `tools/list` (`CommandMeta.listedArgs`). */

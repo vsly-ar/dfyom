@@ -73,13 +73,17 @@ describe('agent tools', () => {
   it('the tool list equals both registries plus the session tools (parity is structural)', () => {
     const { app, project } = registries()
     const names = allTools().map((t) => t.name)
+    // v0.5 Q229: UI-first commands (`agentTool: false`) are no tools
+    const tool = (c: { agentTool?: false }) => c.agentTool !== false
     expect(names).toEqual([
-      ...app.commands.map((c) => c.name),
+      ...app.commands.filter(tool).map((c) => c.name),
       ...app.queries.map((q) => q.name),
-      ...project.commands.map((c) => c.name),
+      ...project.commands.filter(tool).map((c) => c.name),
       ...project.queries.map((q) => q.name),
       ...SESSION_TOOLS.map((s) => s.name),
     ])
+    expect(project.commands.map((c) => c.name)).toContain('run.machine.spindle')
+    expect(names).not.toContain('run.machine.spindle')
     // names are unique across both registries and the session tools
     expect(new Set(names).size).toBe(names.length)
     expect(names).toEqual(
@@ -386,6 +390,7 @@ describe('agent tools', () => {
           : n
     let described = 0
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
+      if ('agentTool' in def && def.agentTool === false) continue
       const t = tool(tools, def.name)
       const as = / Args as ([a-z.<>]+[a-zA-Z.]*)( items)?\.$/.exec(t.description)
       if (as === null) continue

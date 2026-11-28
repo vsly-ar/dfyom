@@ -306,6 +306,38 @@
 
 /* DF133 RW3: the workholding guard's notice line, reserved (two lines and the button's height)
    while the guard is on so a stop never moves the controls (DF34) */
+/* v0.5 RV1: the spindle under the pad (docs/modes/run-machine.md#spindle-while-jogging-rv1) */
+.spindle {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.spindleState {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  transition: color var(--motion-fast);
+}
+
+.spindleState[data-on] {
+  color: var(--text-accent);
+}
+
+/* reserved, so a reason never moves the buttons (DF34) */
+.spindleWhy {
+  min-height: var(--lh-sm);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.droMeta dd[data-on] {
+  color: var(--text-accent);
+}
+
 .guardNotice {
   display: flex;
   flex-wrap: wrap;
@@ -1873,4 +1905,58 @@
 .droWork [data-dro-go-zero] {
   margin-left: var(--space-1);
   vertical-align: middle;
+}
+
+/* v0.5 RV2: the controller's $$ in "Machine settings" (docs/conventions/ui.md#run-settings-v05-rv2) */
+.controllerSettings {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.controllerTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settingsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.settingsTable th,
+.settingsTable td {
+  padding: var(--space-1) var(--space-1);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.settingsTable th[scope='col'] {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.settingsTable th[scope='row'] {
+  font-weight: var(--weight-regular);
+}
+
+.settingName {
+  display: block;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.settingsTable tr[data-differs] td,
+.settingsTable tr[data-differs] th {
+  background: var(--warning-subtle);
 }

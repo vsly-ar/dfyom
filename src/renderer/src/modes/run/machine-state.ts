@@ -144,7 +144,16 @@ export function runGates(s: RunStatus, opts: { planChosen: boolean }): RunGates 
   const limits = limitSwitches(s.pins)
   const pressed = limits.length > 0 ? m.why.limitPressed(limits) : null
   return {
-    home: critical ?? (job ? m.why.running : moving ? m.why.busy : (door ?? pressed)),
+    // v0.5 RV1: GRBL would home with the spindle turning (the host refuses it too)
+    home:
+      critical ??
+      (job
+        ? m.why.running
+        : moving
+          ? m.why.busy
+          : s.spindle > 0
+            ? m.goTo.spindleOn
+            : (door ?? pressed)),
     unlock: critical ?? (job ? m.why.running : alarm ? door : moving ? m.why.busy : null),
     jog:
       critical ??
@@ -196,6 +205,24 @@ export function goToGate(s: RunStatus): Gate {
 }
 
 /**
+ * v0.5 RV1: why "Start spindle" cannot act now, or null (docs/modes/run-machine.md#spindle-while-jogging-rv1):
+ * connected, no run job (not even at a wait), Idle; in a jog the reason says to stop it first.
+ */
+export function spindleStartGate(s: RunStatus): Gate {
+  if (!isConnected(s)) return m.why.notConnected
+  if (activeJob(s) !== undefined) return m.spindle.runOwns
+  if (s.state.startsWith('Jog')) return m.spindle.notIdle
+  return runGates(s, { planChosen: false }).workZero
+}
+
+/** v0.5 RV1: "Stop spindle": whenever connected, except while a run streams or holds. */
+export function spindleStopGate(s: RunStatus): Gate {
+  if (!isConnected(s)) return m.why.notConnected
+  const job = activeJob(s)
+  return job !== undefined && job.phase !== 'toolChange' ? m.spindle.runOwns : null
+}
+
+/**
  * Stop's gate (DF35, docs/modes/run.md#stop-only-when-something-can-be-stopped-df35): allowed with
  * a run job or while the machine moves or is held; otherwise why there is nothing to stop.
  */
@@ -207,6 +234,10 @@ export function stopGate(s: RunStatus): Gate {
 
 /** The navigator's text for a refused action; `undefined` = the code's own message. */
 export function actionText(e: AppErrorData, units: UnitSystem): string | undefined {
+  // v0.5 RV1: the spindle's refusals in words (docs/modes/run-machine.md#spindle-while-jogging-rv1)
+  const rule = e.issues[0]?.rule
+  if ((e.code === 'run.state' || e.code === 'machine.reset') && rule !== undefined)
+    return m.spindle.refused[rule]
   if (e.code !== 'run.travel') return undefined
   const d = e.frames[0]?.data as
     { axis?: string; target?: number; min?: number; max?: number; atEdge?: boolean } | undefined
@@ -281,6 +312,8 @@ export const formatStep = (v: number): string => String(+v.toPrecision(6))
 
 /** Jog feed default and limit when the machine's is unknown (mm/min). */
 export const JOG_FEED_DEFAULT = 2000
+/** v0.5 RV1 (Q217): the jog feed while the spindle turns, before one is chosen (mm/min). */
+export const CUTTING_JOG_FEED_DEFAULT = 600
 export const JOG_FEED_FALLBACK_MAX = 5000
 
 export interface JogFeedRange {

@@ -2,7 +2,7 @@
 // scripted machine that answers the run commands and pushes statuses as main does.
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #testing
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { planSetup } from '../../../../core/plan/plan.fixture'
 import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
@@ -404,6 +404,93 @@ describe('Run mode', () => {
     expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 10, 0], feed: 2200 })
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog Z−' }))
     expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 0, -10], feed: 1000 })
+  })
+
+  it('v0.5 RV1: while the spindle turns the jog uses the cutting jog feed (600 mm/min, remembered); Home waits', async () => {
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    expect(within(t.nav()).getByRole('slider', { name: 'Jog feed' })).toHaveAttribute(
+      'aria-valuetext',
+      '2000 mm/min',
+    )
+    t.machine.push({ spindle: 12000, spindleDirection: 'cw' })
+    const cutting = within(t.nav()).getByRole('slider', { name: 'Cutting jog feed' })
+    expect(cutting).toHaveAttribute('aria-valuetext', '600 mm/min')
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
+    expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [10, 0, 0], feed: 600 })
+    cutting.focus()
+    await t.user.keyboard('{ArrowLeft}')
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ cuttingJogFeed: { [t.s.machineId]: 500 } })
+    // the DRO's spindle value in the accent; Home refused with the reason
+    expect(within(t.nav()).getByRole('button', { name: 'Home' })).toBeDisabled()
+    // off: the jog feed again
+    t.machine.push({ spindle: 0 })
+    expect(within(t.nav()).getByRole('slider', { name: 'Jog feed' })).toHaveAttribute(
+      'aria-valuetext',
+      '2000 mm/min',
+    )
+  })
+
+  it('v0.5 RV2: Machine settings edits the library machine (Save, Revert) and shows the controller $$', async () => {
+    const t = await renderRun({ plate: '10' })
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    // collapsed by default
+    const toggle = inspector.getByRole('button', { name: 'Machine settings' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await t.user.click(toggle)
+    const plate = inspector.getByRole('combobox', { name: 'Touch plate thickness' })
+    expect(plate).toHaveValue('10')
+    expect(inspector.getByText(/plan uses its own copy/)).toBeInTheDocument()
+    // a draft: Unsaved, Revert drops it
+    await t.user.clear(plate)
+    await t.user.type(plate, '12{Enter}')
+    expect(inspector.getByText('Unsaved')).toBeInTheDocument()
+    await t.user.click(inspector.getByRole('button', { name: 'Revert' }))
+    expect(inspector.getByRole('combobox', { name: 'Touch plate thickness' })).toHaveValue('10')
+    expect(inspector.queryByText('Unsaved')).toBeNull()
+    // Save: one library.machine.update; Probe Z then uses the library machine's plate
+    const again = inspector.getByRole('combobox', { name: 'Touch plate thickness' })
+    await t.user.clear(again)
+    await t.user.type(again, '12{Enter}')
+    await t.user.click(inspector.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(inspector.queryByText('Unsaved')).toBeNull())
+    const update = t.callsOf('library.machine.update').at(-1) as {
+      id: string
+      values: { probePlateThickness?: string }
+    }
+    expect(update.id).toBe(t.s.machineId)
+    expect(update.values.probePlateThickness).toBe('12')
+    // main's library broadcast (the fake bridge does not send it by itself)
+    act(() =>
+      t.bridge.emitLibraryChange({
+        kind: 'machine',
+        id: t.s.machineId,
+        change: 'updated',
+        revision: 3,
+      }),
+    )
+    expect(await within(t.nav()).findByText(/Touch plate 12\.000 mm/)).toBeInTheDocument()
+    await expectNoAxeViolations()
+
+    // connected: the controller's $$ read-only, a difference with its line to copy
+    t.bridge.handle('run.settings.check', () =>
+      ok({ settings: { '20': 1, '22': 1, '110': 4000, '111': 5000, '999': 3 } }),
+    )
+    await connectAndHome(t)
+    const table = within(await inspector.findByRole('table', { name: 'Controller settings' }))
+    expect(table.getByRole('rowheader', { name: /\$110 X max rate/ })).toBeInTheDocument()
+    const differs = table.getByRole('row', { name: /\$110/ })
+    expect(differs).toHaveAttribute('data-differs')
+    expect(differs).toHaveTextContent('4000 mm/min')
+    expect(differs).toHaveTextContent('5000 mm/min')
+    expect(table.getByRole('row', { name: /\$111/ })).not.toHaveAttribute('data-differs')
+    expect(table.getByRole('row', { name: /\$999/ })).toHaveTextContent('—')
+    const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    await t.user.click(table.getByRole('button', { name: 'Copy $110=5000' }))
+    expect(write).toHaveBeenCalledWith('$110=5000')
+    write.mockRestore()
+    await expectNoAxeViolations()
   })
 
   it('remembers the jog step and feed per machine across restarts (DF140)', async () => {
@@ -1519,10 +1606,12 @@ describe('Run mode', () => {
     await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
     const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
     const section = within(inspector.getByRole('region', { name: 'Overrides' }))
-    // Run and Overrides take the inspectors' group header style (DF110 S6): h3 titles, Reset none
+    // Run, Overrides and Machine settings (v0.5 RV2) take the inspectors' group header style
+    // (DF110 S6): h3 titles, Reset none
     expect(inspector.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
       'Run',
       'Overrides',
+      'Machine settings',
     ])
     expect(inspector.getByRole('region', { name: 'Reset (immediate)' })).toBeInTheDocument()
     // not reported yet

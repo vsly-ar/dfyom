@@ -306,6 +306,8 @@ export function buildAgentTools(
     ['project', registries.project],
   ] as const)
     for (const def of [...reg.commands, ...reg.queries]) {
+      // UI-first commands are no tools (v0.5 Q229, CommandMeta.agentTool)
+      if ('agentTool' in def && def.agentTool === false) continue
       const d = toolDescriptor(def)
       if (d.isErr()) return d
       entries.push({ def, scope, d: d.unwrap() })

@@ -42,6 +42,7 @@ interface CommandMeta<A> {
   readonly summary: string // agent/tool description; imperative, one sentence
   readonly title: (args: A) => string // UI label, undo menu text ("Add pocket")
   readonly machine: boolean // affects a real machine → permission check
+  readonly agentTool?: false // v0.5 RV1: not listed as an agent tool (UI-only controls)
 }
 
 interface DocumentCommand<S extends z.ZodType, R> extends CommandMeta<z.output<S>> {

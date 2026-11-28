@@ -106,6 +106,8 @@ export const runMessages = {
     customPlaceholder: 'Custom',
     customInvalid: (max: string, unit: string) => `Above 0, at most ${max} ${unit}`,
     jogFeed: 'Jog feed',
+    /** v0.5 RV1: the jog feed while the spindle turns (Q217). */
+    cuttingJogFeed: 'Cutting jog feed',
     /** How the pad works, the pad's description. */
     jogHint: 'Click to jog one step; hold to jog until released.',
     /** After a real connection was lost without a reset (run-machine.md#lost-connection-m2). */
@@ -465,11 +467,68 @@ export const runMessages = {
     noSpindleLaser: 'Laser mode is on ($32=1): no spindle override.',
   },
 
+  /** v0.5 RV1: the spindle under the jog pad (docs/modes/run-machine.md#spindle-while-jogging-rv1). */
+  spindle: {
+    title: 'Spindle',
+    off: 'Off',
+    on: (rpm: string, dir: 'cw' | 'ccw' | undefined) =>
+      dir === undefined ? `${rpm} rpm` : `${rpm} rpm · ${dir === 'cw' ? 'CW' : 'CCW'}`,
+    speed: 'Spindle speed',
+    rpm: (rpm: string) => `${rpm} rpm`,
+    start: 'Start spindle',
+    stop: 'Stop spindle',
+    notIdle: 'Stop the jog first: the spindle turns on only while the machine is idle.',
+    runOwns: 'The run controls the spindle: Stop stops the run and the spindle.',
+    manual: 'The spindle speed is set by hand: switch the router on and off at the router.',
+    laser: 'The controller is in laser mode ($32=1): no spindle control.',
+    confirm: {
+      title: 'Start the spindle?',
+      description: (rpm: string) =>
+        `The spindle starts at ${rpm} rpm. Keep hands and loose clothing clear. Off stops it, also while jogging.`,
+      confirm: 'Start spindle',
+    },
+    /** Refusals by rule (`run.state`), in the navigator's banner. */
+    refused: {
+      spindleNotIdle: 'Stop the jog first: the spindle turns on only while the machine is idle.',
+      spindleStopping: 'The spindle is stopping: jog again once it is off.',
+      runSpindle: 'The run controls the spindle: Stop stops the run and the spindle.',
+      spindleOn: 'Stop the spindle first.',
+      manualSpindle:
+        'The spindle speed is set by hand: switch the router on and off at the router.',
+      laserMode: 'The controller is in laser mode ($32=1): no spindle control.',
+      spindleReset:
+        'The jog did not stop in time: the controller was reset to stop the spindle. Home again.',
+    } as Readonly<Record<string, string>>,
+  },
+
   unlockConfirm: {
     title: 'Unlock without homing?',
     description:
       'Position is not known until homed. Soft limits and the work zero may be wrong until you home the machine.',
     confirm: 'Unlock',
+  },
+
+  /** v0.5 RV2: the Run inspector's "Machine settings" (docs/conventions/ui.md#run-settings-v05-rv2). */
+  machineSettings: {
+    title: 'Machine settings',
+    noMachine: 'Choose a machine to see its settings.',
+    of: (name: string) =>
+      `Library machine “${name}”. Saved values apply to manual control, the settings check and new plans.`,
+    planCopy:
+      "The plan uses its own copy of the machine; update the plan's machine to use these values.",
+    unsaved: 'Unsaved',
+    save: 'Save',
+    revert: 'Revert',
+    conflict: 'The machine changed elsewhere.',
+    reload: 'Reload',
+    controller: 'Controller settings',
+    controllerHint:
+      'Read from the controller ($$). DFYOM never changes them: copy a line into your sender’s console, or import $$ into the machine in the Library.',
+    columns: { setting: 'Setting', controller: 'Controller', machine: 'Machine' },
+    differs: 'Differs from the machine',
+    copy: (line: string) => `Copy ${line}`,
+    copied: (line: string) => `${line} copied to the clipboard.`,
+    copyFailed: 'Could not copy to the clipboard.',
   },
 
   dro: {

@@ -38,6 +38,9 @@ import { runAlignGoto, runAlignTick } from './align-commands'
 import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
 import { settingsCheck, SettingsCheckSchema } from './settings-check'
 import type { MachineValuesDTO } from '../library/machine.dto'
+import { DEFAULT_SPIN_UP_SECONDS } from '../post/grbl/post'
+import { Quantity } from '../quantity/quantity'
+import type { QuantityDTO } from '../quantity/quantity.dto'
 
 /** Margin between the clearance plane and the top of the machine travel in `prepare` (mm). */
 export const PREPARE_TOP_MARGIN = 5
@@ -599,16 +602,26 @@ export const runSettingsCheck = defineQuery({
     planId: PlanIdSchema.optional(),
     machineId: ItemIdSchema.optional(),
   }),
-  result: z.object({ settingsCheck: SettingsCheckSchema.optional() }),
+  result: z.object({
+    settingsCheck: SettingsCheckSchema.optional(),
+    /**
+     * v0.5 RV2: the open connection's `$$` by setting number, on any connection (the Run
+     * inspector's controller settings table, docs/conventions/ui.md#run-settings-v05-rv2).
+     */
+    settings: z.record(z.string(), z.number()).optional(),
+  }),
   run(doc, args, ctx) {
     const m = ctx.services.machine
     const settings = m?.controllerSettings
-    if (m?.target !== 'serial' || settings === undefined) return Ok({})
+    if (settings === undefined) return Ok({})
+    const all = { settings: { ...settings } }
+    if (m?.target !== 'serial' || (args.planId === undefined && args.machineId === undefined))
+      return Ok(all)
     const chosen = connectionMachine(doc, ctx.services, args, 'run.settings.check')
     if (chosen.isErr()) return Err(chosen.unwrapErr())
     const against = args.planId === undefined ? 'machine' : 'plan'
     const values = chosen.unwrap().machine.toDTO() as MachineValuesDTO
-    return Ok({ settingsCheck: settingsCheck(values, settings, against) })
+    return Ok({ ...all, settingsCheck: settingsCheck(values, settings, against) })
   },
 })
 
@@ -674,6 +687,75 @@ export const runMachineProbeZ = defineCommand({
     )
     if (r.isErr()) return r
     return Ok(r.unwrap() as { workZero: Vec3; contact: Vec3 })
+  },
+})
+
+/**
+ * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1). On: Idle only
+ * (in a jog a speed change through the spindle override), a G-code spindle, no laser mode, rpm in
+ * the machine's minSpeed–maxSpeed. Off: always (a jog is cancelled first). Not an agent tool (Q229).
+ */
+export const runMachineSpindle = defineCommand({
+  kind: 'effect',
+  name: 'run.machine.spindle',
+  summary:
+    'Spindle on at rpm (Idle only; while jogging a speed change through the override) or off (cancels a jog first).',
+  title: (a) => (a.on ? 'Start spindle' : 'Stop spindle'),
+  machine: true,
+  agentTool: false,
+  args: z
+    .object({
+      on: z.boolean(),
+      rpm: z.number().positive().max(1_000_000).optional().describe('rpm, with on'),
+    })
+    .refine((a) => !a.on || a.rpm !== undefined, {
+      message: 'spindle on needs rpm',
+      path: ['rpm'],
+    }),
+  result: z.object({ spindle: z.number().describe('rpm reported after it, 0 = off') }),
+  async run(_doc, args, ctx) {
+    const where = 'run.machine.spindle'
+    if (!args.on) {
+      const r = await act(ctx.services, { kind: 'spindle', on: false }, where)
+      return r.map((v) => v as { spindle: number })
+    }
+    const m = machineOf(ctx.services, where)
+    if (m.isErr()) return Err(m.unwrapErr())
+    const service = m.unwrap()
+    const values = service.connectedMachine
+    const refused = (message: string, rule: string) =>
+      fail('run.state', message, {
+        where,
+        data: { state: service.status().state },
+        issues: [{ path: ['on'], rule, message }],
+      })
+    if (values?.spindle.control !== 'gcode')
+      return refused(
+        'the spindle speed is set by hand: switch the router on and off at the router',
+        'manualSpindle',
+      )
+    if (service.status().laserMode === true)
+      return refused('the controller is in laser mode ($32=1): no spindle control', 'laserMode')
+    const speed = (dto: unknown) => {
+      const q = dto === undefined ? undefined : Quantity.fromDTO(dto as QuantityDTO)
+      return q !== undefined && q.isOk() ? q.unwrap().canonical : undefined
+    }
+    const min = speed(values.spindle.minSpeed) ?? 0
+    const max = speed(values.spindle.maxSpeed) ?? Number.POSITIVE_INFINITY
+    const rpm = args.rpm ?? 0
+    if (rpm < min - 1e-9 || rpm > max + 1e-9) {
+      const message = `between ${min} and ${max} rpm`
+      return fail('input.malformed', `${rpm} rpm is outside the spindle's speed range`, {
+        where,
+        issues: [{ path: ['rpm'], rule: 'spindleRange', message }],
+      })
+    }
+    const r = await act(
+      ctx.services,
+      { kind: 'spindle', on: true, rpm, dwellSeconds: DEFAULT_SPIN_UP_SECONDS },
+      where,
+    )
+    return r.map((v) => v as { spindle: number })
   },
 })
 
@@ -789,6 +871,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runWorkZeroSet,
   runMachineReset,
   runMachineProbeZ,
+  runMachineSpindle,
   runOverrideSet,
   runAlignGoto,
   runAlignTick,
@@ -817,6 +900,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runWorkZeroSet,
   runMachineReset,
   runMachineProbeZ,
+  runMachineSpindle,
   runOverrideSet,
   runJobContinue,
   runTimeScaleSet,

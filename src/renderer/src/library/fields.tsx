@@ -26,8 +26,11 @@ export interface FormProps<V> {
   readonly units: UnitSystem
   /** The issues at a field (dotted path below the values) as field messages. */
   readonly messages: (field: string) => FieldMessage[]
-  /** `quick`: the fields the add dialogs need (v0.1); `full`: every field (Library window). */
-  readonly variant: 'quick' | 'full'
+  /**
+   * `quick`: the fields the add dialogs need (v0.1); `full`: every field (Library window); `run`:
+   * a machine's fields Run uses (v0.5 RV2, the Run inspector's "Machine settings").
+   */
+  readonly variant: 'quick' | 'full' | 'run'
   /** Focus entered a field (the tool drawing highlights its dimension). */
   readonly onFocusField?: ((field: string | undefined) => void) | undefined
 }

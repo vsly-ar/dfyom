@@ -255,6 +255,12 @@ export interface SenderStatus {
    * `R` reset, `S` cycle start); absent when none (DF134, docs/architecture/grbl.md#status-reports).
    */
   readonly pins?: string
+  /**
+   * RV1: the spindle's direction from the last `A:` (`S` → `cw`, `C` → `ccw`), kept between
+   * reports like `Ov` (GRBL sends `A:` only with `Ov`); absent = off or not reported yet.
+   * Doc: docs/modes/run-machine.md#spindle-while-jogging-rv1
+   */
+  readonly spindleDirection?: 'cw' | 'ccw'
 }
 
 export type SenderEvent =
@@ -454,6 +460,8 @@ export class GrblSender {
   private wcoPending = true
   private lastG54: Vec3 | undefined
   private overrides: Overrides | undefined
+  /** RV1: the spindle direction of the last `A:` (sent with `Ov`); cleared by a reset. */
+  private spindleDirection: 'cw' | 'ccw' | undefined
   /** `$H` reply limit from the handshake's `$$` (DF87). */
   private homingMs = HOMING_TIMEOUT_FALLBACK_MS
 
@@ -1061,6 +1069,11 @@ export class GrblSender {
     )
       this.ownHoldMark = undefined
     if (report.overrides !== undefined) this.overrides = report.overrides
+    // `A:` comes with `Ov` only: a report with `Ov` and no `A:` says every accessory is off
+    if (report.overrides !== undefined || report.accessories !== undefined) {
+      const a = report.accessories ?? ''
+      this.spindleDirection = a.includes('S') ? 'cw' : a.includes('C') ? 'ccw' : undefined
+    }
     const k = this.inches ? 25.4 : 1
     // DF87: while `$H` is out the machine homes, whatever a controller says meanwhile (`Idle`)
     const homing = report.state === 'Idle' && this.homingInFlight()
@@ -1075,6 +1088,7 @@ export class GrblSender {
       ...(this.overrides === undefined ? {} : { overrides: this.overrides }),
       ...(report.line === undefined ? {} : { line: report.line }),
       ...(report.pins === undefined || report.pins === '' ? {} : { pins: report.pins }),
+      ...(this.spindleDirection === undefined ? {} : { spindleDirection: this.spindleDirection }),
     }
     for (const l of [...this.statusListeners]) l(this.latest)
     if (this.lostAcknowledgement(report)) return
@@ -1200,6 +1214,8 @@ export class GrblSender {
     this.critical = false
     // GRBL restores the overrides on a reset
     if (this.overrides !== undefined) this.overrides = NO_OVERRIDES
+    // and stops the spindle
+    this.spindleDirection = undefined
     this.holdMark = undefined
     this.freshMark = undefined
     this.cancelHoldTimeout?.()

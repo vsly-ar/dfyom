@@ -44,6 +44,8 @@ import { firstRunSetup, runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
+import { SpindleControl } from './SpindleControl'
+import { useMachineOverrideLimits } from './OverridesSection'
 import styles from './Run.module.css'
 
 const m = runMessages.navigator
@@ -191,6 +193,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const setupId = useRun((s) => s.setupId)
   const timeScale = useRun((s) => s.timeScale)
   const jog = useJogControls(doc)
+  const spindleMachine = useMachineOverrideLimits(doc)
   const guardSetup = useRun((s) => s.guardSetup)
   const guardOff = useRun((s) => s.guardOff)
   const machineKey = useMachineJog(doc).key
@@ -495,6 +498,13 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
         }
       >
         <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} reasonShown={false} />
+        {/* v0.5 RV1: under the pad, so nothing above it moves (DF34) */}
+        <SpindleControl
+          status={status}
+          machine={spindleMachine}
+          onSpindle={a.spindle}
+          sharedReason={reasonId}
+        />
       </Section>
 
       {/* DF88: the zero buttons moved to the Position table; Probe Z is what is left */}
