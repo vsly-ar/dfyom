@@ -27,6 +27,8 @@ import {
   type Profile,
   type Shape,
 } from '../operation'
+import { isInlinePath } from '../operation'
+import { inlineBounds } from '../line-inline'
 import { placeShape } from '../placement'
 import type { ShapeDTO } from '../shape.dto'
 import type { Flip, UV } from './path'
@@ -183,7 +185,9 @@ function footprintBoundsOf(
       return b === undefined ? undefined : grow(b, op.width.canonical)
     }
     case 'line':
-      return union(op.paths.map((p) => shapeBounds(p, shapes, port)))
+      return union(
+        op.paths.map((p) => (isInlinePath(p) ? inlineBounds(p) : shapeBounds(p, shapes, port))),
+      )
   }
 }
 

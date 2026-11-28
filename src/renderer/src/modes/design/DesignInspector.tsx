@@ -613,6 +613,25 @@ function OperationInspector({
               openShape(shapeId)
             })(),
           editShape: openShape,
+          // DF147 SL2: Straight / Arc → Shape keeps the line as a named shape
+          convert: () =>
+            void (async () => {
+              const r = await call('design.shape.convert', {
+                partId: part.dto.id,
+                operationId: op.id,
+              })
+              if (failed(r) || !r.ok) return
+              const id = (r.value as { shapeId: string }).shapeId
+              const got = await bridge.call('design.shape.get', {
+                partId: part.dto.id,
+                shapeId: id,
+              })
+              ui.getState().setRemovedToast(
+                got.ok
+                  ? t.picker.converted((got.value as { shape: { name: string } }).shape.name)
+                  : t.picker.convertedUnnamed,
+              )
+            })(),
         }
       : undefined
   const ctx: OperationFieldsContext = {

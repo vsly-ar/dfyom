@@ -2,6 +2,25 @@
 // (line, V-groove). Doc: docs/modes/engraved-patterns.md#ui
 export const lineMessages = {
   groups: { paths: 'Paths', depth: 'Depth' },
+  /** DF147 SL2: the geometry mode and the inline fields (engraved-patterns.md § Simple Line). */
+  geometry: 'Geometry',
+  geometryModes: { straight: 'Straight', arc: 'Arc', shape: 'Shape' },
+  startU: 'Start u',
+  startV: 'Start v',
+  endU: 'End u',
+  endV: 'End v',
+  throughU: 'Through u',
+  throughV: 'Through v',
+  pointsNote: 'Points on the face, from its front-left corner; a value may be a formula.',
+  throughNote: 'A point the arc passes through, between its start and its end.',
+  lengthReadout: (length: string) => `Length ${length}`,
+  arcReadout: (radius: string, sweep: string) => `Radius ${radius}, sweep ${sweep}°`,
+  convert: 'Convert to shape',
+  converted: (name: string) => `Converted to ${name}`,
+  parallel: 'Parallel to',
+  edges: { front: 'Front edge', back: 'Back edge', left: 'Left edge', right: 'Right edge' },
+  distance: 'Distance from edge',
+  parallelNote: 'Places a straight line across the whole face, this far from the edge.',
   /** One path's shape: "Path 1". */
   path: (n: number) => `Path ${n}`,
   pathU: 'Position u',

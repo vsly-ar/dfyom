@@ -16,6 +16,8 @@ import type {
   AnchorDTO,
   DrillBottomKind,
   GeneralToleranceDTO,
+  LinePathItemDTO,
+  PointDTO,
   OperationDTO,
   OperationKind,
   PartDTO,
@@ -284,8 +286,43 @@ export interface ChamferSourceEdge {
 /** A named shape placed on a face, as a Line's path (the `named` kind of `Shape`). */
 export type NamedPlacement = Extract<Shape, { kind: 'named' }>
 
-/** A Line's path: a named placement, E2 `scale`d about its anchor point (absent = 1). */
-export type LinePath = NamedPlacement
+/**
+ * DF147 SL2 (engraved-patterns.md § Simple Line): one inline element in the `on` face's frame, the
+ * Line's only path: a straight segment, or an arc from `start` through `through` to `end`.
+ */
+export type InlineLinePath =
+  | { readonly kind: 'segment'; readonly start: Point; readonly end: Point }
+  | { readonly kind: 'arc'; readonly start: Point; readonly through: Point; readonly end: Point }
+
+/**
+ * A Line's path: a named placement, E2 `scale`d about its anchor point (absent = 1), or (DF147
+ * SL2) an inline Straight / Arc.
+ */
+export type LinePath = NamedPlacement | InlineLinePath
+
+/** True for an inline Straight / Arc path (DF147 SL2). */
+export const isInlinePath = (p: LinePath): p is InlineLinePath => p.kind !== 'named'
+
+/** An inline path's points with their parameter keys, in order (`start`, `through`, `end`). */
+export function inlinePoints(p: InlineLinePath): [key: 'start' | 'through' | 'end', at: Point][] {
+  return p.kind === 'segment'
+    ? [
+        ['start', p.start],
+        ['end', p.end],
+      ]
+    : [
+        ['start', p.start],
+        ['through', p.through],
+        ['end', p.end],
+      ]
+}
+
+/** An inline path with every point mapped (a Clones copy, a split piece's frame). */
+export function mapInlinePoints(p: InlineLinePath, f: (q: Point) => Point): InlineLinePath {
+  return p.kind === 'segment'
+    ? { kind: 'segment', start: f(p.start), end: f(p.end) }
+    : { kind: 'arc', start: f(p.start), through: f(p.through), end: f(p.end) }
+}
 
 /**
  * A Line's depth below `on` (engraved-patterns.md E1, E2): constant, linear from `start` to `end`
@@ -533,6 +570,13 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
       break
     case 'line':
       op.paths.forEach((p, i) => {
+        if (isInlinePath(p)) {
+          for (const [k, at] of inlinePoints(p)) {
+            add(`paths.${i}.${p.kind}.${k}.0`, at[0])
+            add(`paths.${i}.${p.kind}.${k}.1`, at[1])
+          }
+          return
+        }
         add(`paths.${i}.center.0`, p.center[0])
         add(`paths.${i}.center.1`, p.center[1])
         addOpt(`paths.${i}.rotation`, p.rotation)
@@ -616,6 +660,13 @@ function lineWithParam(op: Line, path: string, value: Quantity): Line {
   const i = Number(parts[1])
   const paths = op.paths.map((p, k): LinePath => {
     if (k !== i) return p
+    if (isInlinePath(p)) {
+      const key = parts[3] as 'start' | 'through' | 'end'
+      const at = (q: Point): Point => (parts[4] === '0' ? [value, q[1]] : [q[0], value])
+      if (p.kind === 'segment')
+        return key === 'start' ? { ...p, start: at(p.start) } : { ...p, end: at(p.end) }
+      return { ...p, [key]: at(p[key]) }
+    }
     if (parts[2] === 'rotation') return { ...p, rotation: Some(value) }
     return { ...p, center: parts[3] === '0' ? [value, p.center[1]] : [p.center[0], value] }
   })
@@ -921,11 +972,29 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
     }
     case 'line': {
       const paths = collect(
-        dto.paths.map((p, i) =>
-          shapeFromDTO(p)
+        dto.paths.map((p, i): AppResult<LinePath> => {
+          const at = (x: readonly [QuantityDTO, QuantityDTO], kind: string, key: string) =>
+            pointFromDTO(x, 'paths', String(i), kind, key)
+          if ('segment' in p)
+            return collect([
+              at(p.segment.start, 'segment', 'start'),
+              at(p.segment.end, 'segment', 'end'),
+            ]).map(([start, end]): LinePath => ({ kind: 'segment', start: start!, end: end! }))
+          if ('arc' in p)
+            return collect([
+              at(p.arc.start, 'arc', 'start'),
+              at(p.arc.through, 'arc', 'through'),
+              at(p.arc.end, 'arc', 'end'),
+            ]).map(([start, through, end]): LinePath => ({
+              kind: 'arc',
+              start: start!,
+              through: through!,
+              end: end!,
+            }))
+          return shapeFromDTO(p)
             .map((s): LinePath => s as NamedPlacement)
-            .mapErr((e) => e.prefixIssues('paths', i)),
-        ),
+            .mapErr((e) => e.prefixIssues('paths', i))
+        }),
       )
       const d = dto.depth
       const depth: AppResult<LineDepth> =
@@ -958,6 +1027,15 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
       }))
     }
   }
+}
+
+/** A Line path's record: a named placement as a shape's, an inline element as `{ segment }` / `{ arc }`. */
+function linePathToDTO(p: LinePath): LinePathItemDTO {
+  if (!isInlinePath(p)) return shapeToDTO(p) as LinePathItemDTO
+  const pt = (q: Point) => [q[0].toDTO(), q[1].toDTO()] as PointDTO
+  return p.kind === 'segment'
+    ? { segment: { start: pt(p.start), end: pt(p.end) } }
+    : { arc: { start: pt(p.start), through: pt(p.through), end: pt(p.end) } }
 }
 
 function shapeToDTO(s: Shape): OperationShapeDTO {
@@ -1099,7 +1177,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         kind: 'line',
         ...base,
         on: op.on,
-        paths: op.paths.map((p) => shapeToDTO(p)),
+        paths: op.paths.map((p) => linePathToDTO(p)),
         depth:
           op.depth.kind === 'constant'
             ? op.depth.depth.toDTO()
@@ -1278,7 +1356,9 @@ export function placedShapeIds(
   op: OperationDTO | Operation,
 ): { id: string; path: (string | number)[] }[] {
   if (op.kind === 'line')
-    return op.paths.map((p, i) => ({ id: p.shapeId, path: ['paths', i, 'shapeId'] }))
+    return op.paths.flatMap((p, i) =>
+      'shapeId' in p ? [{ id: p.shapeId, path: ['paths', i, 'shapeId'] }] : [],
+    )
   if ((op.kind === 'pocket' || op.kind === 'profile') && op.shape.kind === 'named')
     return [{ id: op.shape.shapeId, path: ['shape', 'shapeId'] }]
   return []

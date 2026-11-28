@@ -33,6 +33,7 @@ export const SurfaceIdSchema = z
 
 /** Point `[u, v]` in the face frame of the operation's `on` (`[x, y]` on the top face). */
 export const PointDtoSchema = z.tuple([length(), length()])
+export type PointDTO = z.output<typeof PointDtoSchema>
 
 /** One coordinate of a placement anchor in the face frame (design-v0.2.md#placement-anchors). */
 export const ANCHOR_POINTS = ['min', 'centre', 'max'] as const
@@ -246,6 +247,25 @@ export const LINE_PATHS_MAX = 50
 export const LinePathDtoSchema = OperationShapeDtoSchema.options[2]
 
 /**
+ * DF147 SL2 (engraved-patterns.md § Simple Line): one inline element on the `on` face, in its face
+ * frame, instead of a placed shape: a straight segment, or an arc from `start` through `through`
+ * to `end` (any sweep below 360°). It is the Line's only path (`inlineAlone`).
+ */
+export const LineSegmentDtoSchema = z.object({
+  segment: z.object({ start: PointDtoSchema, end: PointDtoSchema }),
+})
+export const LineArcDtoSchema = z.object({
+  arc: z.object({ start: PointDtoSchema, through: PointDtoSchema, end: PointDtoSchema }),
+})
+/** A Line's `paths` item: a placed named shape (Shape mode) or an inline Straight / Arc. */
+export const LinePathItemDtoSchema = z.union([
+  LinePathDtoSchema,
+  LineSegmentDtoSchema,
+  LineArcDtoSchema,
+])
+export type LinePathItemDTO = z.output<typeof LinePathItemDtoSchema>
+
+/**
  * A Line's depth below `on`: one length (constant), `{ start, end }` (linear along each line by
  * arc length) or, E2, `{ min, max }` (from the paths' levels: level 0 → `min`, 1 → `max`).
  */
@@ -266,7 +286,7 @@ export const LineDtoSchema = z.object({
   kind: z.literal('line'),
   ...common,
   on: SurfaceIdSchema,
-  paths: z.array(LinePathDtoSchema).min(1).max(LINE_PATHS_MAX),
+  paths: z.array(LinePathItemDtoSchema).min(1).max(LINE_PATHS_MAX),
   depth: LineDepthDtoSchema,
   blend: length().optional(),
   /**

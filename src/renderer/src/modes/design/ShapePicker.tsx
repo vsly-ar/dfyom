@@ -68,6 +68,8 @@ export interface LineShapeActions {
   newShape(index: number): void
   /** Opens the shape in the Shape Editor window. */
   editShape(shapeId: string): void
+  /** SL2: `design.shape.convert` of the inline Straight / Arc (Shape mode, nothing lost). */
+  convert(): void
 }
 
 /** A named shape's loops resolved by the renderer's port (shape frame, mm). */

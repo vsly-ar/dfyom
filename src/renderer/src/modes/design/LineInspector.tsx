@@ -1,21 +1,48 @@
-// The Line inspector (engraved-patterns.md E1, E2): the `line` kind's groups inside
-// OperationFields, so the Design inspector and the plan copy share it. Paths (`on`, then per path
-// its shape, a Select of the part's shapes, and its centre on the face), Depth (a segmented choice
+// The Line inspector (engraved-patterns.md E1, E2, DF147): the `line` kind's groups inside
+// OperationFields, so the Design inspector and the plan copy share it. Paths (`on`, the geometry
+// mode Straight / Arc / Shape; Straight: start and end with the length, "Parallel to an edge"
+// behind More; Arc: start, a point it passes through and end with radius and sweep; both offer
+// "Convert to shape", which the Shape choice also runs; Shape: per path its shape, a Select of the
+// part's shapes with New shape… / Edit shape…, and its centre on the face), Depth (a segmented choice
 // Constant / Start → end / From SVG levels, then the fields; to Constant keeps the deeper end;
 // levels: Min and Max, the depth legend, Blend behind More), then the tool group. Each commit is one
 // `design.line.update` (one undo step).
 // Doc: docs/modes/engraved-patterns.md#ui, docs/conventions/inspector-layout.md
+import { useState } from 'react'
 import { lineLegend } from '../../../../core/design/engraving/legend'
+import { arcReadout } from '../../../../core/design/line-inline'
+import type { Quantity } from '../../../../core/quantity/quantity'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { SHAPE_ID_PATTERN } from '../../../../core/design/shape.dto'
 import { lineMessages } from '../../messages/line'
 import { DEFAULTS } from '../../../../core/design/operation'
 import type { UnitSystem } from '../../../../core/project/document'
 import { useRegion2d } from '../../shell/ShellContext'
-import { Button, Field, Icon, InspectorGroup, SegmentedControl, Select } from '../../ui'
+import {
+  Button,
+  Field,
+  Icon,
+  InspectorGroup,
+  QuantityInput,
+  SegmentedControl,
+  Select,
+} from '../../ui'
+import { lengthSource } from '../../messages/dfm'
 import styles from './Design.module.css'
 import { DepthLegend } from './DepthLegend'
-import { linePathArgs, quantityAt } from './model'
+import {
+  arcPoints,
+  FACE_EDGES,
+  geometryModeOf,
+  lineAcross,
+  parallelToEdge,
+  pathsForMode,
+  segmentLength,
+  type FaceEdge,
+  type LineGeometryMode,
+} from './line-geometry'
+import { defaultUnit, linePathArgs, quantityAt } from './model'
+import { surfaceFace } from './outline'
 import { EDIT_SHAPE, NEW_SHAPE } from './operation-shape'
 import { OnField, ParamField, type OperationFieldsContext } from './OperationFields'
 
@@ -43,9 +70,7 @@ export function LineInspector({
     <>
       <InspectorGroup title={t.groups.paths} level={level}>
         <OnField ctx={ctx} />
-        {op.paths.map((_, i) => (
-          <PathFields key={i} ctx={ctx} op={op} index={i} />
-        ))}
+        <GeometryFields ctx={ctx} op={op} />
       </InspectorGroup>
       <InspectorGroup title={t.groups.depth} level={level}>
         <Field label={t.depthMode} kind="toggle" readOnly={ctx.readOnly}>
@@ -129,6 +154,161 @@ export function LineInspector({
   )
 }
 
+/** The geometry mode row and the fields of the chosen mode (DF147 SL2). */
+function GeometryFields({
+  ctx,
+  op,
+}: {
+  ctx: OperationFieldsContext
+  op: LineDTO
+}): React.JSX.Element {
+  const mode = geometryModeOf(op)
+  const actions = ctx.readOnly ? undefined : ctx.lineShapeActions
+  const face = faceSize(ctx, op)
+  const choose = (m: LineGeometryMode) => {
+    if (m === mode) return
+    if (m === 'shape') return actions?.convert()
+    const paths = mode === 'shape' ? [lineAcross(face, ctx.units)] : pathsForMode(op, m, ctx.units)
+    if (paths !== undefined) ctx.send({ paths }, 'paths')
+  }
+  const convert =
+    actions !== undefined && mode !== 'shape' ? (
+      <div className={styles['pickerActions']}>
+        <Button size="sm" icon={<Icon name="shapes" />} onClick={actions.convert}>
+          {t.convert}
+        </Button>
+      </div>
+    ) : null
+  const point = (key: string, u: string, v: string, info?: string) => (
+    <>
+      <ParamField
+        ctx={ctx}
+        path={`paths.0.${key}.0`}
+        stepKind="xy"
+        label={u}
+        kind="length"
+        icon="positionX"
+        {...(info !== undefined ? { info } : {})}
+      />
+      <ParamField
+        ctx={ctx}
+        path={`paths.0.${key}.1`}
+        stepKind="xy"
+        label={v}
+        kind="length"
+        icon="positionY"
+      />
+    </>
+  )
+  const length = segmentLength(op)
+  const arc = arcPoints(op)
+  const r = arc === undefined ? undefined : arcReadout(...arc)
+  return (
+    <>
+      <Field label={t.geometry} kind="toggle" readOnly={ctx.readOnly}>
+        <SegmentedControl<LineGeometryMode>
+          label={t.geometry}
+          options={(['straight', 'arc', 'shape'] as const).map((m) => ({
+            value: m,
+            label: t.geometryModes[m],
+            // Shape converts the line, which the plan copy cannot
+            ...(m === 'shape' && mode !== 'shape' && actions === undefined
+              ? { disabled: true }
+              : {}),
+          }))}
+          value={mode}
+          disabled={ctx.readOnly}
+          onValueChange={choose}
+        />
+      </Field>
+      {mode === 'straight' ? (
+        <>
+          {point('segment.start', t.startU, t.startV, t.pointsNote)}
+          {point('segment.end', t.endU, t.endV)}
+          {length === undefined ? null : (
+            <p className={styles['muted']} data-line-readout>
+              {t.lengthReadout(lengthSource(Math.round(length * 1000) / 1000, ctx.units))}
+            </p>
+          )}
+          {ctx.readOnly ? null : <ParallelToEdge ctx={ctx} face={face} />}
+          {convert}
+        </>
+      ) : mode === 'arc' ? (
+        <>
+          {point('arc.start', t.startU, t.startV, t.pointsNote)}
+          {point('arc.through', t.throughU, t.throughV, t.throughNote)}
+          {point('arc.end', t.endU, t.endV)}
+          {r === undefined ? null : (
+            <p className={styles['muted']} data-line-readout>
+              {t.arcReadout(
+                lengthSource(Math.round(r.radius * 1000) / 1000, ctx.units),
+                String(Math.round(r.sweep * 10) / 10),
+              )}
+            </p>
+          )}
+          {convert}
+        </>
+      ) : (
+        op.paths.map((_, i) => <PathFields key={i} ctx={ctx} op={op} index={i} />)
+      )}
+    </>
+  )
+}
+
+/** The `on` face's size in its frame (mm): u from 0 to `length`, v from 0 to `width`. */
+function faceSize(ctx: OperationFieldsContext, op: LineDTO): { length: number; width: number } {
+  const stock = ctx.part.loaded?.stock
+  const table = ctx.part.table
+  if (stock === undefined || table === undefined) return { length: 100, width: 60 }
+  const f = surfaceFace(op.on, stock, table)
+  return { length: f.local.length, width: f.local.width }
+}
+
+/**
+ * "Parallel to an edge" (DF147 SL2): an edge and a distance; committing the distance places a
+ * straight line across the whole face that far from the edge (one update).
+ */
+function ParallelToEdge({
+  ctx,
+  face,
+}: {
+  ctx: OperationFieldsContext
+  face: { length: number; width: number }
+}): React.JSX.Element {
+  const [edge, setEdge] = useState<FaceEdge>('front')
+  const [distance, setDistance] = useState<Quantity | undefined>(undefined)
+  const place = (e: FaceEdge, d: Quantity | undefined) => {
+    if (d === undefined) return
+    ctx.send({ paths: [parallelToEdge(e, d.canonical, face, ctx.units)] }, 'paths')
+  }
+  return (
+    <InspectorGroup.More fields={[t.parallel]} rememberKey="line.parallel.more">
+      <Field label={t.parallel}>
+        <Select
+          options={FACE_EDGES.map((e) => ({ value: e, label: t.edges[e] }))}
+          value={edge}
+          onValueChange={(e) => {
+            setEdge(e as FaceEdge)
+            place(e as FaceEdge, distance)
+          }}
+        />
+      </Field>
+      <QuantityInput
+        label={t.distance}
+        kind="length"
+        stepKind="xy"
+        defaultUnit={defaultUnit('length', ctx.units)}
+        value={distance}
+        info={t.parallelNote}
+        onCommit={(q) => {
+          setDistance(q)
+          place(edge, q)
+        }}
+      />
+    </InspectorGroup.More>
+  )
+}
+
 /** The depth legend of a Line with levels: its paths' levels between Shallowest and Deepest. */
 function LevelsLegend({
   ctx,
@@ -142,7 +322,7 @@ function LevelsLegend({
   const max = quantityAt(op, 'depth.max')?.canonical
   if (min === undefined || max === undefined) return null
   const legend = lineLegend(
-    op.paths.map((p) => p.shapeId),
+    op.paths.flatMap((p) => ('shapeId' in p ? [p.shapeId] : [])),
     ctx.part.dto.shapes ?? [],
     port,
   )
@@ -188,7 +368,8 @@ function PathFields({
   index: number
 }): React.JSX.Element {
   const shapes = (ctx.part.dto.shapes ?? []).filter((s) => SHAPE_ID_PATTERN.test(s.id))
-  const id = op.paths[index]!.shapeId
+  const path = op.paths[index]!
+  const id = 'shapeId' in path ? path.shapeId : ''
   const actions = ctx.readOnly ? undefined : ctx.lineShapeActions
   const known = shapes.some((s) => s.id === id)
   const options: { value: string; label: string; group?: string }[] = shapes.map((s) => ({

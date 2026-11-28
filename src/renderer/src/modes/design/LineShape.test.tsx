@@ -93,6 +93,60 @@ async function choose(
   await user.click(within(list).getByRole('option', { name: option }))
 }
 
+type Paths = { segment?: { start: unknown[]; end: unknown[] }; arc?: unknown; shapeId?: string }[]
+const pathsOf = (p: PartDTO) => (p.operations[0] as unknown as { paths: Paths }).paths
+const exact = (q: unknown) => {
+  const e = (q as { exact: { num: string; den: string } }).exact
+  return Number(e.num) / Number(e.den)
+}
+const field = (label: string) =>
+  within(inspector()).getByLabelText(label, { selector: 'input' }) as HTMLInputElement
+
+describe('Line inspector: Straight / Arc / Shape (DF147 SL2)', () => {
+  it('Add → Line is Straight across the face; Arc, Parallel to an edge and Shape (converts)', async () => {
+    const { user, part, d } = await renderLine()
+    within(navigator()).getByRole('button', { name: 'Add' }).focus()
+    await user.keyboard('{Enter}')
+    const ops = within(await screen.findByRole('menu')).getByRole('group', { name: 'Operations' })
+    await user.click(within(ops).getByRole('menuitem', { name: 'Line' }))
+    await within(inspector()).findByRole('heading', { name: 'Line 1' })
+    expect(within(inspector()).getByRole('radio', { name: 'Straight' })).toBeChecked()
+    // across the middle of the 100 × 60 top
+    expect(pathsOf(part())[0]!.segment!.start.map(exact)).toEqual([0, 30])
+    expect(pathsOf(part())[0]!.segment!.end.map(exact)).toEqual([100, 30])
+    expect(within(inspector()).getByText('Length 100 mm')).toBeVisible()
+    await user.clear(field('End u'))
+    await user.type(field('End u'), '80{Enter}')
+    await waitFor(() => expect(pathsOf(part())[0]!.segment!.end.map(exact)).toEqual([80, 30]))
+    await expectNoAxeViolations(inspector())
+
+    // Parallel to an edge: 22 mm from the front edge, across the whole face
+    await user.click(within(inspector()).getByRole('button', { name: /^More/ }))
+    await user.type(field('Distance from edge'), '22{Enter}')
+    await waitFor(() => expect(pathsOf(part())[0]!.segment!.start.map(exact)).toEqual([0, 22]))
+    expect(pathsOf(part())[0]!.segment!.end.map(exact)).toEqual([100, 22])
+
+    // Arc keeps the ends and bulges to the left by a quarter of the chord
+    await user.click(within(inspector()).getByRole('radio', { name: 'Arc' }))
+    await waitFor(() => expect(pathsOf(part())[0]).toHaveProperty('arc'))
+    expect(field('Through u').value).toMatch(/^50/)
+    expect(field('Through v').value).toMatch(/^47/)
+    expect(within(inspector()).getByText(/^Radius .* mm, sweep .*°$/)).toBeVisible()
+    await expectNoAxeViolations(inspector())
+
+    // Shape converts the arc into a named shape (one undo step) and shows the Path picker
+    const before = d.history.undoable.length
+    await user.click(within(inspector()).getByRole('radio', { name: 'Shape' }))
+    await waitFor(() => expect(pathsOf(part())[0]!.shapeId).toBe('shape2'))
+    expect(d.history.undoable).toHaveLength(before + 1)
+    expect(within(inspector()).getByRole('combobox', { name: 'Path 1' })).toBeVisible()
+    // and back to Straight: across the face's middle, the shape kept in the library
+    await user.click(within(inspector()).getByRole('radio', { name: 'Straight' }))
+    await waitFor(() => expect(pathsOf(part())[0]).toHaveProperty('segment'))
+    expect(part().shapes).toHaveLength(2)
+  })
+})
+
 describe('Line inspector: Shape Editor access (DF147 SL1)', () => {
   it('"New shape…" in the Path picker adds an open path, picks it and opens it, one undo step', async () => {
     const { user, d, part, partId, bridge } = await renderLine()

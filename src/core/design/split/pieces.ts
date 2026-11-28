@@ -28,7 +28,14 @@ import {
   roughingOwnerId,
   type Operation,
 } from '../operation'
-import type { OperationDTO, OperationShapeDTO, PartDTO, SplitDTO } from '../part.dto'
+import type {
+  LinePathItemDTO,
+  OperationDTO,
+  OperationShapeDTO,
+  PartDTO,
+  PointDTO,
+  SplitDTO,
+} from '../part.dto'
 import { orientedShape, shapeDefinition, shapeOrientation } from '../placement'
 import type { ShapeDefinition } from '../shape'
 import type { ShapeDTO, ShapeItemDTO } from '../shape.dto'
@@ -815,9 +822,18 @@ function mapOperation(
       if (!overlaps(cell.rect, groove)) return Ok(undefined)
       const vsCut = cell.cut === undefined ? undefined : cutRelation(c.port, cell.cut, groove, 0)
       if (vsCut === 'miss') return Ok(undefined)
-      const paths = base.paths.map(
-        (p) => ({ ...p, ...shiftedShape(p, delta, c.units) }) as typeof p,
-      )
+      const sh = (q: PointDTO): PointDTO => [
+        shifted(q[0], delta[0], c.units),
+        shifted(q[1], delta[1], c.units),
+      ]
+      const paths = base.paths.map((p): LinePathItemDTO => {
+        // DF147 SL2: an inline Straight / Arc moves by its points
+        if ('segment' in p)
+          return { segment: { start: sh(p.segment.start), end: sh(p.segment.end) } }
+        if ('arc' in p)
+          return { arc: { start: sh(p.arc.start), through: sh(p.arc.through), end: sh(p.arc.end) } }
+        return { ...p, ...shiftedShape(p, delta, c.units) } as typeof p
+      })
       const rect = cell.rect
       const grown: Rect = {
         x0: rect.x0 - half,
@@ -1419,7 +1435,7 @@ export function planPieces(
         (o.kind === 'pocket' || o.kind === 'profile') && o.shape.kind === 'named'
           ? [o.shape.shapeId]
           : o.kind === 'line'
-            ? o.paths.map((p) => p.shapeId)
+            ? o.paths.flatMap((p) => ('shapeId' in p ? [p.shapeId] : []))
             : [],
       ),
     )

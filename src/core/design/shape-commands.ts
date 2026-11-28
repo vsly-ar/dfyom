@@ -12,7 +12,7 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
-import { Err, fail, None, Ok, type AppResult } from '../../shared/result'
+import { collect, Err, fail, None, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import { listedAs } from '../commands/json-schema'
 import type { CommandContext } from '../commands/context'
@@ -25,7 +25,15 @@ import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { findOperation, refuseOwned, Warnings, withWarnings, writeOperationList } from './commands'
 import { loadPart, type LoadedPart } from './load'
-import { DEFAULTS, fieldContext, type FieldKind, type Operation } from './operation'
+import {
+  CENTRE_ANCHOR,
+  DEFAULTS,
+  fieldContext,
+  isInlinePath,
+  type FieldKind,
+  type Operation,
+} from './operation'
+import { inlineElement, inlineGeometry } from './line-inline'
 import { OperationIdSchema, PartIdSchema } from './part.dto'
 import {
   definitionOf,
@@ -49,6 +57,7 @@ import {
   type ShapeDTO,
   type ShapeItem,
   type ShapeOp,
+  type ShapeSegment,
   type ShapeItemDTO,
 } from './shape.dto'
 import { featuresUsingShape, operationsUsingShape, shapesOffsetting } from './shape-users'
@@ -69,7 +78,7 @@ import {
 } from './reference-find'
 import type { FittedLoop } from './reference-section'
 import { sectionShapes } from './section-shapes'
-import { chainBounds } from '../geometry/2d/model'
+import { chainBounds, type ArcElement } from '../geometry/2d/model'
 import type { SvgImport } from '../import/svg'
 import { svgImportTask, SvgImportReportSchema } from '../import/svg/task'
 import { issueSummary } from '../../shared/errors/app-error'
@@ -608,7 +617,7 @@ const shapeConvert = defineCommand({
   kind: 'document',
   name: 'design.shape.convert',
   summary:
-    "Move a pocket's or profile's inline rectangle or circle into a new named shape the operation then places (one undo step).",
+    "Move a pocket's or profile's inline rectangle or circle, or a Line's segment or arc, into a new named shape the operation then places (one undo step).",
   title: () => 'Convert to shape',
   machine: false,
   args: z.object({ ...PartArg, operationId: OperationIdSchema }),
@@ -623,10 +632,15 @@ const shapeConvert = defineCommand({
     const owned = refuseOwned(loaded, found.unwrap(), where)
     if (owned.isErr()) return owned
     const op = loaded.part.operations[found.unwrap()]!
+    if (op.kind === 'line') return convertLine(draft, args.partId, loaded, op, port, shapes, ctx)
     if (op.kind !== 'pocket' && op.kind !== 'profile')
       return fail('input.malformed', `${op.id} is a ${op.kind}, which has no shape`, {
         issues: [
-          { path: ['operationId'], rule: 'operationKind', message: 'must be a pocket or profile' },
+          {
+            path: ['operationId'],
+            rule: 'operationKind',
+            message: 'must be a pocket, profile or Line',
+          },
         ],
         where,
       })
@@ -707,6 +721,103 @@ const shapeConvert = defineCommand({
     return withWarnings({ shapeId }, loaded, ops, ctx, where)
   },
 })
+
+/**
+ * A Line's inline Straight / Arc (DF147 SL2) moved into a new named shape of one open path from
+ * [0, 0] in its frame; the Line then places it by its bounding box's centre, so the groove stays
+ * where it was (engraved-patterns.md § Simple Line). Lengths are written to 0.1 µm (an arc's
+ * radius rounded up, so it still spans its chord).
+ */
+function convertLine(
+  draft: Draft<ProjectDoc>,
+  partId: string,
+  loaded: LoadedPart,
+  op: Extract<Operation, { kind: 'line' }>,
+  port: Region2dPort,
+  shapes: readonly ShapeDTO[],
+  ctx: CommandContext,
+) {
+  const where = 'design.shape.convert'
+  const p = op.paths[0]
+  const inline = p !== undefined && isInlinePath(p) ? p : undefined
+  const el = inline === undefined ? undefined : inlineElement(inline)
+  const geometry = inline === undefined ? undefined : inlineGeometry(inline)
+  if (el === undefined || geometry === undefined)
+    return fail('input.malformed', `${op.id} has no straight line or arc to convert`, {
+      issues: [
+        {
+          path: ['operationId'],
+          rule: inline === undefined ? 'alreadyNamed' : 'lineTooShort',
+          message: 'must be a Line in Straight or Arc mode',
+        },
+      ],
+      where,
+    })
+  const resolver = shapeResolver(loaded)
+  const len = (mm: number): AppResult<Quantity> =>
+    quantityFromSource(`${+mm.toFixed(4)} mm`, fieldContext('length', loaded.units), resolver)
+  const radius =
+    el.kind === 'arc'
+      ? Math.ceil(Math.hypot(el.a[0] - el.centre[0], el.a[1] - el.centre[1]) * 1e4) / 1e4
+      : 0
+  const values = collect([
+    len(0),
+    len(el.b[0] - el.a[0]),
+    len(el.b[1] - el.a[1]),
+    len(radius),
+    len(geometry.center[0]),
+    len(geometry.center[1]),
+  ])
+  if (values.isErr()) return Err(values.unwrapErr().withContext(where))
+  const [zero, tu, tv, r, cu, cv] = values.unwrap() as Quantity[]
+  const segment: ShapeSegment<Quantity> =
+    el.kind === 'line'
+      ? { kind: 'line', to: [tu!, tv!] }
+      : {
+          kind: 'arc',
+          to: [tu!, tv!],
+          radius: r!,
+          cw: !el.ccw,
+          ...(arcSweep(el) > 180 ? { large: true } : {}),
+        }
+  const item: ShapeItem<Quantity> = {
+    kind: 'path',
+    op: 'add',
+    start: [zero!, zero!],
+    segments: [segment],
+    closed: false,
+  }
+  const n = nextShapeNumber(shapes)
+  const shapeId = `shape${n}`
+  const dtos = settleItems(port, [item], where, shapes, shapeId)
+  if (dtos.isErr()) return dtos
+  draftShapes(draft, partId).push({ id: shapeId, name: shapeName(n), items: dtos.unwrap() })
+  const placed: Operation = {
+    ...op,
+    paths: [
+      {
+        kind: 'named',
+        center: [cu!, cv!],
+        anchor: CENTRE_ANCHOR,
+        shapeId,
+        rotation: None,
+        mirror: false,
+      },
+    ],
+  }
+  const ops = loaded.part.operations.map((o) => (o.id === op.id ? placed : o))
+  writeOperationList(draft.parts[partId]!.operations, ops)
+  return withWarnings({ shapeId }, loaded, ops, ctx, where)
+}
+
+/** An arc element's sweep in degrees (0–360). */
+function arcSweep(el: ArcElement): number {
+  const a0 = Math.atan2(el.a[1] - el.centre[1], el.a[0] - el.centre[0])
+  const a1 = Math.atan2(el.b[1] - el.centre[1], el.b[0] - el.centre[0])
+  let s = el.ccw ? a1 - a0 : a0 - a1
+  while (s <= 0) s += 2 * Math.PI
+  return (s * 180) / Math.PI
+}
 
 const FromArg = z
   .object({

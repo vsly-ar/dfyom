@@ -22,7 +22,7 @@ import {
 import type { Region2dPort } from '../geometry/2d/port'
 import { Rational } from '../quantity/rational'
 import { chainLength } from '../geometry/2d/measure'
-import { shapeRotation, type Operation, type Part, type Shape } from './operation'
+import { isInlinePath, shapeRotation, type Operation, type Part, type Shape } from './operation'
 import type { PatternDefinition } from './pattern/layout'
 import type { ShapeDefinition } from './shape'
 import { definitionOf, resolveShape, type AnyShapeDefinition, type ResolvedShape } from './shape'
@@ -258,6 +258,7 @@ export function shapeFacts(
     // reach the feature's fields as a pattern's cells' do
     if (op.kind === 'line' && port !== undefined)
       for (const p of op.paths) {
+        if (isInlinePath(p)) continue
         const rec = shapes?.get(p.shapeId)?.engraving
         if (rec === undefined) continue
         const r = resolveEngraving(rec, shapes, port)
