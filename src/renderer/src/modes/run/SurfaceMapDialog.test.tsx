@@ -3,7 +3,9 @@
 // `run.machine.surfacePoint` job per point in serpentine order with the travel height following
 // the last contact, the heat map and the map saved per plan and setup; a failed point keeps the
 // rest and offers Retry from here; the pre-flight's "Follow the surface map" (off by default)
-// passes the map to `run.job.check` and `run.job.start`; axe.
+// passes the map to `run.job.check` and `run.job.start`; axe. v0.5 RV11: the bed map from Machine
+// settings (machine X/Y over the travel, saved per library machine with its homing, stale when the
+// homing changes) and the pre-flight's "Compensate with the bed map".
 // Spec: docs/modes/run-surface.md
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
@@ -109,6 +111,7 @@ async function renderRun() {
     checks,
     starts,
     planId,
+    machineId: s.machineId,
     setupId: s.plan(planId).setups[0]!.id,
     setFailAt: (n: number | undefined) => (failAt = n),
   }
@@ -213,5 +216,92 @@ describe('Map stock surface (v0.5 RV10)', () => {
     await waitFor(() => expect(start).toBeEnabled())
     await t.user.click(start)
     expect(t.starts.at(-1)).toMatchObject({ surfaceMap: { cols: 5, rows: 4 } })
+  })
+})
+
+type SavedBed = {
+  bedMaps: Record<
+    string,
+    { z: number[]; cols: number; rows: number; origin: [number, number]; homing: unknown }
+  >
+}
+
+describe('Map bed (v0.5 RV11)', () => {
+  const bedDialog = () => screen.getByRole('dialog', { name: 'Map bed' })
+
+  async function mapBed(t: Awaited<ReturnType<typeof renderRun>>) {
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    await t.user.click(inspector.getByRole('button', { name: 'Machine settings' }))
+    expect(inspector.getByText(/^Bed map/).closest('p')?.textContent).toMatch(/none/)
+    await t.user.click(inspector.getByRole('button', { name: 'Map bed…' }))
+    expect(within(bedDialog()).getByText(/^5 × 4 points/)).toBeVisible()
+    t.push({ pins: 'P' })
+    t.push({ pins: '' })
+    const run = within(bedDialog()).getByRole('button', { name: 'Map bed' })
+    await waitFor(() => expect(run).toBeEnabled())
+    await t.user.click(run)
+    await waitFor(() => expect(t.bridge.settingsPatches.at(-1)).toHaveProperty('bedMaps'))
+    return inspector
+  }
+
+  it('maps the bed over the travel in machine coordinates and keeps it with the machine', async () => {
+    const t = await renderRun()
+    const inspector = await mapBed(t)
+    expect(t.points).toHaveLength(20)
+    // the travel less the 5 mm margin, machine X/Y; every point a bed point
+    expect(t.points[0]).toMatchObject({ at: [-795, -595], bed: true })
+    expect(t.points[4]!.at).toEqual([-5, -595])
+    const saved = (t.bridge.settingsPatches.at(-1) as SavedBed).bedMaps[t.machineId]!
+    expect(saved).toMatchObject({
+      cols: 5,
+      rows: 4,
+      origin: [-795, -595],
+      homing: { travel: [800, 600, 100], pullOff: 1, homingMask: 0 },
+      workArea: null,
+    })
+    // machine Z as probed (not relative to G54)
+    expect(saved.z[0]).toBeCloseTo(top(-795), 6)
+    expect(within(bedDialog()).getByRole('img', { name: /20 of 20 points/ })).toBeVisible()
+    await expectNoAxeViolations()
+    await t.user.click(within(bedDialog()).getByRole('button', { name: 'Close' }))
+    const summary = () => inspector.getByText(/^Bed map/).closest('p')?.textContent
+    expect(summary()).toMatch(/5 × 4, range/)
+    // another pull-off: the homing changed, the map is stale and not offered
+    t.push({ envelope: { ...envelope, pullOff: 2 } })
+    expect(await inspector.findByText(/^Stale: the homing changed/)).toBeVisible()
+    t.push({ envelope })
+    await waitFor(() => expect(inspector.queryByText(/^Stale/)).toBeNull())
+    // Clear
+    await t.user.click(inspector.getByRole('button', { name: 'Clear' }))
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ bedMaps: { [t.machineId]: null } })
+  })
+
+  it('the pre-flight offers Compensate with the bed map in the work frame of G54', async () => {
+    const t = await renderRun()
+    await mapBed(t)
+    await t.user.click(within(bedDialog()).getByRole('button', { name: 'Close' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    const box = within(preflight).getByRole('checkbox', { name: 'Compensate with the bed map' })
+    expect(box).not.toBeChecked()
+    await within(preflight).findByText('Inside the travel at this work zero.')
+    await t.user.click(box)
+    await within(preflight).findByText(/The program moves by up to 0.310 mm/)
+    const arg = (t.checks.at(-1) as { surfaceMap: Record<string, unknown> }).surfaceMap
+    expect(arg).not.toHaveProperty('setupId')
+    expect(arg).toMatchObject({
+      origin: [-795 - G54[0], -595 - G54[1]],
+      workZero: [G54[0], G54[1]],
+      cols: 5,
+      rows: 4,
+      maxRange: 1,
+    })
+    await expectNoAxeViolations()
+    const start = within(preflight).getByRole('button', { name: 'Start run' })
+    await waitFor(() => expect(start).toBeEnabled())
+    await t.user.click(start)
+    expect(t.starts.at(-1)).toMatchObject({ surfaceMap: { cols: 5, workZero: [G54[0], G54[1]] } })
   })
 })

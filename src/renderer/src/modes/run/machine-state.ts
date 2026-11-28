@@ -242,6 +242,8 @@ export function actionText(e: AppErrorData, units: UnitSystem): string | undefin
   if ((e.code === 'run.state' || e.code === 'machine.reset') && rule !== undefined)
     return m.spindle.refused[rule]
   if (e.code !== 'run.travel') return undefined
+  // v0.5 RV11: the floor's refusal says where in its own words (run-surface.md#uses)
+  if (rule === 'floor') return e.message
   const d = e.frames[0]?.data as
     | {
         axis?: string

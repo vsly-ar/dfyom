@@ -397,6 +397,8 @@ export interface RunState {
   readonly calibrationOpen: boolean
   /** v0.5 RV10: the Map stock surface dialog is open (run-surface.md). */
   readonly surfaceMapOpen: boolean
+  /** v0.5 RV11: the Map bed dialog (the same dialog in bed mode) is open (run-surface.md). */
+  readonly bedMapOpen: boolean
   /**
    * v0.5 RV10: the pre-flight's "Follow the surface map": the map `run.job.check`/`start` get as
    * `surfaceMap`; off (undefined) whenever the pre-flight opens (docs/modes/run-surface.md).
@@ -539,6 +541,7 @@ export interface RunState {
   setRepeatOpen(open: boolean): void
   setCalibrationOpen(open: boolean): void
   setSurfaceMapOpen(open: boolean): void
+  setBedMapOpen(open: boolean): void
   /** RV10: tick (the map) or untick (undefined) "Follow the surface map". */
   setFollowSurface(map: object | undefined): void
   setCalibrationPreview(lines: readonly string[] | undefined): void
@@ -893,6 +896,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       calibrationOpen: false,
       calibrationPreview: undefined,
       surfaceMapOpen: false,
+      bedMapOpen: false,
       followSurface: undefined,
       zeroUndo: undefined,
       virtualStockKey: undefined,
@@ -1244,6 +1248,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setWorkAreaOpen: (workAreaOpen) => set({ workAreaOpen }),
       setRepeatOpen: (repeatOpen) => set({ repeatOpen }),
       setSurfaceMapOpen: (surfaceMapOpen) => set({ surfaceMapOpen }),
+      setBedMapOpen: (bedMapOpen) => set({ bedMapOpen }),
       setFollowSurface: (followSurface) => set({ followSurface, startProgram: undefined }),
       setCalibrationOpen: (calibrationOpen) =>
         set(
@@ -1365,7 +1370,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         set({ preflightCheck: { state: 'checking', key } })
         // DF129 RC3: a plan's program for "Start at", once per open pre-flight and setup
         const surfaceMap = ofFile ? undefined : get().followSurface
-        const programKey = `${planId ?? ''}|${setupId ?? ''}|${surfaceMap === undefined ? '' : 'map'}`
+        // RV11: a bed map has no setup (run-surface.md#uses)
+        const followed = surfaceMap === undefined ? '' : 'setupId' in surfaceMap ? 'map' : 'bed'
+        const programKey = `${planId ?? ''}|${setupId ?? ''}|${followed}`
         const readProgram = !ofFile && get().startProgram?.key !== programKey
         const at = fromLine === undefined ? {} : { fromLine }
         // not through `call`: a failed check shows in the dialog, not in the action banner

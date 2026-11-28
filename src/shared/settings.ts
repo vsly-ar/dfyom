@@ -11,6 +11,7 @@ import { AnchorDtoSchema } from '../core/design/part.dto'
 import { UnitSystemSchema } from '../core/project/document'
 import { APP_MODES } from '../core/modes'
 import { BACK_OFF_DEFAULT_MM, BACK_OFF_MAX_MM, BACK_OFF_MIN_MM } from '../core/run/back-off'
+import { BED_MAP_AGE } from '../core/run/bed-map'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
@@ -125,6 +126,30 @@ export type SurfaceMapRecord = z.output<typeof SurfaceMapRecordSchema>
 /** RV10: "Follow the surface map"'s largest map range (mm, Settings › Run). */
 export const SURFACE_MAX_RANGE = { min: 0.1, max: 5, default: 1 } as const
 
+const Vec3 = z.tuple([Num, Num, Num])
+
+/**
+ * v0.5 RV11: a machine's bed map (docs/modes/run-surface.md#the-bed-map-rv11): when, the probe
+ * kind, the margin, the grid (machine X/Y, mm), the contacts' machine Z (null: not measured), the
+ * stickout of what touched (when given), and what makes it stale: the homing (travel, pull-off,
+ * homing mask), the work area bound (null: none) and the repeatability result's date (null: none).
+ */
+export const BedMapRecordSchema = z.object({
+  date: z.string().min(1).max(40),
+  probe: z.string().min(1).max(20),
+  margin: Num.min(0),
+  origin: z.tuple([Num, Num]),
+  spacing: z.tuple([Num.positive(), Num.positive()]),
+  cols: z.number().int().min(2).max(30),
+  rows: z.number().int().min(2).max(30),
+  z: z.array(Num.nullable()).max(900),
+  stickout: Num.positive().optional(),
+  homing: z.object({ travel: Vec3, pullOff: Num, homingMask: z.number().int().min(0).max(7) }),
+  workArea: z.object({ min: Vec3, max: Vec3 }).nullable(),
+  repeatability: z.string().min(1).max(40).nullable(),
+})
+export type BedMapRecord = z.output<typeof BedMapRecordSchema>
+
 const fields = {
   /** Light / Dark / System (follow the OS); `data-theme` on the root (ui.md decision 1). */
   theme: z.enum(THEMES),
@@ -233,6 +258,13 @@ const fields = {
   surfaceMaps: z.record(z.string().min(1).max(500), SurfaceMapRecordSchema.nullable()),
   /** v0.5 RV10: the largest map range "Follow the surface map" accepts (mm, default 1). */
   surfaceMapMaxRange: z.number().min(SURFACE_MAX_RANGE.min).max(SURFACE_MAX_RANGE.max),
+  /**
+   * v0.5 RV11: the bed map per library machine id (app state; null in a patch clears one;
+   * docs/modes/run-surface.md#the-bed-map-rv11).
+   */
+  bedMaps: z.record(z.string().min(1), BedMapRecordSchema.nullable()),
+  /** v0.5 RV11: days after which a bed map warns as old (Settings › Run, default 30). */
+  bedMapMaxAge: z.number().int().min(BED_MAP_AGE.min).max(BED_MAP_AGE.max),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -261,6 +293,8 @@ export const AppSettingsSchema = z.object({
   calibration: fields.calibration.default({}),
   surfaceMaps: fields.surfaceMaps.default({}),
   surfaceMapMaxRange: fields.surfaceMapMaxRange.default(SURFACE_MAX_RANGE.default),
+  bedMaps: fields.bedMaps.default({}),
+  bedMapMaxAge: fields.bedMapMaxAge.default(BED_MAP_AGE.default),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -274,8 +308,8 @@ export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 /**
  * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
  * `cuttingJogFeed`, `jogStep`,
- * `inspectorGroups`, `inspectorTabs`, `homingRepeatability`, `calibration` and `surfaceMaps` merge
- * by key (a null `surfaceMaps` entry removes that map).
+ * `inspectorGroups`, `inspectorTabs`, `homingRepeatability`, `calibration`, `surfaceMaps` and
+ * `bedMaps` merge by key (a null `surfaceMaps` or `bedMaps` entry removes that map).
  */
 export function mergeSettings(
   current: AppSettings,
@@ -313,5 +347,11 @@ export function mergeSettings(
       ),
     ),
     surfaceMapMaxRange: patch.surfaceMapMaxRange ?? current.surfaceMapMaxRange,
+    bedMaps: Object.fromEntries(
+      Object.entries({ ...current.bedMaps, ...(patch.bedMaps ?? {}) }).filter(
+        ([, v]) => v !== null,
+      ),
+    ),
+    bedMapMaxAge: patch.bedMapMaxAge ?? current.bedMapMaxAge,
   }
 }

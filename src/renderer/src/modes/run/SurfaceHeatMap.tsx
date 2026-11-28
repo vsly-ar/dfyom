@@ -17,6 +17,12 @@ import styles from './Run.module.css'
 
 const m = runMessages.surface
 
+/** Max − min over a map's measured heights. */
+export function surfaceRange(z: readonly (number | null)[]): number {
+  const v = z.filter((x): x is number => x !== null)
+  return v.length === 0 ? 0 : Math.max(...v) - Math.min(...v)
+}
+
 /** The ramp at `t` (0 lowest … 1 highest): light cool to dark warm, readable in both themes. */
 export function rampColour(t: number): string {
   const k = Math.min(1, Math.max(0, t))

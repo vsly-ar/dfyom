@@ -27,6 +27,8 @@ import { useMachineJog } from './JogPad'
 import { formatLength, isConnected } from './machine-state'
 import { workAreaOfValues } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits } from './run-store'
+import { surfaceRange } from './SurfaceHeatMap'
+import { useBedMap } from './useBedMap'
 import styles from './Run.module.css'
 
 const m = runMessages.machineSettings
@@ -119,6 +121,7 @@ export function MachineSettingsGroup({ doc }: { doc: ProjectDoc | undefined }): 
           />
           <WorkAreaSummary values={item} units={fallbackUnits} />
           <RepeatabilitySummary machineId={item.id} units={fallbackUnits} />
+          <BedMapSummary doc={doc} units={fallbackUnits} />
           {conflict ? (
             <div className={styles['notice']} role="alert">
               <p className={styles['why']}>{m.conflict}</p>
@@ -257,6 +260,65 @@ function RepeatabilitySummary({
       <Button size="sm" onClick={() => store.getState().setRepeatOpen(true)}>
         {t.open}
       </Button>
+    </div>
+  )
+}
+
+/**
+ * v0.5 RV11: the machine's bed map, read-only, with why it is stale or old and the stickout the
+ * floor assumes; Map bed… opens the surface map dialog in bed mode, Clear removes it
+ * (docs/modes/run-surface.md#the-bed-map-rv11).
+ */
+function BedMapSummary({
+  doc,
+  units,
+}: {
+  doc: ProjectDoc | undefined
+  units: UnitSystem
+}): React.JSX.Element {
+  const store = useRunStore()
+  const update = useSettings((s) => s.update)
+  const bed = useBedMap(doc)
+  const t = runMessages.surface.bed
+  const unit = runMessages.dro.units[units]
+  const r = bed.record
+  const note =
+    bed.state === undefined
+      ? undefined
+      : bed.state.unusable !== undefined
+        ? t.unusable[bed.state.unusable]
+        : bed.state.old
+          ? t.old(bed.state.ageDays)
+          : undefined
+  const assumed = r?.stickout ?? bed.stickout
+  return (
+    <div className={styles['buttons']} data-bed-map-summary="">
+      <p className={styles['hint']}>
+        <span className={styles['settingName']}>{t.summary}</span>
+        {r === undefined
+          ? t.summaryNone
+          : t.summaryMap(
+              r.cols,
+              r.rows,
+              formatLength(surfaceRange(r.z), units),
+              unit,
+              new Date(r.date).toLocaleDateString(),
+            ) + (assumed === undefined ? '' : t.floorStickout(formatLength(assumed, units), unit))}
+      </p>
+      {note === undefined ? null : <p className={styles['why']}>{note}</p>}
+      <Button size="sm" onClick={() => store.getState().setBedMapOpen(true)}>
+        {t.open}
+      </Button>
+      {r === undefined || bed.key === undefined ? null : (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Icon name="delete" />}
+          onClick={() => update({ bedMaps: { [bed.key!]: null } })}
+        >
+          {t.clear}
+        </Button>
+      )}
     </div>
   )
 }

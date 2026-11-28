@@ -64,6 +64,9 @@ const backOffRange = (q: Quantity): AppResult<Quantity> =>
         ],
       })
 
+/** v0.5 RV11: the bed map age choices (days). */
+const BED_MAP_AGES: readonly number[] = [7, 14, 30, 60, 90, 180, 365]
+
 /** v0.5 RV10: "Follow the surface map"'s largest map range (mm). */
 const surfaceRange = (q: Quantity): AppResult<Quantity> =>
   q.canonical >= SURFACE_MAX_RANGE.min && q.canonical <= SURFACE_MAX_RANGE.max
@@ -100,6 +103,10 @@ export function SettingsDialog(): React.JSX.Element {
   )
     ? AUTO_APPLY_DELAYS
     : [...AUTO_APPLY_DELAYS, settings.autoApplyDelay].toSorted((a, b) => a - b)
+
+  const ages = BED_MAP_AGES.includes(settings.bedMapMaxAge)
+    ? BED_MAP_AGES
+    : [...BED_MAP_AGES, settings.bedMapMaxAge].toSorted((a, b) => a - b)
 
   // the server's state follows the setting asynchronously: re-read it when either changes
   useEffect(() => {
@@ -326,6 +333,21 @@ export function SettingsDialog(): React.JSX.Element {
               />
             </div>
             <p className={styles['settingHint']}>{m.surfaceMapMaxRangeHint}</p>
+          </div>
+          {/* v0.5 RV11: a bed map older than this warns (docs/modes/run-surface.md#stale-and-old) */}
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.bedMapMaxAge}
+            </span>
+            <div className={styles['settingSelect']}>
+              <Select<string>
+                aria-label={m.bedMapMaxAge}
+                options={ages.map((d) => ({ value: String(d), label: m.bedMapAgeDays(d) }))}
+                value={String(settings.bedMapMaxAge)}
+                onValueChange={(v) => update({ bedMapMaxAge: Number(v) })}
+              />
+            </div>
+            <p className={styles['settingHint']}>{m.bedMapMaxAgeHint}</p>
           </div>
         </InspectorGroup>
         <InspectorGroup title={m.groups.agents} className={styles['settingsGroup']}>

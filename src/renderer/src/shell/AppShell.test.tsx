@@ -253,6 +253,8 @@ describe('AppShell', () => {
         calibration: {},
         surfaceMaps: {},
         surfaceMapMaxRange: 1,
+        bedMaps: {},
+        bedMapMaxAge: 30,
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

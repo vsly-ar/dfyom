@@ -55,6 +55,8 @@ describe('settings store', () => {
       calibration: {},
       surfaceMaps: {},
       surfaceMapMaxRange: 1,
+      bedMaps: {},
+      bedMapMaxAge: 30,
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

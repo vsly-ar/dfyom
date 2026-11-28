@@ -37,6 +37,8 @@ import { WorkAreaDialog } from './WorkAreaDialog'
 import { CalibrationDialog } from './CalibrationDialog'
 import { RepeatabilityDialog } from './RepeatabilityDialog'
 import { followArg, SurfaceMapDialog, surfaceMapKey } from './SurfaceMapDialog'
+import { surfaceRange } from './SurfaceHeatMap'
+import { bedFollowArg, useBedMap } from './useBedMap'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import { useFinalizeAndStart } from './finalize-start'
@@ -129,12 +131,28 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   // v0.5 RV10: "Follow the surface map" (off each time the pre-flight opens; run-surface.md)
   const surfaceMaps = useSettings((s) => s.settings.surfaceMaps)
   const maxRange = useSettings((s) => s.settings.surfaceMapMaxRange)
-  const following = useRun((s) => s.followSurface !== undefined)
+  // RV11: a followed bed map has no setup (run-surface.md#uses); ticking one unticks the other
+  const followKind = useRun((s) =>
+    s.followSurface === undefined ? '' : 'setupId' in s.followSurface ? 'map' : 'bed',
+  )
+  const following = followKind === 'map'
+  const compensating = followKind === 'bed'
   const surfaceMap =
     planId === undefined || info === undefined
       ? undefined
       : surfaceMaps[surfaceMapKey(planId, info.setup.id)]
-  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${info?.cut.size ?? 0}|${status.workZero.join(',')}|${following ? `map${maxRange}` : ''}`
+  const bed = useBedMap(doc)
+  const bedMap = bed.state?.unusable === undefined ? bed.record : undefined
+  // the bed map follows the live G54: moved with it while ticked
+  const zeroKey = status.workZero.join(',')
+  useEffect(() => {
+    if (!compensating) return
+    const s = store.getState()
+    const next =
+      bedMap === undefined ? undefined : bedFollowArg(bedMap, s.status.workZero, maxRange)
+    if (JSON.stringify(next) !== JSON.stringify(s.followSurface)) s.setFollowSurface(next)
+  }, [compensating, bedMap, zeroKey, maxRange, store])
+  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${info?.cut.size ?? 0}|${status.workZero.join(',')}|${followKind === '' ? '' : `${followKind}${maxRange}`}`
   const setupToCheck = info?.setup.id
   const canCheck = open && plan !== undefined && machineGate === null
   const start = usePreflightStart(checkKey, setupToCheck, canCheck)
@@ -292,6 +310,43 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           </div>
         </div>
       )}
+      {resume || allCut || bedMap === undefined ? null : (
+        <div
+          className={styles['notice']}
+          role="group"
+          aria-label={runMessages.surface.bed.compensate}
+        >
+          <div>
+            <Checkbox
+              label={runMessages.surface.bed.compensate}
+              checked={compensating}
+              onCheckedChange={(c) =>
+                a.setFollowSurface(
+                  c === true ? bedFollowArg(bedMap, status.workZero, maxRange) : undefined,
+                )
+              }
+            />
+            <p className={styles['why']}>
+              {runMessages.surface.bed.compensateHint(
+                new Date(bedMap.date).toLocaleDateString(),
+                formatLength(surfaceRange(bedMap.z), units),
+                runMessages.dro.units[units],
+              )}
+            </p>
+            {bed.state?.old === true ? (
+              <p className={styles['why']}>{runMessages.surface.bed.old(bed.state.ageDays)}</p>
+            ) : null}
+            {compensating && current?.state === 'done' && current.surface !== undefined ? (
+              <p className={styles['why']} data-followed="">
+                {runMessages.surface.followed(
+                  formatLength(current.surface.maxDz, units),
+                  runMessages.dro.units[units],
+                )}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
       {serial && !resume ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
@@ -361,12 +416,6 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       )}
     </Dialog>
   )
-}
-
-/** Max − min over a map's measured heights. */
-function surfaceRange(z: readonly (number | null)[]): number {
-  const v = z.filter((x): x is number => x !== null)
-  return v.length === 0 ? 0 : Math.max(...v) - Math.min(...v)
 }
 
 /** The pre-flight's soft-limit row: checking, inside the travel, the findings, or the failure. */

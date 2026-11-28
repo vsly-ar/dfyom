@@ -152,6 +152,10 @@ export const shellMessages = {
     surfaceMapMaxRange: 'Surface map limit',
     surfaceMapMaxRangeHint:
       'A run follows a stock surface map only when its heights vary by at most this much.',
+    bedMapMaxAge: 'Bed map age',
+    bedMapMaxAgeHint:
+      'A bed map older than this shows a warning: spoilboards move with humidity and get surfaced.',
+    bedMapAgeDays: (d: number) => `${d} days`,
     homeConfirmHint: (n: number) =>
       n === 0
         ? 'Homing a real machine asks for confirmation first.'

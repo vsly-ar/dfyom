@@ -39,7 +39,7 @@ export interface BedMapLike extends BedMapStamp {
   readonly rows: number
   readonly z: readonly (number | null)[]
   /** mm below the spindle nose of what touched the bed; absent: not given. */
-  readonly stickout?: number
+  readonly stickout?: number | undefined
 }
 
 /** The connection now, as far as the bed map's validity goes. */

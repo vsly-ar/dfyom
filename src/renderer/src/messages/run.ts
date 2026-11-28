@@ -611,6 +611,46 @@ export const runMessages = {
     followHint: (date: string, range: string, unit: string, k: number) =>
       `The map of ${date}: range ${range} ${unit}, ${k} points. The program's Z follows it.`,
     followed: (dz: string, unit: string) => `The program moves by up to ${dz} ${unit}.`,
+    /** v0.5 RV11: the bed map (docs/modes/run-surface.md#the-bed-map-rv11). */
+    bed: {
+      title: 'Map bed',
+      description:
+        'Probe a grid of heights on the bed in machine coordinates; it is kept with the machine as the floor for probing and for thin sheet laid on it.',
+      steps:
+        'Take clamps and fixtures off the bed. Put the bit or probe a few mm above the bed, within the search depth. Map bed probes the points row by row over the work area; the heat map fills as each one ends.',
+      run: 'Map bed',
+      result: 'Bed map',
+      stickout: 'Stickout of what touches (mm)',
+      stickoutPositive: 'The stickout must be above 0, or empty.',
+      noMachine: 'Choose a library machine: the bed map is kept with it.',
+      homeFirst: 'Home the machine first: the bed map is in machine coordinates.',
+      unusable: {
+        notHomed: 'Home the machine to use the bed map.',
+        incomplete: 'The bed map is incomplete: Retry from here or map the bed again.',
+        homing:
+          'Stale: the homing changed since the map (travel, pull-off or homing direction). Map the bed again.',
+        workArea: 'Stale: the work area changed since the map. Map the bed again.',
+        repeatability:
+          'Stale: a homing repeatability test failed since the map. Fix the homing, then map the bed again.',
+      } as Record<string, string>,
+      old: (days: number) =>
+        `The bed map is ${days} days old: spoilboards move; map the bed again if it was surfaced.`,
+      confirm: {
+        title: 'Map bed',
+        description: (n: number) =>
+          `The machine probes ${n} points on the bed, moving between them at the clearance with probe moves. Keep clear of the machine; Stop resets it at once.`,
+      },
+      summary: 'Bed map',
+      summaryNone: 'none',
+      summaryMap: (cols: number, rows: number, range: string, unit: string, date: string) =>
+        `${cols} × ${rows}, range ${range} ${unit}, ${date}`,
+      floorStickout: (s: string, unit: string) => `; the floor assumes a ${s} ${unit} stickout`,
+      open: 'Map bed…',
+      clear: 'Clear',
+      compensate: 'Compensate with the bed map',
+      compensateHint: (date: string, range: string, unit: string) =>
+        `For thin sheet laid on the bed: the map of ${date} (range ${range} ${unit}). The program's Z follows the bed.`,
+    },
   },
   repeat: {
     button: 'Test homing repeatability…',
