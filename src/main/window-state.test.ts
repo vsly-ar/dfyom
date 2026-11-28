@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { libraryWindowStart, visibleBounds, windowStart, windowTitle } from './window-state'
+import {
+  libraryWindowStart,
+  revealSteps,
+  visibleBounds,
+  windowStart,
+  windowTitle,
+} from './window-state'
 
 const primary = { x: 0, y: 25, width: 1920, height: 1055 }
 const right = { x: 1920, y: 0, width: 2560, height: 1440 }
@@ -84,6 +90,26 @@ describe('libraryWindowStart', () => {
     expect(libraryWindowStart(undefined, [primary], primary)).toEqual({
       bounds: undefined,
       maximized: false,
+      fullScreen: false,
+    })
+  })
+})
+
+describe('revealSteps (DF162)', () => {
+  const start = { bounds: undefined, maximized: true, fullScreen: true }
+
+  it('a window the user opened is focused and restored as it was', () => {
+    expect(revealSteps(start, false)).toEqual({ inactive: false, maximize: true, fullScreen: true })
+  })
+
+  it('a window an agent opened takes no focus and never enters full screen', () => {
+    expect(revealSteps(start, true)).toEqual({ inactive: true, maximize: true, fullScreen: false })
+  })
+
+  it('a window without a start is just shown', () => {
+    expect(revealSteps(undefined, true)).toEqual({
+      inactive: true,
+      maximize: false,
       fullScreen: false,
     })
   })
