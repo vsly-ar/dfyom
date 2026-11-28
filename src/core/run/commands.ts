@@ -54,6 +54,7 @@ import {
   ProbeGeometrySchema,
   ProbeRoutineSchema,
   type RapidOverride,
+  FloorSettingSchema,
   TimeScaleSchema,
   Vec3Schema,
   VirtualStockSchema,
@@ -972,6 +973,7 @@ export const runMachineSurfacePoint = defineCommand({
     fastFeed: z.number().positive().max(10_000).optional(),
     slowFeed: z.number().positive().max(10_000).optional(),
     moveFeed: z.number().positive().max(10_000).optional(),
+    bed: z.boolean().optional(),
   }),
   result: z.object({ z: z.number(), uncertainty: z.number() }),
   async run(_doc, args, ctx) {
@@ -987,12 +989,38 @@ export const runMachineSurfacePoint = defineCommand({
         fastFeed: args.fastFeed ?? d.fastFeed,
         slowFeed: args.slowFeed ?? d.slowFeed,
         moveFeed: args.moveFeed ?? d.moveFeed,
+        ...(args.bed === true ? { bed: true as const } : {}),
       },
       'run.machine.surfacePoint',
       true,
     )
     if (r.isErr()) return r
     return Ok(r.unwrap() as { z: number; uncertainty: number })
+  },
+})
+
+/**
+ * v0.5 RV11: the connection's floor (docs/modes/run-surface.md#uses): the bed map's heights for the
+ * mounted tool and/or the spoilboard plane, MPos; every probe cycle stays 1 mm above it while
+ * homed. Absent: none. Moves nothing; the Run window sends it whenever it changes. UI only (an
+ * agent must not lift the floor of a real machine), not an agent tool.
+ */
+export const runMachineFloor = defineCommand({
+  kind: 'effect',
+  name: 'run.machine.floor',
+  summary: 'Set the floor (bed) every probe cycle stays 1 mm above; absent: none.',
+  title: () => 'Probe floor',
+  machine: true,
+  agentTool: false,
+  args: z.object({ floor: FloorSettingSchema.optional() }),
+  result: Done,
+  async run(_doc, args, ctx) {
+    const r = await act(
+      ctx.services,
+      { kind: 'floor', ...(args.floor === undefined ? {} : { floor: args.floor }) },
+      'run.machine.floor',
+    )
+    return r.map(() => ({}))
   },
 })
 
@@ -1297,6 +1325,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbe,
   runMachineRepeatability,
   runMachineSurfacePoint,
+  runMachineFloor,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,
@@ -1334,6 +1363,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbe,
   runMachineRepeatability,
   runMachineSurfacePoint,
+  runMachineFloor,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,

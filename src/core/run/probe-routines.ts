@@ -10,12 +10,15 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { ProbeKind } from '../library/machine.dto'
 import type { Vec3 } from '../toolpath/model'
 import {
+  floorHit,
+  floorRefused,
   fmt,
   modalRestore,
   probeResult,
   runProbeCycle,
   type ProbeAxis,
   type ProbeCycleResult,
+  type ProbeFloor,
   type ProbePort,
 } from './probe-cycle'
 
@@ -79,6 +82,8 @@ export interface ProbeRoutineSpec {
   /** mm/min: the `G38.3` positioning moves. */
   readonly moveFeed: number
   readonly travel?: { readonly min: Vec3; readonly max: Vec3 }
+  /** v0.5 RV11: the bed (docs/modes/run-surface.md#uses): every cycle and positioning move. */
+  readonly floor?: ProbeFloor
   readonly inches?: boolean
   readonly cancelled?: () => boolean
 }
@@ -290,6 +295,13 @@ export async function runProbeRoutine(
       Math.abs(to[i]! - from[i]!) > 1e-6 ? [`${a.toUpperCase()}${fmt(to[i]! - wco[i]!)}`] : [],
     )
     if (words.length === 0) return Ok(undefined)
+    // RV11: never toward the bed: refused before the move, home along the path
+    const low = floorHit(spec.floor, from, to)
+    if (low !== undefined) {
+      const b = await back(path)
+      if (b.isErr()) return b
+      return floorRefused(low, where)
+    }
     const length = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2])
     const m = await send(
       `G21 G90 G38.3 ${words.join(' ')} F${fmt(spec.moveFeed)}`,
@@ -326,6 +338,7 @@ export async function runProbeRoutine(
       slow: { feed: spec.slowFeed, backOff: BACK_OFF, repeats: SLOW_REPEATS },
       retract,
       ...(spec.travel === undefined ? {} : { travel: spec.travel }),
+      ...(spec.floor === undefined ? {} : { floor: spec.floor }),
       ...(spec.inches === undefined ? {} : { inches: spec.inches }),
       ...(spec.cancelled === undefined ? {} : { cancelled: spec.cancelled }),
     })

@@ -418,6 +418,11 @@ export function createFakeBridge(
               ([, v]) => v !== null,
             ),
           ),
+          bedMaps: Object.fromEntries(
+            Object.entries({ ...current.bedMaps, ...(patch.bedMaps ?? {}) }).filter(
+              ([, v]) => v !== null,
+            ),
+          ),
         } as AppSettings
         settings.emit(current)
         return Promise.resolve({ ok: true, value: current, revision: 0 })

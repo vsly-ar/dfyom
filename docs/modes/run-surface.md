@@ -1,6 +1,6 @@
 # Run: surface maps
 
-Status: accepted (v0.5 [RV10](../plans/v0.5-run.md#slices), delegation D88; Q227), RV10 implemented ([§ Implementation (RV10)](#implementation-rv10)); RV11 (bed map) not yet · Plan: [v0.5-run.md § 9](../plans/v0.5-run.md#9-surface-probing-stock-and-bed-maps) · Probing: [run-probing.md](run-probing.md) (the cycle runner, the probe check DF143) · Post: [grbl.md § Post-processor](../architecture/grbl.md#post-processor-task-211) · Safety: [run.md § Safety](run.md#safety) · Terms: [glossary.md](../glossary.md) (surface map, Z compensation)
+Status: accepted (v0.5 [RV10](../plans/v0.5-run.md#slices) and RV11, delegation D88; Q227, Q228), RV10 implemented ([§ Implementation (RV10)](#implementation-rv10)), RV11 implemented ([§ The bed map (RV11)](#the-bed-map-rv11), [§ Implementation (RV11)](#implementation-rv11)) · Plan: [v0.5-run.md § 9](../plans/v0.5-run.md#9-surface-probing-stock-and-bed-maps) · Probing: [run-probing.md](run-probing.md) (the cycle runner, the probe check DF143) · Post: [grbl.md § Post-processor](../architecture/grbl.md#post-processor-task-211) · Safety: [run.md § Safety](run.md#safety) · Terms: [glossary.md](../glossary.md) (surface map, Z compensation)
 
 A **stock map** is a grid of heights probed on the stock top, like a 3D printer's bed levelling mesh. With **Follow the surface map** ticked in the pre-flight, the run's program is exported with the map: its Z follows the measured surface, so an engraving, a V-carve or a cut in thin sheet keeps its depth on warped stock. Off by default; the map changes nothing until the user opts in for a run.
 
@@ -34,7 +34,7 @@ Run navigator › Probing › **Map stock surface…** (with a plan and a setup 
 5. **Probe check:** the Map button waits for the [probe check](run-probing.md#probe-check-df143) like every probing action, and shows the probe input beside it.
 6. **Map:** the user puts the bit above the first point (front left; the dialog says where) within the search depth of the top. **Map surface** probes the points one by one, each a `run.machine.surfacePoint` job (the dialog is the confirmation; a real machine's map is confirmed once more). **Decided:** one job per point, not one job for the map: a failure or a Stop leaves every point measured before it in the dialog without a partial result channel, and the heat map fills as each job ends. Points go in **serpentine order** (row by row, alternating direction) so each move is one cell.
 
-Per point (`probeSurfacePoint`, `src/core/run/surface-probe.ts`): up to the travel height if lower (a rapid along Z only: the travelled path), then across to the point at the travel height with **`G38.3`** (an unexpected contact stops it without an alarm: the map stops, "The probe touched something on the way to point 7…"), then **`G38.2` down** through the shared runner (the seek, one slow re-probe at 1 mm back-off, the retract by the clearance). The **travel height** is the job's start Z for the first point, then the last contact plus the clearance. The search depth is cut by the travel's bottom (the runner's travel rule); RV11 adds the bed as the floor.
+Per point (`probeSurfacePoint`, `src/core/run/surface-probe.ts`): up to the travel height if lower (a rapid along Z only: the travelled path), then across to the point at the travel height with **`G38.3`** (an unexpected contact stops it without an alarm: the map stops, "The probe touched something on the way to point 7…"), then **`G38.2` down** through the shared runner (the seek, one slow re-probe at 1 mm back-off, the retract by the clearance). The **travel height** is the job's start Z for the first point, then the last contact plus the clearance. The search depth is cut by the travel's bottom (the runner's travel rule) and stops 1 mm above the [floor](#uses) (RV11).
 
 - **A failed point** (no contact: `ALARM:5`, recovered by the runner; an unexpected contact; an error) stops the map and **keeps the measured points**: the dialog shows the partial map with the failed point marked and **Retry from there** (it probes the missing points only, in the same order). A partial map is saved but cannot be followed.
 - **Stop** (the footer's Stop or the dialog's Stop map) is the job's abort (feed hold and reset); the points measured so far are kept as after a failure.
@@ -83,9 +83,61 @@ The export's result carries what the pre-flight shows: the max |dz|, the range, 
 
 The virtual operator's stock surface: when a map is probed on the virtual machine, the host lays a **tilted height field** over the stock top (the probe scene's `heightField`, [grbl.md § Probe scene](../architecture/grbl.md#probe-scene-rv3)) at the work Z0 of the live G54 (or the virtual stock's top), tilted `VIRTUAL_TILT` = 0.004 in X and −0.002 in Y (about 0.4 mm over 100 mm), so the map shows a range and the compensation does something visible. It is taken away after the job, like the plate.
 
+## The bed map (RV11)
+
+A **bed map** is the same grid probed on the bed (the spoilboard, or a fixture plate that stays on the machine) once, in **machine coordinates**, and kept with the machine: it is reused by every later job and session until it goes stale or is cleared (Q228 (1)). Unlike a stock map it does not belong to a setup or a work zero.
+
+### Taking it
+
+Run inspector › **Machine settings** › **Bed map** shows the saved map (grid, range, date, and why it is stale or old) with **Map bed…** and **Clear**. Map bed… opens the [stock map's dialog](#probing-a-map) in bed mode (title "Map bed"); it needs a library machine, a connection and a **homed** machine (positions before homing mean nothing). What differs from a stock map:
+
+- **Area:** the marked [work area](run.md#work-area-rv7) (its margin in) as the controller reports it while homed, else the travel; inset by the dialog's margin; in machine X/Y.
+- **No skipped points:** the bed has no setup to guard; the dialog asks for a clear bed ("Take clamps and fixtures off the bed"). The move across is still `G38.3`, so a forgotten clamp stops the map ([§ Probing a map](#probing-a-map)).
+- **Stickout:** an optional field, the length below the spindle nose of what touches the bed (the bit, or the 3D probe), prefilled with the stickout of the tool the workholding guard assumes ([run-workholding.md](run-workholding.md)) when a plan's setup is chosen. It lets the floor follow a tool of another length ([below](#uses)).
+- **Probing** is the stock map's, one `run.machine.surfacePoint` job per point with `bed: true`: the job's floor leaves the old bed map out (it is being replaced) and keeps the spoilboard estimate. The heat map, partial maps, Retry from here, Stop and Clear are the stock map's.
+
+**Saved** in app settings `bedMaps`, keyed by the library machine id ([ui.md § Settings](../conventions/ui.md#settings)): the date, the probe kind, the margin, the grid (machine X/Y), the contacts' **machine Z** (`null`: not measured), the stickout when given, and what makes it stale: the **homing** it was taken after (the controller's travel, pull-off and homing mask), the **work area** bound then (or none) and the date of the machine's [homing repeatability](run-machine.md#homing-repeatability-rv8) result then (or none). A new bed map replaces the old one.
+
+### Stale and old
+
+A bed map is a measurement in machine coordinates, so it holds only while homing puts the machine where it was:
+
+| State     | When                                                                                                                                                                                                                                                                                                          | Effect                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Stale** | The controller's travel, pull-off or homing mask differs from the map's (`homing`); the work area bound differs (`workArea`: re-marked, often because a switch moved); a homing repeatability test newer than the map failed (`repeatability`: homing does not repeat within the map's accuracy, plan item 6) | Not used: no floor from it, no "Compensate with the bed map"; the Machine group says why and offers Map bed… again |
+| **Old**   | Older than the **bed map age** (`bedMapMaxAge`, Settings › Run, default 30 days, 1–365): spoilboards move with humidity and get surfaced                                                                                                                                                                      | A warning in the Machine group and the pre-flight; still used                                                      |
+
+Not homed: not used (nothing to compare), shown as "home to use it". **Decided:** a passing repeatability test after the map leaves it valid, since it confirms the homing it relies on.
+
+### Uses
+
+Q228 (1): the bed map is the **floor** for every probe, and followed only when the user ticks it for a thin sheet. Thick stock does not follow the bed, so it is never applied automatically.
+
+1. **The floor** ([plan § Never into the bed](../plans/v0.5-run.md#never-into-the-bed)). The renderer sends a real (serial) connection a floor (`run.machine.floor`, UI only, moves nothing) whenever the connection, the homing, the bed map or the guard's tool changes; the host applies it while homed to every probe cycle: Probe Z, the X/Y routines and Set X/Y zero, the repeatability target, map points. The floor at X/Y is, in this order:
+   - the bed map's bilinear height there (clamped to the grid's edge outside it), raised by the guard tool's stickout minus the map's when both are known (a longer tool touches the bed higher);
+   - else the **spoilboard top** estimated from the machine's `noseToTable`, `spoilboardThickness` and pull-off for the guard tool's stickout (as [Z headroom](../architecture/grbl.md#z-headroom-hardening-df68) does): MPos Z = stickout + spoilboard − nose to table − pull-off;
+   - else none (the travel, as before).
+
+   The cycle runner keeps **1 mm above** it: a Z probe down is cut to stop 1 mm above the floor under it, and refused before moving when less than 1 mm is left (`run.travel`, rule `floor`: "The bed is 0.6 mm below the probe here: no room to probe down. Raise Z or check the bed map."); an X/Y probe or a `G38.3` positioning move (the routines' step down beside the stock, a map point's move across, the repeatability descent) whose path comes within 1 mm of the floor is refused before it is sent (same rule: "The probe would go within 1 mm of the bed…"). **Decided:** without a known stickout the bed map is used as it is, valid for the probe that took it; the Machine group says which stickout the floor assumes.
+
+2. **Compensate with the bed map** in the run pre-flight: a checkbox (off by default, per pre-flight) beside **Follow the surface map** (ticking one unticks the other) when the machine has a bed map that is complete, not stale, and the machine is homed. The map is moved into the run's work frame (its X/Y minus the live G54 X/Y) and followed exactly as a stock map ([§ Following the map](#following-the-map)): heights relative to the tool run's touch-off spot, the same segments, refusals and follow limit. Meant for thin sheet laid flat on the bed: its top follows the bed, so the cut's depth below the top (and a through-cut's depth into the bed) stays even.
+
+**Not here (recorded):** checking a through-cut's depth against the real bed under the part without compensation, and an absolute floor check of the run's own moves: both need the tool tip's height in machine Z, which a Z touch-off on the stock does not give (a tool setter would; later). Following the bed for thick stock (Q228 (2)) and a flatness-only report (Q228 (3)) are not offered.
+
+### Virtual machine (bed)
+
+On the virtual machine a map point with `bed: true` probes a **warped bed**: a height field over the whole table (`VIRTUAL_BED`: a tilt of 0.0005 in X and −0.0003 in Y about the travel's centre plus six seeded bumps of up to ±0.1 mm, a range of about 0.5 mm over an 800 × 600 travel), at the virtual stock's bottom when one is laid, else 20 mm below the first point's start; kept for the connection so a second map reads the same bed. **Decided:** the renderer sends no floor to the virtual machine (its bed is laid by the first bed point, so a saved map need not match it); the floor is tested in core and the host directly.
+
 ## Not here
 
-The **bed map** (RV11: per machine, in machine coordinates, the floor for every probe), compensation of external gCode files (Q227 (2)), compensation in the sender, an agent tool (Q229: `run.machine.surfacePoint` is UI only; `run.job.start` takes `surfaceMap` from any source like its other arguments, so an agent on the virtual machine can follow a map it was given).
+Compensation of external gCode files (Q227 (2)), compensation in the sender, an agent tool (Q229: `run.machine.surfacePoint` is UI only; `run.job.start` takes `surfaceMap` from any source like its other arguments, so an agent on the virtual machine can follow a map it was given).
+
+## Implementation (RV11)
+
+- **Core:** `src/core/run/bed-map.ts` (`bedMapStamp`, `bedMapState` with `BED_MAP_AGE`, `FloorSetting`, `floorSetting`, `floorFunction`, `spoilboardFloorZ`, `bedFollowMap`, `bedMapComplete`, `VIRTUAL_BED`, `virtualBed`); the floor in the cycle runner (`ProbeFloor`, `FLOOR_MARGIN`, `floorHit`, `floorRefused` in `probe-cycle.ts`) and passed through `probe-routines.ts`, `homing-repeatability.ts` and `surface-probe.ts`; the host action `floor` (`FloorSettingSchema` in `host/protocol.ts`, applied by `floorOf` while homed) and the command `run.machine.floor` (UI only, no agent tool); `surfacePoint`'s `bed: true` (the virtual warped bed, the old map out of the floor).
+- **Renderer:** `useBedMap.ts` (`useBedMap`: the record, its state and the guard tool's stickout; `bedFollowArg`; `useProbeFloorSync`, mounted with the jog guard sync), `SurfaceMapDialog.tsx` bed mode (`bedMapOpen` in the run store), `BedMapSummary` in `MachineSettingsGroup.tsx`, the pre-flight's Compensate checkbox in `RunDialogs.tsx` (the follow kind in the check key; the map re-moved when G54 changes), `machineBed` in `plan-info.ts`, the `floor` rule's text in `machine-state.ts`; settings `bedMaps` (`BedMapRecordSchema`, a null entry removes) and `bedMapMaxAge` (Settings › Run).
+- **Tests:** `bed-map.test.ts` (the floor in every cycle kind: Z cut, refused, X/Y path, routine, repeatability, map point; a map on the warped virtual bed within 0.005 mm; the floor recovers a miss; stale rules; stickout offset; spoilboard estimate; the follow map), `host.test.ts` (bed points on the virtual bed, the floor refuses Probe Z, cleared), `SurfaceMapDialog.test.tsx` (bed mode over the travel in machine X/Y, saved per machine with the homing, stale on another pull-off, Clear, Compensate passes a map without setup in G54's frame; axe), `e2e/run-bed.e2e.ts` (hidden: map the bed → relaunch → a thin-sheet run compensated to its end, more lines than the plain program).
+- **Waits for the user:** the user's spoilboard mapped on the real machine.
 
 ## Implementation (RV10)
 

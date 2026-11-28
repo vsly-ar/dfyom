@@ -2,8 +2,8 @@
  * The shared probe-cycle runner (v0.5 RV3): one probe along one axis over a `ProbePort` (the
  * machine host wires the sender to it). Guards, fast seek, back off, slow re-probe(s), retract,
  * the modal state back; a failure unlocks and returns to the start (or stays, for Probe Z);
- * never targets past the configured distance or the travel. Headless.
- * Doc: docs/modes/run-probing.md#the-cycle-runner-rv3
+ * never targets past the configured distance, the travel or 1 mm above the floor (RV11). Headless.
+ * Doc: docs/modes/run-probing.md#the-cycle-runner-rv3, docs/modes/run-surface.md#uses
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Vec3 } from '../toolpath/model'
@@ -37,6 +37,50 @@ export interface ProbePort {
 
 export type ProbeAxis = 'x' | 'y' | 'z'
 
+/**
+ * v0.5 RV11: the floor's machine Z at machine X/Y: the bed under the tip of the mounted tool or
+ * probe (docs/modes/run-surface.md#uses); undefined: no floor there.
+ */
+export type ProbeFloor = (x: number, y: number) => number | undefined
+
+/** A probe never targets closer than this above the floor (mm; plan § Never into the bed). */
+export const FLOOR_MARGIN = 1
+
+/**
+ * The first point of the straight path `from` → `to` (MPos) whose Z comes within `FLOOR_MARGIN`
+ * of the floor (sampled every 1 mm, both ends included), with the floor there; undefined: clear.
+ */
+export function floorHit(
+  floor: ProbeFloor | undefined,
+  from: Vec3,
+  to: Vec3,
+): { at: Vec3; floor: number } | undefined {
+  if (floor === undefined) return undefined
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2])
+  const n = Math.min(1000, Math.max(1, Math.ceil(length)))
+  for (let k = 0; k <= n; k++) {
+    const t = k / n
+    const at: Vec3 = [
+      from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t,
+      from[2] + (to[2] - from[2]) * t,
+    ]
+    const f = floor(at[0], at[1])
+    if (f !== undefined && at[2] < f + FLOOR_MARGIN - 1e-6) return { at, floor: f }
+  }
+  return undefined
+}
+
+/** `run.travel` rule `floor`: a path that would come within 1 mm of the bed, before it is sent. */
+export function floorRefused(hit: { at: Vec3; floor: number }, where: string): AppResult<never> {
+  const message = `The probe would go within ${FLOOR_MARGIN} mm of the bed at X ${fmt(hit.at[0])} Y ${fmt(hit.at[1])} (machine): raise Z or check the bed map.`
+  return fail('run.travel', message, {
+    where,
+    data: { floor: hit.floor, at: [...hit.at] },
+    issues: [{ path: [], rule: 'floor', message }],
+  })
+}
+
 export interface ProbeCycleSpec {
   readonly axis: ProbeAxis
   /** −1: toward minus (Z down), +1: toward plus. */
@@ -57,6 +101,11 @@ export interface ProbeCycleSpec {
   readonly retract: number
   /** The machine travel in MPos when soft limits are on: probe targets stay 0.01 mm inside. */
   readonly travel?: { readonly min: Vec3; readonly max: Vec3 }
+  /**
+   * v0.5 RV11: the bed: a Z probe down stops `FLOOR_MARGIN` above it (refused with less room), an
+   * X/Y probe whose path comes that close is refused before moving.
+   */
+  readonly floor?: ProbeFloor
   /** `$13=1`: `[PRB]` comes in inch. */
   readonly inches?: boolean
   /**
@@ -217,6 +266,27 @@ export async function runProbeCycle(
           atEdge: true,
         },
       })
+    }
+  }
+  if (spec.floor !== undefined) {
+    if (spec.axis === 'z' && dir < 0) {
+      // never into the bed: stop 1 mm above the floor under the probe
+      const f = spec.floor(start[0], start[1])
+      if (f !== undefined) {
+        const room = start[2] - (f + FLOOR_MARGIN)
+        if (room < MIN_DISTANCE) {
+          const message = `The bed is ${fmt(Math.max(0, start[2] - f))} mm below the probe here: no room to probe down. Raise Z or check the bed map.`
+          return fail('run.travel', message, {
+            where,
+            data: { floor: f, at: [...start] },
+            issues: [{ path: [], rule: 'floor', message }],
+          })
+        }
+        distance = Math.min(distance, room)
+      }
+    } else if (spec.axis !== 'z') {
+      const hit = floorHit(spec.floor, start, withAxis(start, i, start[i]! + dir * distance))
+      if (hit !== undefined) return floorRefused(hit, where)
     }
   }
   /** The farthest point the cycle may reach on the axis (MPos). */

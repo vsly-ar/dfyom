@@ -312,6 +312,28 @@ export function machineProbe(
   }
 }
 
+/**
+ * v0.5 RV11: the machine's spindle nose to table and spoilboard (mm), the library machine's when
+ * known (the shop's measurement), else the plan's copy; for the floor's spoilboard estimate
+ * (docs/modes/run-surface.md#uses).
+ */
+export function machineBed(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): { readonly noseToTable?: number; readonly spoilboard?: number } {
+  const copy = plan?.snapshots.find((x) => x.id === plan.machine)
+  const lib = machines?.find((x) => x.id === (plan === undefined ? machineId : copy?.libraryItemId))
+  const v = (lib ?? copy?.values) as
+    { noseToTable?: unknown; spoilboardThickness?: unknown } | undefined
+  const nose = lengthOf(v?.noseToTable)
+  const board = lengthOf(v?.spoilboardThickness)
+  return {
+    ...(nose === undefined ? {} : { noseToTable: nose }),
+    ...(board === undefined ? {} : { spoilboard: board }),
+  }
+}
+
 /** What the machine profile puts on the overrides (DF85, docs/modes/run-machine.md#overrides-m6). */
 export interface MachineOverrideLimits {
   /** mm/min: the lower of the X and Y max feed rates (the axes a cut mostly moves). */

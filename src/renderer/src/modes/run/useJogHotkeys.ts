@@ -17,6 +17,7 @@ import type { JogKeyStyle } from '../../../../shared/settings'
 import type { RunStatus } from '../../../../core/run/service'
 import { useRun, useRunStore } from './run-store'
 import { useJogGuardSync } from './useJogGuardSync'
+import { useProbeFloorSync } from './useBedMap'
 
 /**
  * DF128 GT2 (Q157): whether a `G` key press opens the Go to dialog: the plain key (no modifier,
@@ -163,5 +164,7 @@ export function JogHotkeys({ doc }: { doc: ProjectDoc | undefined }): null {
   })
   useGoToHotkey()
   useJogGuardSync()
+  // v0.5 RV11: the floor every probe on a real connection stays above (run-surface.md#uses)
+  useProbeFloorSync(doc)
   return null
 }
