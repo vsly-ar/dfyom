@@ -83,6 +83,11 @@ export interface FeedsInput {
   readonly helixPitch?: number
   /** Chamfer (v0.4): the cut's depth below the tool tip (mm), the resolved strategy's `cutDepth`. */
   readonly chamferDepth?: number
+  /**
+   * DF141: a chamfer plunged by a chamfer mill into an edge (hole) of this Ø (0: solid, a witness
+   * mark): its power is F12 at the plunge rate (feeds-speeds.md § Plunged chamfers).
+   */
+  readonly chamferPlunge?: { readonly edgeDiameter: number }
   /** Pocket/profile: the resolved finishing allowance (mm; 0 or absent = no finishing pass). */
   readonly finishAllowance?: number
   /** Pocket/profile: the resolved finish stepdown (mm), the finishing pass's axial engagement. */
@@ -317,7 +322,7 @@ function presetUse(
 
 /** The calculator's engagement: the strategy's (facing: its stepover, never an entered one). */
 function engagementOf(
-  i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth'>,
+  i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth' | 'chamferPlunge'>,
 ): Engagement {
   const D = i.tool.diameter.canonical
   switch (i.kind) {
@@ -335,7 +340,11 @@ function engagementOf(
       // chamfer's end mill (F7) as helical boring, one terrace deep
       return i.tool.type === 'flatEndMill'
         ? { kind: 'helix', ap: i.chamferDepth ?? 0.25 * D }
-        : { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
+        : {
+            kind: 'chamfer',
+            depth: i.chamferDepth ?? 0,
+            ...(i.chamferPlunge === undefined ? {} : { plunge: i.chamferPlunge }),
+          }
     case 'line':
       // engraved-patterns.md § Toolpath: a V-bit by F10 at the deepest point, a tapered ball by F11
       // there (tapered-ball-nose.md § Feeds and speeds), else a full slot
@@ -491,11 +500,14 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
   if (noData.isNone() && value('spindleSpeed').isSome() && value('feedRate').isSome()) {
     const ap = value('stepdown')
     const ae = value('stepover')
+    const vp = value('plungeRate')
     const values = {
       n: value('spindleSpeed').unwrap(),
       vf: value('feedRate').unwrap(),
       ...(ap.isSome() ? { ap: ap.unwrap() } : {}),
       ...(ae.isSome() ? { ae: ae.unwrap() } : {}),
+      // a plunged chamfer cuts at the plunge rate (F12, DF141)
+      ...(vp.isSome() ? { vp: vp.unwrap() } : {}),
     }
     const checked =
       data === undefined ? checkCutting(base, values) : checkCutting(base, values, data)

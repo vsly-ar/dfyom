@@ -20,7 +20,7 @@ import { Tool } from '../library/tool'
 import { ToolValuesDtoSchema } from '../library/tool.dto'
 import { MATERIAL_DATA } from './data'
 import { TEST_DATA } from './data.fixture'
-import { availablePower, rctf } from './formulas'
+import { availablePower, plungedRemovalRate, rctf } from './formulas'
 import {
   checkCutting,
   cuttingAt,
@@ -533,6 +533,44 @@ describe('suggestCutting: engagement and chip thinning', () => {
     expect(tipped.display.unwrap().dCalc).toBeCloseTo(6, 9)
     const deep = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 20 } })
     expect(deep.display.unwrap().dCalc).toBe(12)
+  })
+
+  // Doc: docs/architecture/feeds-speeds.md#plunged-chamfers-hardening-df141
+  it('DF141: a plunged chamfer: power is F12 at the plunge rate; an excess lowers the plunge only', () => {
+    // 90° V-bit, tip 2.5 mm deep: De = 5 mm at the face, plunged into a Ø3 hole
+    const plunged: Engagement = { kind: 'chamfer', depth: 2.5, plunge: { edgeDiameter: 3 } }
+    const machine = limits({ power: Some(1000), maxSpeed: 24_000, rigidity: 'rigidMill' })
+    const s = suggest({ tool: vbit(), engagement: plunged, machine })
+    const contour = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 2.5 }, machine })
+    expect(value(s.feedRate)).toBeCloseTo(value(contour.feedRate), 9)
+    expect(value(s.plungeRate)).toBeCloseTo(value(contour.plungeRate), 9)
+    // π/4 · (25 − 9) = 4π mm² per mm of plunge
+    const pr = value(s.plungeRate)
+    expect(plungedRemovalRate(5, 3, pr)).toBeCloseTo(4 * Math.PI * pr, 9)
+    expect(s.display.unwrap().Q.unwrap()).toBeCloseTo(4 * Math.PI * pr, 6)
+    expect(s.plungeRate.unwrap().derivation.map((d) => d.step)).toContain('F12')
+    expect(codes(s)).not.toContain('feeds.powerExceeded')
+    // a 5 W spindle: the plunge is lowered to fit, the (unused) feed is not
+    const weak = limits({ power: Some(5), maxSpeed: 24_000, rigidity: 'rigidMill' })
+    const w = suggest({ tool: vbit(), engagement: plunged, machine: weak })
+    expect(value(w.feedRate)).toBeCloseTo(value(s.feedRate), 9)
+    expect(value(w.plungeRate)).toBeLessThan(pr)
+    expect(w.plungeRate.unwrap().derivation.map((d) => d.step)).toContain('power')
+    expect(w.display.unwrap().spindleLoad.unwrap()).toBeLessThanOrEqual(100 + 1e-6)
+    expect(w.warnings.find((x) => x.code === 'feeds.powerExceeded')?.message).toBe(
+      'Cutting power exceeds the spindle: suggested plunge rate reduced to fit.',
+    )
+    // the final-value check and the display read the plunge rate
+    const input = { tool: vbit(), materialClass: 'aluminum' as const, engagement: plunged }
+    const at = { n: value(w.spindleSpeed), vf: value(w.feedRate), vp: value(w.plungeRate) }
+    expect(checkCutting({ ...input, machine: weak }, at, TEST_DATA)).toEqual([])
+    const over = checkCutting({ ...input, machine: weak }, { ...at, vp: 2 * at.vp }, TEST_DATA)
+    expect(over.map((x) => [x.code, x.field])).toEqual([['feeds.powerExceeded', 'plungeRate']])
+    expect(
+      cuttingAt({ ...input, machine: weak }, at, TEST_DATA)
+        .unwrap()
+        .Q.unwrap(),
+    ).toBeCloseTo(4 * Math.PI * at.vp, 6)
   })
 
   it('chamfer: De below the smallest charted diameter scales that chip load by De / 3.175', () => {

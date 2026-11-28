@@ -98,9 +98,11 @@ describe('chamfer plan operations', () => {
     const explained = t.s.query('plan.operation.feeds.get', {
       planId: t.planId,
       planOperationId: t.chamfer,
-    }) as { inputs: { engagement: { kind: string; depth: number } } }
+    }) as { inputs: { engagement: { kind: string; depth: number; plungeEdgeDiameter?: number } } }
     expect(explained.inputs.engagement.kind).toBe('chamfer')
     expect(explained.inputs.engagement.depth).toBeCloseTo(3.5, 9)
+    // DF141: a plunge cuts the annulus between the Ø6 hole and the cone, at the plunge rate (F12)
+    expect(explained.inputs.engagement.plungeEdgeDiameter).toBe(6)
     expect((await t.generate()).operations).toEqual([
       { planOperationId: t.chamfer, status: 'generated' },
     ])
@@ -116,6 +118,12 @@ describe('chamfer plan operations', () => {
     expect(t.errors()).toEqual([])
     expect(t.view().strategy).toMatchObject({ entry: 'contour' })
     expect(t.view().strategy['cutDepth']).toBeCloseTo(2, 9)
+    const explained = t.s.query('plan.operation.feeds.get', {
+      planId: t.planId,
+      planOperationId: t.chamfer,
+    }) as { inputs: { engagement: { kind: string } } }
+    // a contour keeps F6 at the feed rate (DF141)
+    expect(explained.inputs.engagement).not.toHaveProperty('plungeEdgeDiameter')
     await t.generate()
     const tp = t.toolpath()
     expect(deepest(tp)).toBeCloseTo(-2.5, 9)

@@ -39,6 +39,8 @@ import {
   materialRemovalRate,
   TOOL_WEAR_FACTOR,
   plungeRate,
+  plungedChip,
+  plungedRemovalRate,
   rctf,
   spindleSpeed,
   surfaceSpeed,
@@ -55,8 +57,17 @@ export type Engagement =
   | { readonly kind: 'stepover'; readonly ae: number }
   | { readonly kind: 'helix'; readonly ap: number }
   | { readonly kind: 'drill' }
-  /** A chamfer mill cutting `depth` mm below its tip (F10: speed and chip load at De). */
-  | { readonly kind: 'chamfer'; readonly depth: number }
+  /**
+   * A chamfer mill cutting `depth` mm below its tip (F10: speed and chip load at De). `plunge`: the
+   * cut is a plunge along the tool axis into an edge (hole) of Ø `edgeDiameter` (0: solid), so its
+   * power is F12 at the plunge rate, not F6 at the feed rate (hardening DF141,
+   * docs/architecture/feeds-speeds.md#plunged-chamfers-hardening-df141).
+   */
+  | {
+      readonly kind: 'chamfer'
+      readonly depth: number
+      readonly plunge?: { readonly edgeDiameter: number }
+    }
   /**
    * A tapered ball end mill cutting a Line `depth` mm deep (F11: speed and chip load at the groove
    * width De there; the stepdown is suggested, docs/architecture/feeds-speeds.md#tapered-ball-end-mills-hardening-df124).
@@ -128,6 +139,7 @@ export type StepId =
   | 'F9'
   | 'F10'
   | 'F11'
+  | 'F12'
   | 'taperAp'
   | 'fzScale'
 
@@ -703,12 +715,19 @@ function millAt(
     : Infinity
   const limit = loadLimit(row)
   const budget = pAvail * limit
+  // a plunged chamfer (F12, DF141) cuts at the plunge rate: its power is checked below, on it
+  const edge = plungedEdge(engagement)
+  const angle = tool.angle.mapOr(90, (q) => q.canonical)
   const powerAt = (feed: number): { Q: number; pc: number } => {
     const q = materialRemovalRate(ae, ap, feed)
     return { Q: q, pc: rowCuttingPower(row, q, feed / (n * z * k)) }
   }
+  const plungePowerAt = (plunge: number): { Q: number; pc: number } => {
+    const q = plungedRemovalRate(D, edge ?? 0, plunge)
+    return { Q: q, pc: rowCuttingPower(row, q, plungedChip(plunge, n, z, angle)) }
+  }
   let { Q, pc } = powerAt(vf)
-  let exceeded = pc > budget * (1 + EPS)
+  let exceeded = edge === undefined && pc > budget * (1 + EPS)
   let feedReduced = false
   if (exceeded && apSteps.isNone() && L.vf === undefined) {
     const before = vf
@@ -750,7 +769,40 @@ function millAt(
       unit: 'mm/min',
     },
   ]
-  const pr = clampZ(pr0, machine, prSteps, warnings)
+  let pr = clampZ(pr0, machine, prSteps, warnings)
+  let plungeReduced = false
+  if (edge !== undefined) {
+    ;({ Q, pc } = plungePowerAt(pr))
+    prSteps.push({
+      step: 'F12',
+      formula: 'Q = π/4 · (De² − d²) · plungeRate; h = plungeRate / (n · z) · sin(α/2)',
+      inputs: { De: D, d: edge, plungeRate: pr, n, z, angle },
+      result: Q,
+      unit: 'mm³/min',
+    })
+    if (pc > budget * (1 + EPS)) {
+      const before = pr
+      const pcBefore = pc
+      for (let i = 0; i < MAX_POWER_ITERATIONS && pc > budget * (1 + EPS); i++) {
+        pr = pr * (budget / pc) * 0.999
+        ;({ Q, pc } = plungePowerAt(pr))
+      }
+      prSteps.push({
+        step: 'power',
+        formula:
+          limit < 1
+            ? 'plungeRate reduced until Pc ≤ loadLimit · Pavail (n kept)'
+            : 'plungeRate reduced until Pc ≤ Pavail (n kept)',
+        inputs:
+          limit < 1
+            ? { plungeRate: before, PcBefore: pcBefore, Pavail: pAvail, loadLimit: limit }
+            : { plungeRate: before, PcBefore: pcBefore, Pavail: pAvail },
+        result: pr,
+        unit: 'mm/min',
+      })
+      plungeReduced = true
+    }
+  }
 
   let spindleLoad: Option<number> = None
   if (power.isSome()) spindleLoad = Some((pc / pAvail) * 100)
@@ -761,7 +813,7 @@ function millAt(
       message: 'Machine spindle power is not set, so the power check is skipped.',
       params: {},
     })
-  if (exceeded || powerReduced || feedReduced)
+  if (exceeded || powerReduced || feedReduced || plungeReduced)
     warnings.push(
       warn(
         'feeds.powerExceeded',
@@ -769,7 +821,9 @@ function millAt(
           ? `Cutting power exceeds ${spindleWords(row)}: suggested stepdown reduced to fit.`
           : feedReduced
             ? `Cutting power exceeds ${spindleWords(row)}: suggested feed rate reduced to fit.`
-            : `Cutting power exceeds ${spindleWords(row)}: reduce stepdown or stepover.`,
+            : plungeReduced
+              ? `Cutting power exceeds ${spindleWords(row)}: suggested plunge rate reduced to fit.`
+              : `Cutting power exceeds ${spindleWords(row)}: reduce stepdown or stepover.`,
         powerParams(row, pc, budget),
       ),
     )
@@ -951,11 +1005,17 @@ export interface CuttingValues {
   readonly vf: number
   readonly ap?: number
   readonly ae?: number
+  /** Plunge rate: the cutting feed of a plunged chamfer (F12, DF141); unused otherwise. */
+  readonly vp?: number
 }
+
+/** A plunged chamfer's edge Ø (F12, DF141); undefined for every other cut. */
+export const plungedEdge = (e: Engagement): number | undefined =>
+  e.kind === 'chamfer' ? e.plunge?.edgeDiameter : undefined
 
 /** A final-value warning on the field to change. */
 export interface CheckWarning extends CuttingWarning {
-  readonly field: 'feedRate' | 'stepdown'
+  readonly field: 'feedRate' | 'stepdown' | 'plungeRate'
 }
 
 /**
@@ -970,6 +1030,8 @@ export interface CheckModel {
   readonly isDrill: boolean
   /** The axial engagement fixed by the strategy (helix pitch, chamfer depth); else the stepdown. */
   readonly fixedAp: number | undefined
+  /** A plunged chamfer (DF141): its power is F12 at `values.vp` (None without it). */
+  readonly plunged: boolean
   /** Chip thinning F3 × F5 (capped) at `values`; 1 for drilling. */
   chipThinning(values: CuttingValues): number
   /** The chip after thinning (milling) or feed per revolution (drilling) at `values`. */
@@ -1003,19 +1065,30 @@ export function checkModel(
   }
   const chipLoad = (v: CuttingValues) => (isDrill ? v.vf / v.n : v.vf / (v.n * z * k(v)))
   const spindle = machine.andThen((m) => m.power.map((p) => ({ p, max: m.maxSpeed })))
+  const edge = plungedEdge(e)
+  const angle = tool.angle.mapOr(90, (q) => q.canonical)
   return Some({
     row: c.row,
     range: c.range,
     isDrill,
     fixedAp: fixedAp(e),
+    plunged: edge !== undefined,
     chipThinning: k,
     chipLoad,
     power: (v) => {
       const ap = apOf(v)
       if (isDrill || ap === undefined || spindle.isNone()) return None
+      if (edge !== undefined && v.vp === undefined) return None
       const { p, max } = spindle.unwrap()
       return Some({
-        pc: rowCuttingPower(c.row, materialRemovalRate(ae(v), ap, v.vf), chipLoad(v)),
+        pc:
+          edge !== undefined
+            ? rowCuttingPower(
+                c.row,
+                plungedRemovalRate(D, edge, v.vp!),
+                plungedChip(v.vp!, v.n, z, angle),
+              )
+            : rowCuttingPower(c.row, materialRemovalRate(ae(v), ap, v.vf), chipLoad(v)),
         budget: availablePower(p, v.n, max) * loadLimit(c.row),
       })
     },
@@ -1047,10 +1120,12 @@ export function checkCutting(
       out.push({
         ...warn(
           'feeds.powerExceeded',
-          `Cutting power exceeds ${spindleWords(m.row)}: reduce stepdown, stepover or feed.`,
+          m.plunged
+            ? `Cutting power exceeds ${spindleWords(m.row)}: reduce the plunge rate.`
+            : `Cutting power exceeds ${spindleWords(m.row)}: reduce stepdown, stepover or feed.`,
           powerParams(m.row, pc, budget),
         ),
-        field: m.fixedAp === undefined ? 'stepdown' : 'feedRate',
+        field: m.plunged ? 'plungeRate' : m.fixedAp === undefined ? 'stepdown' : 'feedRate',
       })
   })
   return out
@@ -1091,9 +1166,23 @@ export function cuttingAt(
   const z = tool.fluteCount.canonical
   const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
   const dCalc = ap === undefined ? D : effectiveDiameter(D, RE, ap)
-  const Q: Option<number> = ap === undefined ? None : Some(materialRemovalRate(ae, ap, values.vf))
   const fz = values.vf / (values.n * z * k)
-  const Pc: Option<number> = Q.map((q) => rowCuttingPower(c.row, q, fz))
+  // a plunged chamfer cuts at the plunge rate (F12, DF141)
+  const edge = plungedEdge(e)
+  const angle = tool.angle.mapOr(90, (q) => q.canonical)
+  const Q: Option<number> =
+    edge !== undefined
+      ? Option.nonNull(values.vp).map((vp) => plungedRemovalRate(D, edge, vp))
+      : ap === undefined
+        ? None
+        : Some(materialRemovalRate(ae, ap, values.vf))
+  const Pc: Option<number> = Q.map((q) =>
+    rowCuttingPower(
+      c.row,
+      q,
+      edge !== undefined ? plungedChip(values.vp!, values.n, z, angle) : fz,
+    ),
+  )
   const spindleLoad: Option<number> = machine.andThen((m) =>
     Pc.andThen((pc) => m.power.map((p) => (pc / availablePower(p, values.n, m.maxSpeed)) * 100)),
   )
