@@ -51,10 +51,11 @@ import {
   type JogDirection,
 } from '../back-off'
 import { overrideLimits, overrideSteps } from '../override'
-import { runProbeCycle, type ProbePort } from '../probe-cycle'
+import { runProbeCycle, type ProbeFloor, type ProbePort } from '../probe-cycle'
 import { runProbeRoutine } from '../probe-routines'
 import { runTargetProbe } from '../homing-repeatability'
 import { probeSurfacePoint, VIRTUAL_TILT } from '../surface-probe'
+import { floorFunction, virtualBed, type FloorSetting } from '../bed-map'
 import type { ProbeTarget } from '../grbl/emulator/probe-scene'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
@@ -189,6 +190,10 @@ interface Connection {
   virtualStock?: { readonly stock?: VirtualStock; readonly touch: boolean } | undefined
   /** v0.5 RV10: the virtual stock's surface a map probes (laid once per G54), MPos. */
   virtualSurface?: { readonly key: string; readonly z: number } | undefined
+  /** v0.5 RV11: the floor main sent (docs/modes/run-surface.md#uses); applied while homed. */
+  floor?: FloorSetting | undefined
+  /** v0.5 RV11: the virtual machine's warped bed (laid at the first bed map point), MPos Z. */
+  virtualBed?: number | undefined
 }
 
 type VirtualStock = NonNullable<Extract<MachineAction, { kind: 'virtualStock' }>['stock']>
@@ -706,6 +711,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           action.area === undefined || marksEmpty(action.area.marks) ? undefined : action.area
         status.now()
         return Ok(undefined)
+      case 'floor':
+        // v0.5 RV11: bookkeeping only; the next probe follows it
+        c.floor = action.floor
+        return Ok(undefined)
       case 'jogCancel':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.jogCancel)
@@ -941,6 +950,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         fastFeed: a.feed,
         retract: a.retract,
         ...(travel === undefined ? {} : { travel }),
+        ...floorOf(c),
         inches: c.inches,
         onAlarm: 'stay',
       },
@@ -1038,6 +1048,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const r = await runProbeRoutine(probePort(c), {
       ...spec,
       ...(travel === undefined ? {} : { travel }),
+      ...floorOf(c),
       inches: c.inches,
     })
     if (emu !== undefined) {
@@ -1225,6 +1236,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const r = await runTargetProbe(probePort(c), {
       ...spec,
       ...(travel === undefined ? {} : { travel }),
+      ...floorOf(c),
       inches: c.inches,
     })
     if (emu !== undefined) {
@@ -1253,7 +1265,15 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const s = c.sender.status
     if (s === undefined) return stateError('no status report yet', state)
     const emu = c.emulator
-    if (emu !== undefined) {
+    if (emu !== undefined && a.bed === true) {
+      // RV11: the virtual bed, laid once per connection under the virtual stock (or the start)
+      const travel = c.envelope?.travel ?? [800, 600, 100]
+      if (c.virtualBed === undefined) c.virtualBed = c.virtualStock?.stock?.min[2] ?? s.mpos[2] - 20
+      emu.setProbeScene({
+        targets: [{ kind: 'heightField', ...virtualBed(travel, c.virtualBed) }],
+      })
+      emu.setProbeTip({ shape: 'cylinder', radius: 0 })
+    } else if (emu !== undefined) {
       const wz = c.workZero
       const key = wz.join(',')
       if (c.virtualSurface?.key !== key) {
@@ -1275,10 +1295,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     }
     c.jogEnd = undefined
     const travel = probeTravel(c)
-    const { kind: _kind, ...spec } = a
+    const { kind: _kind, bed, ...spec } = a
     const r = await probeSurfacePoint(probePort(c), {
       ...spec,
       ...(travel === undefined ? {} : { travel }),
+      // a bed map being taken: not above the old one
+      ...floorOf(c, bed !== true),
       inches: c.inches,
     })
     if (emu !== undefined) emu.setProbeScene(touchScene(c))
@@ -1575,6 +1597,13 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (area === undefined) return undefined
     // soft limits off: the work area only (a huge travel never binds)
     return limitViolation({ travel: [1e9, 1e9, 1e9], workArea: area }, end, from)
+  }
+
+  /** v0.5 RV11: the probe runner's floor while homed (`withMap: false`: the plane only). */
+  function floorOf(c: Connection, withMap = true): { floor?: ProbeFloor } {
+    if (!c.homed) return {}
+    const f = floorFunction(c.floor, withMap)
+    return f === undefined ? {} : { floor: f }
   }
 
   /** The probe runner's travel: the work area's bound (RV7), else the travel with soft limits. */

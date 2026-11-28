@@ -8,7 +8,15 @@
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { HeightMap } from '../post/height-map'
 import type { Vec3 } from '../toolpath/model'
-import { fmt, probeResult, runProbeCycle, type ProbePort } from './probe-cycle'
+import {
+  floorHit,
+  floorRefused,
+  fmt,
+  probeResult,
+  runProbeCycle,
+  type ProbeFloor,
+  type ProbePort,
+} from './probe-cycle'
 
 /** Map probing defaults (docs/modes/run-surface.md#probing-a-map), mm and mm/min. */
 export const SURFACE_DEFAULTS = {
@@ -96,6 +104,8 @@ export interface SurfacePointSpec {
   /** mm/min of the `G38.3` move across. */
   readonly moveFeed: number
   readonly travel?: { readonly min: Vec3; readonly max: Vec3 }
+  /** v0.5 RV11: the bed (docs/modes/run-surface.md#uses): the move across and the probe down. */
+  readonly floor?: ProbeFloor
   readonly inches?: boolean
   readonly cancelled?: () => boolean
 }
@@ -153,6 +163,9 @@ export async function probeSurfacePoint(
     if (r.isErr()) return Err(r.unwrapErr())
   }
   const z = Math.max(from[2], travelZ)
+  // RV11: the move across stays 1 mm above the bed (refused before it is sent)
+  const low = floorHit(spec.floor, [from[0], from[1], z], [spec.at[0], spec.at[1], z])
+  if (low !== undefined) return floorRefused(low, where)
   // 2. across: G38.3 in work coordinates (GRBL rejects G53 with G38.x)
   const xy = Math.hypot(spec.at[0] - from[0], spec.at[1] - from[1])
   if (xy > 1e-4) {
@@ -184,6 +197,7 @@ export async function probeSurfacePoint(
     slow: { feed: spec.slowFeed, backOff: 1, repeats: 1 },
     retract: spec.retract,
     ...(spec.travel === undefined ? {} : { travel: spec.travel }),
+    ...(spec.floor === undefined ? {} : { floor: spec.floor }),
     ...(spec.inches === undefined ? {} : { inches: spec.inches }),
     cancelled,
   })

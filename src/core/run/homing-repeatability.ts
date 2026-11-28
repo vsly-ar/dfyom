@@ -8,7 +8,15 @@
  * Pure but for the port. Doc: docs/modes/run-machine.md#homing-repeatability-rv8
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
-import { fmt, probeResult, runProbeCycle, type ProbePort } from './probe-cycle'
+import {
+  floorHit,
+  floorRefused,
+  fmt,
+  probeResult,
+  runProbeCycle,
+  type ProbeFloor,
+  type ProbePort,
+} from './probe-cycle'
 import { runProbeRoutine, type ProbeGeometry } from './probe-routines'
 
 type Vec3 = readonly [number, number, number]
@@ -105,6 +113,8 @@ export interface TargetProbeSpec {
   /** mm/min: the XY move to the start at the machine top. */
   readonly travelFeed: number
   readonly travel?: { readonly min: Vec3; readonly max: Vec3 }
+  /** v0.5 RV11: the bed (docs/modes/run-surface.md#uses): the descent and every cycle. */
+  readonly floor?: ProbeFloor
   readonly inches?: boolean
   readonly cancelled?: () => boolean
 }
@@ -143,6 +153,9 @@ export async function runTargetProbe(
       'belowStart',
       { from, at },
     )
+  // RV11: the descent to the start stays 1 mm above the bed (refused before anything moves)
+  const low = floorHit(spec.floor, [at[0], at[1], from[2]], at)
+  if (low !== undefined) return floorRefused(low, where)
   // 1. across at this Z (the machine top after homing): the move a Go to makes at its lift
   const xy = Math.hypot(at[0] - from[0], at[1] - from[1])
   if (xy > 1e-6) {
@@ -183,6 +196,7 @@ export async function runTargetProbe(
       slow: { feed: spec.slowFeed, backOff: 1, repeats: 2 },
       retract: 0,
       ...(spec.travel === undefined ? {} : { travel: spec.travel }),
+      ...(spec.floor === undefined ? {} : { floor: spec.floor }),
       ...(spec.inches === undefined ? {} : { inches: spec.inches }),
       cancelled,
     })
@@ -200,6 +214,7 @@ export async function runTargetProbe(
       slowFeed: spec.slowFeed,
       moveFeed: spec.moveFeed,
       ...(spec.travel === undefined ? {} : { travel: spec.travel }),
+      ...(spec.floor === undefined ? {} : { floor: spec.floor }),
       ...(spec.inches === undefined ? {} : { inches: spec.inches }),
       cancelled,
     })

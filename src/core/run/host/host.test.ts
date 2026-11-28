@@ -6,6 +6,8 @@ import { expectErrCode, expectOk } from '../../../shared/testing/result'
 import { parseWith } from '../../../shared/parse'
 import { FakeTimers } from '../clock.fixture'
 import { FAST } from '../grbl/emulator.fixture'
+import { heightAt } from '../grbl/emulator/probe-scene'
+import { virtualBed } from '../bed-map'
 import { runMachineHost } from './host'
 import { HostMessage, MainMessage, PROTOCOL_VERSION, type ConnectedInfo } from './protocol'
 
@@ -316,6 +318,66 @@ describe('machine host', () => {
     expect(b.z - a.z).toBeCloseTo(0.004 * 40, 2)
     expect(lastStatus(h)).toMatchObject({ state: 'Idle', workZero: [0, 0, 0] })
     expect(lastStatus(h)?.mpos[2]).toBeCloseTo(b.z + 2, 2)
+  })
+
+  it('v0.5 RV11: bed points on the warped virtual bed; the floor then bounds Probe Z', async () => {
+    const h = harness()
+    await connectedHost(h)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const stock = { min: [-200, -300, -70], max: [-100, -250, -50] }
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'virtualStock', stock, touch: false } }),
+    )
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', to: [-150, -280, -60], feed: 3000 },
+      }),
+    )
+    await h.pump(() => lastStatus(h)?.state === 'Idle' && lastStatus(h)?.mpos[2] === -60)
+    const bed = virtualBed(lastStatus(h)!.envelope!.travel, -70)
+    const field = { kind: 'heightField' as const, ...bed }
+    const point = expectOk(
+      await h.request({
+        type: 'machine',
+        action: {
+          kind: 'surfacePoint',
+          at: [-150, -280],
+          travelZ: -60,
+          zDistance: 25,
+          retract: 2,
+          fastFeed: 300,
+          slowFeed: 50,
+          moveFeed: 1000,
+          bed: true,
+        },
+      }),
+    ) as { z: number }
+    // the bed lies under the virtual stock (its bottom), warped
+    expect(point.z).toBeCloseTo(heightAt(field, -150, -280), 2)
+    // the floor 3 mm under the tool: Probe Z is refused before it moves (homed)
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'floor', floor: { plane: lastStatus(h)!.mpos[2] - 1.5 } },
+      }),
+    )
+    const refused = expectErrCode(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'probeZ', plateThickness: 5, maxTravel: 25, feed: 300, retract: 2 },
+      }),
+      'run.travel',
+    )
+    expect(refused.issues[0]?.rule).toBe('floor')
+    // the floor cleared: Probe Z probes again
+    expectOk(await h.request({ type: 'machine', action: { kind: 'floor' } }))
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'probeZ', plateThickness: 5, maxTravel: 25, feed: 300, retract: 2 },
+      }),
+    )
   })
 
   it('machine frame: envelope, power-up position, queued jogs checked against the travel (DF33, DF34)', async () => {

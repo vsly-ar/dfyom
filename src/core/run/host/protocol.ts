@@ -186,6 +186,21 @@ export const HostStatusSchema = z.object({
 })
 export type HostStatus = z.output<typeof HostStatusSchema>
 
+/** v0.5 RV11: the floor (MPos): the bed map's heights for the tool, the spoilboard plane. */
+export const FloorSettingSchema = z.object({
+  map: z
+    .object({
+      origin: z.tuple([Num, Num]).readonly(),
+      spacing: z.tuple([z.number().positive().finite(), z.number().positive().finite()]).readonly(),
+      cols: z.number().int().min(2).max(30),
+      rows: z.number().int().min(2).max(30),
+      z: z.array(Num).max(900).readonly(),
+    })
+    .refine((g) => g.z.length === g.cols * g.rows, 'one height per point')
+    .exactOptional(),
+  plane: Num.exactOptional(),
+})
+
 // ── main → host ───────────────────────────────────────────────────────────────────────────
 
 export const VirtualTargetSchema = z.object({
@@ -414,6 +429,8 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     fastFeed: Feed,
     slowFeed: Feed,
     moveFeed: Feed,
+    /** v0.5 RV11: a bed map point: the floor leaves the old bed map out; virtual: the warped bed. */
+    bed: z.literal(true).exactOptional(),
   }),
   /**
    * v0.5 RV5 (virtual only): the stock the virtual operator laid (`stock` absent: the one laid before); with
@@ -442,6 +459,11 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
    * `envelope.workArea` follow it while homed. Moves nothing.
    */
   z.object({ kind: z.literal('workArea'), area: WorkAreaSettingSchema.exactOptional() }),
+  /**
+   * v0.5 RV11: the connection's floor (absent: none): every probe cycle stays 1 mm above it while
+   * homed (docs/modes/run-surface.md#uses). Moves nothing.
+   */
+  z.object({ kind: z.literal('floor'), floor: FloorSettingSchema.exactOptional() }),
   /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
   z.object({
     kind: z.literal('override'),
