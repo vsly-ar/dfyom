@@ -181,7 +181,7 @@ test('the shell switches the three modes and applies the theme setting', async (
   await page.keyboard.press('ControlOrMeta+1')
   await expect(mode('Design')).toBeChecked()
 
-  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await settings.getByRole('radio', { name: 'Dark' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
