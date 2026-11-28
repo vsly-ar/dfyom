@@ -43,6 +43,7 @@ import {
   airCut,
   heightDifference,
   placeLoops,
+  pocketDeepCuts,
   pocketRapids,
   regionCoverage,
 } from './testing/region-coverage'
@@ -171,8 +172,14 @@ function checkRules(
     inp.operation.restAfter === undefined || before !== undefined
       ? pocketRapids(tp, inp, 0.2, before)
       : []
+  // DF144: no feed move meets more than the stepdown of uncut material
+  const deep =
+    inp.operation.restAfter === undefined || before !== undefined
+      ? pocketDeepCuts(tp, inp, { cell: 0.2, ...(before === undefined ? {} : { before }) })
+      : []
   return [
     ...rapids,
+    ...deep,
     ...violations(tp, {
       feedRate: inp.cutting.feedRate,
       plungeRate: inp.cutting.plungeRate,

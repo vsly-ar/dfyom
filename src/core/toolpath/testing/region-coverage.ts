@@ -11,7 +11,7 @@ import { chainBounds, regionLoops, type Loop, type Region } from '../../geometry
 import { flattenLoop, segmentGrid } from '../../geometry/2d/testing/oracles'
 import type { Toolpath, ToolpathTool } from '../model'
 import { LINK_RADIAL_MARGIN } from '../links'
-import { SLOT_CLEARANCE } from '../region-pocket'
+import { narrowReach, SLOT_CLEARANCE } from '../region-pocket'
 import { Heightmap, samples, steps } from './oracles'
 
 export interface Coverage {
@@ -332,5 +332,117 @@ export function pocketRapids(
       radial: LINK_RADIAL_MARGIN,
     },
     { cell, origin, top: inp.operation.onZ, before },
+  )
+}
+
+/** What `deepCuts` allows (mm). */
+export interface DeepCutLimits {
+  /** Material depth a feed move may meet under the tool (the roughing stepdown). */
+  readonly stepdown: number
+  /**
+   * Finishing moves are probed with the tool shrunk by this: they may meet the wall's full depth
+   * only within it of the disc's edge (the allowance and corner tips, DF144).
+   */
+  readonly finishRadial: number
+}
+
+/**
+ * Feed moves that bury the tool in uncut material (DF144): each feed move after `before` is
+ * probed sample by sample on the heightmap of everything cut so far; a rough move may meet at
+ * most `stepdown` of material under the tool (less a cell at the disc's edge, the raster), a
+ * finishing move at most `stepdown` under the tool shrunk by `finishRadial`. A link through
+ * stock, a plunge into it or a finishing ring that cuts what the roughing never reached fails.
+ * Returns the failures (one per move). Test-only.
+ */
+export function deepCuts(
+  tp: Toolpath,
+  tool: ToolpathTool,
+  size: { length: number; width: number },
+  limits: DeepCutLimits,
+  opts: {
+    readonly before?: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[]
+    readonly cell?: number
+    readonly tol?: number
+    /** The heightmap's (0, 0) in toolpath coordinates. */
+    readonly origin?: Vec2
+    /** The stock top's Z in toolpath coordinates (the heightmap starts flat there). */
+    readonly top?: number
+    /** The heightmap to cut (`size` and `cell` unused): a stock shaped beforehand. */
+    readonly heightmap?: Heightmap
+  } = {},
+): string[] {
+  const { before = [], origin = [0, 0], top = 0, tol = 0.02 } = opts
+  const hm = opts.heightmap ?? new Heightmap(size.length, size.width, opts.cell ?? 0.1)
+  const cell = hm.cell
+  const at = (p: Vec3): Vec3 => [p[0] - origin[0], p[1] - origin[1], p[2] - top]
+  for (const b of before)
+    for (const s of steps(b.tp))
+      if (s.move.kind !== 'rapid') for (const p of samples(s, cell)) hm.stamp(b.tool, at(p))
+  const shrunk = (d: number) => ({ ...tool, diameter: Math.max(0, tool.diameter - 2 * d) })
+  const roughProbe = shrunk(cell)
+  const finishProbe = shrunk(limits.finishRadial + cell)
+  const flat = tool.type !== 'chamferMill' && tool.type !== 'drill' && tool.cornerRadius === 0
+  const finish = new Set(tp.passes.filter((p) => p.kind === 'finish').flatMap((p) => p.moves))
+  const out: string[] = []
+  const fmt = (p: Vec3) => p.map((n) => n.toFixed(3)).join(',')
+  for (const s of steps(tp)) {
+    if (s.move.kind === 'rapid') continue
+    const fin = finish.has(s.move)
+    const probe = fin ? finishProbe : roughProbe
+    const depthAt = (p: Vec3) => (flat ? hm.probeFlat(probe.diameter / 2, p) : hm.probe(probe, p))
+    // the whole move against the material before it: a plunge meets its whole column
+    const pts = samples(s, cell)
+    let worst: { depth: number; p: Vec3 } | undefined
+    for (const p of pts) {
+      const depth = depthAt(at(p))
+      if (depth > limits.stepdown + tol && (worst === undefined || depth > worst.depth))
+        worst = { depth, p }
+    }
+    for (const p of pts) hm.stamp(tool, at(p))
+    if (worst !== undefined)
+      out.push(
+        `${fin ? 'finish' : 'rough'} ${s.move.kind} meets ${worst.depth.toFixed(3)} mm of material at ${fmt(worst.p)}`,
+      )
+  }
+  return out
+}
+
+/**
+ * `deepCuts` of a region pocket's toolpath over its own stock (flat at `onZ`, the region's box +
+ * 10 mm): the roughing stepdown; finishing moves within `narrowReach` + 2 × the allowance of the
+ * disc's edge (the allowance, what the generator leaves to the finishing ring, DF144). Test-only.
+ */
+export function pocketDeepCuts(
+  tp: Toolpath,
+  inp: {
+    readonly tool: ToolpathTool
+    readonly cutting: { readonly stepdown: number }
+    readonly strategy: { readonly finishAllowance: number }
+    readonly operation: { readonly region: Region; readonly onZ: number }
+  },
+  opts: {
+    readonly cell?: number
+    readonly before?: readonly { readonly tool: ToolpathTool; readonly tp: Toolpath }[]
+    readonly heightmap?: Heightmap
+    readonly origin?: Vec2
+  } = {},
+): string[] {
+  const box = chainBounds(inp.operation.region.pieces.flatMap((p) => p.outer.elements))
+  if (box === undefined) return []
+  const pad = 10
+  const a = inp.strategy.finishAllowance
+  return deepCuts(
+    tp,
+    inp.tool,
+    { length: box.max[0] - box.min[0] + 2 * pad, width: box.max[1] - box.min[1] + 2 * pad },
+    {
+      stepdown: inp.cutting.stepdown,
+      finishRadial: narrowReach(a, inp.tool.diameter / 2 - inp.tool.cornerRadius) + 2 * a,
+    },
+    {
+      ...opts,
+      origin: opts.origin ?? [box.min[0] - pad, box.min[1] - pad],
+      top: inp.operation.onZ,
+    },
   )
 }

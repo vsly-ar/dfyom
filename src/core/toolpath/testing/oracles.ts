@@ -171,6 +171,28 @@ export class Heightmap {
     return most
   }
 
+  /**
+   * `probe` of a flat disc of radius `R` (the tip's Z under all of it), row by row as `stamp`:
+   * the per-move check of `deepCuts` (DF144) probes every sample of every move.
+   */
+  probeFlat(R: number, p: Vec3): number {
+    const { cell, nx, z } = this
+    const reach = R + 1e-12
+    let most = 0
+    const i0 = Math.max(0, Math.floor((p[0] - R) / cell))
+    const i1 = Math.min(nx - 1, Math.ceil((p[0] + R) / cell))
+    const j1 = Math.min(this.ny - 1, Math.ceil((p[1] + R) / cell))
+    for (let j = Math.max(0, Math.floor((p[1] - R) / cell)); j <= j1; j++) {
+      const dy2 = ((j + 0.5) * cell - p[1]) ** 2
+      const row = j * nx
+      for (let i = i0; i <= i1; i++) {
+        const d = z[row + i]! - p[2]
+        if (d > most && Math.sqrt(((i + 0.5) * cell - p[0]) ** 2 + dy2) <= reach) most = d
+      }
+    }
+    return most
+  }
+
   /** Sweep every feed move of a toolpath (rapids are checked separately: they never cut). */
   sweep(tool: ToolpathTool, tp: Toolpath, step = 0.1): void {
     for (const s of steps(tp))
