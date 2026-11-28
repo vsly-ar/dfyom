@@ -323,8 +323,8 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         break
       }
       case 'chamfer': {
-        // plan-v0.4.md § Tool checks for chamfer mills: the design's fit row (angle, tip, slant
-        // when contoured), then reach to the tip of the resolved entry
+        // plan-v0.4.md § Tool checks for chamfer mills: the design's fit row (angle, tip; shank
+        // and bore when cut in levels, DF142), then reach to the tip of the resolved entry
         const loop = loopCut(op, part.operations)
         if (loop !== undefined) {
           // a general edge (edge-chamfers.md § Tool): angle and slant (one ring), then reach
@@ -334,6 +334,9 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
               diameter: D,
               ...(tool.angle.isSome() ? { angle: tool.angle.unwrap().canonical } : {}),
               tipDiameter: tool.tipDiameterMm,
+              ...(tool.shankDiameter.isSome() && {
+                shankDiameter: tool.shankDiameter.unwrap().canonical,
+              }),
             },
             { width: op.width.canonical, angle: op.angle.canonical },
           )
@@ -354,12 +357,17 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
             diameter: D,
             ...(tool.angle.isSome() ? { angle: tool.angle.unwrap().canonical } : {}),
             tipDiameter: tool.tipDiameterMm,
+            ...(tool.shankDiameter.isSome() && {
+              shankDiameter: tool.shankDiameter.unwrap().canonical,
+            }),
           },
           {
             edgeDiameter: cut.edgeDiameter,
             diameter: cut.diameter,
             angle: op.angle.canonical,
             ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
+            // DF142: an inside circle profile leaves its core (no levels)
+            edgeCore: part.operations.find((o) => o.id === op.edgeOf)?.kind === 'profile',
           },
         )
         if (unfit !== undefined) add('tool', unfit.rule, unfit.detail, numeric(unfit.values))

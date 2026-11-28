@@ -904,24 +904,28 @@ function chamfer(
     )
   if (loop) out.push(...chamferTabFindings(op, own))
   if (loop && port !== undefined) out.push(...loopChamferFindings(op, port, own))
-  if (!lib.empty && candidates(op, lib).length === 0 && loop)
+  if (!lib.empty && candidates(op, lib).length === 0 && loop) {
+    const reason = chamferNoToolReason(op, lib)
     out.push(
       warning(
         'dfm.chamferNoTool',
         op,
         'angle',
-        `no chamfer mill of ${op.angle}° in the library has a cutting edge for a ${mm(op.width)} bevel`,
-        { angle: op.angle, width: op.width },
+        `no chamfer mill of ${op.angle}° in the library has a cutting edge for a ${mm(op.width)} bevel` +
+          (reason === 'angle' ? '' : ` (${reason})`),
+        { angle: op.angle, width: op.width, reason },
       ),
     )
-  else if (!lib.empty && !loop && candidates(op, lib).length === 0)
+  } else if (!lib.empty && !loop && candidates(op, lib).length === 0) {
+    const reason = op.stepdown === undefined ? chamferNoToolReason(op, lib) : undefined
     out.push(
       warning(
         'dfm.chamferNoTool',
         op,
         op.stepdown === undefined ? 'angle' : 'stepdown',
         op.stepdown === undefined
-          ? `no chamfer mill of ${op.angle}° in the library fits Ø${mm(op.edgeDiameter)} → Ø${mm(op.diameter)}`
+          ? `no chamfer mill of ${op.angle}° in the library fits Ø${mm(op.edgeDiameter)} → Ø${mm(op.diameter)}` +
+              (reason === 'angle' ? '' : ` (${reason})`)
           : `no flat end mill in the library is smaller than Ø${mm(op.edgeDiameter)} (stepped)`,
         {
           angle: op.angle,
@@ -929,10 +933,22 @@ function chamfer(
           edgeDiameter: op.edgeDiameter,
           // F7: a stepped chamfer needs a flat end mill smaller than the edge
           ...(op.stepdown !== undefined && { stepped: 1 }),
+          ...(reason !== undefined && { reason }),
         },
       ),
     )
+  }
   return out
+}
+
+/**
+ * Why no library chamfer mill fits a chamfer (DF142, plan-v0.4.md § Chamfers wider than the
+ * cutting edge): `angle` when none has its angle; else the first failed rule of those that do,
+ * preferring `bore` (the edge leaves its core), then `shank`, `tip`, `slant`.
+ */
+function chamferNoToolReason(op: Op<'chamfer'>, lib: Library): string {
+  const rules = new Set(lib.tools.map((t) => chamferFit(t, op)?.rule))
+  return (['bore', 'shank', 'tip', 'slant'] as const).find((r) => rules.has(r)) ?? 'angle'
 }
 
 /**

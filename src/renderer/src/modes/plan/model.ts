@@ -10,6 +10,7 @@ import { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Direction, StockSize } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
 import { loadPlanDTO, type LoadedPlan } from '../../../../core/plan/plan'
+import { feedFieldsOf } from '../../../../core/plan/plan.dto'
 import { planOpLabel } from '../../../../core/plan/labels'
 import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
@@ -720,11 +721,12 @@ export function lengthText(mm: number, units: UnitSystem): string {
   return units === 'mm' ? `${trim(mm, 3)} mm` : `${trim(mm / 25.4, 4)} in`
 }
 
-/** Feeds fields a kind uses: drilling has no stepdown or stepover. */
+/**
+ * Feeds fields a kind uses, the ones core accepts (`feedFieldsOf`): a drilling and a chamfer have
+ * no stepdown or stepover (DF142, TG #490: a chamfer's Stepdown field was refused by core).
+ */
 export function feedFields(kind: OperationKind): readonly FeedField[] {
-  return kind === 'drilling'
-    ? ['spindleSpeed', 'feedRate', 'plungeRate']
-    : ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover']
+  return feedFieldsOf(kind)
 }
 
 // ── strategy ──────────────────────────────────────────────────────────────────────────────

@@ -139,6 +139,7 @@ export const ChamferGeometrySchema = z.object({
   diameter: z.number(),
   angle: z.number(),
   stepdown: z.number().exactOptional(),
+  edgeCore: z.literal(true).exactOptional(),
 })
 
 /** Edge chamfer (E1, E2): a bevel along a general edge (docs/modes/edge-chamfers.md#implementation-e1). */

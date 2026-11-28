@@ -67,6 +67,17 @@ export const FEED_FIELDS = [
 ] as const
 export type FeedField = (typeof FEED_FIELDS)[number]
 
+/**
+ * The feeds fields an operation kind takes (an override of another is `notForKind`): a drilling
+ * and a chamfer have no stepdown or stepover (their passes follow from the strategy and the tool;
+ * hardening DF142, TG #490: the Plan inspector offers only these).
+ */
+export function feedFieldsOf(kind: string): readonly FeedField[] {
+  return kind === 'drilling' || kind === 'chamfer'
+    ? ['spindleSpeed', 'feedRate', 'plungeRate']
+    : FEED_FIELDS
+}
+
 export const OverridesDtoSchema = z
   .object({
     spindleSpeed: quantityDto('spindleSpeed').optional(),

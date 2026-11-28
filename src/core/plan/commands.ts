@@ -65,6 +65,7 @@ import {
 } from './setups'
 import {
   FEED_FIELDS,
+  feedFieldsOf,
   lengthDTO,
   PlanDtoSchema,
   PlanIdSchema,
@@ -1063,10 +1064,7 @@ const operationUpdate = defineCommand({
         unlock(op, field)
         continue
       }
-      if (
-        (kind === 'drilling' || kind === 'chamfer') &&
-        (field === 'stepdown' || field === 'stepover')
-      ) {
+      if (!feedFieldsOf(kind).includes(field)) {
         issues.push({
           path: ['overrides', field],
           rule: 'notForKind',

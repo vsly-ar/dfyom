@@ -114,8 +114,13 @@ describe('generateChamfer', () => {
     const input = chamferInput(stock, chamfer({ center: [7, 7] }), tool)
     expect(chamferCut(input).ringRadius + tool.diameter / 2).toBeCloseTo(4, 12)
     checkSurface(input, 0.02)
-    const shorter = generateChamfer(chamferInput(stock, chamfer(), chamferMill(3.9, 90, 2)))
-    expect(shorter.unwrapErr().issues.map((i) => i.rule)).toEqual(['slant'])
+    // DF142: a shorter edge cuts it in levels
+    const shorter = chamferInput(stock, chamfer(), chamferMill(3.9, 90, 2))
+    expect(
+      generateChamfer(shorter)
+        .unwrap()
+        .passes.map((p) => p.kind),
+    ).toEqual(['rough', 'finish'])
   })
 
   it('contour: enters inside the hole, ramps at most at the ramp angle, climbs, leaves to the centre', () => {

@@ -44,6 +44,9 @@ export type FitRule =
   | 'angle'
   | 'tip'
   | 'slant'
+  // a chamfer cut in levels (DF142): the shank is wider than the cone, or the edge leaves a core
+  | 'shank'
+  | 'bore'
 
 export interface ToolUnfit {
   readonly rule: FitRule
@@ -417,6 +420,8 @@ export type ChamferFitInput =
       readonly angle: number
       /** Stepped (F7): cut in terraces by a flat end mill. */
       readonly stepdown?: number
+      /** DF142: the edge leaves material inside it (an inside circle profile): no levels. */
+      readonly edgeCore?: boolean
       readonly width?: never
     }
   | {
@@ -431,10 +436,12 @@ export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
 /**
  * The fit row of a circular chamfer (design-v0.4.md § Chamfer operation, Fit): a `chamferMill`
  * whose angle equals the chamfer's within 0.5°, whose tip is smaller than the edge Ø, and that
- * either covers the chamfer Ø (plunged at the centre) or has a cutting edge (its cone's slant from
- * tip to DC) at least the chamfer's slant height (contoured). First failed rule, or undefined.
- * One ring only: several rings are stepped clearing, not a chamfer pass (design-v0.4.md
- * § Implementation (task C2)). Reach is checked by `toolFit`, which knows the depth below the face.
+ * covers the chamfer Ø (plunged at the centre), has a cutting edge (its cone's slant from tip to
+ * DC) at least the chamfer's slant height (one ring), or else cuts it in levels (DF142,
+ * plan-v0.4.md § Chamfers wider than the cutting edge): its shank no wider than DC (rule
+ * `shank`) and the edge's bore cleared (rule `bore`). A general edge (E4a) is cut in levels by
+ * any cutting edge, with the same shank rule. First failed rule, or undefined. Reach is checked
+ * by `toolFit`, which knows the depth below the face.
  */
 export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
   if (c.edgeDiameter !== undefined && c.stepdown !== undefined) return steppedFit(tool, c)
@@ -457,13 +464,13 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
     // finding's business)
     const edge = coneSlant(tip, tool.diameter, tool.angle)
     const slant = coneSlant(0, 2 * c.width, c.angle)
-    return tool.diameter - tip > 2 * TOL
-      ? undefined
-      : {
-          rule: 'slant',
-          detail: `the tool has no cutting edge (tip Ø${mm(tip)}, DC ${mm(tool.diameter)})`,
-          values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, width: c.width },
-        }
+    if (!(tool.diameter - tip > 2 * TOL))
+      return {
+        rule: 'slant',
+        detail: `the tool has no cutting edge (tip Ø${mm(tip)}, DC ${mm(tool.diameter)})`,
+        values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, width: c.width },
+      }
+    return edge + TOL >= slant ? undefined : shankFit(tool)
   }
   if (tip >= c.edgeDiameter - TOL)
     return {
@@ -472,15 +479,50 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
       need: { relation: 'atLeast', value: tip },
       values: { tipDiameter: tip, edgeDiameter: c.edgeDiameter },
     }
-  if (tool.diameter + TOL >= c.diameter) return undefined
-  const edge = coneSlant(tip, tool.diameter, tool.angle)
-  const slant = coneSlant(c.edgeDiameter, c.diameter, c.angle)
-  return edge + TOL >= slant
+  if (chamferInOnePass(tool, c)) return undefined
+  // DF142: levels, the hole's air beside the cone (its bore cut first) and the shank in it
+  if (c.edgeCore === true)
+    return {
+      rule: 'bore',
+      detail:
+        `the cutting edge ${mm(coneSlant(tip, tool.diameter, tool.angle))} is shorter than the ` +
+        `slant ${mm(coneSlant(c.edgeDiameter, c.diameter, c.angle))} and the edge leaves its ` +
+        'core, which the shank would enter in levels',
+      values: { edgeDiameter: c.edgeDiameter, diameter: c.diameter },
+    }
+  return shankFit(tool)
+}
+
+/**
+ * Whether a chamfer mill of the angle cuts the chamfer in one pass (DF142): a plunge (DC covers a
+ * circular chamfer's Ø) or one ring (the cutting edge covers the slant); else it needs levels.
+ */
+export function chamferInOnePass(
+  tool: Pick<DfmTool, 'diameter' | 'tipDiameter' | 'angle'>,
+  c: ChamferFitInput,
+): boolean {
+  const tip = tool.tipDiameter ?? 0
+  const angle = tool.angle ?? c.angle
+  if (c.edgeDiameter === undefined)
+    return coneSlant(tip, tool.diameter, angle) + TOL >= coneSlant(0, 2 * c.width, c.angle)
+  return (
+    tool.diameter + TOL >= c.diameter ||
+    coneSlant(tip, tool.diameter, angle) + TOL >= coneSlant(c.edgeDiameter, c.diameter, c.angle)
+  )
+}
+
+/**
+ * The shank rule of a chamfer cut in levels (DF142): the shank goes below the face, so it must be
+ * no wider than the cone's largest Ø (an unknown shank is taken as DC, a V-bit's usual shank).
+ */
+function shankFit(tool: DfmTool): ToolUnfit | undefined {
+  const shank = tool.shankDiameter ?? tool.diameter
+  return shank <= tool.diameter + TOL
     ? undefined
     : {
-        rule: 'slant',
-        detail: `cutting edge ${mm(edge)} is shorter than the chamfer's slant ${mm(slant)}`,
-        values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, diameter: c.diameter },
+        rule: 'shank',
+        detail: `the shank Ø${mm(shank)} is wider than the cone's Ø${mm(tool.diameter)}: in levels it would rub the chamfer`,
+        values: { shankDiameter: shank, toolDiameter: tool.diameter },
       }
 }
 

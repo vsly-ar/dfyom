@@ -318,6 +318,10 @@ function operationGeometry(
         )!.toNumber(),
         angle: op.angle.canonical,
         ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
+        // DF142: an inside circle profile leaves its core (no levels wider than the cone)
+        ...(ops.find((o) => o.id === op.edgeOf)?.kind === 'profile'
+          ? { edgeCore: true as const }
+          : {}),
       })
     }
     case 'line': {
