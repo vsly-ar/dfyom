@@ -328,6 +328,8 @@ describe('Run mode', () => {
     // in Alarm, jog and work zero say why they are disabled
     expect(within(t.nav()).getByRole('button', { name: 'Jog X+' })).toBeDisabled()
     expect(within(t.nav()).getAllByText('Home the machine first.').length).toBeGreaterThan(0)
+    // v0.5 RV3: Test probe, the probe input live
+    expect(within(t.nav()).getByText(/^Probe input: open\./)).toHaveAttribute('role', 'status')
     await expectNoAxeViolations()
   })
 

@@ -324,6 +324,11 @@ export const runMessages = {
     confirmDescription: (thickness: string, surface?: string) =>
       `Put the touch plate on ${surface ?? 'the stock'} under the bit and the clip on the bit. The spindle must be off. The bit moves down until it touches the plate (at most 25 mm). Plate thickness: ${thickness}.`,
     confirm: 'Probe',
+    /** v0.5 RV3: Test probe (docs/modes/run-probing.md#test-probe-rv3). */
+    input: (touching: boolean) =>
+      touching
+        ? 'Probe input: touching. Probing waits until it reads open.'
+        : 'Probe input: open. Touch the clip to the plate to test it.',
   },
 
   /** DF69: "Move to touch-off spot" at a tool change (docs/modes/z-reference.md#dfyom-run). */

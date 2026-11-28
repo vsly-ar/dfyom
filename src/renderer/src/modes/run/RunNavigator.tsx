@@ -518,6 +518,12 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           onProbe={(t) => void a.probeZ(t)}
         />
         {plate === undefined ? <p className={styles['hint']}>{m.noPlate}</p> : null}
+        {/* v0.5 RV3: Test probe, the probe input live from `Pn:P` (run-probing.md) */}
+        {connected ? (
+          <p className={styles['hint']} role="status">
+            {runMessages.probe.input(status.pins?.includes('P') === true)}
+          </p>
+        ) : null}
       </Section>
 
       {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
