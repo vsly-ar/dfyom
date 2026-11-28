@@ -71,9 +71,12 @@ type Render = (p: DfmWarning['params'], L: (mm: unknown) => string, name: DfmNam
 
 const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.loosePiece': (p) =>
-    p['offcut'] === true
-      ? 'An offcut is not held and comes loose. Add tabs or make them thicker.'
-      : 'A piece of the part is not held and comes loose. Check the cut that separates it.',
+    // DF147 SL3: a through Line cuts a piece off on purpose
+    p['cutOff'] === true
+      ? 'This line cuts a piece off the part: it comes loose on the last pass. Hold both sides of the line.'
+      : p['offcut'] === true
+        ? 'An offcut is not held and comes loose. Add tabs or make them thicker.'
+        : 'A piece of the part is not held and comes loose. Check the cut that separates it.',
   // D4: what remains of lowered tabs and which operation to change (design-llm-first.md § DFM in waste)
   'dfm.retainedRemoved': (p, L, name) => {
     const by = typeof p['by'] === 'string' ? name.item(p['by']) : 'Another operation'

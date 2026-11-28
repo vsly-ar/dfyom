@@ -368,7 +368,8 @@ function operationGeometry(
         ...direction,
         onZ: on.faceZ.toNumber(),
         paths: paths.unwrap(),
-        depth: lineDepths(op.depth),
+        // DF147 SL3: a through Line's depth is the material below `on`, read fresh
+        depth: lineDepths(op.depth, on.faceZ.add(table.extent(on.direction)).toNumber()),
         ...(levels.some((l) => l !== null) ? { levels } : {}),
         ...(op.depth.kind === 'levels' && op.blend.isSome()
           ? { blend: op.blend.unwrap().canonical }
@@ -382,6 +383,7 @@ function operationGeometry(
             }
           : {}),
         cutter: lineCutter(op, ctx.snapshots),
+        ...(op.depth.kind === 'through' ? { through: true as const } : {}),
       })
     }
   }

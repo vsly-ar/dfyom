@@ -13,7 +13,7 @@ import { None, Some, type Option } from '../../shared/result'
 import { TOOL_MATCH_TOLERANCE, type DfmTool, type OperationTool } from '../geometry/dfm'
 import { localStock, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
-import { DEFAULT_LINE_CUTTER } from '../geometry/line'
+import { DEFAULT_LINE_CUTTER, DEFAULT_THROUGH_CUTTER } from '../geometry/line'
 import {
   CHAMFER_ANGLE_TOLERANCE,
   isAnalyticOperation,
@@ -404,7 +404,8 @@ function generalizedCandidates(input: ChoiceInput): GeneralizedTool[] {
   const { op, units } = input
   const plain = (q: Quantity) => plainLength(q.exact, units)
   const out: GeneralizedTool[] = []
-  if (op.kind === 'chamfer' || op.kind === 'line') {
+  // DF147 SL3: a through Line takes the end mills below
+  if (op.kind === 'chamfer' || (op.kind === 'line' && op.depth.kind !== 'through')) {
     // a Line's generalized tool is a 60° V-bit (engraved-patterns.md § Tools)
     const angle =
       op.kind === 'line'
@@ -590,10 +591,15 @@ export function chooseTool(input: ChoiceInput): ToolChoice {
  * that does not resolve) the default 60° V-bit.
  */
 export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
-  if (op.tool.isNone()) return DEFAULT_LINE_CUTTER
+  // DF147 SL3: a through Line is cut by a flat end mill (another chosen type is the plan's unfit)
+  const through = op.kind === 'line' && op.depth.kind === 'through'
+  const fallback = through ? DEFAULT_THROUGH_CUTTER : DEFAULT_LINE_CUTTER
+  if (op.tool.isNone()) return fallback
   const t = resolveDesignTool(op.tool.unwrap(), snapshots ?? {})
-  if (t.isNone()) return DEFAULT_LINE_CUTTER
+  if (t.isNone()) return fallback
   const tool = t.unwrap()
+  if (through)
+    return tool.type === 'flatEndMill' ? { kind: 'flat', diameter: tool.diameter } : fallback
   if (tool.type === 'chamferMill' && tool.angle !== undefined)
     return {
       kind: 'vBit',

@@ -96,6 +96,8 @@ function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
   if (design?.kind === 'profile') return (design as { depth?: unknown }).depth === undefined
   // a pattern's through pocket (patterns P4)
   if (design?.kind === 'pocket') return (design as { through?: boolean }).through === true
+  // DF147 SL3: a through Line
+  if (design?.kind === 'line') return (design as { depth?: unknown }).depth === 'through'
   return (design as { bottom?: string } | undefined)?.bottom === 'through'
 }
 

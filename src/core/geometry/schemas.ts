@@ -209,6 +209,7 @@ export const LineGeometrySchema = z.object({
     z.object({ kind: z.literal('ball'), diameter: z.number() }),
     z.object({ kind: z.literal('flat'), diameter: z.number() }),
   ]),
+  through: z.literal(true).exactOptional(),
 })
 
 // two chamfer shapes share `kind`: the circular one first (it needs `center`), then the loop one

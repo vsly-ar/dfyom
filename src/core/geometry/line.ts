@@ -41,6 +41,12 @@ export const DEFAULT_LINE_CUTTER: LineCutter = Object.freeze({
   tipDiameter: 0,
 })
 
+/**
+ * A through Line's tool when it has no flat end mill (DF147 SL3): a flat end mill Ø 6 mm, the slot
+ * the 3D view shows until the plan picks the real one.
+ */
+export const DEFAULT_THROUGH_CUTTER: LineCutter = Object.freeze({ kind: 'flat', diameter: 6 })
+
 /** Elements whose ends and middles are this close coincide (mm, the doc's chaining tolerance). */
 export const COINCIDENT_TOLERANCE = 0.01
 
@@ -844,11 +850,22 @@ function loftRun(
  * side would fold) ends the run, and the tool itself stands at every corner and open end, so the
  * union is the Minkowski sum of the tool and the chorded line. Role `groove`, no face target.
  */
-export function lineSolids(op: LineGeometry): AppResult<LocalSolids> {
+export function lineSolids(op: LineGeometry, role = 'groove'): AppResult<LocalSolids> {
   const table = new Table()
-  const groove = table.add('groove')
+  // DF147 SL3: a through Line's slot runs on past the far face (no film), role `cutOff`
+  const through = op.through === true && 'start' in op.depth
+  const groove = table.add(through ? 'cutOff' : role)
   const removal: { mesh: LabelledMesh; at: Vec3 }[] = []
-  for (const l of lineChains(op).lines) {
+  const deep: LineGeometry = through
+    ? {
+        ...op,
+        depth: {
+          start: (op.depth as { start: number }).start + OVERSHOOT,
+          end: (op.depth as { end: number }).end + OVERSHOOT,
+        },
+      }
+    : op
+  for (const l of lineChains(deep).lines) {
     const raw = flattenLine(l)
     const pts: Vec3[] = []
     for (const p of raw) {

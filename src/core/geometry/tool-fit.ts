@@ -355,6 +355,13 @@ export function toolFit(
           }
     }
     case 'line': {
+      // DF147 SL3: a through Line is a slot as wide as a flat end mill
+      if (op.through === true && tool.type !== 'flatEndMill')
+        return {
+          rule: 'type',
+          detail: 'a through Line needs a flat end mill',
+          values: { needs: 'flatEndMill' },
+        }
       // a V-bit (chamfer mill with an angle), a tapered ball (tapered-ball-nose.md), a ball or a
       // flat end mill (engraved-patterns.md § Tools); its cutting length is the DFM's `lineTooDeep`, the reach here
       const ok =

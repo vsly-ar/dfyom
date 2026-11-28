@@ -57,6 +57,8 @@ export const PLAN_WARNING_CODES = [
   'plan.workholding.breakthrough',
   'plan.workholding.inPart',
   'plan.workholding.partLoose',
+  // DF147 SL3: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
+  'plan.workholding.cutOffLoose',
   'plan.workholding.outOfRange',
   // DF132 H2: docs/modes/tool-holder.md#findings
   'plan.holder.unknown',
@@ -473,7 +475,12 @@ function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): numb
       return belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
     }
     case 'line': {
-      return belowTop(table, op.on) + lineDeepest(op.depth)
+      // DF147 SL3: a through Line goes through the material below its face + breakthrough
+      const below = table
+        .get(op.on)
+        .mapOr(stock.thickness.canonical, (e) => e.faceZ.add(table.extent(e.direction)).toNumber())
+      const breakthrough = i.strategy.kind === 'line' ? (i.strategy.breakthrough ?? 0) : 0
+      return belowTop(table, op.on) + lineDeepest(op.depth, below + breakthrough)
     }
   }
 }

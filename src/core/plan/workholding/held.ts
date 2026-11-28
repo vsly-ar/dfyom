@@ -15,6 +15,7 @@ import { regionContains } from '../../geometry/2d/measure'
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { OperationGeometry, PartGeometryInput, Vec2 } from '../../geometry/model'
 import { profileChain, tabCentres } from '../../geometry/outline'
+import { cutOffPieces, polygonContains, type CutOffSide } from '../../geometry/cut-off'
 import { isThroughGeometry } from '../../geometry/through-depth'
 import { faceWaste } from '../../geometry/waste'
 import { fromWcs, toWcs, type SetupWcs } from '../../toolpath/wcs'
@@ -89,7 +90,7 @@ const overlaps = (a0: number, a1: number, b0: number, b1: number): boolean =>
  */
 function holds(
   item: ResolvedItem,
-  piece: { readonly region: Parameters<typeof regionContains>[0]; readonly box: Bounds2 },
+  piece: { readonly contains: (p: Vec2) => boolean; readonly box: Bounds2 },
   h: SetupWorkholding,
   wcs: SetupWcs,
 ): boolean {
@@ -97,7 +98,7 @@ function holds(
   const { length: L, width: W } = h.stock
   switch (item.kind) {
     case 'screw':
-      return regionContains(piece.region, fromWcs([item.center[0], item.center[1]], wcs))
+      return piece.contains(fromWcs([item.center[0], item.center[1]], wcs))
     case 'toeClamp': {
       const a = item.at - item.width / 2
       const b = item.at + item.width / 2
@@ -155,11 +156,12 @@ function partLoose(
       const { chain, closed } = profileChain(g)
       const bounds = chainBounds(chain.elements)
       if (!closed || bounds === undefined) continue
+      // counter-clockwise, as an outer loop (`faceWaste` does the same)
+      const region = {
+        pieces: [{ outer: signedArea(chain) < 0 ? reverseLoop(chain) : chain, holes: [] }],
+      }
       const piece = {
-        // counter-clockwise, as an outer loop (`faceWaste` does the same)
-        region: {
-          pieces: [{ outer: signedArea(chain) < 0 ? reverseLoop(chain) : chain, holes: [] }],
-        },
+        contains: (p: Vec2) => regionContains(region, p),
         box: turnedBounds(bounds, wcs),
       }
       if (h.items.some((i) => holds(i, piece, h, wcs))) continue
@@ -175,6 +177,82 @@ function partLoose(
       })
     }
   return out
+}
+
+/** "left of Line 1" / "right of Line 1", or the part / the offcut when a chamfer names the side kept. */
+function sideWord(side: CutOffSide, name: string, kept: CutOffSide | undefined): string {
+  const where = `${side} of ${name}`
+  if (kept === undefined) return `the piece ${where}`
+  return side === kept ? `the part (${where})` : `the offcut (${where})`
+}
+
+/**
+ * `plan.workholding.cutOffLoose` (DF147 SL3): per setup without a `surface` hold, every through
+ * Line that cuts the stock in two (`cutOffPieces`) with a side that no screw, toe clamp or vise
+ * holds; a setup without items holds neither side. The side kept is the one a one-sided chamfer
+ * of the Line leaves (`edgeSide`, SL4), else neither is named the part.
+ * Doc: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
+ */
+export function cutOffLoose(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  input: PartGeometryInput,
+): PlanWarning[] {
+  const h = (setup.workholding ?? []).length > 0 ? setupWorkholding(setup, plan.stock) : undefined
+  if (h !== undefined && h.items.some((i) => i.kind === 'surface')) return []
+  const out: PlanWarning[] = []
+  const byId = new Map(input.operations.map((o) => [o.id, o]))
+  const wcs = turnOf(setup, input)
+  const face = { length: wcs.size[0], width: wcs.size[1] }
+  for (const op of setup.operations)
+    for (const id of op.designOperationIds) {
+      const g = byId.get(id)
+      if (g?.kind !== 'line' || g.through !== true) continue
+      if ((g.direction ?? '+z') !== setupDirection(setup)) continue
+      const pieces = cutOffPieces(g, face)
+      if (pieces === undefined) continue
+      const loose = pieces.filter((p) => {
+        if (h === undefined) return true
+        const xs = p.polygon.map((q) => q[0])
+        const ys = p.polygon.map((q) => q[1])
+        const piece = {
+          contains: (q: Vec2) => polygonContains(p.polygon, q),
+          box: turnedBounds(
+            { min: [Math.min(...xs), Math.min(...ys)], max: [Math.max(...xs), Math.max(...ys)] },
+            wcs,
+          ),
+        }
+        return !h.items.some((i) => holds(i, piece, h, wcs))
+      })
+      if (loose.length === 0) continue
+      const kept = keptSide(plan, id)
+      const name = planOpLabel(plan.dto.design.part, op)
+      const what = loose.map((p) => sideWord(p.side, name, kept)).join(' and ')
+      out.push({
+        code: 'plan.workholding.cutOffLoose',
+        severity: 'warning',
+        message: `${name} cuts the stock in two in ${setup.name}: ${what} ${loose.length > 1 ? 'are' : 'is'} not held, and comes loose on the last pass. Clamp both sides of the line (or use tape, vacuum or glue) so neither piece moves into the tool`,
+        planOperationId: op.id,
+        rule: 'cutOffLoose',
+        params: {
+          setupId: setup.id,
+          line: id,
+          sides: loose.map((p) => p.side).join(','),
+          ...(kept === undefined ? {} : { kept }),
+        },
+      })
+    }
+  return out
+}
+
+/** The side a one-sided chamfer of the Line keeps (SL4 `edgeSide`), if one does. */
+function keptSide(plan: LoadedPlan, lineId: string): CutOffSide | undefined {
+  for (const o of plan.part.operations) {
+    const side = (o as { edgeSide?: unknown }).edgeSide
+    if (o.kind === 'chamfer' && o.edgeOf === lineId && (side === 'left' || side === 'right'))
+      return side
+  }
+  return undefined
 }
 
 /**
@@ -214,15 +292,29 @@ export function heldFindings(
   setupId?: string,
   port?: Region2dPort,
 ): PlanWarning[] {
-  const setups = plan.setups.filter(
-    (s) => (setupId === undefined || s.id === setupId) && (s.workholding ?? []).length > 0,
+  const all = plan.setups.filter((s) => setupId === undefined || s.id === setupId)
+  // DF147 SL3: a cut-off is checked with or without items
+  const cutting = all.filter((s) =>
+    s.operations.some((o) =>
+      o.designOperationIds.some((d) => {
+        const op = plan.part.operations.find((x) => x.id === d)
+        return op?.kind === 'line' && op.depth.kind === 'through'
+      }),
+    ),
   )
-  if (setups.length === 0) return []
+  const setups = all.filter((s) => (s.workholding ?? []).length > 0)
+  if (setups.length === 0 && cutting.length === 0) return []
   const input = geometry(plan, port)
   if (input === null) return []
-  return setups.flatMap((s) => {
-    const h = setupWorkholding(s, plan.stock)
-    return [...inPart(s, h, input), ...partLoose(plan, s, h, input)]
+  return all.flatMap((s) => {
+    const own =
+      (s.workholding ?? []).length > 0
+        ? (() => {
+            const h = setupWorkholding(s, plan.stock)
+            return [...inPart(s, h, input), ...partLoose(plan, s, h, input)]
+          })()
+        : []
+    return [...own, ...(cutting.includes(s) ? cutOffLoose(plan, s, input) : [])]
   })
 }
 

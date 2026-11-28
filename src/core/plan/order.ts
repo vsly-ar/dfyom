@@ -4,6 +4,7 @@
  */
 import {
   isGeneralShape,
+  isThroughLine,
   roughingIdOf,
   type Operation,
   type Part,
@@ -446,13 +447,16 @@ function centerOf(op: Operation, part: Part, port: Region2dPort | undefined): Ve
 }
 
 type Profile = Extract<Operation, { kind: 'profile' }>
+type Line = Extract<Operation, { kind: 'line' }>
+/** A cut that frees material: a through profile, or (DF147 SL3) a through Line, a cut-off. */
+type FreeingCut = Profile | Line
 
 /**
  * A profile that cuts through the stock: any side without a depth (a step, DF53, is blind; a
  * roughing profile, DF122 R4, leaves a skin and frees nothing).
  */
-export function isThroughProfile(op: Operation): op is Profile {
-  return op.kind === 'profile' && op.depth.isNone() && op.roughing !== true
+export function isThroughProfile(op: Operation | undefined): op is Profile {
+  return op?.kind === 'profile' && op.depth.isNone() && op.roughing !== true
 }
 
 const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
@@ -465,7 +469,7 @@ const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
  * the caller's.
  */
 function frees(
-  profile: Profile,
+  profile: FreeingCut,
   op: Operation,
   part: Part,
   port: Region2dPort | undefined,
@@ -474,6 +478,9 @@ function frees(
   if (op.id === profile.id) return false
   // a chamfer on the profile's own edge bevels the rim round it, not material inside it (X2)
   if (op.kind === 'chamfer' && op.edgeOf === profile.id) return false
+  // DF147 SL3: a cut-off frees both sides, so it comes after every other cut of its direction
+  // but the other freeing cuts (engraved-patterns.md § Cutting the part out along a line)
+  if (profile.kind === 'line') return !isThroughProfile(op) && !isThroughLine(op)
   if (op.kind === 'facing') return true
   // DF57: the cut that releases the part comes after everything else of its setup
   if (release.has(profile.id) && !release.has(op.id)) return true
@@ -506,6 +513,9 @@ export function releaseProfiles(
       !through.some((o) => o.direction === t.direction && frees(o.profile, t.profile, part, port))
     )
       out.add(t.profile.id)
+  // DF147 SL3: a cut-off releases (both sides of) the part
+  for (const p of planOps)
+    for (const d of p.designOperationIds) if (isThroughLine(byId.get(d))) out.add(d)
   return out
 }
 
@@ -514,6 +524,13 @@ function throughProfiles(p: PlanOperationDTO, byId: ReadonlyMap<string, Operatio
   return p.designOperationIds
     .map((d) => byId.get(d))
     .filter((o): o is Profile => o !== undefined && isThroughProfile(o))
+}
+
+/** The freeing cuts of a plan operation: through profiles and (DF147 SL3) through Lines. */
+function freeingCuts(p: PlanOperationDTO, byId: ReadonlyMap<string, Operation>): FreeingCut[] {
+  return p.designOperationIds
+    .map((d) => byId.get(d))
+    .filter((o): o is FreeingCut => isThroughProfile(o) || isThroughLine(o))
 }
 
 /**
@@ -544,7 +561,7 @@ export function freeingDependencies(
   }
   const out = new Map<string, Set<string>>()
   for (const p of planOps) {
-    const profiles = throughProfiles(p, byId)
+    const profiles = freeingCuts(p, byId)
     if (profiles.length === 0) continue
     const freed = new Set<string>()
     for (const q of planOps) {
@@ -604,12 +621,24 @@ export function orderFindings(
         )
   })
   planOps.forEach((p, i) => {
-    for (const profile of throughProfiles(p, byId))
+    for (const profile of freeingCuts(p, byId))
       for (const later of planOps.slice(i + 1)) {
         if (direction.get(later.id) !== direction.get(p.id)) continue
         for (const d of later.designOperationIds) {
           const o = byId.get(d)
           if (o !== undefined && frees(profile, o, part, port, release)) {
+            // DF147 SL3: after a cut-off both sides may move
+            if (profile.kind === 'line') {
+              out.push({
+                code: 'plan.loosePiece',
+                severity: 'warning',
+                message: `${profile.id} cuts the stock in two before ${o.id}: both sides are held only by the workholding`,
+                planOperationId: later.id,
+                rule: 'cutOffFirst',
+                params: { profile: profile.id, operation: o.id },
+              })
+              break
+            }
             // inside it, or (DF57) anywhere after the cut that releases the part
             const within = frees(profile, o, part, port)
             out.push({

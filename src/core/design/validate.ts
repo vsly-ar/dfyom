@@ -433,17 +433,19 @@ export function operationIssues(
     case 'line': {
       // every depth > 0 and above the stock's far face (engraved-patterns.md § Line operation)
       const depths: [string, Quantity][] =
-        op.depth.kind === 'constant'
-          ? [['depth', op.depth.depth]]
-          : op.depth.kind === 'ramp'
-            ? [
-                ['depth.start', op.depth.start],
-                ['depth.end', op.depth.end],
-              ]
-            : [
-                ['depth.min', op.depth.min],
-                ['depth.max', op.depth.max],
-              ]
+        op.depth.kind === 'through'
+          ? []
+          : op.depth.kind === 'constant'
+            ? [['depth', op.depth.depth]]
+            : op.depth.kind === 'ramp'
+              ? [
+                  ['depth.start', op.depth.start],
+                  ['depth.end', op.depth.end],
+                ]
+              : [
+                  ['depth.min', op.depth.min],
+                  ['depth.max', op.depth.max],
+                ]
       for (const [path, q] of depths)
         if (c.positive(q, path) && on !== undefined) checkAboveBottom(c, path, on, q, T.exact)
       // E2: level 0 is `min`, level 1 `max`; a blend is a length ≥ 0
@@ -464,6 +466,15 @@ export function operationIssues(
           {
             actual: op.blend.unwrap().canonical,
           },
+        )
+      // DF147 SL3: a through Line is one open Straight / Arc (a closed or many-line cut-out is a
+      // Profile with tabs, engraved-patterns.md § Cutting the part out along a line)
+      if (op.depth.kind === 'through')
+        c.check(
+          op.paths.length === 1 && isInlinePath(op.paths[0]!),
+          'depth',
+          'lineThroughPath',
+          'a through Line is one straight line or arc; cut a shape out with a Profile',
         )
       for (const [i, p] of op.paths.entries()) {
         if (isInlinePath(p)) {

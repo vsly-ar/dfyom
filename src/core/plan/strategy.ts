@@ -53,7 +53,7 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
   chamfer: ['entry', 'rampAngle'],
   // Line (engraved-patterns.md § Toolpath): ramp-back (default) or plunge (V-bits, tapered balls)
-  line: ['entry', 'rampAngle'],
+  line: ['entry', 'rampAngle', 'breakthrough'],
 }
 
 const LENGTH_KEYS = [
@@ -97,7 +97,9 @@ export const StrategyArgSchema = z
     peckDepth: clear(Src).describe('Drilling: default DC'),
     chipBreakBack: clear(Src).describe('Drilling: default 0.5 mm / 0.02"'),
     helixPitch: clear(Src).describe('Drilling (helix): default preset stepdown, else 0.25 DC'),
-    breakthrough: clear(Src).describe('Through drilling/profile/pocket: default 0.5 mm / 0.02"'),
+    breakthrough: clear(Src).describe(
+      'Through drilling/profile/pocket/line: default 0.5 mm / 0.02"',
+    ),
   })
   .describe('Pass strategy parameters; omitted keys stay, null resets to the default')
 export type StrategyArgs = z.output<typeof StrategyArgSchema>
@@ -170,6 +172,8 @@ export type ResolvedStrategy =
       readonly rampAngle: number
       /** The deepest point of the groove (mm): F10's `depth` for a V-bit's feeds. */
       readonly cutDepth: number
+      /** A through Line's (DF147 SL3) only; absent on a groove. */
+      readonly breakthrough?: number
     }
   | {
       readonly kind: 'chamfer'
@@ -361,16 +365,23 @@ export function resolveStrategy(
         finishStepdown: mm(s.finishStepdown).unwrapOr(finishStepdownDefault(depth, c.tool, wood)),
       }
     }
-    case 'line':
+    case 'line': {
+      // DF147 SL3: a through Line cuts the material below `on` + breakthrough
+      const through = c.ops.some((op) => op.kind === 'line' && op.depth.kind === 'through')
       return {
         kind,
         entry: s.entry === 'plunge' ? 'plunge' : 'ramp',
         rampAngle: mm(s.rampAngle).unwrapOr(LINE_RAMP_ANGLE),
         cutDepth: c.ops.reduce((m, op) => {
           if (op.kind !== 'line') return m
-          return Math.max(m, lineDeepest(op.depth))
+          return Math.max(
+            m,
+            lineDeepest(op.depth, materialBelow(op.on, c.allOps, c.stock) + breakthrough),
+          )
         }, 0),
+        ...(through ? { breakthrough } : {}),
       }
+    }
     case 'chamfer': {
       const tool = c.tool.isSome() ? c.tool.unwrap() : undefined
       const plunge = c.ops.every((op) => {

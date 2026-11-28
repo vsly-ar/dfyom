@@ -280,7 +280,9 @@ function depthToDTO(d: LineDepth): z.input<typeof DepthDtoSchema> {
       ? d.depth.toDTO()
       : d.kind === 'ramp'
         ? { start: d.start.toDTO(), end: d.end.toDTO() }
-        : { min: d.min.toDTO(), max: d.max.toDTO() }
+        : d.kind === 'through'
+          ? 'through'
+          : { min: d.min.toDTO(), max: d.max.toDTO() }
   ) as never
 }
 

@@ -273,3 +273,60 @@ test('line: depth from SVG levels, varying depth in the Plan program (E2)', asyn
   expect(new Set(zs.map((z) => z.toFixed(2))).size).toBeGreaterThan(5)
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+const FLAT = {
+  name: 'Flat 6',
+  type: 'flatEndMill',
+  diameter: '6',
+  fluteLength: '32',
+  overallLength: '60',
+  fluteCount: '2',
+  toolMaterial: 'carbide',
+  presets: [
+    {
+      name: 'Plywood',
+      materialClass: 'sheetGood',
+      spindleSpeed: '18000',
+      feedRate: '1500',
+      plungeRate: '400',
+      stepdown: '2',
+    },
+  ],
+}
+
+test('line: Depth → Through cuts the part off in Plan, with the cut-off warning (DF147 SL3)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(150_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const added = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: FLAT }] as const,
+  )
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+  await newProject(page)
+
+  // ── Add → Line: Straight across the face, 22 mm from the front edge, Through ───────────────
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Operations' })
+    .getByRole('menuitem', { name: 'Line' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await setField(inspector, 'Start v', '22')
+  await setField(inspector, 'End v', '22')
+  await inspector.getByRole('radio', { name: 'Through' }).click()
+  await expect(inspector.getByText(/^Cuts through the stock/)).toBeVisible()
+  await shootPanel(page, inspector, 'line-through')
+
+  // ── Plan: generated; the cut-off warns that both sides come loose ──────────────────────────
+  await planWithMachine(page)
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByText(/cuts the stock in two/).first()).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
+})

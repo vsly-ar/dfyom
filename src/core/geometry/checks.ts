@@ -165,9 +165,23 @@ function loosePieces(
   const part = largest(pieces.filter((p) => !p.offcut)) ?? largest(pieces)!
 
   const profiles = new Set(input.operations.filter((c) => isProfile(c.op)).map((c) => c.op.id))
+  // DF147 SL3: a through Line's slot (role `cutOff`) cuts a piece off on purpose
+  const cutOffs = new Set(
+    input.operations.filter((c) => c.op.surfaces.includes('cutOff')).map((c) => c.op.id),
+  )
   const warnings = pieces
     .filter((p) => p !== part)
     .map((p): DfmWarning => {
+      const cutOff = p.operations.find((id) => cutOffs.has(id))
+      if (!p.offcut && cutOff !== undefined)
+        return {
+          code: 'dfm.loosePiece',
+          severity: 'warning',
+          message: `${cutOff}: cuts a piece (${mm3(p.volume)}) off the part; it comes loose on the last pass, so hold both sides of the line`,
+          operation: cutOff,
+          parameter: 'depth',
+          params: { volume: p.volume, offcut: false, operations: p.operations, cutOff: true },
+        }
       const operation = p.operations.find((id) => profiles.has(id)) ?? p.operations[0] ?? 'stock'
       const what = p.offcut ? 'an offcut' : 'a piece of the part'
       return {

@@ -332,6 +332,12 @@ export type LineDepth =
   | { readonly kind: 'constant'; readonly depth: Quantity }
   | { readonly kind: 'ramp'; readonly start: Quantity; readonly end: Quantity }
   | { readonly kind: 'levels'; readonly min: Quantity; readonly max: Quantity }
+  /**
+   * DF147 SL3 (engraved-patterns.md § Cutting the part out along a line): through the stock, the
+   * material below `on` (read fresh, as a through pocket's) plus the plan's `breakthrough`; a flat
+   * end mill on one inline Straight / Arc.
+   */
+  | { readonly kind: 'through' }
 
 /**
  * A Line (engraved-patterns.md EP-A, E1, E2): a groove cut on the centreline of every loop and
@@ -359,18 +365,28 @@ export interface Line extends Common {
  */
 export const lineDepths = (
   d: LineDepth,
+  through = 0,
 ): { start: number; end: number } | { min: number; max: number } =>
   d.kind === 'constant'
     ? { start: d.depth.canonical, end: d.depth.canonical }
     : d.kind === 'ramp'
       ? { start: d.start.canonical, end: d.end.canonical }
-      : { min: d.min.canonical, max: d.max.canonical }
+      : d.kind === 'through'
+        ? { start: through, end: through }
+        : { min: d.min.canonical, max: d.max.canonical }
 
-/** A Line's deepest depth as entered (mm): with levels, `max` (levels never pass it). */
-export const lineDeepest = (d: LineDepth): number => {
-  const v = lineDepths(d)
+/**
+ * A Line's deepest depth as entered (mm): with levels, `max` (levels never pass it); a through
+ * Line (DF147 SL3) `through`, the material below its face as the caller reads it.
+ */
+export const lineDeepest = (d: LineDepth, through = 0): number => {
+  const v = lineDepths(d, through)
   return 'min' in v ? v.max : Math.max(v.start, v.end)
 }
+
+/** A Line cut through the stock (DF147 SL3). */
+export const isThroughLine = (op: Operation | undefined): op is Line =>
+  op?.kind === 'line' && op.depth.kind === 'through'
 
 export type Operation = Facing | Pocket | Drilling | Profile | Chamfer | Line
 
@@ -585,7 +601,7 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
       else if (op.depth.kind === 'ramp') {
         add('depth.start', op.depth.start)
         add('depth.end', op.depth.end)
-      } else {
+      } else if (op.depth.kind === 'levels') {
         add('depth.min', op.depth.min)
         add('depth.max', op.depth.max)
       }
@@ -639,7 +655,9 @@ function lineWithParam(op: Line, path: string, value: Quantity): Line {
           ? op.depth
           : op.depth.kind === 'ramp'
             ? { min: op.depth.start, max: op.depth.end }
-            : { min: op.depth.depth, max: op.depth.depth }
+            : op.depth.kind === 'through'
+              ? { min: value, max: value }
+              : { min: op.depth.depth, max: op.depth.depth }
       return {
         ...op,
         depth: { kind: 'levels', min: d.min, max: d.max, [parts[1]]: value } as LineDepth,
@@ -650,7 +668,9 @@ function lineWithParam(op: Line, path: string, value: Quantity): Line {
         ? op.depth
         : op.depth.kind === 'levels'
           ? { start: op.depth.min, end: op.depth.max }
-          : { start: op.depth.depth, end: op.depth.depth }
+          : op.depth.kind === 'through'
+            ? { start: value, end: value }
+            : { start: op.depth.depth, end: op.depth.depth }
     return {
       ...op,
       depth: { kind: 'ramp', start: d.start, end: d.end, [parts[1]]: value } as LineDepth,
@@ -998,15 +1018,17 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
       )
       const d = dto.depth
       const depth: AppResult<LineDepth> =
-        'start' in d
-          ? collect([q(d.start, 'depth', 'start'), q(d.end, 'depth', 'end')]).map(
-              ([start, end]): LineDepth => ({ kind: 'ramp', start: start!, end: end! }),
-            )
-          : 'min' in d
-            ? collect([q(d.min, 'depth', 'min'), q(d.max, 'depth', 'max')]).map(
-                ([min, max]): LineDepth => ({ kind: 'levels', min: min!, max: max! }),
+        d === 'through'
+          ? Ok({ kind: 'through' })
+          : typeof d === 'object' && 'start' in d
+            ? collect([q(d.start, 'depth', 'start'), q(d.end, 'depth', 'end')]).map(
+                ([start, end]): LineDepth => ({ kind: 'ramp', start: start!, end: end! }),
               )
-            : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
+            : typeof d === 'object' && 'min' in d
+              ? collect([q(d.min, 'depth', 'min'), q(d.max, 'depth', 'max')]).map(
+                  ([min, max]): LineDepth => ({ kind: 'levels', min: min!, max: max! }),
+                )
+              : q(d, 'depth').map((v): LineDepth => ({ kind: 'constant', depth: v }))
       const blend = optQ(dto.blend, 'blend')
       const w = dto.within
       const within: AppResult<Option<{ min: Point; max: Point }>> =
@@ -1183,7 +1205,9 @@ export function operationToDTO(op: Operation): OperationDTO {
             ? op.depth.depth.toDTO()
             : op.depth.kind === 'ramp'
               ? { start: op.depth.start.toDTO(), end: op.depth.end.toDTO() }
-              : { min: op.depth.min.toDTO(), max: op.depth.max.toDTO() },
+              : op.depth.kind === 'through'
+                ? 'through'
+                : { min: op.depth.min.toDTO(), max: op.depth.max.toDTO() },
         ...(op.blend.isSome() ? { blend: op.blend.unwrap().toDTO() } : {}),
         ...(op.within.isSome()
           ? {

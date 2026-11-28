@@ -830,7 +830,8 @@ export function toGeneratorInputs(
                   plungeRate: c.plungeRate,
                   stepdown: c.stepdown,
                 },
-                operation,
+                // DF147 SL3: a through Line goes `breakthrough` below the opposite face
+                operation: throughLine(operation, s.breakthrough),
                 strategy: { entry: s.entry, rampAngle: s.rampAngle },
               },
             ],
@@ -838,4 +839,15 @@ export function toGeneratorInputs(
         ),
       )
   }
+}
+
+/** A through Line's depth plus `breakthrough` (DF147 SL3); any other Line unchanged. */
+function throughLine<T extends { readonly through?: true; readonly depth: object }>(
+  op: T,
+  breakthrough: number | undefined,
+): T {
+  if (op.through !== true || !('start' in op.depth)) return op
+  const d = op.depth as { start: number; end: number }
+  const b = breakthrough ?? 0
+  return { ...op, depth: { start: d.start + b, end: d.end + b } }
 }

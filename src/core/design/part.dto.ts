@@ -267,9 +267,11 @@ export type LinePathItemDTO = z.output<typeof LinePathItemDtoSchema>
 
 /**
  * A Line's depth below `on`: one length (constant), `{ start, end }` (linear along each line by
- * arc length) or, E2, `{ min, max }` (from the paths' levels: level 0 → `min`, 1 → `max`).
+ * arc length) or, E2, `{ min, max }` (from the paths' levels: level 0 → `min`, 1 → `max`), or
+ * (DF147 SL3) `'through'`: through the stock (engraved-patterns.md § Cutting the part out along a line).
  */
 export const LineDepthDtoSchema = z.union([
+  z.literal('through'),
   length(),
   z.object({ start: length(), end: length() }),
   z.object({ min: length(), max: length() }),

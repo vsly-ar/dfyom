@@ -379,7 +379,9 @@ function zRange(c: Ctx, op: Operation, g: OperationGeometry, bevel = false): ZRa
       break
     }
     case 'line': {
-      depth = lineDeepest(op.depth)
+      // DF147 SL3: a through Line cuts the stock in two
+      if (op.depth.kind === 'through') through = true
+      else depth = lineDeepest(op.depth)
       break
     }
   }

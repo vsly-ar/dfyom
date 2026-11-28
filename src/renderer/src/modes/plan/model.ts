@@ -791,6 +791,8 @@ export function shownStrategyKeys(
       case 'chamfer':
         return key !== 'rampAngle' || entry === 'contour'
       case 'line':
+        // DF147 SL3: breakthrough for a through Line only
+        if (key === 'breakthrough') return through
         return key !== 'rampAngle' || entry !== 'plunge'
       case 'facing':
         return true

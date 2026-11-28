@@ -300,7 +300,7 @@ Built 2026-11-26 (provisional, on a branch): the last deferred item of the engra
 
 ## Simple Line: straight and arc (hardening DF147)
 
-Status: **accepted** for SL1–SL2 (2026-11-28, from the user's TG #492; Q235 and Q236 taken as recommended by delegation D89); SL3–SL4 await [Q237–Q238](#questions-q235q238) · Intake: [hardening.md DF147](../plans/hardening.md#intake-user-feedback-goes-here)
+Status: **accepted** (2026-11-28, from the user's TG #492; Q235–Q238 taken as recommended by delegation D89) · Intake: [hardening.md DF147](../plans/hardening.md#intake-user-feedback-goes-here)
 
 The user: "I think I need a 'Straight Line' operation: I'd use it to cut out the part and to chamfer only the part that stays. Current 'Line' operation is too complicated for a simple straight line, requiring to create a shape in a separate shapes editor. Or better yet, the Line op can be simplified by default for just one straight line or an arc. And user may switch to the Shape mode to be able to use a shape or SVG. Btw. there's no option to open the Shapes editor from the 'Path' dropdown (for the Line op) or anywhere on this side panel, which makes it obscure."
 
@@ -354,6 +354,16 @@ The user: "I think I need a 'Straight Line' operation: I'd use it to cut out the
   - **Agent API:** `paths` items of `design.line.add` accept `{ segment }` / `{ arc }`; `design.shape.convert` names Lines. `tools/list` measured 111,772 → 112,279 chars (+0.5 K, above the 0.3 K estimate; within the 120 K budget).
   - **Not built (decided here):** viewport handles for the endpoints (the fields and Parallel to cover SL2's flows; handles wait for a dogfood need).
   - Tests: `line-inline.test.ts` (geometry, commands, invariants), `line-inline-plan.test.ts` (byte-equal motion), `LineShape.test.tsx` (modes, Parallel to, convert, axe), `e2e/line.e2e.ts` (Straight → Plan, New shape… from the picker).
+
+### Implementation (SL3–SL4)
+
+- **SL3 (built):** the through Line.
+  - **Model:** `depth: 'through'` (DTO literal, `design.line.add/update` arg); no `schemaVersion` change. Invariant `lineThroughPath` (at `depth`): a through Line is one inline Straight or Arc; a cut-out along a shape is a Profile (with tabs). The inspector's Depth row offers **Through** outside Shape mode; it replaces the depth fields with a note. Engraved patterns refuse it (a bad length).
+  - **Geometry:** the depth is the material below `on` (the face's z plus the stock's extent in its direction); the geometry carries `through: true`; the removal solid is the slot swept by the flat cutter past the bottom, role `cutOff`. **Decided here:** with an automatic or non-flat tool the design shows a Ø6 flat (`DEFAULT_THROUGH_CUTTER`); the plan's tool fit refuses a non-flat tool ("a through Line needs a flat end mill") and the auto choice takes end mills only. A piece the cut-off frees gets its own `dfm.loosePiece` text ("hold both sides of the line").
+  - **Plan:** the line strategy takes `breakthrough` (shown only for a through Line; the profile's default); the toolpath depth is material + breakthrough and the reach check / minimum stickout count it. DF50's leftover `throughDepth` is not applied to Lines. Every through Line is a **freeing cut**: it comes after the non-freeing cuts of its face (`releaseProfiles`), its own chamfers after it; an operation planned after it gets `plan.loosePiece` (rule `cutOffFirst`), a later setup `plan.cutoutBeforeSetup`. The split check counts it through.
+  - **Toolpath:** an end is **open** when it lies on or past the face rectangle and a straight lead along its tangent clears the stock by R + 2 mm (`openLead`). The line is entered at an open end (reversed if only its end is open), led out past each open end, and every pass at an open end plunges in the air outside the stock to the pass depth (no ramp, no plunge into material); passes alternate; an inner end keeps ramp-back. No finishing pass (the slot is the tool's width).
+  - **Workholding:** `plan.workholding.cutOffLoose` (warning) per setup without a surface hold: the cut-off splits the face into the sides left / right of the line (`cut-off.ts`); each side no screw, toe clamp or vise holds is named ("the piece right of Line 1", or "the part" / "the offcut" once a one-sided chamfer names the side kept), with "Clamp both sides of the line (or use tape, vacuum or glue)". A setup without items names both sides. **Decided here:** a warning, not an error (the user may hold the offcut by hand-placed means DFYOM does not model).
+  - Tests: `toolpath/line-through.test.ts` (open ends, alternation, `deepCuts` clean, heightmap slot covered and nothing beside it, arc leads), `design/line-through.test.ts`, `plan/line-through-plan.test.ts` (the user's 100 mm aluminium plate, Ø6.22 flat 22 mm from the front edge, 0.4 breakthrough: two pieces, no errors, `deepCuts` clean, golden `line-cut-off.nc`, virtual machine; the cut-off after a pocket; clamps on both sides silence the warning), `LineShape.test.tsx` (Through, axe), `e2e/line.e2e.ts` (Through → Plan).
 
 ## Questions for the user
 

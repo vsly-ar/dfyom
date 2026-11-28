@@ -292,6 +292,13 @@ interface LineFields {
    */
   readonly within?: { readonly min: Vec2; readonly max: Vec2 }
   readonly cutter: LineCutter
+  /**
+   * DF147 SL3: cut through the stock (one open path, a flat cutter). `depth` is the material below
+   * `on`; the removal solid runs on past the far face, the plan adds `breakthrough`, and an end on
+   * or beyond the face's edge is entered from outside the stock.
+   * Doc: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
+   */
+  readonly through?: true
 }
 
 export type LineGeometry = FacePlacement & LineFields

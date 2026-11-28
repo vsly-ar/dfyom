@@ -244,7 +244,9 @@ const LinePathArg = z.union([
 /** A Line's depth as entered (also the engraved pattern's, engraved-patterns.md E3). */
 export const LineDepthArg = z
   .union([Src, z.object({ start: Src, end: Src }), z.object({ min: Src, max: Src })])
-  .describe('Default 0.5 mm; {start, end}: linear along each line; {min, max}: by shape levels')
+  .describe(
+    "Default 0.5 mm; {start, end}: linear along each line; {min, max}: by shape levels; 'through': cut off (flat end mill, one segment/arc)",
+  )
 const lineParams = {
   on: SurfaceIdSchema.describe('Default as a pocket'),
   paths: z
@@ -2132,6 +2134,8 @@ export function lineDepthOf(
   }),
 ): LineDepth {
   if (a === undefined || a === null) return prev ?? fallback()
+  // DF147 SL3: through the stock (engraved-patterns.md § Cutting the part out along a line)
+  if (a === 'through') return { kind: 'through' }
   if (typeof a === 'string') return { kind: 'constant', depth: f.q('depth', 'length', a) }
   if ('min' in a)
     return {
