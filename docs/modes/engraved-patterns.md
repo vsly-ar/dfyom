@@ -298,6 +298,49 @@ Built 2026-11-26 (provisional, on a branch): the last deferred item of the engra
 - **Presets are immutable once shipped** (EP-G). Projects store the preset id, and the resolution reads the shipped file. Changing a file would silently change projects.
 - **The "round surface" reading** (EP-F) is taken by delegation. If the user meant a cylinder, it is a rotary-axis project and outside this doc.
 
+## Simple Line: straight and arc (hardening DF147)
+
+Status: **draft** (2026-11-28, from the user's TG #492; awaits [Q235–Q238](#questions-q235q238)) · Intake: [hardening.md DF147](../plans/hardening.md#intake-user-feedback-goes-here)
+
+The user: "I think I need a 'Straight Line' operation: I'd use it to cut out the part and to chamfer only the part that stays. Current 'Line' operation is too complicated for a simple straight line, requiring to create a shape in a separate shapes editor. Or better yet, the Line op can be simplified by default for just one straight line or an arc. And user may switch to the Shape mode to be able to use a shape or SVG. Btw. there's no option to open the Shapes editor from the 'Path' dropdown (for the Line op) or anywhere on this side panel, which makes it obscure."
+
+### Geometry modes
+
+- **Proposal:** the [Line operation](#line-operation) keeps its kind and gains an inline geometry. A `paths` item is either a placed named shape (as now: **Shape** mode) or one inline element on the `on` face, in its face frame:
+  - **Straight:** `{ segment: { start: [u, v], end: [u, v] } }`.
+  - **Arc:** `{ arc: { start, through, end } }` (three points, Q236); the inspector shows its radius and sweep.
+- **Default:** Add → Line opens in **Straight** mode with a line across the face's middle; the inspector's first row is a segmented choice **Straight / Arc / Shape**. Straight and Arc hold one element; Shape is today's multi-pick (and Import SVG…). Switching Straight/Arc → Shape offers "Convert to shape", which creates a named shape from the element so nothing is lost; Shape → Straight keeps the shape in the library.
+- **Coordinates** are quantities and may be expressions (`stock.width − 22`). **Decided here:** a "Parallel to an edge" helper (edge picker + distance) fills a Straight line across the whole face at that distance from the edge: "22 mm from the front edge".
+- **Everything after the geometry is the Line's:** depth (constant, start → end; levels need a shape), tool, passes, ramp-back, toolpath, removal solid. An inline element is turned into one open path before geometry and the toolpath, so the generators do not change.
+- **Shape Editor access (decided here):** the Path picker of the Line, and every other shape picker (pocket, profile, Clones `along`), lists **New shape…** and **Edit shape…** (the picked one); the Line panel gets an "Edit in Shape Editor" button in Shape mode. A shape made by New shape… is picked when the editor closes.
+
+### Cutting the part out along a line
+
+- **Through Line (Q237):** `depth: 'through'` (stock extent under the face plus the profile's `breakthrough`), a flat end mill, the slot as wide as the tool (a wider slot is a Profile `on`, [design-v0.3.md § Cut side and open shapes](design-v0.3.md#cut-side-and-open-shapes)). The `lessThanStockThickness` rule keeps holding for every other depth.
+- **Ends on the stock edge:** an end on or beyond a stock edge is an **open end**: passes enter from outside the stock at full level depth, as facing rows do (no ramp needed); an end inside the face keeps ramp-back.
+- **Release:** a through Line that splits the stock is ordered as a through profile (after the operations on both sides, the freeing cut last) and takes the loose-piece check; no tabs in this slice (a straight cut-off frees a bar end, not a held part).
+
+### One-sided chamfer along a line
+
+- **Proposal (Q238):** a [chamfer](edge-chamfers.md#model) may take `edgeOf` a Line or a profile `on`, with a new `edgeSide: 'left' | 'right'` (relative to the path from start to end) naming **the side that stays**. The chamfered edge is the groove's wall at the face on that side: the path offset by half the groove width at the face, clipped to the stock face; round ends are not chamfered. It is cut by the edge chamfer's toolpath ([edge-chamfers.md § Toolpath](edge-chamfers.md#toolpath-plan)).
+- **UI:** Chamfer in the Line row's menu; the inspector shows "Side that stays: Left / Right" with an arrow drawn on the line in the viewport, and clicking either side of the line picks it.
+
+### Questions (Q235–Q238)
+
+1. **Q235 – Where the simple line lives.** (1) **The Line operation with Straight / Arc / Shape modes, Straight by default** (above). (2) A separate "Straight line" operation kind. (3) Shapes only, with a quicker New shape… in the picker. _Recommendation: (1). One kind keeps one tool, one toolpath and one agent tool; the user's second suggestion._
+2. **Q236 – How an arc is given.** (1) **Start, a point it passes through, end** (any sweep below 360°, no small/large ambiguity, snaps to points). (2) Centre, radius, start and end angles. (3) Start, end, radius and direction (G-code style). _Recommendation: (1), with radius and sweep shown read-only._
+3. **Q237 – Cutting out along a line.** (1) **A through depth on the Line: flat end mill, slot = tool width, open ends enter from outside the stock, freeing-cut order and loose-piece check, no tabs.** (2) No Line change; Profile `on` gets the inline Straight / Arc geometry instead. (3) Both. _Recommendation: (1). The user asked for the Line; a wider slot or tabs remain Profile `on`'s job._
+4. **Q238 – Chamfering only the side that stays.** (1) **`edgeOf` a Line or a profile `on` with `edgeSide` left/right on the chamfer, picked as "the side that stays".** (2) A `keep` side on the Line, which a chamfer and the plan read. (3) A chamfer option on the Line itself. _Recommendation: (1). It reuses the edge chamfer and lifts edge-chamfers.md's "`on` profiles: later" for both kinds._
+
+### Slices
+
+| Slice | Content                                                                                                                                                                                                        | Done when                                                                                                                                                         |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SL1   | **Shape Editor access:** New shape… / Edit shape… in every shape picker, the panel button                                                                                                                      | From the Line panel the user creates a shape and finds it picked; component test with axe                                                                         |
+| SL2   | **Straight and Arc:** inline `segment` / `arc` items (model, DTO, conversion to a path, `design.line.add/update` args, ≈ 0.3 K of `tools/list`, measured), the mode row, Convert to shape, Parallel to an edge | A straight Line 22 mm from the front edge and a three-point arc evaluate and plan as the same line drawn as a shape (byte-equal G-code); goldens unchanged        |
+| SL3   | **Through Line:** `depth: 'through'`, open ends with side entry, freeing-cut order, loose-piece check                                                                                                          | The user's cut-off (6.22 mm flat across a 100 mm bar, 10.4 mm deep): every feed move meets ≤ stepdown of uncut material (`deepCuts` oracle); virtual machine Idle |
+| SL4   | **One-sided chamfer:** `edgeSide` on chamfers of Lines and profiles `on`, edge offset and clipping, toolpath, removal solid, UI side pick                                                                      | The part side of the cut-off is chamfered 0.5 mm and the offcut side not (heightmap); refusals for a missing side                                                 |
+
 ## Questions for the user
 
-None blocking. The choices above were delegated (D70); the user may veto any of them.
+None blocking for E0–E5. The choices above were delegated (D70); the user may veto any of them. The draft [Simple Line](#simple-line-straight-and-arc-hardening-df147) asks Q235–Q238.
