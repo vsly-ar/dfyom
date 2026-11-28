@@ -99,6 +99,32 @@ export const CalibrationRecordSchema = z.object({
 })
 export type CalibrationRecord = z.output<typeof CalibrationRecordSchema>
 
+const Num = z.number().finite()
+
+/**
+ * v0.5 RV10: a setup's stock surface map (docs/modes/run-surface.md#storage): when, the probe kind,
+ * the margin it was laid out with, the grid (work X/Y, mm), the heights relative to the first
+ * point (null: not measured, under a clamp or missed), the skipped points, and G54 X/Y (machine)
+ * it was taken at.
+ */
+export const SurfaceMapRecordSchema = z.object({
+  date: z.string().min(1).max(40),
+  probe: z.string().min(1).max(20),
+  margin: Num.min(0),
+  setupId: z.string().min(1).max(200),
+  origin: z.tuple([Num, Num]),
+  spacing: z.tuple([Num.positive(), Num.positive()]),
+  cols: z.number().int().min(2).max(30),
+  rows: z.number().int().min(2).max(30),
+  z: z.array(Num.nullable()).max(900),
+  skipped: z.array(z.number().int().min(0)).max(900).optional(),
+  workZero: z.tuple([Num, Num]),
+})
+export type SurfaceMapRecord = z.output<typeof SurfaceMapRecordSchema>
+
+/** RV10: "Follow the surface map"'s largest map range (mm, Settings › Run). */
+export const SURFACE_MAX_RANGE = { min: 0.1, max: 5, default: 1 } as const
+
 const fields = {
   /** Light / Dark / System (follow the OS); `data-theme` on the root (ui.md decision 1). */
   theme: z.enum(THEMES),
@@ -200,6 +226,13 @@ const fields = {
    * docs/modes/run-calibration.md#saved-results).
    */
   calibration: z.record(z.string().min(1), z.array(CalibrationRecordSchema).max(50)),
+  /**
+   * v0.5 RV10: the stock surface map per `planId/setupId` (app state, not in the plan; null in a
+   * patch clears one; docs/modes/run-surface.md#storage).
+   */
+  surfaceMaps: z.record(z.string().min(1).max(500), SurfaceMapRecordSchema.nullable()),
+  /** v0.5 RV10: the largest map range "Follow the surface map" accepts (mm, default 1). */
+  surfaceMapMaxRange: z.number().min(SURFACE_MAX_RANGE.min).max(SURFACE_MAX_RANGE.max),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -226,6 +259,8 @@ export const AppSettingsSchema = z.object({
   inspectorTabs: fields.inspectorTabs.default({}),
   homingRepeatability: fields.homingRepeatability.default({}),
   calibration: fields.calibration.default({}),
+  surfaceMaps: fields.surfaceMaps.default({}),
+  surfaceMapMaxRange: fields.surfaceMapMaxRange.default(SURFACE_MAX_RANGE.default),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -239,7 +274,8 @@ export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 /**
  * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
  * `cuttingJogFeed`, `jogStep`,
- * `inspectorGroups`, `inspectorTabs`, `homingRepeatability` and `calibration` merge by key.
+ * `inspectorGroups`, `inspectorTabs`, `homingRepeatability`, `calibration` and `surfaceMaps` merge
+ * by key (a null `surfaceMaps` entry removes that map).
  */
 export function mergeSettings(
   current: AppSettings,
@@ -271,5 +307,11 @@ export function mergeSettings(
       ...(patch.homingRepeatability ?? {}),
     },
     calibration: { ...current.calibration, ...(patch.calibration ?? {}) },
+    surfaceMaps: Object.fromEntries(
+      Object.entries({ ...current.surfaceMaps, ...(patch.surfaceMaps ?? {}) }).filter(
+        ([, v]) => v !== null,
+      ),
+    ),
+    surfaceMapMaxRange: patch.surfaceMapMaxRange ?? current.surfaceMapMaxRange,
   }
 }

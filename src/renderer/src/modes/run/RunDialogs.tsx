@@ -12,8 +12,8 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
-import { useReplica, useShell } from '../../shell/ShellContext'
+import { Icon, Button, Checkbox, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
+import { useReplica, useSettings, useShell } from '../../shell/ShellContext'
 import type { Interruption } from '../../../../core/run/interruption'
 import type { RunStatus } from '../../../../core/run/service'
 import { reasonText } from './RecoveryPanel'
@@ -36,6 +36,7 @@ import { CheckAlignmentDialog } from './CheckAlignmentDialog'
 import { WorkAreaDialog } from './WorkAreaDialog'
 import { CalibrationDialog } from './CalibrationDialog'
 import { RepeatabilityDialog } from './RepeatabilityDialog'
+import { followArg, SurfaceMapDialog, surfaceMapKey } from './SurfaceMapDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import { useFinalizeAndStart } from './finalize-start'
@@ -70,6 +71,7 @@ export function RunDialogs(): React.JSX.Element {
       <WorkAreaDialog doc={doc} />
       <RepeatabilityDialog doc={doc} />
       <CalibrationDialog doc={doc} />
+      <SurfaceMapDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>
@@ -124,7 +126,15 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const a = store.getState()
   // the soft-limit result (DF46): checked on open and again when the work zero changes; with a
   // start line (DF129 RC3) over the lead-in and the rest, with the lead-in's preview
-  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${info?.cut.size ?? 0}|${status.workZero.join(',')}`
+  // v0.5 RV10: "Follow the surface map" (off each time the pre-flight opens; run-surface.md)
+  const surfaceMaps = useSettings((s) => s.settings.surfaceMaps)
+  const maxRange = useSettings((s) => s.settings.surfaceMapMaxRange)
+  const following = useRun((s) => s.followSurface !== undefined)
+  const surfaceMap =
+    planId === undefined || info === undefined
+      ? undefined
+      : surfaceMaps[surfaceMapKey(planId, info.setup.id)]
+  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${info?.cut.size ?? 0}|${status.workZero.join(',')}|${following ? `map${maxRange}` : ''}`
   const setupToCheck = info?.setup.id
   const canCheck = open && plan !== undefined && machineGate === null
   const start = usePreflightStart(checkKey, setupToCheck, canCheck)
@@ -253,6 +263,35 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <AllCutOffer doc={doc} plan={plan} setupName={info.setup.name} />
       ) : null}
       {resume || allCut ? null : <StartAtSection current={current} units={units} />}
+      {resume || allCut || surfaceMap === undefined || surfaceMap === null ? null : (
+        <div className={styles['notice']} role="group" aria-label={runMessages.surface.follow}>
+          <div>
+            <Checkbox
+              label={runMessages.surface.follow}
+              checked={following}
+              onCheckedChange={(c) =>
+                a.setFollowSurface(c === true ? followArg(surfaceMap, maxRange) : undefined)
+              }
+            />
+            <p className={styles['why']}>
+              {runMessages.surface.followHint(
+                new Date(surfaceMap.date).toLocaleDateString(),
+                formatLength(surfaceRange(surfaceMap.z), units),
+                runMessages.dro.units[units],
+                surfaceMap.z.filter((v) => v !== null).length,
+              )}
+            </p>
+            {following && current?.state === 'done' && current.surface !== undefined ? (
+              <p className={styles['why']} data-followed="">
+                {runMessages.surface.followed(
+                  formatLength(current.surface.maxDz, units),
+                  runMessages.dro.units[units],
+                )}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
       {serial && !resume ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
@@ -322,6 +361,12 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       )}
     </Dialog>
   )
+}
+
+/** Max − min over a map's measured heights. */
+function surfaceRange(z: readonly (number | null)[]): number {
+  const v = z.filter((x): x is number => x !== null)
+  return v.length === 0 ? 0 : Math.max(...v) - Math.min(...v)
 }
 
 /** The pre-flight's soft-limit row: checking, inside the travel, the findings, or the failure. */

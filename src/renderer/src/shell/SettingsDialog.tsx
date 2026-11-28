@@ -7,7 +7,12 @@
 // Doc: docs/conventions/ui.md#settings
 import { useEffect, useId, useState } from 'react'
 import type { LocalHttpState } from '../../../shared/preload-api'
-import { JOG_KEY_STYLES, THEMES, type ThemeSetting } from '../../../shared/settings'
+import {
+  JOG_KEY_STYLES,
+  SURFACE_MAX_RANGE,
+  THEMES,
+  type ThemeSetting,
+} from '../../../shared/settings'
 import { Quantity } from '../../../core/quantity/quantity'
 import { BACK_OFF_MAX_MM, BACK_OFF_MIN_MM } from '../../../core/run/back-off'
 import type { UnitId } from '../../../core/quantity/units'
@@ -55,6 +60,20 @@ const backOffRange = (q: Quantity): AppResult<Quantity> =>
             path: ['exact'],
             rule: 'range',
             message: `${BACK_OFF_MIN_MM}–${BACK_OFF_MAX_MM} mm`,
+          },
+        ],
+      })
+
+/** v0.5 RV10: "Follow the surface map"'s largest map range (mm). */
+const surfaceRange = (q: Quantity): AppResult<Quantity> =>
+  q.canonical >= SURFACE_MAX_RANGE.min && q.canonical <= SURFACE_MAX_RANGE.max
+    ? Ok(q)
+    : fail('model.invariant', 'out of range', {
+        issues: [
+          {
+            path: ['exact'],
+            rule: 'range',
+            message: `${SURFACE_MAX_RANGE.min}–${SURFACE_MAX_RANGE.max} mm`,
           },
         ],
       })
@@ -290,6 +309,24 @@ export function SettingsDialog(): React.JSX.Element {
               </p>
             </div>
           ) : null}
+          {/* v0.5 RV10: the surface map's follow limit (docs/modes/run-surface.md#refusals) */}
+          <div className={styles['settingRow']}>
+            <span className={styles['settingLabel']} aria-hidden="true">
+              {m.surfaceMapMaxRange}
+            </span>
+            <div className={styles['settingSelect']}>
+              <QuantityInput
+                label={m.surfaceMapMaxRange}
+                stepKind="small"
+                kind="length"
+                defaultUnit="mm"
+                value={gridValue(settings.surfaceMapMaxRange, 'mm')}
+                validate={surfaceRange}
+                onCommit={(q) => update({ surfaceMapMaxRange: q.canonical })}
+              />
+            </div>
+            <p className={styles['settingHint']}>{m.surfaceMapMaxRangeHint}</p>
+          </div>
         </InspectorGroup>
         <InspectorGroup title={m.groups.agents} className={styles['settingsGroup']}>
           <div className={styles['settingRow']}>

@@ -538,6 +538,80 @@ export const runMessages = {
     noLibraryTool: 'The tool is not from the library: edit its Ø in the plan.',
   },
 
+  /** v0.5 RV10: Map stock surface (docs/modes/run-surface.md). */
+  surface: {
+    button: 'Map stock surface…',
+    title: 'Map stock surface',
+    description:
+      'Probe a grid of heights on the stock top; a run can then follow the measured surface.',
+    steps:
+      'Put the bit or probe a few mm above the first point (front left) of the stock top, within the search depth. Map surface probes the points row by row; the heat map fills as each one ends.',
+    margin: 'Margin from the edges (mm)',
+    layout: 'Points',
+    layouts: { count: 'Columns × rows', spacing: 'Spacing' } as Record<'count' | 'spacing', string>,
+    cols: 'Columns',
+    rows: 'Rows',
+    spacing: 'Spacing (mm)',
+    clearance: 'Clearance between points (mm)',
+    depth: 'Search depth (mm)',
+    gridSummary: (
+      cols: number,
+      rows: number,
+      dx: string,
+      dy: string,
+      unit: string,
+      n: number,
+      minutes: number,
+    ) =>
+      `${cols} × ${rows} points, ${dx} × ${dy} ${unit} apart: ${n} to probe, about ${minutes} min.`,
+    skipped: (n: number, items: string) =>
+      `${n} ${n === 1 ? 'point' : 'points'} skipped under ${items}: filled from their neighbours.`,
+    probeHint: {
+      zPlate:
+        'The probe clip needs a conductive top (aluminium, or a foil on the stock); wood or MDF needs a 3D probe.',
+      xyzPlate:
+        'The probe clip needs a conductive top (aluminium, or a foil on the stock); wood or MDF needs a 3D probe.',
+      tool: 'The bit probes the top: it needs a conductive top (aluminium, or a foil on the stock).',
+      '3d': 'The 3D probe touches each point.',
+    } as Record<string, string>,
+    areaTooSmall: 'The margin leaves no area on the stock top.',
+    countRange: (min: number, max: number) => `Columns and rows: ${min} to ${max}.`,
+    positive: 'Clearance and search depth must be above 0.',
+    allSkipped: 'Every point is under workholding: change the margin or the grid.',
+    noPlan: 'Choose a plan: the map is kept with its setup.',
+    spindleOn: 'Turn the spindle off first.',
+    idleFirst: 'Wait until the machine is idle.',
+    run: 'Map surface',
+    retry: 'Retry from here',
+    stop: 'Stop map',
+    close: 'Close',
+    stopped: 'Stopped: the points measured so far are kept.',
+    failed: (n: number) => `Point ${n} failed: the points before it are kept.`,
+    progress: 'Mapping',
+    running: (k: number, n: number) => `Point ${k} of ${n}…`,
+    result: 'Surface map',
+    when: (date: string, probe: string) => `Taken ${date} with the ${probe} probe.`,
+    clear: 'Clear map',
+    heatLabel: (min: string, max: string, range: string, unit: string, k: number, n: number) =>
+      `Surface map: lowest ${min}, highest ${max}, range ${range} ${unit}; ${k} of ${n} points.`,
+    range: (range: string, unit: string) => `Range ${range} ${unit}`,
+    points: (k: number, n: number) => `${k} of ${n} points`,
+    filledNote: 'hatched: filled',
+    overLimit: (range: string, limit: string, unit: string) =>
+      `The surface varies by ${range} ${unit}, more than the ${limit} ${unit} limit (Settings › Run).`,
+    cellValue: (n: number, z: string, unit: string) => `Point ${n}: ${z} ${unit}`,
+    cellFilled: (n: number, z: string, unit: string) => `Point ${n}: ${z} ${unit} (filled)`,
+    cellMissing: (n: number) => `Point ${n}: not measured`,
+    confirm: {
+      title: 'Map stock surface',
+      description: (n: number) =>
+        `The machine probes ${n} points on the stock top, moving between them at the clearance with probe moves. Keep clear of the machine; Stop resets it at once.`,
+    },
+    follow: 'Follow the surface map',
+    followHint: (date: string, range: string, unit: string, k: number) =>
+      `The map of ${date}: range ${range} ${unit}, ${k} points. The program's Z follows it.`,
+    followed: (dz: string, unit: string) => `The program moves by up to ${dz} ${unit}.`,
+  },
   repeat: {
     button: 'Test homing repeatability…',
     title: 'Homing repeatability',

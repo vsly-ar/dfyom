@@ -149,6 +149,9 @@ export const shellMessages = {
       'Skips the confirmations before Home, Unlock, Probe Z, Start spindle and Move to touch-off spot, and offers “Unlock and back off” after a limit switch hit while jogging. The run’s pre-flight and the confirmations that guard your data stay.',
     limitBackOff: 'Back-off distance',
     limitBackOffHint: 'How far “Unlock and back off” jogs off a limit switch.',
+    surfaceMapMaxRange: 'Surface map limit',
+    surfaceMapMaxRangeHint:
+      'A run follows a stock surface map only when its heights vary by at most this much.',
     homeConfirmHint: (n: number) =>
       n === 0
         ? 'Homing a real machine asks for confirmation first.'
