@@ -167,8 +167,28 @@ describe('JogPad', () => {
       display: 'flex',
       'overflow-x': 'auto',
       position: 'relative',
+      // DF148: no scroll bar (macOS's overlay bar took the cells' clicks after a scroll)
+      'scrollbar-width': 'none',
     })
     expect(cssRule(css, '.cell')).toMatchObject({ flex: '1 0 auto' })
+  })
+
+  it('scrolls the row sideways with a plain mouse wheel while it can move (DF148)', () => {
+    renderUi(<JogPad controls={controls()} disabledReason={null} reasonId="why" />)
+    const row = document.querySelector<HTMLElement>('[data-jog-steps]')!
+    Object.defineProperty(row, 'scrollWidth', { value: 270, configurable: true })
+    Object.defineProperty(row, 'clientWidth', { value: 190, configurable: true })
+    row.scrollLeft = 0
+    const wheel = (deltaY: number) => {
+      const e = new WheelEvent('wheel', { deltaY, cancelable: true, bubbles: true })
+      row.dispatchEvent(e)
+      return e.defaultPrevented
+    }
+    expect(wheel(40)).toBe(true)
+    expect(row.scrollLeft).toBe(40)
+    // at the start a wheel up leaves the row (and lets the panel scroll)
+    row.scrollLeft = 0
+    expect(wheel(-40)).toBe(false)
   })
 
   it('keeps the chosen cell in view of the scrolled row, sideways only (DF102)', () => {
