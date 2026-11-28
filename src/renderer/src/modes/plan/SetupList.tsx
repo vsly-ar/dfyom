@@ -135,6 +135,8 @@ export function SetupList({
   const current = useCurrentSetup(plan)
   const failures = usePlanState((s) => s.failures)
   const store = usePlanStore()
+  // DF146: the instance row chosen last (highlighted in the viewport while its group is selected)
+  const chosen = usePlanState((s) => s.instanceChosen)
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const canMove = allows(plan, 'plan.operation.move')
   // DF135: operations already cut (marked in Design) are muted, with a check
@@ -155,7 +157,9 @@ export function SetupList({
   }
   /** DF146 G2: the group rows shown expanded (their instances), this window only. */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
-  const toggle = (id: string, open: boolean) =>
+  const toggle = (id: string, open: boolean) => {
+    // a closing group's rows leave without a pointer-leave or blur: its highlight goes with them
+    if (!open) store.getState().hoverInstance(undefined)
     setExpanded((was) => {
       if (was.has(id) === open) return was
       const next = new Set(was)
@@ -163,6 +167,7 @@ export function SetupList({
       else next.delete(id)
       return next
     })
+  }
   /** Every row in the order shown, for ↑/↓: an expanded group's instances after it. */
   const order = plan.setups.flatMap((s) => [
     s.id,
@@ -367,7 +372,18 @@ export function SetupList({
                     open={expanded.has(op.id)}
                     onToggle={(open) => toggle(op.id, open)}
                     instanceRef={(d) => ref(instanceKey(op.id, d))}
-                    onInstanceSelect={() => select(op.id)}
+                    chosenInstance={
+                      selected === op.id && chosen?.planOperationId === op.id
+                        ? chosen.designOperationId
+                        : undefined
+                    }
+                    onInstanceSelect={(d) => {
+                      store
+                        .getState()
+                        .chooseInstance({ planOperationId: op.id, designOperationId: d })
+                      select(op.id)
+                    }}
+                    onInstanceHover={(d) => store.getState().hoverInstance(d)}
                     onInstanceKeyDown={(e, d) =>
                       onKey(
                         e,
@@ -560,7 +576,9 @@ function OperationRow({
   open,
   onToggle,
   instanceRef,
+  chosenInstance,
   onInstanceSelect,
+  onInstanceHover,
   onInstanceKeyDown,
   onSelect,
   onMenuClose,
@@ -590,8 +608,12 @@ function OperationRow({
   open: boolean
   onToggle: (open: boolean) => void
   instanceRef: (designOperationId: string) => (el: HTMLButtonElement | null) => void
-  /** An instance row was chosen: its group is selected (never toggled off). */
-  onInstanceSelect: () => void
+  /** DF146: the instance chosen last while this group is selected (its design operation). */
+  chosenInstance?: string | undefined
+  /** An instance row was chosen: its group is selected (never toggled off), the instance shown. */
+  onInstanceSelect: (designOperationId: string) => void
+  /** DF146: an instance row is hovered or focused (undefined: left), its position shown. */
+  onInstanceHover: (designOperationId: string | undefined) => void
   onInstanceKeyDown: (e: KeyboardEvent, designOperationId: string) => void
   onSelect: () => void
   /** The row menu closed: the focus goes back to the row. */
@@ -793,7 +815,12 @@ function OperationRow({
                       x.n === undefined ? x.name : m.operations.instanceOf(x.n, group!.of)
                     }
                     title={m.operations.instanceTip(name)}
-                    onClick={onInstanceSelect}
+                    aria-current={chosenInstance === x.id || undefined}
+                    onClick={() => onInstanceSelect(x.id)}
+                    onPointerEnter={() => onInstanceHover(x.id)}
+                    onPointerLeave={() => onInstanceHover(undefined)}
+                    onFocus={() => onInstanceHover(x.id)}
+                    onBlur={() => onInstanceHover(undefined)}
                     onKeyDown={(e) => onInstanceKeyDown(e, x.id)}
                   >
                     {x.n === undefined ? x.name : m.operations.instance(x.n)}

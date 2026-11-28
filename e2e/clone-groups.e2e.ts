@@ -132,9 +132,11 @@ test('clone groups: one plan row × 4, one tool change reaches every instance', 
   await expect(instances.nth(0)).toHaveText('Instance 1')
   await expect(instances.nth(3)).toHaveText('Instance 4')
 
-  // choosing an instance selects its group: one tool change in its inspector
+  // choosing an instance selects its group: one tool change in its inspector; DF146: the chosen
+  // instance is current (its position drawn selected in the viewport while the group is selected)
   await instances.nth(2).click()
   await expect(row).toHaveAttribute('aria-pressed', 'true')
+  await expect(instances.nth(2)).toHaveAttribute('aria-current', 'true')
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
   const toolGroup = inspector.getByRole('region', { name: 'Tool' })

@@ -269,6 +269,13 @@ export interface PlanState {
   /** DF78: the alignment point focused in the setup inspector (drawn larger in the viewport). */
   readonly alignmentPoint: string | undefined
   /**
+   * DF146: the instance row hovered or focused (its design operation): the viewport highlights
+   * that instance's position (`shownInstance`).
+   */
+  readonly instanceHover: string | undefined
+  /** DF146: the instance row chosen last; highlighted while its group stays selected. */
+  readonly instanceChosen: InstanceChoice | undefined
+  /**
    * DF135: the toolpaths of already-cut operations are drawn (hidden by default,
    * docs/modes/cut-state.md#what-a-cut-operation-means-in-its-plan).
    */
@@ -306,6 +313,10 @@ export interface PlanState {
   previewZRef(planOperationId: string | undefined): void
   /** Marks an alignment point in the viewport; undefined: none. */
   focusAlignmentPoint(id: string | undefined): void
+  /** DF146: an instance row is hovered or focused; undefined: none. */
+  hoverInstance(designOperationId: string | undefined): void
+  /** DF146: an instance row was chosen (its group is selected with it). */
+  chooseInstance(choice: InstanceChoice | undefined): void
   /** DF135: "Show cut toolpaths". */
   setShowCutToolpaths(show: boolean): void
   /** DF135 C5: "Show in-process stock". */
@@ -345,6 +356,25 @@ export interface PlanState {
 
 export type PlanStore = StoreApi<PlanState>
 
+/** DF146: an instance row of a group: its plan operation (the group) and design operation. */
+export interface InstanceChoice {
+  readonly planOperationId: string
+  readonly designOperationId: string
+}
+
+/**
+ * DF146: the design operation whose position the plan viewport highlights: the hovered or focused
+ * instance row, else the chosen one while its group is selected; undefined: none.
+ */
+export function shownInstance(
+  state: Pick<PlanState, 'instanceHover' | 'instanceChosen'>,
+  selected: string | null | undefined,
+): string | undefined {
+  if (state.instanceHover !== undefined) return state.instanceHover
+  const c = state.instanceChosen
+  return c !== undefined && c.planOperationId === selected ? c.designOperationId : undefined
+}
+
 interface JobInfo {
   readonly state: string
   readonly progress?: JobProgress
@@ -372,6 +402,8 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     fieldRequest: undefined,
     zRefPreview: undefined,
     alignmentPoint: undefined,
+    instanceHover: undefined,
+    instanceChosen: undefined,
     showCutToolpaths: false,
     showInProcessStock: true,
     pickingAlignment: undefined,
@@ -396,6 +428,10 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     focusAlignmentPoint: (alignmentPoint) => {
       if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
     },
+    hoverInstance: (instanceHover) => {
+      if (get().instanceHover !== instanceHover) set({ instanceHover })
+    },
+    chooseInstance: (instanceChosen) => set({ instanceChosen }),
     pickAlignment: (pickingAlignment) => {
       if (get().pickingAlignment !== pickingAlignment) set({ pickingAlignment })
     },

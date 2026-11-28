@@ -2,6 +2,7 @@
 // project runtime: a countersunk bolt hole cloned three times plans as one row per source
 // operation, "Bolt hole 1 · drill × 4"; its chevron (and → / ←) shows the instances by their
 // stable number, read-only; choosing an instance selects its group, whose inspector edits all.
+// DF146: a hovered, focused or chosen instance is drawn selected in the viewport (its position).
 // Doc: docs/modes/features.md#clone-groups-in-plan-hardening-df146, docs/conventions/ui.md
 import { screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -13,12 +14,19 @@ import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 
 vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
-    <div data-testid={rest['data-testid']} />
+  Canvas: ({ children, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
+    <div data-testid={rest['data-testid']}>{children}</div>
   ),
 }))
+vi.mock('../../viewport/ViewCube', () => ({ ViewCube: () => null }))
+vi.mock('../../viewport/Measure3d', () => ({ Measure3d: () => null }))
+// the scene records the surfaces drawn selected (DF146: the shown instance)
+const scene = vi.hoisted(() => ({ selected: undefined as string | null | undefined }))
 vi.mock('../../viewport/Scene', () => ({
-  Scene: () => null,
+  Scene: (p: { surfaceState: { selectedOperation: string | null } }) => {
+    scene.selected = p.surfaceState.selectedOperation
+    return null
+  },
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
 }))
 
@@ -108,6 +116,40 @@ describe('clone groups in the setup panel (DF146 G2)', () => {
     expect(
       within(t.ops()).getByRole('button', { name: /^Bolt hole 1 · countersink\s*× 4/ }),
     ).toHaveFocus()
+  })
+
+  it('DF146: the hovered, focused or chosen instance is drawn selected in the viewport', async () => {
+    const t = await renderGroups()
+    const drill = within(t.ops()).getByRole('button', { name: /^Bolt hole 1 · drill\s*× 4/ })
+    const ids = t
+      .plan()
+      .setups[0]!.operations.find((o) => o.designOperationIds.length === 4)!.designOperationIds
+    await t.user.click(within(drill).getByTitle('Show the instances of Bolt hole 1 · drill × 4'))
+    const list = within(t.nav()).getByRole('list', {
+      name: 'Instances of Bolt hole 1 · drill × 4',
+    })
+    const instances = within(list).getAllByRole('button')
+    expect(scene.selected).toBeNull()
+    // hovered: its position shows; left: none
+    await t.user.hover(instances[2]!)
+    await waitFor(() => expect(scene.selected).toBe(ids[2]))
+    await t.user.unhover(instances[2]!)
+    await waitFor(() => expect(scene.selected).toBeNull())
+    // chosen: shown while its group is selected, marked current; focus shows another
+    await t.user.click(instances[1]!)
+    expect(instances[1]).toHaveAttribute('aria-current', 'true')
+    await t.user.unhover(instances[1]!)
+    instances[1]!.blur()
+    await waitFor(() => expect(scene.selected).toBe(ids[1]))
+    instances[3]!.focus()
+    await waitFor(() => expect(scene.selected).toBe(ids[3]))
+    instances[3]!.blur()
+    await waitFor(() => expect(scene.selected).toBe(ids[1]))
+    await expectNoAxeViolations(t.container)
+    // another row selected: the chosen instance is no longer shown
+    await t.user.click(within(t.ops()).getByRole('button', { name: /^Bolt hole 1 · countersink/ }))
+    await waitFor(() => expect(scene.selected).toBeNull())
+    expect(instances[1]).not.toHaveAttribute('aria-current')
   })
 
   it('a single operation has no chevron', async () => {
