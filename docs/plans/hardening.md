@@ -26,7 +26,7 @@ As of 2026-11-25: the machine lane (M1–M8) is on main and the user runs the re
 
 DF143 (TG #488: probe check, Advanced user, Unlock and back off, Finalize and start) built on a branch, awaiting the merge and the user's look on the real machine.
 
-Plate dogfood 2026-11-28 ([report](../research/2026-11-28-plate-dogfood.md)): the user's TG #492 job rebuilt with DF145–DF147 over the agent CLI, planned, exported, Idle on the virtual machine, heightmap oracles clean (regression `plan/plate-dogfood.test.ts`); F1 (`job.wait` hang at a repeated tool change) fixed; new rows DF149–DF161 (S2: DF149–DF154, DF156).
+Plate dogfood 2026-11-28 ([report](../research/2026-11-28-plate-dogfood.md)): the user's TG #492 job rebuilt with DF145–DF147 over the agent CLI, planned, exported, Idle on the virtual machine, heightmap oracles clean (regression `plan/plate-dogfood.test.ts`); F1 (`job.wait` hang at a repeated tool change) fixed; new rows DF149–DF161 (S2: DF149–DF154, DF156, all done on a branch 2026-11-28; open: the S3 rows DF155, DF157–DF161).
 
 TG #492 designs (drafts, awaiting answers): DF145 facing region (Q230–Q231), DF146 clone groups in Plan (built: G0–G2 and the instance's viewport highlight; open: the user's check in the installed app), DF147 simple Line (Q235–Q238 accepted by D89; SL1–SL4 built, SL4 follow-up built (Line with a depth, profile `on`, the viewport side arrow and pick, mirrored Clones swap the side); open: the user's check in the installed app).
 
