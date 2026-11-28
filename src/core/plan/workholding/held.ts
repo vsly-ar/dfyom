@@ -231,7 +231,7 @@ export function cutOffLoose(
       out.push({
         code: 'plan.workholding.cutOffLoose',
         severity: 'warning',
-        message: `${name} cuts the stock in two in ${setup.name}: ${what} ${loose.length > 1 ? 'are' : 'is'} not held, and comes loose on the last pass. Clamp both sides of the line (or use tape, vacuum or glue) so neither piece moves into the tool`,
+        message: `${name} cuts the stock in two in ${setup.name}: ${what} ${loose.length > 1 ? 'are not held and come' : 'is not held and comes'} loose on the last pass. Clamp both sides of the line (or use tape, vacuum or glue) so neither piece moves into the tool`,
         planOperationId: op.id,
         rule: 'cutOffLoose',
         params: {

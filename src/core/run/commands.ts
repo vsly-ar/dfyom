@@ -578,6 +578,8 @@ export const runJobContinue = defineCommand({
       jobId: z.string(),
       toolChange: z.number().int().optional(),
       pause: z.number().int().optional(),
+      /** The program line the run waited at: a tool number can come back (llm-api.md A2). */
+      line: z.number().int().optional(),
     })
     .describe('The wait that was ended'),
   async run(_doc, args, ctx) {
@@ -618,6 +620,7 @@ export const runJobContinue = defineCommand({
     return (await m.unwrap().controlJob(job.jobId, 'continue', expect)).map(() => ({
       jobId: job.jobId,
       ...expect,
+      line: job.line,
     }))
   },
 })
