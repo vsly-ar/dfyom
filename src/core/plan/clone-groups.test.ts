@@ -15,7 +15,7 @@ import { exportPlan } from '../post/plan-export'
 import { createToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { PlanWarning } from './checks'
-import { planOperationLabel } from './labels'
+import { groupInstances, planOperationLabel } from './labels'
 import { opsOf, planSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
@@ -118,6 +118,13 @@ describe('clone groups in Plan (DF146 G1)', () => {
     expect(rows.map((r) => r.label)).toEqual(
       expect.arrayContaining(['Pocket 1 × 3', 'Chamfer 1 × 3', 'Line 1 × 3']),
     )
+    // G2's instance rows: the stable numbers, 1 = the source
+    const part = t.s.plan(t.planId).design.part
+    expect(groupInstances(part, group('pocket1'))).toMatchObject({
+      of: 'Pocket 1',
+      instances: [{ n: 1 }, { n: 2 }, { n: 3 }],
+    })
+    expect(groupInstances(part, ['pocket1']).instances).toEqual([])
     // the toolpath joins the instances in path order, each pass named by its instance
     for (const r of rows) {
       const tp = await t.toolpath(r.id)

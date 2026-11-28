@@ -564,17 +564,16 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   // one setup (its row's actions are its context menu, DF67)
   await expect(setups.locator(':scope > li')).toHaveCount(1)
   // tool by tool (plan order v2), as X1 plans it: equal holes and equal countersinks share one
-  // plan operation, every clone instance keeps its source's tool, the outline last
+  // plan operation, and so does each clone source operation with its instances (DF146), the
+  // outline last
   const planned = setups
     .getByRole('list', { name: 'Plan operations in machining order' })
     .getByRole('button', { name: /^(Bolt hole|Profile|Chamfer) \d/ })
   await expect(planned).toHaveText([
     /^Bolt hole 1 · drill × 4\s*Flat 3/,
-    /^Bolt hole 2 · counterbore\s*Flat 3/,
-    ...[2, 3, 4, 5, 6].map((n) => new RegExp(`^Bolt hole 2 · counterbore · ${n}\\s*Flat 3`)),
+    /^Bolt hole 2 · counterbore × 6\s*Flat 3/,
     /^Bolt hole 2 · drill × 6\s*Flat 3/,
-    /^Profile 3\s*Flat 3/,
-    ...[2, 3, 5, 6, 7].map((n) => new RegExp(`^Profile 3 · ${n}\\s*Flat 3`)),
+    /^Profile 3 × 6\s*Flat 3/,
     /^Profile 2\s*Flat 6/,
     /^Bolt hole 1 · countersink × 4\s*Chamfer 90 × 12/,
     /^Chamfer 1\s*Chamfer 90 × 12/,
@@ -604,11 +603,9 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   // tool by tool (plan order v2): Flat 3, Flat 6 for the cutout, the chamfer mill, the outline
   expect([...new Set(sections(program))]).toEqual([
     'Bolt hole 1 - drill x 4',
-    'Bolt hole 2 - counterbore',
-    ...[2, 3, 4, 5, 6].map((n) => `Bolt hole 2 - counterbore - ${n}`),
+    'Bolt hole 2 - counterbore x 6',
     'Bolt hole 2 - drill x 6',
-    'Profile 3',
-    ...[2, 3, 5, 6, 7].map((n) => `Profile 3 - ${n}`),
+    'Profile 3 x 6',
     'Profile 2',
     'Bolt hole 1 - countersink x 4',
     'Chamfer 1',

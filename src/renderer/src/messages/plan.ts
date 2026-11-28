@@ -505,6 +505,15 @@ export const planMessages = {
     enableInPlan: 'Enable in this plan',
     disabledInPlan: (name: string) => `${name} is off in this plan`,
     enabledInPlan: (name: string) => `${name} is back in this plan`,
+    /** DF146 G2: a group row's chevron (its instances, read-only). */
+    expand: (name: string) => `Show the instances of ${name}`,
+    collapse: (name: string) => `Hide the instances of ${name}`,
+    instancesLabel: (name: string) => `Instances of ${name}`,
+    /** An instance row: its stable Clones number (1 = the source). */
+    instance: (n: number) => `Instance ${n}`,
+    instanceOf: (n: number, of: string) => `Instance ${n} of ${of}`,
+    /** Its tip: the settings live on the group row. */
+    instanceTip: (group: string) => `Cut as ${group}: edit the group to change it`,
   },
 
   /** Already-cut operations (DF135, docs/modes/cut-state.md): marked in Design. */
