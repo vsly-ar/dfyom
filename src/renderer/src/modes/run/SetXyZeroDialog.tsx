@@ -34,7 +34,7 @@ import { parseGoToField } from './GoToDialog'
 import { JogPad, useJogControls } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
 import { findingText, mayGo, MoveGuardFinding, useGoAnyway, useMoveGuard } from './MoveGuardFinding'
-import { machineProbe, setupPlacement } from './plan-info'
+import { machineProbe, setupPlacement, setupStock } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type ProbedValue } from './run-store'
 import { RunDialogFooter } from './RunStop'
 import { useRunWorkholding } from './useRunWorkholding'
@@ -88,15 +88,7 @@ function XyZeroOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
 
   const plan = planId === undefined || planId === NO_PLAN ? undefined : doc?.plans[planId]
   const placed = plan === undefined ? undefined : setupPlacement(plan, setupId, units)
-  const stock: PlanStock | undefined =
-    placed === undefined
-      ? undefined
-      : {
-          length: placed.orientation.size[0],
-          width: placed.orientation.size[1],
-          thickness: placed.orientation.size[2],
-          zero: placed.zero,
-        }
+  const stock: PlanStock | undefined = setupStock(placed)
   const probe = machineProbe(plan, machines, machineId)
   const canProbe = XY_PROBE_KINDS.includes(probe.kind)
   const plateReady =

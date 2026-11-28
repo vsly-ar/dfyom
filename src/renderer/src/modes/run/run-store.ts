@@ -372,6 +372,8 @@ export interface RunState {
   readonly zUnset: boolean
   /** v0.5 RV5: the Set X/Y zero dialog is open (docs/modes/run-probing.md#set-xy-zero-rv5). */
   readonly xyZeroOpen: boolean
+  /** v0.5 RV6: the Check alignment dialog is open (docs/modes/alignment.md#check-alignment-rv6). */
+  readonly checkAlignOpen: boolean
   /**
    * v0.5 RV5: the last X/Y zero this window set, for "Undo zero change": G54 X/Y before and
    * after (MPos mm); dropped when the connection closes.
@@ -496,6 +498,7 @@ export interface RunState {
   /** "Zero on this point": G54 X/Y so the current position gets these work coordinates. */
   setWorkZeroAt(x: number, y: number): Promise<void>
   setXyZeroOpen(open: boolean): void
+  setCheckAlignOpen(open: boolean): void
   /**
    * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
    * failed or was stopped (the banner or the alarm panel says why).
@@ -839,6 +842,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       spindleTool: undefined,
       zUnset: false,
       xyZeroOpen: false,
+      checkAlignOpen: false,
       zeroUndo: undefined,
       virtualStockKey: undefined,
       startProgram: undefined,
@@ -1177,6 +1181,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         await call('run.workZero.set', { axes: ['x', 'y', 'z'], values })
       },
       setXyZeroOpen: (xyZeroOpen) => set({ xyZeroOpen }),
+      setCheckAlignOpen: (checkAlignOpen) => set({ checkAlignOpen }),
       async probeRoutine(args) {
         const r = await call('run.machine.probe', args)
         if (!r.ok) return undefined

@@ -32,6 +32,7 @@ import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
 import { SetXyZeroDialog } from './SetXyZeroDialog'
+import { CheckAlignmentDialog } from './CheckAlignmentDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import { AllCutOffer, useRunCutMarks } from './CutMarks'
@@ -61,6 +62,7 @@ export function RunDialogs(): React.JSX.Element {
       <WaitDialog doc={doc} />
       <GoToDialog doc={doc} />
       <SetXyZeroDialog doc={doc} />
+      <CheckAlignmentDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>
