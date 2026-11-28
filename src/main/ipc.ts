@@ -99,8 +99,11 @@ function agentSessions(sessions: readonly SessionInfo[]): AgentSessionInfo[] {
 export interface WindowFactory {
   /** A new window, not shown yet; cascaded from `from` (docs/conventions/ui.md#project-files). */
   create(from?: BrowserWindow): BrowserWindow
-  /** Shows the window once it is ready to show (never in hidden test runs). */
-  reveal(win: BrowserWindow): void
+  /**
+   * Shows the window once it is ready to show (never in hidden test runs); `inactive` without
+   * taking focus or activating the app (a window an agent opened, DF162).
+   */
+  reveal(win: BrowserWindow, opts?: { readonly inactive?: boolean }): void
   /** Brings the window to the front (not in hidden test runs). */
   focus(win: BrowserWindow): void
 }
@@ -118,9 +121,10 @@ function inWindow(r: CallReply, window: OpenedWindow): CallReply {
 export interface WindowSessions {
   /**
    * A new window as a session, bound to `key` if given, shown when ready; ended when the window
-   * closes. Cascaded from the focused window. Returns the window.
+   * closes. Cascaded from the focused window. `inactive`: shown without taking focus (an agent's
+   * project, DF162). Returns the window.
    */
-  open(key?: string): BrowserWindow
+  open(key?: string, opts?: { readonly inactive?: boolean }): BrowserWindow
   /**
    * The app quits now (every quit question answered, src/main/index.ts): windows close without
    * closing their project first; host.shutdown closes them (unsaved changes stay recoverable).
@@ -578,10 +582,10 @@ export function registerProjectIpc(
         session.end()
       }
     },
-    open(key) {
+    open(key, opts) {
       const win = windows.create(BrowserWindow.getFocusedWindow() ?? undefined)
       attach(win, key, 'project')
-      windows.reveal(win)
+      windows.reveal(win, opts)
       return win
     },
     attachLibrary(win) {

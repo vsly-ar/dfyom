@@ -50,6 +50,7 @@ import {
   APP_NAME,
   LIBRARY_WINDOW_SIZE,
   libraryWindowStart,
+  revealSteps,
   SHAPE_EDITOR_WINDOW_SIZE,
   windowStart,
   windowTitle,
@@ -184,11 +185,13 @@ function windowFactory(
   appState: AppStateStore,
   isLibrary: (win: BrowserWindow) => boolean,
 ): WindowFactory & { createLibrary(): BrowserWindow; createShapeEditor(): BrowserWindow } {
-  const show = (win: BrowserWindow) => {
-    win.show()
-    const start = starts.get(win)
-    if (start?.maximized === true) win.maximize()
-    if (start?.fullScreen === true) win.setFullScreen(true)
+  // DF162: a window an agent opened is shown without taking focus (ui.md#project-files)
+  const show = (win: BrowserWindow, inactive: boolean) => {
+    const steps = revealSteps(starts.get(win), inactive)
+    if (steps.inactive) win.showInactive()
+    else win.show()
+    if (steps.maximize) win.maximize()
+    if (steps.fullScreen) win.setFullScreen(true)
   }
   return {
     // a project window never cascades from the Library window (another size and place)
@@ -203,10 +206,11 @@ function windowFactory(
       ),
     createLibrary: () => createAppWindow(log, level, settings(), appState, 'library', undefined),
     createShapeEditor: () => createAppWindow(log, level, settings(), appState, 'shapes', undefined),
-    reveal(win) {
+    reveal(win, opts) {
       if (hideWindows || win.isDestroyed()) return
-      if (ready.get(win) === true) show(win)
-      else win.once('ready-to-show', () => show(win))
+      const inactive = opts?.inactive === true
+      if (ready.get(win) === true) show(win, inactive)
+      else win.once('ready-to-show', () => show(win, inactive))
     },
     focus(win) {
       if (hideWindows || win.isDestroyed()) return
@@ -505,10 +509,10 @@ void app.whenReady().then(async () => {
     isProjectWindow: (id) => sessions.isProjectWindow(id),
     changed: installMenu,
   })
-  // A project an agent opens gets its own window, which stays open after the session ends; the
-  // user's New / Open choose their window in ipc.ts (docs/conventions/ui.md#project-files).
+  // A project an agent opens gets its own window, which stays open after the session ends and is
+  // shown without taking focus (DF162); the user's New / Open choose their window in ipc.ts (docs/conventions/ui.md#project-files).
   host.onProjectOpened((key, source) => {
-    if (source.kind === 'agent') sessions.open(key)
+    if (source.kind === 'agent') sessions.open(key, { inactive: true })
   })
   const first = sessions.open()
   // DF129 RC6: the first window shows the recovery panel of a run interrupted by a crash (Run mode)

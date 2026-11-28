@@ -115,3 +115,24 @@ export function libraryWindowStart(
     fullScreen: saved.fullScreen,
   }
 }
+
+/** How a window is shown (docs/conventions/ui.md#project-files, hardening DF162). */
+export interface RevealSteps {
+  /** `showInactive()`: shown without taking focus or activating the app. */
+  readonly inactive: boolean
+  readonly maximize: boolean
+  readonly fullScreen: boolean
+}
+
+/**
+ * How to show a window with its start: a window the user opened is shown, focused and restored
+ * as it was (maximized, full screen); a window an agent opened (`inactive`) is shown without
+ * taking focus, maximized but never full screen (full screen would move the user to its Space).
+ */
+export function revealSteps(start: WindowStart | undefined, inactive: boolean): RevealSteps {
+  return {
+    inactive,
+    maximize: start?.maximized === true,
+    fullScreen: !inactive && start?.fullScreen === true,
+  }
+}
