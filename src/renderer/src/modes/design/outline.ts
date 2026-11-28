@@ -230,6 +230,103 @@ export function surfaceFace(on: string, stock: Stock, table: SurfaceTable): Oper
   }
 }
 
+/** Distance (mm) within which a point of a region's boundary is on a stock edge. */
+const ON_EDGE = 1e-6
+
+/** A closed loop (face frame) clipped to the face rectangle `[0, L] × [0, W]` (Sutherland–Hodgman). */
+function clipToFace(loop: readonly Vec3[], L: number, W: number): Vec3[] {
+  const planes: [(p: Vec3) => number, (a: Vec3, b: Vec3) => Vec3][] = (
+    [
+      [0, 0, 1],
+      [0, L, -1],
+      [1, 0, 1],
+      [1, W, -1],
+    ] as const
+  ).map(([axis, at, sign]) => {
+    const d = (p: Vec3) => sign * (p[axis] - at)
+    const cut = (a: Vec3, b: Vec3): Vec3 => {
+      const t = d(a) / (d(a) - d(b))
+      const p: [number, number, number] = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2]]
+      p[axis] = at
+      return p
+    }
+    return [d, cut]
+  })
+  let out: Vec3[] = [...loop]
+  for (const [d, cut] of planes) {
+    const input = out
+    out = []
+    for (let i = 0; i < input.length; i++) {
+      const a = input[i]!
+      const b = input[(i + 1) % input.length]!
+      if (d(a) >= 0) out.push(a)
+      if (d(a) >= 0 !== d(b) >= 0) out.push(cut(a, b))
+    }
+  }
+  return out
+}
+
+/**
+ * DF145: a facing region's boundary on its face at height `w` (face frame), clipped to the face:
+ * the `inner` sides, where the tool's edge stays on the boundary, and the `open` sides on the
+ * stock edges, where the rows run off the stock (drawn dashed, design.md § Facing region). A
+ * named shape draws only with the 2D port (`ctx`).
+ */
+export function facingRegionSides(
+  op: Extract<Operation, { kind: 'facing' }>,
+  face: OperationFace,
+  w: number,
+  ctx?: ShapeContext,
+): { inner: OutlineLoop[]; open: OutlineLoop[] } {
+  const { length: L, width: W } = face.local
+  const region = op.region
+  if (region === undefined) return { inner: [], open: [rectangleLoop(0, 0, L, W, w)] }
+  let loops: (readonly Vec3[])[]
+  if (region.kind === 'band') {
+    const b = region.width.canonical
+    const box = {
+      front: [0, 0, L, b],
+      back: [0, W - b, L, W],
+      left: [0, 0, b, W],
+      right: [L - b, 0, L, W],
+    }[region.edge]
+    loops = [rectangleLoop(box[0]!, box[1]!, box[2]!, box[3]!, w)]
+  } else loops = shapeLoops(region.shape, w, ctx).filter((l) => l.open !== true)
+  const onEdge = (a: Vec3, b: Vec3) =>
+    [
+      [0, 0],
+      [0, L],
+      [1, 0],
+      [1, W],
+    ].some(
+      ([axis, at]) => Math.abs(a[axis!]! - at!) < ON_EDGE && Math.abs(b[axis!]! - at!) < ON_EDGE,
+    )
+  const inner: OutlineLoop[] = []
+  const open: OutlineLoop[] = []
+  for (const raw of loops) {
+    const pts = clipToFace(raw, L, W)
+    const n = pts.length
+    if (n < 3) continue
+    const kinds = pts.map((p, i) => onEdge(p, pts[(i + 1) % n]!))
+    // start at a change of kind, so a run never wraps round the loop's first point
+    const start = kinds.findIndex((k, i) => k !== kinds[(i + n - 1) % n])
+    if (start < 0) {
+      ;(kinds[0] ? open : inner).push(pts)
+      continue
+    }
+    let run: Vec3[] = [pts[start]!]
+    for (let j = 0; j < n; j++) {
+      const i = (start + j) % n
+      run.push(pts[(i + 1) % n]!)
+      if (j === n - 1 || kinds[(i + 1) % n] !== kinds[i]) {
+        ;(kinds[i] ? open : inner).push(Object.assign(run, { open: true as const }))
+        run = [pts[(i + 1) % n]!]
+      }
+    }
+  }
+  return { inner, open }
+}
+
 /**
  * A pattern's area (the boundary less the margin, face frame) as closed loops on its face in the
  * part frame: the dashed guide while the pattern is selected (patterns P2).
@@ -321,6 +418,21 @@ const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>
   })
 
 /**
+ * DF145: a selected region facing's open sides (on the stock edges, where the rows run off), in
+ * the part frame at its face: the dashed guide beside its solid inner sides.
+ */
+export function facingRegionGuide(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  ctx?: ShapeContext,
+): OutlineLoop[] {
+  if (op.kind !== 'facing' || op.region === undefined) return []
+  const face = operationFace(op, stock, table)
+  return place(face, facingRegionSides(op, face, face.w, ctx).open)
+}
+
+/**
  * The operation's shape where it starts and where it ends, in the part frame: the top loop at its
  * `on` face and the bottom loop at its floor (facing: the new face; profile: the stock face and
  * the opposite one; chamfer: its diameter at the face and the edge's where the cone meets it,
@@ -336,10 +448,17 @@ export function operationOutline(
   const face = operationFace(op, stock, table)
   const through = -face.local.thickness
   switch (op.kind) {
-    case 'facing':
+    case 'facing': {
+      const floor = face.w - op.depth.canonical
+      if (op.region === undefined)
+        return place(face, [rectangleLoop(0, 0, face.local.length, face.local.width, floor)])
+      // DF145: the region's inner sides at the face and at the new floor (the open sides are the
+      // dashed guide, `facingRegionSides`)
       return place(face, [
-        rectangleLoop(0, 0, face.local.length, face.local.width, face.w - op.depth.canonical),
+        ...facingRegionSides(op, face, face.w, ctx).inner,
+        ...facingRegionSides(op, face, floor, ctx).inner,
       ])
+    }
     case 'pocket':
       return place(face, [
         ...shapeLoops(op.shape, face.w, ctx),

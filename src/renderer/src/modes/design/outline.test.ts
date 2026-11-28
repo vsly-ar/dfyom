@@ -16,6 +16,7 @@ import {
   operationOutline,
   PATTERN_WEB_MARKER,
   patternGuideLoops,
+  facingRegionGuide,
 } from './outline'
 
 const region2d = nodeRegion2d()
@@ -161,5 +162,67 @@ describe('thin walls between grooves (engraved patterns, dfm.lineMerge)', () => 
         expect(Math.abs(p[2]!)).toBeLessThan(1e-9)
       }
     })
+  })
+})
+
+describe('facing region (DF145)', () => {
+  it('a front band: its inner side solid at face and floor, the stock edges dashed', async () => {
+    const s = await designSetup()
+    await s.run('design.facing.add', {
+      partId: s.partId,
+      depth: '1',
+      region: { band: { edge: 'front', width: '22' } },
+    })
+    const part = designPart(s.d.doc)!
+    const op = part.loaded!.part.operations[0]!
+    const loops = operationOutline(op, part.loaded!.stock, part.table!)
+    expect(loops).toHaveLength(2)
+    for (const l of loops) {
+      expect(l.open).toBe(true)
+      expect(l.map((p) => p[1])).toEqual([22, 22])
+      expect(span(l, 0)).toBe(100)
+    }
+    expect(loops.map((l) => l[0]![2])).toEqual([0, -1])
+    // left, front and right edges: one dashed run round the band's open sides
+    const guide = facingRegionGuide(op, part.loaded!.stock, part.table!)
+    expect(guide).toHaveLength(1)
+    expect(guide[0]!.open).toBe(true)
+    expect(guide[0]!.map((p) => [p[0], p[1]])).toEqual([
+      [0, 22],
+      [0, 0],
+      [100, 0],
+      [100, 22],
+    ])
+  })
+
+  it('a shape region: inside the face all inner; across an edge that part is open', async () => {
+    const s = await designSetup()
+    await s.run('design.facing.add', {
+      partId: s.partId,
+      region: { shape: { kind: 'circle', center: ['50', '30'], diameter: '20' } },
+    })
+    const part = designPart(s.d.doc)!
+    const stock = part.loaded!.stock
+    const op = part.loaded!.part.operations[0]!
+    const loops = operationOutline(op, stock, part.table!)
+    expect(loops).toHaveLength(2)
+    expect(loops[0]!.open).toBeUndefined()
+    expect(facingRegionGuide(op, stock, part.table!)).toEqual([])
+    await s.run('design.facing.update', {
+      partId: s.partId,
+      operationId: op.id,
+      region: { shape: { kind: 'rectangle', center: ['0', '30'], length: '40', width: '20' } },
+    })
+    const moved = designPart(s.d.doc)!
+    const op2 = moved.loaded!.part.operations[0]!
+    // the three sides inside the face: one run, at the face and the floor
+    const inner = operationOutline(op2, stock, moved.table!)
+    expect(inner).toHaveLength(2)
+    expect(span(inner[0]!, 0)).toBe(20)
+    expect(span(inner[0]!, 1)).toBe(20)
+    const open = facingRegionGuide(op2, stock, moved.table!)
+    expect(open).toHaveLength(1)
+    expect(open[0]!.every((p) => p[0] === 0)).toBe(true)
+    expect(span(open[0]!, 1)).toBe(20)
   })
 })

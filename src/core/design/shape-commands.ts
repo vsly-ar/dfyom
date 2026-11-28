@@ -32,6 +32,7 @@ import {
   isInlinePath,
   type FieldKind,
   type Operation,
+  type Shape,
 } from './operation'
 import { inlineElement, inlineGeometry } from './line-inline'
 import { OperationIdSchema, PartIdSchema } from './part.dto'
@@ -617,7 +618,7 @@ const shapeConvert = defineCommand({
   kind: 'document',
   name: 'design.shape.convert',
   summary:
-    "Move a pocket's or profile's inline rectangle or circle, or a Line's segment or arc, into a new named shape the operation then places (one undo step).",
+    "Move a pocket's, profile's or facing region's inline rectangle or circle, or a Line's segment or arc, into a new named shape the operation then places (one undo step).",
   title: () => 'Convert to shape',
   machine: false,
   args: z.object({ ...PartArg, operationId: OperationIdSchema }),
@@ -633,18 +634,20 @@ const shapeConvert = defineCommand({
     if (owned.isErr()) return owned
     const op = loaded.part.operations[found.unwrap()]!
     if (op.kind === 'line') return convertLine(draft, args.partId, loaded, op, port, shapes, ctx)
-    if (op.kind !== 'pocket' && op.kind !== 'profile')
+    // DF145: a facing's shape region converts as a pocket's shape
+    const region = op.kind === 'facing' && op.region?.kind === 'shape' ? op.region.shape : undefined
+    if (op.kind !== 'pocket' && op.kind !== 'profile' && region === undefined)
       return fail('input.malformed', `${op.id} is a ${op.kind}, which has no shape`, {
         issues: [
           {
             path: ['operationId'],
             rule: 'operationKind',
-            message: 'must be a pocket, profile or Line',
+            message: 'must be a pocket, profile, Line or facing with a shape region',
           },
         ],
         where,
       })
-    const s = op.shape
+    const s = op.kind === 'pocket' || op.kind === 'profile' ? op.shape : region!
     if (s.kind === 'named')
       return fail('input.malformed', `${op.id} already places shape ${s.shapeId}`, {
         issues: [
@@ -705,17 +708,20 @@ const shapeConvert = defineCommand({
     draftShapes(draft, args.partId).push({ id: shapeId, name: shapeName(n), items: dtos.unwrap() })
     // the operation now places the shape: same anchor point, anchor and rotation, so the placed
     // box (and the feature) stays where it was (shapes.md#implementation-k3)
-    const placed: Operation = {
-      ...op,
-      shape: {
-        kind: 'named',
-        center: s.center,
-        anchor: s.anchor,
-        shapeId,
-        rotation: s.kind === 'rectangle' ? s.rotation : None,
-        mirror: false,
-      },
+    const named: Shape = {
+      kind: 'named',
+      center: s.center,
+      anchor: s.anchor,
+      shapeId,
+      rotation: s.kind === 'rectangle' ? s.rotation : None,
+      mirror: false,
     }
+    const placed: Operation =
+      op.kind === 'pocket' || op.kind === 'profile'
+        ? { ...op, shape: named }
+        : op.kind === 'facing'
+          ? { ...op, region: { kind: 'shape', shape: named } }
+          : op
     const ops = loaded.part.operations.map((o) => (o.id === op.id ? placed : o))
     writeOperationList(draft.parts[args.partId]!.operations, ops)
     return withWarnings({ shapeId }, loaded, ops, ctx, where)

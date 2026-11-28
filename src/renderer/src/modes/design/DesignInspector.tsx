@@ -445,6 +445,21 @@ function OperationInspector({
       keepDraft(path, r.ok ? undefined : draft, placed?.errors ?? [])
     else if (saved !== undefined) keepDraft(undefined, undefined, placed?.errors ?? [])
   }
+  // DF145: a facing's shape region takes the pocket's shape actions, its commands as `region`
+  const regionShape =
+    op.kind === 'facing' && op.region !== undefined && 'shape' in op.region
+      ? op.region.shape
+      : undefined
+  const opShape = op.kind === 'pocket' || op.kind === 'profile' ? op.shape : regionShape
+  const shaped = (args: { shape?: Record<string, unknown>; anchor?: unknown }) =>
+    regionShape === undefined
+      ? args
+      : {
+          region: {
+            shape: args.shape ?? shapeArgs(regionShape),
+            ...(args.anchor !== undefined ? { anchor: args.anchor } : {}),
+          },
+        }
   // the Shape Editor window on the shape (DF94)
   const openShape = (shapeId: string) => openShapeIn(part.dto.id, shapeId)
   const failed = (r: { ok: boolean; error?: AppErrorData }) => {
@@ -459,7 +474,7 @@ function OperationInspector({
   const svg = useSvgImport(part, {
     onImported: async (shapeIds, gesture) => {
       const shapeId = shapeIds[0]
-      if (shapeId === undefined || (op.kind !== 'pocket' && op.kind !== 'profile')) return undefined
+      if (shapeId === undefined || opShape === undefined) return undefined
       const got = await bridge.call('design.shape.get', { partId: part.dto.id, shapeId })
       const shape = got.ok ? (got.value as { shape: ShapeDTO }).shape : undefined
       const name = shape?.name ?? shapeId
@@ -469,7 +484,7 @@ function OperationInspector({
         {
           partId: part.dto.id,
           operationId: op.id,
-          shape: shapeChoiceArgs(op.shape, `named:${shapeId}`, undefined, part.units),
+          ...shaped({ shape: shapeChoiceArgs(opShape, `named:${shapeId}`, undefined, part.units) }),
           ...(on ? { side: 'on' } : {}),
         },
         { gesture },
@@ -483,7 +498,7 @@ function OperationInspector({
   })
   // the shape picker's actions (task U2, ui.md#shape-in-the-operation-inspector)
   const shapeActions: ShapeActions | undefined =
-    op.kind === 'pocket' || op.kind === 'profile'
+    opShape !== undefined
       ? {
           newShape: () =>
             void (async () => {
@@ -496,13 +511,13 @@ function OperationInspector({
               )
               if (failed(added) || !added.ok) return
               const shapeId = (added.value as { shapeId: string }).shapeId
-              const center = shapeArgs(op.shape)['center']
+              const center = shapeArgs(opShape)['center']
               const used = await call(
                 `design.${op.kind}.update`,
                 {
                   partId: part.dto.id,
                   operationId: op.id,
-                  shape: { kind: 'named', shapeId, center },
+                  ...shaped({ shape: { kind: 'named', shapeId, center } }),
                 },
                 gesture,
               )
@@ -554,11 +569,11 @@ function OperationInspector({
             void (async () => {
               const gesture = { gesture: newGestureId() }
               const args = { partId: part.dto.id, operationId: op.id }
-              const a = op.shape.anchor
+              const a = opShape.anchor
               if (a?.u !== 'min' || a.v !== 'min') {
                 const r = await call(
                   `design.${op.kind}.update`,
-                  { ...args, anchor: { u: 'min', v: 'min' } },
+                  { ...args, ...shaped({ anchor: { u: 'min', v: 'min' } }) },
                   gesture,
                 )
                 if (failed(r)) return
@@ -566,7 +581,7 @@ function OperationInspector({
               const at = center.map((c) => `${c} mm`)
               const r = await call(
                 `design.${op.kind}.update`,
-                { ...args, shape: { ...shapeArgs(op.shape), center: at } },
+                { ...args, ...shaped({ shape: { ...shapeArgs(opShape), center: at } }) },
                 gesture,
               )
               if (failed(r)) return
@@ -578,7 +593,7 @@ function OperationInspector({
               const r = await call(`design.${op.kind}.update`, {
                 partId: part.dto.id,
                 operationId: op.id,
-                shape,
+                ...shaped({ shape }),
                 side: 'on',
               })
               if (failed(r)) return

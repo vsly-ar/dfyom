@@ -854,7 +854,7 @@ The [Shape Editor window](#shape-editor-window-df94) shows the chosen shape: the
 
 #### Shape in the operation inspector
 
-`ShapePicker` (U2) replaces the pocket's and profile's shape kind control:
+`ShapePicker` (U2) replaces the pocket's and profile's shape kind control (and is a facing's shape region's, [DF145](../modes/design.md#facing-region-hardening-df145)):
 
 - **Picker:** a `Select` with two groups. Inline lists Rectangle and Circle; Shapes lists the part's named shapes, each with a mini outline and "used by n". "New shape…" adds a shape, references it and opens the Shape Editor; "Edit shape…" (a named shape picked) opens it (DF147 SL1; the Line's Path picker has both too, [engraved-patterns.md § Simple Line](../modes/engraved-patterns.md#implementation-sl1sl2)). "Import SVG…" imports a drawing and uses its first shape ([DF49](#import-svg-where-it-is-looked-for-df49)). Under the picker, a named shape offers "Edit shape" (opens the [Shape Editor window](#shape-editor-window-df94) on it) and an inline one offers "Convert to shape". A choice is one command on `shape`.
 - **Placement** under the picker: centre with the [anchor picker](#design-and-plan-controls-v02); **rotation** in ° (also on inline rectangles); **mirror** as a `Switch` "Mirror (flip x)", named shapes only. While the rotation field has focus, the viewport draws the placed, rotated bounding box (which the anchor uses) thin and dashed.

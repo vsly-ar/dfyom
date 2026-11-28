@@ -24,7 +24,7 @@ import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
-import { dfmMessages } from '../../messages/dfm'
+import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
 import type { PickInsert } from '../../ui/QuantityInput/QuantityInput'
 import {
@@ -44,6 +44,7 @@ import {
   type StepKind,
 } from '../../ui'
 import { ChamferInspector } from './ChamferInspector'
+import { surfaceFace } from './outline'
 import { LineInspector } from './LineInspector'
 import { isOpenNamed } from './operation-shape'
 import { isRotated, ShapePicker, type LineShapeActions, type ShapeActions } from './ShapePicker'
@@ -237,6 +238,7 @@ export function OperationFields({
     case 'facing':
       return (
         <>
+          <FacingRegionGroup ctx={ctx} level={level} />
           {g(
             t.groups.depth,
             <>
@@ -538,6 +540,142 @@ function ShapeGroup({
       </InspectorGroup.More>
     </InspectorGroup>
   )
+}
+
+type FacingDTO = Extract<OperationDTO, { kind: 'facing' }>
+type RegionKind = 'whole' | 'band' | 'shape'
+const BAND_EDGES = ['front', 'back', 'left', 'right'] as const
+
+/**
+ * DF145: a facing's shape region shown with the pocket's Shape group: the region's shape as the
+ * op's `shape` (its fields, issues and actions at the pocket's paths `shape.*`, design.md
+ * § Facing region), its `shape` and `anchor` commands sent as `region`.
+ */
+export function regionShapeContext(
+  ctx: OperationFieldsContext,
+  op: FacingDTO,
+): OperationFieldsContext | undefined {
+  if (op.region === undefined || !('shape' in op.region)) return undefined
+  const shape = op.region.shape
+  const view = { ...op, kind: 'pocket', shape } as unknown as OperationDTO
+  const wrap = (args: Record<string, unknown>): Record<string, unknown> => {
+    const { shape: s, anchor, ...rest } = args
+    if (s === undefined && anchor === undefined) return args
+    return {
+      ...rest,
+      region: { shape: s ?? shapeArgs(shape), ...(anchor !== undefined ? { anchor } : {}) },
+    }
+  }
+  return {
+    ...ctx,
+    op: view,
+    send: (args, path, gesture, draft) => ctx.send(wrap(args), path, gesture, draft),
+  }
+}
+
+/**
+ * DF145: a facing's Region group (design.md § Facing region): Whole face / Band / Shape; a band's
+ * edge and width; a shape region as a pocket's Shape group (its own group after this one).
+ */
+function FacingRegionGroup({
+  ctx,
+  level,
+}: {
+  ctx: OperationFieldsContext
+  level: 3 | 4
+}): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'facing') return null
+  const region = op.region
+  const kind: RegionKind = region === undefined ? 'whole' : 'band' in region ? 'band' : 'shape'
+  const names = axes(ctx)
+  // the defaults a choice starts from: a quarter of the face across the front edge, or a
+  // rectangle half the face's size at its centre
+  const size = faceSize(ctx)
+  const len = (mm: number) => lengthSource(Math.max(1, mm), ctx.units, 'down')
+  const choose = (next: RegionKind) => {
+    if (next === kind) return
+    if (next === 'whole') return ctx.send({ region: null }, 'region')
+    if (next === 'band')
+      return ctx.send(
+        { region: { band: { edge: 'front', width: len(Math.round(size[1] / 4)) } } },
+        'region',
+      )
+    ctx.send(
+      {
+        region: {
+          shape: {
+            kind: 'rectangle',
+            center: [len(size[0] / 2), len(size[1] / 2)],
+            length: len(Math.round(size[0] / 2)),
+            width: len(Math.round(size[1] / 2)),
+            cornerRadius: '0',
+          },
+        },
+      },
+      'region',
+    )
+  }
+  const shapeCtx = regionShapeContext(ctx, op)
+  const regionErrors = ctx.errors
+    .filter((e) => e.path === 'region')
+    .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text }))
+  return (
+    <>
+      <InspectorGroup title={t.groups.region} level={level}>
+        <Field label={t.region} kind="toggle" messages={regionErrors} readOnly={ctx.readOnly}>
+          <SegmentedControl<RegionKind>
+            label={t.region}
+            options={(['whole', 'band', 'shape'] as const).map((k) => ({
+              value: k,
+              label: t.regions[k],
+            }))}
+            value={kind}
+            disabled={ctx.readOnly}
+            onValueChange={choose}
+          />
+        </Field>
+        {region !== undefined && 'band' in region ? (
+          <>
+            <Field label={t.bandEdge} readOnly={ctx.readOnly}>
+              <Select
+                options={BAND_EDGES.map((e) => ({
+                  value: e,
+                  label: t.bandEdges(e, names.u, names.v),
+                }))}
+                value={region.band.edge}
+                disabled={ctx.readOnly}
+                onValueChange={(edge) =>
+                  ctx.send(
+                    { region: { band: { edge, width: region.band.width.source } } },
+                    'region.band.edge',
+                  )
+                }
+              />
+            </Field>
+            <ParamField
+              ctx={ctx}
+              path="region.band.width"
+              stepKind="xy"
+              label={t.bandWidth}
+              kind="length"
+              icon="width"
+              info={t.bandWidthInfo}
+            />
+          </>
+        ) : null}
+      </InspectorGroup>
+      {shapeCtx !== undefined ? <ShapeGroup ctx={shapeCtx} level={level} /> : null}
+    </>
+  )
+}
+
+/** The `on` face's size in its frame (`[u, v]`, mm); 100 × 100 while the part does not load. */
+function faceSize(ctx: OperationFieldsContext): readonly [number, number] {
+  const { loaded, table } = ctx.part
+  if (loaded === undefined || table === undefined) return [100, 100]
+  const face = surfaceFace(ctx.op.on ?? 'stock.top', loaded.stock, table)
+  return [face.local.length, face.local.width]
 }
 
 /**

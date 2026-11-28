@@ -168,6 +168,9 @@ export function updateArgs(
     return { center }
   }
   if (head === 'tabs') return { tabs: { [rest.join('.')]: source } }
+  // DF145: a facing's band width (its edge kept)
+  if (head === 'region' && op.kind === 'facing' && op.region !== undefined && 'band' in op.region)
+    return { region: { band: { edge: op.region.band.edge, width: source } } }
   if (op.kind === 'line') {
     // a Line (engraved-patterns.md E1): paths are replaced whole, a ramp's depth too
     if (head === 'paths') {
