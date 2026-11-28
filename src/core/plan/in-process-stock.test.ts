@@ -11,10 +11,12 @@ import { exportPlan } from '../post/plan-export'
 import { createToolpathCache } from '../toolpath/cache'
 import { simulateHeightmap, type CutMap } from '../toolpath/simulate'
 import {
+  asCutStamps,
   inProcessCell,
   inProcessStockInput,
   inProcessStockMesh,
   meshVolume,
+  stampAsCut,
   type CutToolpathEntry,
 } from './in-process-stock'
 import { loadPlanDTO } from './plan'
@@ -125,6 +127,53 @@ describe('in-process stock (C5): the removed-material input', () => {
     const none = (id: string) => ({ ...toolpathOf(id), toolpath: null })
     expect(inProcessStockInput(plan, none)).toEqual({ kind: 'waiting', missing: [pocket] })
     expect(inProcessStockInput(plan, toolpathOf)).toMatchObject({ kind: 'ready', outdated: false })
+  }, 120_000)
+
+  it("stamps a recut pocket's as-cut region (C4 follow-up) before the recut runs", async () => {
+    const { s, planId, toolpathOf, loaded } = await cutPart()
+    await s.run('design.part.update', {
+      partId: s.partId,
+      alreadyCut: ['facing1', 'pocket1'],
+      cutByRun: planId,
+    })
+    await s.run('project.apply', {})
+    expect(asCutStamps(loaded(), region2d)).toEqual([]) // nothing recut yet
+    // deepened after the run: the pocket is recut, the old 6 mm still gone
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '8' })
+    await s.run('project.apply', {})
+    const plan = loaded()
+    const stamps = asCutStamps(plan, region2d)
+    expect(stamps.map((st) => [st.unit, st.direction, st.floor])).toEqual([['pocket1', '+z', -6.5]])
+    expect(asCutStamps(plan, undefined)).toEqual([]) // no 2D port: nothing stamped
+    const input = inProcessStockInput(plan, toolpathOf, undefined, stamps)
+    if (input.kind !== 'ready') throw new Error(`not ready: ${JSON.stringify(input)}`)
+    // only the facing is still cut (the recut pocket is no cut operation), the stamp is keyed
+    expect(input.operations).toHaveLength(1)
+    expect(input.recut).toEqual(['pocket1'])
+    expect(input.key).not.toBe((inProcessStockInput(plan, toolpathOf) as { key?: string }).key)
+    const maps = stampAsCut(
+      expectOk(simulateHeightmap(input.simulate)),
+      stamps,
+      input.simulate.stock,
+    )
+    const top = maps[0]!
+    const h = (x: number, y: number) => top.h[Math.floor(y / 0.5) * top.nu + Math.floor(x / 0.5)]!
+    expect(h(40, 25)).toBeCloseTo(-6.5, 3) // the old floor, not the new one
+    expect(h(5, 5)).toBeCloseTo(-0.5, 3) // the faced top, untouched
+    expect(h(18, 25)).toBeCloseTo(-0.5, 3) // outside the pocket (x 20…60)
+    expect(h(21, 25)).toBeCloseTo(-6.5, 3) // inside its wall
+    // a stamp only lowers: stamping again changes nothing
+    expect(stampAsCut(maps, stamps, input.simulate.stock)[0]!.h).toEqual(top.h)
+    // a recut unit alone (nothing else cut) still draws
+    await s.run('design.part.update', { partId: s.partId, alreadyCut: ['pocket1'] })
+    await s.run('project.apply', {})
+    const alone = inProcessStockInput(
+      loaded(),
+      toolpathOf,
+      undefined,
+      asCutStamps(loaded(), region2d),
+    )
+    expect(alone).toMatchObject({ kind: 'ready', operations: [] })
   }, 120_000)
 
   it('keeps the map within its cell budget', () => {

@@ -9,7 +9,9 @@
 // C4: a run's mark on Pocket 1 (the command Run sends), Pocket 1 deepened 6 → 8 in Design: its
 // marker reads Changed ("plans cut only the difference"), and the export cuts it from 6 to 8 only.
 // C5: Plan (with its switch) and Run draw the in-process stock (Pocket 1 cut out of the blank);
-// with DFYOM_C5_DIR, c5-{plan,run}-{light,dark}.png.
+// with DFYOM_C5_DIR, c5-{plan,run}-{light,dark}.png. C4 follow-ups: the recut Pocket 1 alone
+// still draws the stock (its as-cut region stamped); a V-bit Line run-marked and deepened 1 → 2.5
+// exports from its old groove's floor down only.
 // Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/cut-state.md#implementation-c1, docs/conventions/ui.md
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -279,5 +281,62 @@ test('cut state: mark a pocket already cut in Design, add a pocket in it, export
   expect(Math.min(...depths)).toBeCloseTo(-8, 6)
   // no level between the top and the floor the run cut (6 mm)
   expect(depths.filter((z) => z > -6 + 1e-6)).toEqual([])
+  // C5 follow-up: nothing else is cut, the recut pocket's as-cut region still draws the stock
+  await expect(view).toHaveAttribute('data-in-process-stock', '1', { timeout: 30_000 })
+
+  // ── C4 follow-up: a V-bit Line, run-marked, deepened 1 → 2.5 cuts below its old groove only ─
+  await call('library.tool.add', {
+    values: {
+      name: 'V-bit 60',
+      type: 'chamferMill',
+      diameter: '6',
+      angle: '60',
+      fluteLength: '6',
+      overallLength: '50',
+      fluteCount: '2',
+      toolMaterial: 'carbide',
+      presets: [],
+    },
+  })
+  const { shapeId } = await call<{ shapeId: string }>('design.shape.add', {
+    partId,
+    name: 'Flute',
+    items: [
+      {
+        kind: 'path',
+        closed: false,
+        start: ['0', '0'],
+        segments: [{ kind: 'line', to: ['40', '0'] }],
+      },
+    ],
+  })
+  await call('design.line.add', { partId, paths: [{ shapeId, center: ['50', '8'] }], depth: '1' })
+  await call('project.apply', {})
+  const lineSection = (program: string): string => {
+    const from = program.indexOf('(Line 1)')
+    expect(from, 'a Line 1 section').toBeGreaterThan(0)
+    const ends = ['(Pocket 1)', '(Pocket 2)']
+      .map((h) => program.indexOf(h, from))
+      .filter((i) => i > from)
+    return program.slice(from, ends.length > 0 ? Math.min(...ends) : undefined)
+  }
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  const zs = (section: string) => [...section.matchAll(/Z(-[\d.]+)/g)].map((m) => Number(m[1]))
+  expect(Math.min(...zs(lineSection(await exportProgram())))).toBeCloseTo(-1, 6)
+  await call('design.part.update', { partId, alreadyCut: ['pocket1', 'line1'], cutByRun: planId })
+  await call('design.line.update', { partId, operationId: 'line1', depth: '2.5' })
+  await call('project.apply', {})
+  await expect(navigator.getByRole('button', { name: 'Generate toolpaths' })).toBeEnabled({
+    timeout: 30_000,
+  })
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  const recutLine = lineSection(await exportProgram())
+  const deeper = zs(recutLine)
+  expect(Math.min(...deeper)).toBeCloseTo(-2.5, 6)
+  // the run's groove (1 mm) is not cut again: the cut enters at its floor (a feed move, not a rapid)
+  expect(deeper.filter((z) => z > -1 + 1e-6)).toEqual([])
+  expect(recutLine).toMatch(/^G1 Z-1 F/m)
   expect(dfyom.rendererErrors).toEqual([])
 })

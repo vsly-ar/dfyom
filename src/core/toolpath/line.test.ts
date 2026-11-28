@@ -237,3 +237,46 @@ it('an end mill cuts a slot line the same way (ball and flat tools)', () => {
   )
   expect(Math.min(...moves(t).map((x) => x.m.to[2]))).toBeCloseTo(-1, 9)
 })
+
+describe('generateLine from an as-cut groove (DF135 C4 follow-up)', () => {
+  const zsOf = (tp: Toolpath) =>
+    moves(tp)
+      .filter(({ m }) => m.kind !== 'rapid')
+      .map(({ m }) => m.to[2])
+  const rapidsBelow = (tp: Toolpath, z: number) =>
+    moves(tp).filter(({ m }) => m.kind === 'rapid' && m.to[2] < z).length
+
+  it('drops the passes nowhere below the old floor and enters the first kept one from it', () => {
+    const full = expectOk(generateLine(lineInput(STOCK, lineOp([curve()], 2), vBit)))
+    const input = { ...lineInput(STOCK, lineOp([curve()], 2), vBit), material: { top: -1.2 } }
+    const tp = expectOk(generateLine(input))
+    // passes at 0.5 mm: 4 in full, the first two (−0.5, −1) lie in the old groove
+    const levels = (t: Toolpath) => [...new Set(zsOf(t).map((z) => Math.round(z * 1e6) / 1e6))]
+    expect(Math.min(...zsOf(tp))).toBeCloseTo(-2, 9)
+    expect(levels(tp)).not.toContain(-0.5)
+    expect(levels(tp)).not.toContain(-1)
+    expect(levels(full)).toContain(-0.5)
+    // nothing cut above the old floor but the feed down to it
+    const cutting = moves(tp).filter(({ m }) => m.kind !== 'rapid')
+    expect(cutting[0]!.m.to[2]).toBeCloseTo(-1.2, 9)
+    expect(cutting.slice(1).every(({ m }) => m.to[2] <= -1.2 + 1e-9)).toBe(true)
+    expect(rapidsBelow(tp, 0)).toBe(0)
+    expect(tp.stats.cutLength).toBeLessThan(full.stats.cutLength)
+  })
+
+  it('keeps the last pass when the edit lies inside the old groove; no top is byte-equal', () => {
+    const tp = expectOk(
+      generateLine({
+        ...lineInput(STOCK, lineOp([square(40, 20, 10)], 1), vBit),
+        material: { top: -1.5 },
+      }),
+    )
+    expect(Math.min(...zsOf(tp))).toBeCloseTo(-1, 9)
+    // one pass at the floor (in the air), entered at it, never below it
+    expect(new Set(zsOf(tp).map((z) => z.toFixed(9)))).toEqual(new Set([(-1).toFixed(9)]))
+    const plain = lineInput(STOCK, lineOp([curve()], 1.3), vBit)
+    expect(expectOk(generateLine({ ...plain, material: {} }))).toEqual(
+      expectOk(generateLine(plain)),
+    )
+  })
+})

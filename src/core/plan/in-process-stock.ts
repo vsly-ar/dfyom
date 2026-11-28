@@ -8,7 +8,13 @@
  */
 import type { StockSize } from '../geometry/face'
 import { faceToFace } from '../geometry/face'
-import type { Vec2 } from '../geometry/model'
+import { chainBounds, type Region } from '../geometry/2d/model'
+import { regionContains } from '../geometry/2d/measure'
+import type { Region2dPort } from '../geometry/2d/port'
+import type { StockGeometry, Vec2 } from '../geometry/model'
+import { pocketRegion } from '../geometry/outline'
+import { holeRegion, isOpening, openingRegion, slotRegion } from '../geometry/through-depth'
+import { recutUnits } from '../design/already-cut'
 import type { Toolpath } from '../toolpath/model'
 import { toolpathTool } from '../toolpath/inputs'
 import {
@@ -18,6 +24,7 @@ import {
   type SimulateSetup,
 } from '../toolpath/simulate'
 import { setupAlignment } from './alignment'
+import { asCutRemovals } from './as-cut'
 import { cutTest } from './cut'
 import type { LoadedPlan } from './plan'
 import type { SetupDTO } from './plan.dto'
@@ -43,6 +50,10 @@ export type InProcessStockInput =
       readonly simulate: SimulateInput
       /** The cut plan operations, in machining order. */
       readonly operations: readonly string[]
+      /** C4 follow-up: the recut units' as-cut removals, stamped into the maps (`stampAsCut`). */
+      readonly stamps: readonly AsCutStamp[]
+      /** The recut units the stamps belong to. */
+      readonly recut: readonly string[]
       /** Some cut operation is in a side setup (±x, ±y): its removal is not drawn. */
       readonly sides: boolean
       /** Some cut toolpath is stale (drawn as last generated, as Plan draws outdated toolpaths). */
@@ -67,6 +78,7 @@ export function inProcessStockInput(
   plan: LoadedPlan,
   toolpathOf: (planOperationId: string) => CutToolpathEntry | undefined,
   zeroOf?: (setup: SetupDTO) => Vec2,
+  stamps: readonly AsCutStamp[] = [],
 ): InProcessStockInput {
   const isCut = cutTest(plan.dto.design.part)
   const stock: StockSize = {
@@ -103,17 +115,124 @@ export function inProcessStockInput(
     setups.push({ direction, rotation, zero, toolpaths })
     keys.push(`${setup.id}:${direction}:${rotation}:${zero[0]},${zero[1]}`)
   }
-  if (operations.length === 0) return { kind: 'none' }
+  if (operations.length === 0 && stamps.length === 0) return { kind: 'none' }
   if (missing.length > 0) return { kind: 'waiting', missing }
+  // a stamp's face needs its map even with no cut toolpath there
+  for (const st of stamps)
+    if (!setups.some((s) => s.direction === st.direction))
+      setups.push({ direction: st.direction, rotation: 0, zero: [0, 0], toolpaths: [] })
+  if (stamps.length > 0) keys.push(`asCut:${JSON.stringify(stamps)}`)
   const cell = inProcessCell(stock)
   return {
     kind: 'ready',
     simulate: { stock, cell, setups },
     operations,
+    stamps,
+    recut: [...new Set(stamps.map((st) => st.unit))],
     sides: setups.some((s) => s.direction !== '+z' && s.direction !== '-z'),
     outdated,
     key: [plan.dto.id, stock.length, stock.width, stock.thickness, cell, ...keys].join('|'),
   }
+}
+
+/**
+ * A recut unit's as-cut removal as the display draws it (DF135 C4 follow-up): a region of a ±z
+ * face (its face frame) or the whole face, lowered to `floor` (z in that frame, ≤ 0).
+ */
+export interface AsCutStamp {
+  readonly unit: string
+  readonly direction: '+z' | '-z'
+  readonly region: Region | 'face'
+  readonly floor: number
+}
+
+/**
+ * The stamps of the plan's recut units (DF135 C4 follow-up): the regions C4 counts as removed
+ * (`asCutRemovals`) – a facing's face, a pocket's region inset by its floor fillet, a blind
+ * profile's slot, a blind hole's disc, an opening's interior through – each to its floor. As-cut
+ * chamfers and Lines have no region (their material shows as still there, the safe side); side
+ * faces have no map. Empty without the 2D port or recut units.
+ * Doc: docs/modes/cut-state.md#in-process-stock-display-c5
+ */
+export function asCutStamps(plan: LoadedPlan, port: Region2dPort | undefined): AsCutStamp[] {
+  if (port === undefined || recutUnits(plan.dto.design.part).size === 0) return []
+  const stock: StockGeometry = {
+    length: plan.stock.length.canonical,
+    width: plan.stock.width.canonical,
+    thickness: plan.stock.thickness.canonical,
+  }
+  const out: AsCutStamp[] = []
+  for (const { geometry: g, unit } of asCutRemovals(plan, port)) {
+    const direction = g.direction ?? '+z'
+    if (direction !== '+z' && direction !== '-z') continue
+    const add = (region: Region | 'face' | undefined, floor: number) => {
+      if (region !== undefined && floor < 0) out.push({ unit, direction, region, floor })
+    }
+    if (g.kind === 'facing') add('face', -g.depth)
+    else if (g.kind === 'pocket' && g.roughing !== true) {
+      const r = pocketRegion(g).region
+      add(
+        g.floorRadius > 0 ? port.offset(r, g.floorRadius).mapOr(undefined, (x) => x) : r,
+        g.onZ - g.depth,
+      )
+    } else if (g.kind === 'profile' && g.depth !== undefined && g.roughing !== true)
+      add(slotRegion(g, stock, port), -g.depth)
+    else if (isOpening(g)) add(openingRegion(g, stock, port), -stock.thickness)
+    else if (g.kind === 'drilling' && g.bottom.kind !== 'through')
+      add(holeRegion(g, stock, port), g.onZ - g.bottom.depth)
+  }
+  return out
+}
+
+/**
+ * `maps` with every stamp lowered in (a cell whose centre lies in the stamp's region goes down to
+ * its floor, never below the stock's other face; a stamp only lowers). Maps are copied.
+ */
+export function stampAsCut(
+  maps: readonly CutMap[],
+  stamps: readonly AsCutStamp[],
+  stock: StockSize,
+): CutMap[] {
+  if (stamps.length === 0) return [...maps]
+  return maps.map((m) => {
+    const own = stamps.filter((st) => st.direction === m.direction)
+    if (own.length === 0) return m
+    const h = Float32Array.from(m.h)
+    const c = m.cell
+    for (const st of own) {
+      const floor = Math.max(-stock.thickness, st.floor)
+      let i0 = 0
+      let i1 = m.nu - 1
+      let j0 = 0
+      let j1 = m.nv - 1
+      if (st.region !== 'face') {
+        const lo: [number, number] = [Infinity, Infinity]
+        const hi: [number, number] = [-Infinity, -Infinity]
+        for (const p of st.region.pieces) {
+          const b = chainBounds(p.outer.elements)
+          if (b === undefined) continue
+          lo[0] = Math.min(lo[0], b.min[0])
+          lo[1] = Math.min(lo[1], b.min[1])
+          hi[0] = Math.max(hi[0], b.max[0])
+          hi[1] = Math.max(hi[1], b.max[1])
+        }
+        if (!(lo[0] <= hi[0] && lo[1] <= hi[1])) continue
+        i0 = Math.max(0, Math.floor(lo[0] / c - 0.5))
+        i1 = Math.min(m.nu - 1, Math.ceil(hi[0] / c - 0.5))
+        j0 = Math.max(0, Math.floor(lo[1] / c - 0.5))
+        j1 = Math.min(m.nv - 1, Math.ceil(hi[1] / c - 0.5))
+      }
+      for (let j = j0; j <= j1; j++)
+        for (let i = i0; i <= i1; i++) {
+          const k = j * m.nu + i
+          if (h[k]! <= floor) continue
+          if (st.region !== 'face' && !regionContains(st.region, [(i + 0.5) * c, (j + 0.5) * c]))
+            continue
+          h[k] = floor
+        }
+    }
+    return { ...m, h }
+  })
 }
 
 /** A cheap identity of a toolpath's moves (counts, lengths and time at full precision). */

@@ -131,6 +131,34 @@ export function edgeChamferPasses(
   return levels
 }
 
+/**
+ * The rings of `levels` less the rough rings whose cone lies wholly in a recut chamfer's as-cut
+ * bevel (DF135 C4 follow-up): `top` is the old bevel's depth below `onZ` (same edge and angle, its
+ * width w₁ = depth · tan(α/2)). A ring at offset o and tip depth z lies in it when its cone's reach
+ * at the face, z · tan(α_tool/2) + dt/2 − o, is at most w₁ and, at the tip, dt/2 − o ≤ (d₁ − z) ·
+ * tan(α/2). Bevel rings are always kept (they reach the new width); levels left empty go.
+ * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
+ */
+export function withoutAsCut(
+  levels: EdgeChamferRing[][],
+  op: { readonly onZ: number; readonly angle: number },
+  top: number | undefined,
+  tipDiameter: number,
+  toolAngle: number | undefined,
+): EdgeChamferRing[][] {
+  if (top === undefined || !(top < op.onZ)) return levels
+  const d1 = op.onZ - top
+  const t = Math.tan((op.angle * Math.PI) / 360)
+  const tt = Math.tan(((toolAngle ?? op.angle) * Math.PI) / 360)
+  const w1 = d1 * t
+  const inside = (r: EdgeChamferRing) =>
+    r.depth * tt + tipDiameter / 2 - r.offset <= w1 + 1e-9 &&
+    tipDiameter / 2 - r.offset <= (d1 - r.depth) * t + 1e-9
+  return levels
+    .map((rings) => rings.filter((r) => r.bevel || !inside(r)))
+    .filter((rings) => rings.length > 0)
+}
+
 /** One run as cut: its items at tip Z, and where a ring in the material is entered (E4b). */
 interface Group {
   readonly items: Item[]
@@ -206,7 +234,9 @@ export function generateEdgeChamfer(
   const ok = issues.result('generateEdgeChamfer', input.planOperationId)
   if (ok.isErr()) return Err(ok.unwrapErr())
 
-  const levels = edgeChamferPasses(op, { diameter: tool.diameter, tipDiameter: tip })
+  const all = edgeChamferPasses(op, { diameter: tool.diameter, tipDiameter: tip })
+  // DF135 C4 follow-up: a recut chamfer drops the rough rings that lie in its as-cut bevel
+  const levels = withoutAsCut(all, op, input.material?.top, tip, tool.angle)
   const edges = loopChamferEdgeLoops(op)
   const every = choosesEveryLoop(op)
   const corners = op.cornerLift === true ? loopChamferLiftCorners(op) : []
@@ -269,7 +299,7 @@ export function generateEdgeChamfer(
     groups.push(group)
   }
   const total = groups.reduce((s, g) => s + g.length, 0)
-  const single = levels.length === 1 && levels[0]!.length === 1
+  const single = all.length === 1 && all[0]!.length === 1
   let done = 0
   for (const group of groups) {
     // patterns P3: hundreds of cells take a grid of the start points (no golden has that many)

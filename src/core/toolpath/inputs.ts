@@ -15,6 +15,7 @@ import {
   type StockGeometry,
 } from '../geometry/model'
 import type { EdgeChamferOperation } from './edge-chamfer'
+import { isCutter } from './line'
 import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
 import { slotSplit } from '../geometry/slots'
 import type { MaterialBand } from '../geometry/through-depth'
@@ -83,7 +84,10 @@ function splitSaves(
 /** The least share of the work a split must save. */
 const SPLIT_GAIN = 0.05
 
-/** A drilling input's `material`: the band's top only (holes skip no levels below). */
+/**
+ * A drilling's or chamfer's input `material`: the band's top only (holes skip no levels below; a
+ * chamfer's top is its as-cut bevel's depth, DF135 C4 follow-up).
+ */
 const holeBand = (m: MaterialBand | undefined): { material?: MaterialBand } =>
   m?.top === undefined ? {} : { material: { top: m.top } }
 
@@ -712,6 +716,8 @@ export function toGeneratorInputs(
                 inputs: [
                   {
                     ...base,
+                    // a recut chamfer's bevel already cut (DF135 C4 follow-up)
+                    ...holeBand(input.materials?.get(op.id)),
                     cutting: {
                       spindleSpeed: c.spindleSpeed,
                       feedRate: c.feedRate,
@@ -747,6 +753,8 @@ export function toGeneratorInputs(
         ...turned,
         inputs: visits.map(({ operation }): ChamferInput => ({
           ...base,
+          // a recut chamfer's bevel already cut (DF135 C4 follow-up)
+          ...holeBand(input.materials?.get(operation.id)),
           cutting: { spindleSpeed: c.spindleSpeed, feedRate: c.feedRate, plungeRate: c.plungeRate },
           operation,
           strategy: strategyOf(operation),
@@ -763,6 +771,9 @@ export function toGeneratorInputs(
             inputs: [
               {
                 ...base,
+                // a recut Line starts on its as-cut groove's floor (DF135 C4 follow-up) when the
+                // plan's tool is the Line's cutter: the run cut the groove with it
+                ...(isCutter(tool, operation.cutter) ? material : {}),
                 cutting: {
                   spindleSpeed: c.spindleSpeed,
                   feedRate: c.feedRate,
