@@ -789,6 +789,12 @@
   color: var(--text);
 }
 
+/* DF146: the chosen instance, highlighted in the viewport while its group is selected */
+.instanceSelect[aria-current='true'] {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* drag to reorder (hardening U3, ui.md#reordering-lists-d45): as the design operation list, a
    setup list or plan operation list that can move reserves a grip slot before the row icons, and
    the grip shows there with the row's actions (hover, focus, selection, a running drag) */

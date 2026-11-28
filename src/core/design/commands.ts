@@ -287,7 +287,9 @@ const chamferParams = {
   edgeSide: z
     .enum(['left', 'right'])
     .nullable()
-    .describe('Through Line edge (required): the side that stays, of the line start→end'),
+    .describe(
+      'Line / on-profile edge (required): the side that stays, of the path start→end (loop: left = inside)',
+    ),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>

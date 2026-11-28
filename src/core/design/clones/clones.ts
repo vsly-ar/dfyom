@@ -53,6 +53,7 @@ import { itemChain } from '../shape-items'
 import type { Region2dPort } from '../../geometry/2d/port'
 import { Some } from '../../../shared/result'
 import { isInlinePath, type LinePath, type Part, type Shape } from '../operation'
+import { isOpenShape } from '../surfaces'
 import {
   flipFootprint,
   flipKey,
@@ -671,6 +672,15 @@ function instanceOf(
         moved = { ...moved, tabs: { ...moved.tabs, positions: Some(all.unwrap()) } }
       }
     }
+  }
+  // DF147 SL4: a one-sided chamfer keeps the mirror image of its side: one flip turns an open
+  // path's left into its right (a closed loop's sides are inside / outside, which a flip keeps)
+  if (moved.kind === 'chamfer' && moved.edgeSide.isSome() && flipped[0] !== flipped[1]) {
+    const edgeOf = moved.edgeOf
+    const edge = ctx.before.find((o) => o.id === edgeOf)
+    const loop = edge?.kind === 'profile' && !isOpenShape(edge.shape, tabs().shapes)
+    if (!loop)
+      moved = { ...moved, edgeSide: Some(moved.edgeSide.unwrap() === 'left' ? 'right' : 'left') }
   }
   const owner = surfaceOwner(op.on)
   const on = inSource.has(owner) ? ctx.ownedId(`${n}_${owner}`) + op.on.slice(owner.length) : op.on

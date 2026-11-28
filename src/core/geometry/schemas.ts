@@ -175,9 +175,12 @@ export const WallChamferGeometrySchema = z.object({
   onZ: z.number(),
   edgeOf: z.string(),
   wall: z.object({
-    element: ElementSchema,
+    elements: z.array(ElementSchema).min(1).readonly(),
+    closed: z.literal(true).exactOptional(),
     halfWidth: z.number(),
     side: z.enum(['left', 'right']),
+    capped: z.literal(true).exactOptional(),
+    floor: z.number().exactOptional(),
   }),
   width: z.number(),
   angle: z.number(),
@@ -227,6 +230,7 @@ export const LineGeometrySchema = z.object({
     z.object({ kind: z.literal('flat'), diameter: z.number() }),
   ]),
   through: z.literal(true).exactOptional(),
+  walled: z.literal(true).exactOptional(),
 })
 
 // two chamfer shapes share `kind`: the circular one first (it needs `center`), then the loop one

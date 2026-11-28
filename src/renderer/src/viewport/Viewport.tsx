@@ -81,6 +81,7 @@ import type { AnchorOverlay, FrameOverlay } from './Overlays'
 import type { DeviationView } from './deviation'
 import type { RegionMarkerView } from './DeviationLayer'
 import type { SlotDimensionView } from './SlotDimension'
+import type { EdgeSideArrowView } from './EdgeSideArrow'
 import type { TabOverlay } from './TabMarkers'
 import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
@@ -167,6 +168,8 @@ export interface ViewportProps {
   regionMarker?: RegionMarkerView | null
   /** A selected slotted Bolt hole's centre line and travel dimension (DF119 H3 follow-up). */
   slotDimension?: SlotDimensionView | null
+  /** A selected one-sided chamfer's side arrow; clicking a side keeps it (DF147 SL4 follow-up). */
+  edgeSide?: EdgeSideArrowView | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
@@ -309,6 +312,7 @@ export function Viewport({
   focus = null,
   regionMarker = null,
   slotDimension = null,
+  edgeSide = null,
   tinted = null,
   selectedAlso = null,
   outlineOnly = null,
@@ -844,6 +848,7 @@ export function Viewport({
           deviation={deviation}
           regionMarker={regionMarker}
           slotDimension={pick ? null : slotDimension}
+          edgeSide={pick ? null : edgeSide}
           seeThrough={seeThrough}
           reducedMotion={reducedMotion}
           controlsRef={controls}

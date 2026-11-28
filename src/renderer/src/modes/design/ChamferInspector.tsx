@@ -51,6 +51,7 @@ import {
   edgeLoopLabels,
   edgeOptions,
   isLoopEdge,
+  edgeSideNames,
   isWallEdge,
   wallSectionValues,
 } from './chamfer-view'
@@ -348,14 +349,16 @@ function SideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element 
 }
 
 /**
- * DF147 SL4: a through Line's chamfer: the side that stays (`edgeSide`), Left / Right of the line
- * from its start to its end; none on any other edge.
+ * DF147 SL4: a groove's chamfer (a Line's, a profile `on`'s): the side that stays (`edgeSide`),
+ * Left / Right of the path from its start to its end, Inside / Outside a closed loop; none on any
+ * other edge.
  */
 function EdgeSideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'chamfer') return null
   const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
   if (edge === undefined || !isWallEdge(edge)) return null
+  const names = edgeSideNames(ctx.part.dto, edge) === 'loop' ? t.edgeSidesLoop : t.edgeSides
   const messages: FieldMessage[] = [
     ...ctx.errors
       .filter((e) => e.path === 'edgeSide')
@@ -371,7 +374,7 @@ function EdgeSideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
     >
       <SegmentedControl<'left' | 'right'>
         label={t.edgeSide}
-        options={(['left', 'right'] as const).map((v) => ({ value: v, label: t.edgeSides[v] }))}
+        options={(['left', 'right'] as const).map((v) => ({ value: v, label: names[v] }))}
         value={op.edgeSide ?? 'left'}
         disabled={ctx.readOnly}
         onValueChange={(v) => v !== op.edgeSide && ctx.send({ edgeSide: v }, 'edgeSide')}

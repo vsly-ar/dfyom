@@ -104,14 +104,21 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
       if (isWallChamfer(op)) {
         const band = wallBand(op.wall, op.width)
         if (band === undefined) return []
-        const outer = {
-          elements: band.map((p, i) => line(p, band[(i + 1) % band.length]!)),
-        }
+        const loop = (pts: readonly (readonly [number, number])[]) => ({
+          elements: pts.map((p, i) => line(p, pts[(i + 1) % pts.length]!)),
+        })
         return [
           {
             direction,
             lowest: op.onZ - wallChamferDepth(op),
-            region: clip({ pieces: [{ outer, holes: [] }] }),
+            region: clip({
+              pieces: [
+                {
+                  outer: loop(band.outer),
+                  holes: band.hole === undefined ? [] : [loop(band.hole)],
+                },
+              ],
+            }),
           },
         ]
       }

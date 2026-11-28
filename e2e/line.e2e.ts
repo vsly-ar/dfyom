@@ -343,6 +343,21 @@ test('line: Depth → Through cuts the part off in Plan, with the cut-off warnin
   await side.getByRole('radio', { name: 'Right' }).click()
   await expect(side.getByRole('radio', { name: 'Right' })).toHaveAttribute('data-state', 'on')
   await shootPanel(page, inspector, 'line-chamfer-side')
+  // the viewport's side arrow: its anchors name the sides, the kept one pressed; picking the
+  // other side there keeps it (the strips' click and the anchor's Enter send the same update)
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  const keepRight = viewport.locator('[data-edge-side="right"]')
+  const keepLeft = viewport.locator('[data-edge-side="left"]')
+  await expect(keepRight).toHaveAttribute('aria-label', 'Right stays')
+  await expect(keepRight).toHaveAttribute('aria-pressed', 'true')
+  await expect(keepLeft).toHaveAttribute('aria-pressed', 'false')
+  await keepLeft.focus()
+  await page.keyboard.press('Enter')
+  await expect(side.getByRole('radio', { name: 'Left' })).toHaveAttribute('data-state', 'on')
+  await expect(keepLeft).toHaveAttribute('aria-pressed', 'true')
+  await keepRight.focus()
+  await page.keyboard.press('Enter')
+  await expect(side.getByRole('radio', { name: 'Right' })).toHaveAttribute('data-state', 'on')
 
   // ── Plan: generated; the cut-off warns that both sides come loose ──────────────────────────
   await planWithMachine(page)

@@ -12,6 +12,7 @@ import type { Loop } from '../../geometry/2d/model'
 import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
 import type { OperationGeometry } from '../../geometry/model'
 import { profileChain, shapeOutline } from '../../geometry/outline'
+import { wallBand } from '../../geometry/wall-chamfer'
 import { docToFiles, loadProjectFiles } from '../../project/layout'
 import { designSetup, type DesignSetup } from '../design.fixture'
 import { partGeometryInput } from '../load'
@@ -231,6 +232,54 @@ describe('mirrored geometry', () => {
         const want = f(src[i]!)
         expect(Math.hypot(q[0] - want[0], q[1] - want[1]), id).toBeLessThan(0.002)
       })
+  })
+
+  it('DF147 SL4: a one-sided chamfer keeps the mirror image of its side (a closed loop keeps its)', async () => {
+    const s = await setup()
+    await s.run('design.line.add', {
+      partId: s.partId,
+      paths: [{ segment: { start: ['10', '15'], end: ['60', '15'] } }],
+      depth: '3',
+    })
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'line1', edgeSide: 'left' })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { kind: 'rectangle', center: ['80', '15'], length: '10', width: '8' },
+      side: 'on',
+      depth: '2',
+      tabs: { count: '0' },
+    })
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'profile1', edgeSide: 'right' })
+    await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { operationIds: ['line1', 'chamfer1', 'profile1', 'chamfer2'] },
+      rows: [
+        { kind: 'mirror', flip: 'v', at: '30' },
+        { kind: 'mirror', flip: 'u', at: '50' },
+      ],
+    })
+    const side = (id: string) => (s.op(id) as unknown as { edgeSide: string }).edgeSide
+    // one flip: an open path's sides swap; both flips (a half turn): kept
+    expect(side('clones1_2_chamfer1')).toBe('right')
+    expect(side('clones1_3_chamfer1')).toBe('right')
+    expect(side('clones1_4_chamfer1')).toBe('left')
+    expect(['clones1_2_chamfer2', 'clones1_3_chamfer2', 'clones1_4_chamfer2'].map(side)).toEqual([
+      'right',
+      'right',
+      'right',
+    ])
+    // the bevel's band lies on the mirror image of the source's (above the line, then below)
+    const g = geometry(s)
+    const bandV = (id: string) => {
+      const op = g.get(id)
+      if (op?.kind !== 'chamfer' || !('wall' in op) || op.wall === undefined)
+        throw new Error('a wall chamfer expected')
+      const b = wallBand(op.wall, op.width)!.outer
+      return b.reduce((t, p) => t + p[1], 0) / b.length
+    }
+    expect(bandV('chamfer1')).toBeGreaterThan(15)
+    expect(bandV('clones1_2_chamfer1')).toBeLessThan(45)
+    expect(bandV('clones1_2_chamfer1')).toBeCloseTo(60 - bandV('chamfer1'), 6)
   })
 })
 

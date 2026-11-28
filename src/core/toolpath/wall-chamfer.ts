@@ -8,7 +8,12 @@
  * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
  */
 import { fail, Ok, type AppResult } from '../../shared/result'
-import { wallPath, type ChamferWall } from '../geometry/wall-chamfer'
+import {
+  isWallRefusal,
+  wallChamferDepth,
+  wallPath,
+  type ChamferWall,
+} from '../geometry/wall-chamfer'
 import { edgeChamferPasses } from './edge-chamfer'
 import type { LineOperation } from './line'
 import type { ToolpathTool } from './model'
@@ -45,6 +50,24 @@ export function wallChamferRings(
   const t = Math.tan(((angle / 2) * Math.PI) / 180)
   const levels = edgeChamferPasses(op, { diameter: tool.diameter, tipDiameter: dt })
   const g = op.wall.halfWidth
+  // a blind groove (or one above tabs): the bevel ends above its floor (rule `belowGroove`)
+  const floor = op.wall.floor
+  if (floor !== undefined && wallChamferDepth(op) > floor + TOL)
+    return fail(
+      'model.invariant',
+      `${op.id}: the bevel (${wallChamferDepth(op).toFixed(2)} mm deep) reaches below the groove's wall (${floor.toFixed(2)} mm)`,
+      {
+        where: 'wallChamferRings',
+        issues: [
+          {
+            path: ['operations', op.id, 'width'],
+            rule: 'belowGroove',
+            message: 'the bevel is deeper than the groove',
+            params: { depth: wallChamferDepth(op), floor },
+          },
+        ],
+      },
+    )
   const out: WallChamferRing[] = []
   for (const level of levels)
     for (const ring of level) {
@@ -68,6 +91,17 @@ export function wallChamferRings(
           },
         )
       const elements = wallPath(op.wall, d, reach, face)
+      if (isWallRefusal(elements))
+        return fail('model.invariant', `${op.id}: ${elements.message}`, {
+          where: 'wallChamferRings',
+          issues: [
+            {
+              path: ['operations', op.id, 'edgeOf'],
+              rule: elements.refused,
+              message: elements.message,
+            },
+          ],
+        })
       if (elements === undefined) continue
       out.push({
         depth: ring.depth,
@@ -78,7 +112,8 @@ export function wallChamferRings(
           paths: [{ center: [0, 0], contour: { kind: 'path', path: { elements } } }],
           depth: { start: ring.depth, end: ring.depth },
           cutter: { kind: 'vBit', diameter: tool.diameter, angle, tipDiameter: dt },
-          // open ends are entered from outside the stock (the through Line's side entry)
+          // open ends are entered from outside the stock (the through Line's side entry; a capped
+          // end runs out only when square on the stock edge, `openLead` checks the lead is air)
           through: true,
         },
       })

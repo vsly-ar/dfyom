@@ -81,6 +81,7 @@ import {
   usePlanData,
   usePlanState,
   usePlanStore,
+  shownInstance,
   type PlanData,
 } from './plan-store'
 import {
@@ -630,6 +631,11 @@ export interface PlanPartScene {
   readonly status: EvaluationStatus
   /** Design operations edited in the plan (tinted); null when none. */
   readonly tinted: ReadonlySet<string> | null
+  /**
+   * DF146: the instance whose position is highlighted (drawn selected): the hovered or focused
+   * instance row of a group, else the chosen one while its group is selected; null when none.
+   */
+  readonly selectedOperation: string | null
 }
 
 /** The snapshot scene's part, or null (not in plan mode, or no plan). */
@@ -638,6 +644,8 @@ export function usePlanPartScene(mode: AppMode): PlanPartScene | null {
   const plan = useScenePlan(mode)
   const evaluation = usePlanEvaluation(plan?.id)
   const doc = replica.status === 'open' ? replica.doc : undefined
+  const selected = useUi((s) => s.selection.plan)
+  const instance = usePlanState((s) => shownInstance(s, selected))
   const shape = useMemo(() => {
     if (plan === undefined || doc === undefined) return undefined
     const s = planPart(doc, plan).loaded?.stock
@@ -659,5 +667,6 @@ export function usePlanPartScene(mode: AppMode): PlanPartScene | null {
     stock: shape.stock,
     status: evaluation?.status ?? 'pending',
     tinted: shape.tinted,
+    selectedOperation: instance ?? null,
   }
 }

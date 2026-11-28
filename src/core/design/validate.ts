@@ -555,25 +555,38 @@ export function operationIssues(
         edgeKind !== undefined,
         'edgeOf',
         'chamferEdge',
-        `must be an earlier drilling, pocket, outside/inside profile or through Line${chamferEdgeWhyNot(edge)}`,
+        `must be an earlier drilling, pocket, profile or Line${chamferEdgeWhyNot(edge)}`,
         { actual: op.edgeOf },
       )
-      // DF147 SL4: a through Line's chamfer bevels the wall on the side that stays only
+      // DF147 SL4: a groove's chamfer (a Line's, a profile `on`'s) bevels the wall on the side
+      // that stays only
       if (edgeKind === 'wall') {
         c.check(
           op.edgeSide.isSome(),
           'edgeSide',
           'chamferSide',
-          'pick the side that stays (left or right of the line, from its start to its end)',
+          'pick the side that stays (left or right of the path, from its start to its end)',
         )
-        c.check(op.loops.isNone(), 'loops', 'chamferLoops', 'a line has no loops')
-        c.check(!op.cornerLift, 'cornerLift', 'chamferLift', 'a line has no corners')
+        c.check(op.loops.isNone(), 'loops', 'chamferLoops', 'a groove has no loops')
+        c.check(!op.cornerLift, 'cornerLift', 'chamferLift', 'a groove has no corner lift')
+        // the bevel ends above the groove's floor (and above a through profile's tabs)
+        const floor = grooveFloor(edge, T.canonical)
+        const angle = op.angle.canonical
+        const bevel = op.width.canonical / Math.tan(((angle / 2) * Math.PI) / 180)
+        if (floor !== undefined && angle > 0 && angle < 180)
+          c.check(
+            bevel <= floor + 1e-6,
+            'width',
+            'chamferBelowGroove',
+            `the bevel (${round3(bevel)} mm deep) must not reach below the groove's wall (${round3(floor)} mm)`,
+            { depth: round3(bevel), floor: round3(floor) },
+          )
       } else
         c.check(
           op.edgeSide.isNone(),
           'edgeSide',
           'chamferSide',
-          'only a through Line has a side that stays',
+          'only a groove (a Line, a profile on) has a side that stays',
         )
       // F7 terraces stay circular (edge-chamfers.md § Model)
       if (edgeKind === 'loop' || edgeKind === 'wall')
@@ -680,8 +693,29 @@ export function checkOperations(
 function chamferEdgeWhyNot(edge: Operation | undefined): string {
   if (edge?.kind === 'facing') return ' (a facing has no edge)'
   if (edge?.kind === 'chamfer') return ' (not another chamfer)'
-  if (edge?.kind === 'profile' && edge.side === 'on')
-    return ' (an "on" profile cuts a groove with two edges: not yet)'
-  if (edge?.kind === 'line') return ' (a Line with depth Through only)'
+  if (edge?.kind === 'line')
+    return ' (a Line along one straight line or arc without levels; Shape mode: not yet)'
   return ''
+}
+
+const round3 = (x: number): number => Math.round(x * 1000) / 1000
+
+/**
+ * DF147 SL4: the wall height of a groove a one-sided chamfer bevels (mm below its face): a Line's
+ * shallowest depth, a blind profile's depth, a through profile's above its tabs; undefined for a
+ * through groove without tabs (`T`: the stock below the face).
+ */
+function grooveFloor(edge: Operation | undefined, T: number): number | undefined {
+  if (edge?.kind === 'line') {
+    const d = edge.depth
+    if (d.kind === 'constant') return d.depth.canonical
+    if (d.kind === 'ramp') return Math.min(d.start.canonical, d.end.canonical)
+    return undefined
+  }
+  if (edge?.kind !== 'profile') return undefined
+  if (edge.depth.isSome()) return edge.depth.unwrap().canonical
+  const tabs = edge.tabs.positions.isSome()
+    ? edge.tabs.positions.unwrap().length > 0
+    : edge.tabs.count.canonical > 0
+  return tabs ? T - edge.tabs.thickness.canonical : undefined
 }

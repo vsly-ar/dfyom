@@ -328,7 +328,7 @@ describe('Viewport', () => {
     expect(controls.setLookAt).toHaveBeenCalledTimes(2)
   })
 
-  it('hands the region marker and the slot dimension to the scene; a pick hides the dimension', () => {
+  it('hands the region marker, the slot dimension and the side arrow to the scene; a pick hides both', () => {
     const slot = {
       centreLine: [
         [0, 0, 0],
@@ -346,16 +346,41 @@ describe('Viewport', () => {
       box: { min: [0, 0, -1] as const, max: [1, 1, 0] as const },
       sign: 'overcut' as const,
     }
+    const arrow = {
+      from: [0, 0, 0] as const,
+      to: [0, 4, 0] as const,
+      head: [
+        [-1, 3, 0],
+        [1, 3, 0],
+      ] as const,
+    }
+    const edgeSide = {
+      kept: 'left' as const,
+      arrows: { left: arrow, right: arrow },
+      strips: { left: [], right: [] },
+      labels: { left: 'Left stays', right: 'Right stays' },
+      locked: false,
+      onPick: () => {},
+    }
     const pick = { eligible: SAMPLE_PICK_ELIGIBLE, field: 'Depth' }
     let setPick: (p: typeof pick | null) => void = () => {}
     function Host(): React.JSX.Element {
       const [p, set] = useState<typeof pick | null>(null)
       setPick = set
-      return <Viewport mesh={mesh} slotDimension={slot} regionMarker={marker} pick={p} />
+      return (
+        <Viewport
+          mesh={mesh}
+          slotDimension={slot}
+          edgeSide={edgeSide}
+          regionMarker={marker}
+          pick={p}
+        />
+      )
     }
     renderUi(<Host />)
-    expect(sceneProps.last).toMatchObject({ slotDimension: slot, regionMarker: marker })
+    expect(sceneProps.last).toMatchObject({ slotDimension: slot, edgeSide, regionMarker: marker })
     act(() => setPick(pick))
     expect(sceneProps.last['slotDimension']).toBeNull()
+    expect(sceneProps.last['edgeSide']).toBeNull()
   })
 })

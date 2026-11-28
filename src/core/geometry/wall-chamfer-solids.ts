@@ -1,6 +1,6 @@
 /**
- * The removal solid of a one-sided chamfer along a through Line (DF147 SL4): a pointed cone of the
- * chamfer's angle swept along the slot's wall on the kept side (`wallPath` at the half width), its
+ * The removal solid of a one-sided chamfer along a groove (DF147 SL4): a pointed cone of the
+ * chamfer's angle swept along the groove's wall on the kept side (`wallPath` at the half width), its
  * tip at the bevel's depth, so its kept-side flank is the bevel and its other flank lies in the
  * slot (air). Open ends run on past the face; an inner end stops short by the bevel's width (the
  * slot's round end is not chamfered). Role `bevel`.
@@ -12,7 +12,7 @@ import { lineSolids } from './line'
 import type { LocalSolids } from './local-solids'
 import { OVERSHOOT, type StockGeometry, type WallChamferGeometry } from './model'
 import { localSolids, Table } from './local-solids'
-import { wallChamferDepth, wallPath } from './wall-chamfer'
+import { isWallRefusal, wallChamferDepth, wallPath } from './wall-chamfer'
 
 export function wallChamferSolids(
   op: WallChamferGeometry,
@@ -21,7 +21,9 @@ export function wallChamferSolids(
   const h = wallChamferDepth(op)
   const face = localStock(op.direction ?? '+z', stock)
   const elements = wallPath(op.wall, op.wall.halfWidth, op.width, face)
-  if (elements === undefined) return Ok(localSolids(op.id, new Table(), { removal: [] }))
+  // nothing left, or a path the toolpath refuses (its error names why): no removal
+  if (elements === undefined || isWallRefusal(elements))
+    return Ok(localSolids(op.id, new Table(), { removal: [] }))
   const t = Math.tan(((op.angle / 2) * Math.PI) / 180)
   return lineSolids(
     {

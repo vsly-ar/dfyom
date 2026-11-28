@@ -312,6 +312,12 @@ interface LineFields {
    * Doc: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
    */
   readonly through?: true
+  /**
+   * DF147 SL4 follow-up: a one-sided chamfer bevels this Line's groove (a Line with a depth): its
+   * walls must be straight, so it is cut by a flat end mill (as a through Line).
+   * Doc: docs/modes/engraved-patterns.md#implementation-sl3sl4
+   */
+  readonly walled?: true
 }
 
 export type LineGeometry = FacePlacement & LineFields
@@ -433,8 +439,9 @@ export const loopChamferTabGap = (tab: LoopChamferTab, width: number, tipDiamete
   tab.width / 2 + width + tipDiameter / 2 + LOOP_CHAMFER_TAB_CLEARANCE
 
 /**
- * DF147 SL4: a one-sided chamfer along a through Line (`edgeSide`): the bevel `width` × `angle` on
- * the slot's wall on the side that stays only (`wall`, see wall-chamfer.ts); `onZ` the Line's face.
+ * DF147 SL4: a one-sided chamfer along a groove (`edgeSide`: a Line's or a profile `on`'s): the
+ * bevel `width` × `angle` on the groove's wall on the side that stays only (`wall`, see
+ * wall-chamfer.ts); `onZ` the groove's face.
  * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
  */
 interface WallChamferFields {

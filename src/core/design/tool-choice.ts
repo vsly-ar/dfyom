@@ -404,8 +404,10 @@ function generalizedCandidates(input: ChoiceInput): GeneralizedTool[] {
   const { op, units } = input
   const plain = (q: Quantity) => plainLength(q.exact, units)
   const out: GeneralizedTool[] = []
-  // DF147 SL3: a through Line takes the end mills below
-  if (op.kind === 'chamfer' || (op.kind === 'line' && op.depth.kind !== 'through')) {
+  // DF147 SL3: a through Line takes the end mills below; SL4: so does a walled one
+  const g = input.geometry
+  const straightWalls = g.kind === 'line' && (g.through === true || g.walled === true)
+  if (op.kind === 'chamfer' || (op.kind === 'line' && !straightWalls)) {
     // a Line's generalized tool is a 60° V-bit (engraved-patterns.md § Tools)
     const angle =
       op.kind === 'line'
@@ -588,11 +590,17 @@ export function chooseTool(input: ChoiceInput): ToolChoice {
 /**
  * The tool a Line's groove takes (engraved-patterns.md § Line operation): its tool field's chamfer
  * mill (V-bit), tapered ball (docs/modes/tapered-ball-nose.md#line-operation), ball or flat end mill; else (auto with nothing chosen, another type, a snapshot
- * that does not resolve) the default 60° V-bit.
+ * that does not resolve) the default 60° V-bit. A through or `walled` Line (DF147 SL3/SL4): its
+ * flat end mill, else the default Ø6 flat.
  */
-export function lineCutter(op: Operation, snapshots?: ProjectDoc['snapshots']): LineCutter {
-  // DF147 SL3: a through Line is cut by a flat end mill (another chosen type is the plan's unfit)
-  const through = op.kind === 'line' && op.depth.kind === 'through'
+export function lineCutter(
+  op: Operation,
+  snapshots?: ProjectDoc['snapshots'],
+  walled = false,
+): LineCutter {
+  // DF147 SL3: a through Line is cut by a flat end mill (another chosen type is the plan's unfit);
+  // SL4: so is a Line whose groove a one-sided chamfer bevels (`walled`)
+  const through = (op.kind === 'line' && op.depth.kind === 'through') || walled
   const fallback = through ? DEFAULT_THROUGH_CUTTER : DEFAULT_LINE_CUTTER
   if (op.tool.isNone()) return fallback
   const t = resolveDesignTool(op.tool.unwrap(), snapshots ?? {})

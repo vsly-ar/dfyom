@@ -36,6 +36,7 @@ import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
 import { overlayView } from './reference-overlay'
 import { ghostMatrix, referencePlacement, sectionMatrix, stockSizeOf } from './reference-view'
 import { useTabMarkers } from './useTabMarkers'
+import { useEdgeSideArrow } from './useEdgeSideArrow'
 import { useReferenceCompare } from './useReferenceCompare'
 import { deviationView, worstRegion } from './reference-compare-state'
 import { lengthSource } from './reference-view'
@@ -295,6 +296,8 @@ export function useDesignScene(): SceneProps {
   }, [faceId, part])
   const selectedDto = part?.dto.operations.find((o) => o.id === shown)
   const tabs = useTabMarkers(part, selectedDto)
+  // DF147 SL4 follow-up: a selected one-sided chamfer's side arrow, a click keeps a side
+  const edgeSide = useEdgeSideArrow(part, selectedDto)
   const clones = useClonesScene(part, shown, warnings)
   // DF122 R2: a pocket and its roughing pocket cut one region, so either selected draws both (the
   // roughing pocket has no faces of its own; roughing.md § UI, "Design viewport: nothing new")
@@ -421,6 +424,7 @@ export function useDesignScene(): SceneProps {
     deviation,
     focus: viewportFocus,
     slotDimension: slot,
+    edgeSide,
     seeThrough: panel && seeThroughStock && ghosts.length > 0,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),

@@ -362,10 +362,13 @@ export function toolFit(
     }
     case 'line': {
       // DF147 SL3: a through Line is a slot as wide as a flat end mill
-      if (op.through === true && tool.type !== 'flatEndMill')
+      if ((op.through === true || op.walled === true) && tool.type !== 'flatEndMill')
         return {
           rule: 'type',
-          detail: 'a through Line needs a flat end mill',
+          detail:
+            op.through === true
+              ? 'a through Line needs a flat end mill'
+              : 'a Line with a one-sided chamfer needs a flat end mill (straight walls)',
           values: { needs: 'flatEndMill' },
         }
       // a V-bit (chamfer mill with an angle), a tapered ball (tapered-ball-nose.md), a ball or a
