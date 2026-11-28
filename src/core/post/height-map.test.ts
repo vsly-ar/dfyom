@@ -254,7 +254,7 @@ describe('refusals', () => {
     expect(e.message).toContain('X 46.0 Y 10.0')
   })
 
-  it('a touch-off spot outside the map, or none', () => {
+  it('a touch-off spot outside the map (X0 Y0 without one)', () => {
     const far = { ...gridMap(), origin: [40, 40] as const }
     expect(rule(applyHeightMap(program(), far))).toBe('anchor')
     const noSpot = engraving().map((b): Block => {
@@ -262,7 +262,9 @@ describe('refusals', () => {
       const { zRef: _z, ...rest } = b
       return rest
     })
-    expect(rule(applyHeightMap(program(noSpot), gridMap()))).toBe('anchor')
+    // without a spot the run touches off at X0 Y0: inside this map, outside the far one
+    expectOk(applyHeightMap(program(noSpot), gridMap()))
+    expect(rule(applyHeightMap(program(noSpot), far))).toBe('anchor')
   })
 
   it('a rise reaching the clearance height', () => {

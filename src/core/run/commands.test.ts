@@ -807,6 +807,55 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().state).toBe('Idle')
   })
 
+  it('v0.5 RV10: run.job.check and run.job.start follow a surface map of this setup and G54', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const setupId = t.s.plan(t.planId).setups[0]!.id
+    const g54 = t.status().workZero
+    // a 3 × 3 grid over −100…500, tilted 0.4 mm over 600 mm in X
+    const map = {
+      setupId,
+      origin: [-100, -100],
+      spacing: [300, 300],
+      cols: 3,
+      rows: 3,
+      z: [0, 0.2, 0.4, 0, 0.2, 0.4, 0, 0.2, 0.4],
+      workZero: [g54[0], g54[1]],
+    }
+    const plain = expectOk(await t.run('run.job.check', { planId: t.planId, program: true })) as {
+      program: { lines: string[] }
+      surface?: unknown
+    }
+    expect(plain.surface).toBeUndefined()
+    const followed = expectOk(
+      await t.run('run.job.check', { planId: t.planId, program: true, surfaceMap: map }),
+    ) as { program: { lines: string[] }; surface: { maxDz: number; range: number } }
+    expect(followed.surface.range).toBeCloseTo(0.4, 9)
+    expect(followed.surface.maxDz).toBeGreaterThan(0)
+    expect(followed.program.lines).not.toEqual(plain.program.lines)
+    // another G54 X/Y, another setup, a malformed map, a file: refused before anything moves
+    const moved = { ...map, workZero: [g54[0] + 1, g54[1]] }
+    const e = expectErrCode(
+      await t.run('run.job.check', { planId: t.planId, surfaceMap: moved }),
+      'run.surfaceMap',
+    )
+    expect(e.issues[0]?.rule).toBe('zero')
+    const other = await t.job('run.job.start', {
+      planId: t.planId,
+      surfaceMap: { ...map, setupId: 'other' },
+    })
+    expectErrCode(await other.result, 'run.surfaceMap')
+    expectErrCode(
+      await t.run('run.job.check', { planId: t.planId, surfaceMap: { ...map, cols: 'x' } }),
+      'input.malformed',
+    )
+    expectErrCode(
+      await t.run('run.job.check', { file: '/files/a.nc', surfaceMap: map }),
+      'run.surfaceMap',
+    )
+    expect(t.status().state).toBe('Idle')
+  })
+
   it('run.job.check { program: true } returns the checked program and its resume points (DF129 RC3)', async () => {
     const file = '/files/fusion-grbl.nc'
     const text = fs.readFileSync(new URL('./__fixtures__/fusion-grbl.nc', import.meta.url), 'utf8')

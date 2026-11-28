@@ -58,6 +58,8 @@ export interface HeightMapOptions {
 }
 
 const EPS = 1e-6
+/** The touch-off spot of a tool run without a Z reference (a program not from a plan). */
+const WORK_ZERO_SPOT: readonly [number, number] = [0, 0]
 const where = 'heightMap'
 
 function refused(rule: string, message: string, params: Record<string, unknown> = {}) {
@@ -212,7 +214,7 @@ const fmt1 = (v: number) => (Math.round(v * 10) / 10).toFixed(1)
  * The program with its Z following the map (docs/modes/run-surface.md#following-the-map): every
  * move with an end below the clearance height split into segments of at most `maxSegment` in X/Y
  * (arcs linearised first), each end below the clearance offset by `h(x, y) − h(spot)` of its tool
- * run's touch-off spot. Refused (`run.surfaceMap`) for an incomplete map, a range over the limit,
+ * run's touch-off spot (X0 Y0 without one). Refused (`run.surfaceMap`) for an incomplete map, a range over the limit,
  * a move or a touch-off spot more than one cell outside the grid, or a dz reaching the clearance.
  */
 export function applyHeightMap(
@@ -240,14 +242,13 @@ export function applyHeightMap(
   const out: Block[] = []
   let pos: Vec3 | undefined
   let anchor: { at: readonly [number, number]; h: number } | undefined
-  let anchorAt: readonly [number, number] | undefined
+  // a run without a spot (no plan's Z reference) touches off at the work zero
+  let anchorAt: readonly [number, number] = WORK_ZERO_SPOT
   let maxDz = 0
   let split = 0
 
   const useAnchor = (): AppResult<number> => {
     if (anchor !== undefined) return Ok(anchor.h)
-    if (anchorAt === undefined)
-      return refused('anchor', 'A tool run has no touch-off spot to anchor the map at.')
     const a = h(anchorAt[0], anchorAt[1])
     if (a === undefined)
       return refused(
@@ -311,7 +312,7 @@ export function applyHeightMap(
 
   for (const b of program.blocks) {
     if (b.kind === 'toolChange') {
-      anchorAt = b.zRef?.at
+      anchorAt = b.zRef?.at ?? WORK_ZERO_SPOT
       anchor = undefined
       out.push(b)
       // the post retracts to the clearance (and may rapid to the spot) after a tool change

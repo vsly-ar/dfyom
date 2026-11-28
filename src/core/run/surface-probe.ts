@@ -190,3 +190,43 @@ export async function probeSurfacePoint(
   if (c.isErr()) return Err(c.unwrapErr())
   return Ok({ z: c.unwrap().value, uncertainty: c.unwrap().uncertainty })
 }
+
+/** A map's G54 X/Y may differ from the live one by this much (mm). */
+export const MAP_ZERO_TOLERANCE = 0.01
+
+/**
+ * The map belongs to this run (docs/modes/run-surface.md#refusals): taken for `setupId` at the live
+ * G54 X/Y within `MAP_ZERO_TOLERANCE`; else `run.surfaceMap` rule `zero`.
+ */
+export function surfaceMapZero(
+  map: HeightMap & { readonly setupId?: string },
+  setupId: string,
+  workZero: readonly [number, number, number],
+): AppResult<void> {
+  const off =
+    map.workZero === undefined ||
+    Math.abs(map.workZero[0] - workZero[0]) > MAP_ZERO_TOLERANCE ||
+    Math.abs(map.workZero[1] - workZero[1]) > MAP_ZERO_TOLERANCE
+  if (map.setupId !== undefined && map.setupId !== setupId) {
+    const message = 'The surface map is of another setup: map this setup.'
+    return fail('run.surfaceMap', message, {
+      where: 'surfaceMapZero',
+      issues: [{ path: ['surfaceMap'], rule: 'zero', message }],
+    })
+  }
+  if (off) {
+    const message = 'The work zero moved since the map was taken: map the surface again.'
+    return fail('run.surfaceMap', message, {
+      where: 'surfaceMapZero',
+      issues: [
+        {
+          path: ['surfaceMap'],
+          rule: 'zero',
+          message,
+          params: { map: map.workZero ?? null, workZero: [workZero[0], workZero[1]] },
+        },
+      ],
+    })
+  }
+  return Ok(undefined)
+}
