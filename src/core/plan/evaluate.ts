@@ -146,7 +146,13 @@ export function evaluateOperation(
       : undefined
   const strategy: ResolvedStrategy =
     aid?.kind === 'witnessMark'
-      ? { kind: 'chamfer', entry: 'plunge', rampAngle: 3, cutDepth: markDepth ?? 0 }
+      ? {
+          kind: 'chamfer',
+          entry: 'plunge',
+          rampAngle: 3,
+          cutDepth: markDepth ?? 0,
+          passDepth: markDepth ?? 0,
+        }
       : resolveStrategy(
           kind,
           aid?.kind === 'registrationHole'
@@ -214,6 +220,10 @@ export function evaluateOperation(
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
       ...(strategy.kind === 'chamfer' || strategy.kind === 'line'
         ? { chamferDepth: strategy.cutDepth }
+        : {}),
+      // DF157: a chamfer in levels meets one level per pass (F6's ap)
+      ...(strategy.kind === 'chamfer' && strategy.passDepth < strategy.cutDepth
+        ? { chamferPassDepth: strategy.passDepth }
         : {}),
       // DF141: a plunged chamfer cuts at the plunge rate, the annulus between its edge Ø and the
       // cone (F12); the smallest edge of the group (a witness mark: solid, 0)

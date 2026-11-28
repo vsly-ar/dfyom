@@ -1,6 +1,7 @@
 /**
  * `generateLine` (engraved-patterns.md E1): a Line's grooves on their centrelines, in depth passes
- * of at most `stepdown`. Pass k cuts z_k(s) = max(z(s), onZ − k · stepdown), the last the profile.
+ * of at most `stepdown`, evenly spread (DF158): with n = ⌈max depth / stepdown⌉ and h = max depth / n,
+ * pass k cuts z_k(s) = max(z(s), onZ − k · h), the last the profile.
  * Open lines alternate direction (no return rapid) and enter each pass by a ramp-back: along the
  * floor already cut `Lr` ahead, then back to the pass start at ≤ `rampAngle`, never below the
  * pass; a line too short for that zigzags on itself. Closed lines keep their direction, start at
@@ -119,10 +120,14 @@ export function linePassCount(maxDepth: number, stepdown: number): number {
   return Math.max(1, Math.ceil(maxDepth / stepdown - 1e-9))
 }
 
-/** Pass k's target (1-based): the profile, no deeper than onZ − k · stepdown. */
-export function passTarget(z: ZProfile, onZ: number, k: number, stepdown: number): ZProfile {
+/**
+ * Pass k's target (1-based): the profile, no deeper than onZ − k · `step`. `cutLine` passes the
+ * even step max depth / n (DF158: no sliver last pass), never more than the stepdown.
+ * Doc: docs/modes/engraved-patterns.md#toolpath-plan
+ */
+export function passTarget(z: ZProfile, onZ: number, k: number, step: number): ZProfile {
   const L = z.s[z.s.length - 1]!
-  return maxZ(z, flatZ(L, onZ - k * stepdown))
+  return maxZ(z, flatZ(L, onZ - k * step))
 }
 
 /** A line as a path by arc length: points, pieces and breaks (element ends, every 90° of arc). */
@@ -412,6 +417,8 @@ export function cutLine(
   const L = path.length
   const deepest = Math.min(...z.z)
   const n = linePassCount(onZ - deepest, c.stepdown)
+  // DF158: equal passes (a 10.6 mm cut at 0.311 is 35 × 0.3029, not 34 × 0.311 and 0.026)
+  const step = (onZ - deepest) / n
   const floor = top === undefined ? onZ : Math.min(onZ, top)
   const tan = Math.tan((st.rampAngle * Math.PI) / 180)
   const at = (s: number, h: number): Vec3 => {
@@ -427,7 +434,7 @@ export function cutLine(
   let cuts = 0
   const zf = (f: ZProfile) => (s: number) => evalZ(f, path.fold(s))
   for (let k = 1; k <= n; k++) {
-    const target = passTarget(z, onZ, k, c.stepdown)
+    const target = passTarget(z, onZ, k, step)
     // C4: a pass nowhere below the as-cut groove's floor is in the air
     if (k < n && floor < onZ && Math.min(...target.z) >= floor - EPS) continue
     const first = cuts === 0

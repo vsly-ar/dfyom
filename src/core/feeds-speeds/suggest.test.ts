@@ -354,6 +354,19 @@ describe('hobby metal cutting (hardening DF131, TG #425)', () => {
     expect(codes(userCase('extrusion', { engagement: { kind: 'stepover', ae: 1 } }))).not.toContain(
       'feeds.manyFlutes',
     )
+    // DF157: a facing pass at 75 % stepover has an open side; a full-width one is a slot
+    const ae = (x: number) => userCase('extrusion', { engagement: { kind: 'stepover', ae: x } })
+    expect(codes(ae(0.75 * 6.33))).not.toContain('feeds.manyFlutes')
+    expect(codes(ae(6.33))).toContain('feeds.manyFlutes')
+    // DF157: never for a chamfer mill (the plate's 3-flute V-bit countersinks and chamfer)
+    const v = tool({
+      type: 'chamferMill',
+      diameter: len('6.35'),
+      angle: deg('90'),
+      fluteCount: num('3'),
+    })
+    const chamfer = userCase('extrusion', { tool: v, engagement: { kind: 'chamfer', depth: 1 } })
+    expect(codes(chamfer)).not.toContain('feeds.manyFlutes')
   })
 
   it('the final-value check flags the failed run’s power only above 80 % (it was 67 %)', () => {
@@ -533,6 +546,19 @@ describe('suggestCutting: engagement and chip thinning', () => {
     expect(tipped.display.unwrap().dCalc).toBeCloseTo(6, 9)
     const deep = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 20 } })
     expect(deep.display.unwrap().dCalc).toBe(12)
+  })
+
+  it('DF157: a chamfer cut in levels: F6 at one level (ap), speed and chip load at the full depth', () => {
+    const machine = limits({ power: Some(800), maxSpeed: 24_000, rigidity: 'rigidMill' })
+    const full = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 2.5 }, machine })
+    const level = suggest({
+      tool: vbit(),
+      engagement: { kind: 'chamfer', depth: 2.5, ap: 2.5 / 3 },
+      machine,
+    })
+    expect(level.display.unwrap().dCalc).toBeCloseTo(5, 9)
+    expect(value(level.spindleSpeed)).toBeCloseTo(value(full.spindleSpeed), 9)
+    expect(level.display.unwrap().Q.unwrap()).toBeCloseTo(full.display.unwrap().Q.unwrap() / 3, 6)
   })
 
   // Doc: docs/architecture/feeds-speeds.md#plunged-chamfers-hardening-df141

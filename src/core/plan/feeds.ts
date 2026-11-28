@@ -83,6 +83,8 @@ export interface FeedsInput {
   readonly helixPitch?: number
   /** Chamfer (v0.4): the cut's depth below the tool tip (mm), the resolved strategy's `cutDepth`. */
   readonly chamferDepth?: number
+  /** DF157: a chamfer cut in levels: one level's depth (mm), F6's `ap` (`passDepth`). */
+  readonly chamferPassDepth?: number
   /**
    * DF141: a chamfer plunged by a chamfer mill into an edge (hole) of this Ø (0: solid, a witness
    * mark): its power is F12 at the plunge rate (feeds-speeds.md § Plunged chamfers).
@@ -322,7 +324,10 @@ function presetUse(
 
 /** The calculator's engagement: the strategy's (facing: its stepover, never an entered one). */
 function engagementOf(
-  i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth' | 'chamferPlunge'>,
+  i: Pick<
+    FeedsInput,
+    'kind' | 'tool' | 'helixPitch' | 'chamferDepth' | 'chamferPassDepth' | 'chamferPlunge'
+  >,
 ): Engagement {
   const D = i.tool.diameter.canonical
   switch (i.kind) {
@@ -343,6 +348,7 @@ function engagementOf(
         : {
             kind: 'chamfer',
             depth: i.chamferDepth ?? 0,
+            ...(i.chamferPassDepth === undefined ? {} : { ap: i.chamferPassDepth }),
             ...(i.chamferPlunge === undefined ? {} : { plunge: i.chamferPlunge }),
           }
     case 'line':

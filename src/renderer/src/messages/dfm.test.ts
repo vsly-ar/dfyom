@@ -37,6 +37,17 @@ describe('dfm messages', () => {
     expect(dfmMessages.text(w({}), 'inch', names)).toContain('0.125"')
   })
 
+  it('a cut-off names the offcut once a one-sided chamfer keeps a side (DF160)', () => {
+    const cut = (kept: object) =>
+      dfmMessages.text(
+        w({ code: 'dfm.loosePiece', params: { volume: 1, cutOff: true, ...kept } }),
+        'mm',
+        names,
+      )
+    expect(cut({})).toMatch(/^This line cuts a piece off the part/)
+    expect(cut({ kept: true })).toMatch(/^This line cuts the offcut off the part/)
+  })
+
   it('names operations and surfaces by their readable names, never their ids (DF43)', () => {
     const missing = dfmMessages.text(
       w({

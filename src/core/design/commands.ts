@@ -56,6 +56,7 @@ import {
   BAND_EDGES,
   type FacingRegion,
   isBottomChamfer,
+  isInlinePath,
   operationToDTO,
   isGeneralShape,
   patternCells,
@@ -117,7 +118,7 @@ import { derivedPartError } from './split/derived'
 import { splitWarnings } from './split/findings'
 import { dropUnusedToolSnapshot, ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
-import { defaultSlotWidth, lengthSourceUp, resolveDesignTool } from './tool-choice'
+import { defaultSlotWidth, lengthSourceUp, lineCutter, resolveDesignTool } from './tool-choice'
 import { toGeometryInput } from './geometry-input'
 import { Tool } from '../library/tool'
 import { reanchor, shapeCentre, type Extents } from './anchor'
@@ -274,7 +275,7 @@ const lineParams = {
 const chamferParams = {
   edgeOf: OperationIdSchema.describe('Earlier drilling, pocket or outside/inside profile'),
   on: SurfaceIdSchema.describe(
-    "Default the edge's face; the opposite stock face: a through profile's bottom edge (flip)",
+    "Default the edge's face; the opposite stock face: a through profile's bottom edge (flip); a one-sided Line chamfer: a top facing's floor (default: the band holding its kept side, DF155)",
   ),
   width: Src.describe('At the face (1.5 × 45°: 1.5); default 0.5 mm'),
   depth: Src.describe('Instead of width'),
@@ -980,6 +981,8 @@ interface BuildContext {
   readonly ops: readonly Operation[]
   /** The part's stock (on add: the default `on` under a centre, DF154). */
   readonly stock?: Stock
+  /** The document's snapshots (DF155: a Line's design cutter for a one-sided chamfer's `on`). */
+  readonly snapshots?: ProjectDoc['snapshots']
 }
 
 /** One operation kind: its parameter args and how args (plus the previous version) build it. */
@@ -1185,10 +1188,17 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
   kind: 'chamfer',
   params: chamferParams,
   required: ['edgeOf'],
-  build: (a, prev, { f, id, name, ops }) => {
+  build: (a, prev, { f, id, name, ops, stock, snapshots }) => {
     const edgeOf = a.edgeOf ?? prev!.edgeOf
     const index = ops.findIndex((o) => o.id === id)
-    const edge = (index < 0 ? ops : ops.slice(0, index)).find((o) => o.id === edgeOf)
+    const before = index < 0 ? ops : ops.slice(0, index)
+    const edge = before.find((o) => o.id === edgeOf)
+    const edgeSide: Option<'left' | 'right'> =
+      a.edgeSide === undefined
+        ? (prev?.edgeSide ?? None)
+        : a.edgeSide === null
+          ? None
+          : Some(a.edgeSide)
     const angle = f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle')
     const width = (): Quantity => {
       if (a.width !== undefined && a.depth !== undefined)
@@ -1207,7 +1217,12 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       id,
       name,
       generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-      on: chamferOnOf(a.on, edge, prev, ops),
+      on: chamferOnOf(a.on, edge, prev, ops, {
+        side: edgeSide,
+        before,
+        ...(stock === undefined ? {} : { stock }),
+        ...(snapshots === undefined ? {} : { snapshots }),
+      }),
       edgeOf,
       width: width(),
       angle,
@@ -1223,26 +1238,30 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
             : Some([...new Set(a.loops)].sort((x, y) => x - y)),
       cornerLift: a.cornerLift ?? prev?.cornerLift ?? false,
       // DF147 SL4: null = none
-      edgeSide:
-        a.edgeSide === undefined
-          ? (prev?.edgeSide ?? None)
-          : a.edgeSide === null
-            ? None
-            : Some(a.edgeSide),
+      edgeSide,
     }
   },
 }
 
 /**
  * A chamfer's `on`: the given face (a through profile's opposite stock face for its bottom edge,
- * edge-chamfers.md E4b; anything else is refused by rule `chamferOn`), else the edge's face, or
- * its bottom face when the chamfer was a bottom chamfer before the edit (a new edge keeps the side).
+ * edge-chamfers.md E4b; a one-sided chamfer's kept-side facing floor, DF155; anything else is
+ * refused by rule `chamferOn`), else the edge's face, or its bottom face when the chamfer was a
+ * bottom chamfer before the edit (a new edge keeps the side). DF155: a one-sided chamfer of a
+ * straight top-face Line stands on the floor of a facing region that holds its kept side at the
+ * wall (`keptSideFloor`); an edit that keeps the edge and the side keeps its `on`.
  */
 function chamferOnOf(
   on: string | undefined,
   edge: Operation | undefined,
   prev: Extract<Operation, { kind: 'chamfer' }> | undefined,
   ops: readonly Operation[],
+  kept: {
+    readonly side: Option<'left' | 'right'>
+    readonly before: readonly Operation[]
+    readonly stock?: Stock
+    readonly snapshots?: ProjectDoc['snapshots']
+  },
 ): string {
   if (on !== undefined) return on
   if (edge === undefined) return prev?.on ?? STOCK_TOP
@@ -1252,7 +1271,60 @@ function chamferOnOf(
       prev,
       ops.find((o) => o.id === prev.edgeOf),
     )
-  return (wasBottom ? bottomEdgeFace(edge) : undefined) ?? edge.on
+  if (wasBottom) return bottomEdgeFace(edge) ?? edge.on
+  if (kept.side.isNone()) return edge.on
+  const side = kept.side.unwrap()
+  if (
+    prev !== undefined &&
+    prev.edgeOf === edge.id &&
+    prev.edgeSide.isSome() &&
+    prev.edgeSide.unwrap() === side
+  )
+    return prev.on
+  return (
+    (kept.stock === undefined
+      ? undefined
+      : keptSideFloor(edge, side, kept.before, kept.stock, kept.snapshots)) ?? edge.on
+  )
+}
+
+/**
+ * DF155: the floor of the last top facing region that holds the kept side (`side`) of a straight
+ * top-face Line at its wall: probed at the segment's middle, 1 mm past the wall (half the Line's
+ * design cutter from its centreline); undefined for anything else (an arc, a named path, a Line on
+ * another face, no such facing).
+ * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
+ */
+export function keptSideFloor(
+  edge: Operation,
+  side: 'left' | 'right',
+  before: readonly Operation[],
+  stock: Stock,
+  snapshots?: ProjectDoc['snapshots'],
+): string | undefined {
+  if (edge.kind !== 'line' || edge.on !== STOCK_TOP || edge.paths.length !== 1) return undefined
+  const p = edge.paths[0]!
+  if (!isInlinePath(p) || p.kind !== 'segment') return undefined
+  const a = [p.start[0].canonical, p.start[1].canonical]
+  const b = [p.end[0].canonical, p.end[1].canonical]
+  const len = Math.hypot(b[0]! - a[0]!, b[1]! - a[1]!)
+  if (!(len > 0)) return undefined
+  const d = [(b[0]! - a[0]!) / len, (b[1]! - a[1]!) / len]
+  // left of start → end: the direction turned counter-clockwise
+  const n = side === 'left' ? [-d[1]!, d[0]!] : [d[1]!, -d[0]!]
+  const reach = lineCutter(edge, snapshots, true).diameter / 2 + 1
+  const center: [number, number] = [
+    (a[0]! + b[0]!) / 2 + n[0]! * reach,
+    (a[1]! + b[1]!) / 2 + n[1]! * reach,
+  ]
+  const facing = before.findLast(
+    (o) =>
+      o.kind === 'facing' &&
+      o.on === STOCK_TOP &&
+      o.region !== undefined &&
+      regionHolds(o.region, { stock, center }),
+  )
+  return facing === undefined ? undefined : `${facing.id}.floor`
 }
 
 /** Micrometres per mm: a width from a depth is kept to 1 µm (tan is irrational but at 90°). */
@@ -1385,6 +1457,9 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         name: args.name ?? `${label} ${n}`,
         ops,
         stock,
+        ...(loaded.unwrap().snapshots === undefined
+          ? {}
+          : { snapshots: loaded.unwrap().snapshots }),
       })
       const generalTolerance = f.tolerance(args.generalTolerance, NO_TOLERANCE)
       const parsed = f.done()
@@ -1555,7 +1630,14 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   const ops = part.operations
   const prev = ops[i] as O
   const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(i), env)
-  const built = spec.build(args, prev, { f, id: prev.id, name: args.name ?? prev.name, ops })
+  const built = spec.build(args, prev, {
+    f,
+    id: prev.id,
+    name: args.name ?? prev.name,
+    ops,
+    stock,
+    ...(loaded.snapshots === undefined ? {} : { snapshots: loaded.snapshots }),
+  })
   const op = {
     ...built,
     generalTolerance: f.tolerance(args.generalTolerance, prev.generalTolerance),

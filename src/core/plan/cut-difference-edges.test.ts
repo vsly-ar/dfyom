@@ -284,8 +284,8 @@ describe('cut state C4 follow-up: recut Lines and chamfers cut the difference', 
     // the material top is the old groove's floor (no facing: the raw top is Z0)
     const zs = cutZs(tp)
     expect(Math.min(...zs)).toBeCloseTo(-4, 6)
-    // the first pass at 1.5 mm is dropped: each line's only move that high is its feed down to
-    // the old floor
+    // the first pass (at 1.333 mm: three even passes, DF158) is dropped: each line's only move
+    // that high is its feed down to the old floor
     expect(zs.filter((z) => z > -1.5 - 1e-6)).toEqual([-1.5, -1.5])
     const o = oracle(r.before, r.after.text, r.reference)
     expect(o.gouge).toBe(0)
@@ -309,7 +309,7 @@ describe('cut state C4 follow-up: recut Lines and chamfers cut the difference', 
       toolLibraryItemId: wide,
     })
     const again = expectOk(await exportPlan(r.s.d.doc, r.planId, r.svc as never)).text
-    expect(again).toContain('Z-1.5 F')
+    expect(again).toContain('Z-1.333 F')
     expect(cutZs(r.toolpath('line1')).filter((z) => z > -1.5 - 1e-6).length).toBeGreaterThan(2)
   }, 120_000)
 

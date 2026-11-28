@@ -79,7 +79,7 @@ const horizontal = (from: Vec3, m: Move): number => {
 }
 
 describe('depth profile and passes', () => {
-  it('cuts ⌈max depth / stepdown⌉ passes, pass k no deeper than k · stepdown', () => {
+  it('cuts ⌈max depth / stepdown⌉ passes, pass k no deeper than k · step', () => {
     expect(linePassCount(1.5, 0.5)).toBe(3)
     expect(linePassCount(1.2, 0.5)).toBe(3)
     expect(linePassCount(0.2, 0.5)).toBe(1)
@@ -92,6 +92,29 @@ describe('depth profile and passes', () => {
     const p3 = passTarget(z, 0, 3, 0.5)
     expect(evalZ(p3, 65)).toBeCloseTo(-0.85, 9)
     expect(evalZ(p3, 130)).toBeCloseTo(-1.5, 9)
+  })
+
+  it('spreads the passes evenly: no sliver last pass (DF158)', () => {
+    // the plate's cut-off: 10.6 mm at 0.311 is 35 passes of 0.30286, not 34 × 0.311 and 0.026
+    const op = { ...lineOp([openShape([line([-50, 0], [50, 0])])], 10.6), onZ: 0 }
+    const tp = expectOk(
+      generateLine({
+        ...lineInput(STOCK, op, endMill(6.22, 20)),
+        cutting: { ...lineInput(STOCK, op, endMill(6.22, 20)).cutting, stepdown: 0.311 },
+      }),
+    )
+    const zs = [
+      ...new Set(
+        moves(tp)
+          .filter(
+            ({ from, m }) => m.kind === 'line' && horizontal(from, m) > 1 && m.to[2] === from[2],
+          )
+          .map(({ m }) => Math.round(m.to[2] * 1e6) / 1e6),
+      ),
+    ].sort((a, b) => b - a)
+    expect(zs).toHaveLength(35)
+    const gaps = zs.map((z, i) => (i === 0 ? -z : zs[i - 1]! - z))
+    for (const g of gaps) expect(g).toBeCloseTo(10.6 / 35, 5)
   })
 })
 
@@ -194,12 +217,14 @@ describe('closed lines', () => {
     expect(cross.every((c) => c >= -1e-9)).toBe(true)
   })
 
-  it('ramp along the loop at ≤ 10° down to each pass, two passes of 0.5 and 0.8', () => {
+  it('ramp along the loop at ≤ 10° down to each pass, two even passes of 0.4 (DF158)', () => {
     const feeds = all.filter((x) => x.m.kind === 'line' && horizontal(x.from, x.m) > 1e-9)
     for (const { from, m } of feeds)
       expect(Math.abs(m.to[2] - from[2]) / horizontal(from, m)).toBeLessThanOrEqual(TAN10 + 1e-9)
     const levels = [...new Set(feeds.map((x) => Math.round(x.m.to[2] * 1e6) / 1e6))]
-    expect(levels).toContain(-0.5)
+    // DF158: 0.8 at stepdown 0.5 is two passes of 0.4 (not 0.5 and a 0.3 remainder)
+    expect(levels).toContain(-0.4)
+    expect(levels).not.toContain(-0.5)
     expect(Math.min(...levels)).toBe(-0.8)
   })
 })

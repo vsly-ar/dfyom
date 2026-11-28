@@ -17,6 +17,7 @@ import { ItemIdSchema, ItemMetaDtoSchema, type LibraryItemKind } from './item'
 import type { Library } from './library'
 import {
   valuesFromDTO,
+  type ItemValues,
   type ItemValuesDTO,
   type LibraryItem,
   type LibraryItemDTO,
@@ -40,7 +41,7 @@ import {
   isBuiltinWorkholding,
   lookupWorkholding,
 } from './workholding-builtins'
-import { UnitSystemSchema, type UnitSystem } from '../project/document'
+import { UnitSystemSchema, type ProjectDoc, type UnitSystem } from '../project/document'
 
 /** Stored values without `kind` (the command name says it). */
 const VALUES = {
@@ -86,6 +87,26 @@ function refuseBuiltin(kind: LibraryItemKind, id: string, where: string): AppRes
   })
 }
 
+/**
+ * DF161: the values of the open project's snapshot `id` of `kind` (a copied project's tools and
+ * machine added to another library). Doc: docs/architecture/library.md#snapshots
+ */
+function snapshotValues(doc: ProjectDoc, kind: LibraryItemKind, id: string): AppResult<ItemValues> {
+  const snap = Object.hasOwn(doc.snapshots, id) ? doc.snapshots[id] : undefined
+  if (snap?.kind !== kind)
+    return fail('input.malformed', `no ${LABEL[kind]} snapshot ${id} in the open project`, {
+      issues: [
+        {
+          path: ['fromSnapshot'],
+          rule: 'unknownSnapshot',
+          message: `must be a ${LABEL[kind]} snapshot of the open project`,
+          params: { actual: id, ...(snap === undefined ? {} : { kind: snap.kind }) },
+        },
+      ],
+    })
+  return valuesFromDTO(snap.values).mapErr((e) => e.prefixIssues('fromSnapshot'))
+}
+
 function libraryOf(services: Services, where: string): AppResult<Library> {
   return services.library === undefined
     ? fail('internal.unexpected', 'no library service configured', { where })
@@ -120,7 +141,13 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const now = (ms: number) => new Date(ms).toISOString()
 
   const addArgs = z.object({
-    values: valuesArg,
+    values: valuesArg.optional(),
+    // DF161: a copied project's tools and machine on another library
+    fromSnapshot: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Instead of values: copy the open project's snapshot (a snapshotId)"),
     units: UNITS_ARG,
     parentId: ItemIdSchema.optional().describe('Add as a variant of this root stock'),
   })
@@ -133,11 +160,32 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     // stock variants (library.md#stock-variants-df13): only the stock add lists a parent
     args: kind === 'stock' ? addArgs : (addArgs.omit({ parentId: true }) as typeof addArgs),
     result: itemResult,
-    async run(_doc, args, ctx) {
+    async run(doc, args, ctx) {
       const where = `library.${kind}.add`
       const lib = libraryOf(ctx.services, where)
       if (lib.isErr()) return lib
-      const values = modelValues(args.values, args.units)
+      const values =
+        args.fromSnapshot === undefined
+          ? args.values === undefined
+            ? fail('input.malformed', 'give values or fromSnapshot', {
+                issues: [
+                  { path: ['values'], rule: 'required', message: 'give values or fromSnapshot' },
+                ],
+                where,
+              })
+            : modelValues(args.values, args.units)
+          : args.values !== undefined
+            ? fail('input.malformed', 'give values or fromSnapshot, not both', {
+                issues: [
+                  {
+                    path: ['fromSnapshot'],
+                    rule: 'notWithValues',
+                    message: 'give values or fromSnapshot, not both',
+                  },
+                ],
+                where,
+              })
+            : snapshotValues(doc, kind, args.fromSnapshot)
       if (values.isErr()) return Err(values.unwrapErr().withContext(where))
       const item = await lib.unwrap().add(values.unwrap(), {
         id: ctx.ids.next(kind),

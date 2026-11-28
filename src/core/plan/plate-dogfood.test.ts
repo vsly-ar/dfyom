@@ -8,8 +8,13 @@
 // (DF144 `deepCuts`); no move near the block. Report: docs/research/2026-11-28-plate-dogfood.md
 import { describe, expect, it } from 'vitest'
 import { Ok } from '../../shared/result'
+import { expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers } from '../commands/jobs'
+import { partGeometryInput } from '../design/load'
+import { evaluatePart } from '../geometry/evaluate'
+import { loadManifold } from '../geometry/manifold'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
+import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import type { Toolpath, ToolpathTool } from '../toolpath/model'
 import { createToolpathCache } from '../toolpath/cache'
 import { chamferMill, endMill } from '../toolpath/testing/fixtures'
@@ -17,6 +22,7 @@ import { Heightmap, samples, steps } from '../toolpath/testing/oracles'
 import { deepCuts } from '../toolpath/testing/region-coverage'
 import type { PlanWarning } from './checks'
 import { generated } from './line-through.fixture'
+import { machineValues } from '../library/library.fixture'
 import { opsOf, planSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
@@ -101,6 +107,7 @@ describe("the user's plate job (dogfood TG #492)", () => {
       paths: [{ segment: { start: ['0', '22 + 6.22/2'], end: ['100', '22 + 6.22/2'] } }],
       depth: 'through',
     })
+    // DF155: no `on`: the kept side at the wall is in the band, so the chamfer stands on its floor
     await s.run('design.chamfer.add', { partId, edgeOf: 'line1', width: '1', edgeSide: 'right' })
     for (const [operationId, id] of [
       ['hole1_drill', flat],
@@ -111,7 +118,32 @@ describe("the user's plate job (dogfood TG #492)", () => {
       await s.run('design.operation.tool.set', { partId, operationId, tool: specific(id) })
     await s.run('project.apply', {})
 
-    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    // DF160: the design's cut-off warning names the offcut (the chamfer keeps the part's side)
+    const kernel = (await loadManifold(nodeManifoldSource())).unwrap()
+    const input = expectOk(partGeometryInput(s.d.doc, partId, region2d))
+    // DF155: the one-sided chamfer stands on the band's floor (its kept side's top at the wall),
+    // so its 1 mm is 1 mm at the part's faced top
+    expect(input.operations.find((o) => o.id === 'chamfer1')).toMatchObject({ onZ: FACE })
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    const cut = solid.warnings.filter((w) => w.code === 'dfm.loosePiece')
+    expect(cut).toMatchObject([{ operation: 'line1', params: { cutOff: true, kept: true } }])
+    expect(cut[0]!.message).toMatch(/^line1: cuts the offcut \(\d+\.\d mm³\) off the part/)
+    // the offcut is the 100 × (60 − 22 − 6.22) mm side, not the kept 22 mm strip
+    expect(cut[0]!.params['volume']).toBeCloseTo(100 * (60 - 22 - 6.22) * 10.1, -2)
+
+    // the user's machine: an extrusion-frame 3020 with an 800 W spindle up to 29,300 rpm
+    const { kind: _, ...shapeoko } = machineValues()
+    const nova = (await s.run('library.machine.add', {
+      values: {
+        ...shapeoko,
+        name: '3020 Nova',
+        travel: { x: '300', y: '200', z: '80' },
+        rigidity: 'extrusion',
+        maxFeedRate: { x: '3000', y: '3000', z: '1000' },
+        spindle: { control: 'manual', minSpeed: '6200', maxSpeed: '29300', power: '800' },
+      },
+    })) as { id: string }
+    const planId = await s.create({ machineLibraryItemId: nova.id })
     const setupId = s.plan(planId).setups[0]!.id
     // the user's stop block left of the stock, below its top
     await s.run('plan.workholding.set', {
@@ -130,6 +162,15 @@ describe("the user's plate job (dogfood TG #492)", () => {
       ['chamfer1', 1],
       ['line1', 1],
     ])
+    // DF157: with automatic feeds the only feeds finding is the line chamfer's spindle clamp (De 2
+    // mm wants 48,500 rpm): no `manyFlutes` on the open-sided facing or the V-bit, no `rubbing` on
+    // the countersinks (F6 meets one DF142 level of 1.21 mm, not the whole 3.62 mm cone)
+    const auto = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }).warnings
+    expect(
+      auto
+        .filter((w) => w.code.startsWith('feeds.'))
+        .map((w) => [w.code, ops.find((o) => o.id === w.planOperationId)?.designOperationIds[0]]),
+    ).toEqual([['feeds.rpmAboveMachine', 'chamfer1']])
     for (const op of ops)
       await s.run('plan.operation.update', {
         planId,
@@ -161,13 +202,21 @@ describe("the user's plate job (dogfood TG #492)", () => {
     const T = { facing1: endMill(6.33, 20), flat: endMill(6.22, 20), vbit: chamferMill(6.35, 90) }
     for (const [id, t, stepdown] of [
       ['facing1', T.facing1, 0.2],
-      ['hole1_drill', T.flat, 0.5],
+      // DF159: ρ 0.19 < R/4, so each helix turn descends the helix pitch (0.25 DC) at the
+      // plunge rate, as the straight plunge below 0.1 mm does
+      ['hole1_drill', T.flat, 0.25 * 6.22],
       // the countersink's rings by level (DF142): each meets at most its level of the cone
       ['hole1_countersink', T.vbit, 1.25],
-      ['chamfer1', T.vbit, 1],
+      // DF155: the bevel is 1 mm below the band; before the slot (DF152) the V-bit's other flank
+      // meets the unfaced offcut side 0.2 mm higher, inside the slot to come
+      ['chamfer1', T.vbit, 1 - FACE],
       ['line1', T.flat, 0.5],
     ] as const)
       tps.push({ id, tool: t, tp: await generated(s, planId, id), stepdown })
+
+    // DF159: the Ø6.6 bore with the Ø6.22 flat is 7 turns (≈ 7 s per hole), not 169 (≈ 33 s)
+    const bore = tps.find((x) => x.id === 'hole1_drill')!.tp.stats.estimatedSeconds
+    expect(bore / 4).toBeLessThan(10)
 
     // DF144: no feed move buries the tool deeper than its pass, after everything cut before it
     for (const [i, x] of tps.entries())
@@ -208,8 +257,8 @@ describe("the user's plate job (dogfood TG #492)", () => {
         } else if (r > CS_R + 0.1 && y < WALL - 1.1) {
           if (Math.abs(z - FACE) > 0.02) count('band not faced flat')
         } else if (y > WALL - 0.9 && y < WALL - 0.1) {
-          // the part's bevel: 1 mm below the stock top at the wall, 45° up to the faced band
-          const expected = Math.min(FACE, -(1 - (WALL - y)))
+          // the part's bevel: 1 mm below the faced band at the wall (DF155), 45° up to it
+          const expected = FACE - Math.max(0, 1 - (WALL - y))
           if (Math.abs(z - expected) > 0.08) count('bevel')
         } else if (y > WALL + 0.1 && y < WALL + 2 * R - 0.1) {
           if (z > BOTTOM) count('slot not through')

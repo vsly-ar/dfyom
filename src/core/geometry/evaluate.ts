@@ -9,7 +9,13 @@
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
 import { boxOf, boxesOverlap, geometryChecks, type Box, type ComposedOperation } from './checks'
 import { constructionSurfaces } from './construction'
-import type { ConstructionSurface, DfmWarning, PartGeometryInput, SurfaceId } from './model'
+import {
+  isWallChamfer,
+  type ConstructionSurface,
+  type DfmWarning,
+  type PartGeometryInput,
+  type SurfaceId,
+} from './model'
 import {
   AIR,
   operationSolids,
@@ -251,7 +257,7 @@ export function evaluatePart(
     .andThen((labelled) =>
       solids.volume(part).andThen((volume) =>
         geometryChecks(
-          { part, operations: ops.map((op) => composed.get(op)!), tables },
+          { part, operations: ops.map((op) => composed.get(op)!), tables, keeps: keepsOf(input) },
           solids,
           steps,
         ).andThen((checks) =>
@@ -394,4 +400,12 @@ function labelMesh(
     }
   }
   return Ok({ positions: pos.slice(0, 3 * count), indices, triangleSurface, surfaces })
+}
+
+/** DF160: each one-sided chamfer (SL4) → the Line whose side it keeps. */
+function keepsOf(input: PartGeometryInput): ReadonlyMap<string, string> {
+  const out = new Map<string, string>()
+  for (const op of input.operations)
+    if (op.kind === 'chamfer' && isWallChamfer(op)) out.set(op.id, op.edgeOf)
+  return out
 }

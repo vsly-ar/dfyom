@@ -25,6 +25,7 @@ import type { Stock } from '../library/stock'
 import type { CuttingPreset, Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
+import { edgeChamferPasses } from '../toolpath/edge-chamfer'
 import {
   DIRECTIONS,
   DRILL_CYCLES,
@@ -185,6 +186,12 @@ export type ResolvedStrategy =
       readonly rampAngle: number
       /** The cut's depth below the tool tip (mm): F10's `depth` for the feeds (P-D). */
       readonly cutDepth: number
+      /**
+       * DF157: the deepest one pass cuts (mm): `cutDepth` / the number of levels of a contour cut in
+       * levels (DF142, E4a), else `cutDepth`; F6's `ap` for the feeds' power (De stays at
+       * `cutDepth`).
+       */
+      readonly passDepth: number
     }
   | {
       readonly kind: 'facing'
@@ -409,20 +416,35 @@ export function resolveStrategy(
         op?.kind === 'chamfer' && tool !== undefined
           ? chamferCuts(op, c.allOps, c.stock, tool)
           : undefined
+      const cutDepth =
+        terraces !== null
+          ? (terraces?.height ?? 0)
+          : loop
+            ? loopChamferDepth({ width: op.width.canonical, angle: op.angle.canonical })
+            : cut === undefined
+              ? 0
+              : entry === 'plunge'
+                ? cut.plungeDepth
+                : cut.contourDepth
+      // DF157: a contour cut in levels meets one level of the cone per pass
+      const width = loop
+        ? op.width.canonical
+        : cut === undefined
+          ? 0
+          : (cut.diameter - cut.edgeDiameter) / 2
+      const levels =
+        entry === 'contour' && tool !== undefined && op?.kind === 'chamfer' && width > 0
+          ? edgeChamferPasses(
+              { width, angle: op.angle.canonical },
+              { diameter: tool.diameter.canonical, tipDiameter: tool.tipDiameterMm },
+            ).length
+          : 1
       return {
         kind,
         entry,
         rampAngle,
-        cutDepth:
-          terraces !== null
-            ? (terraces?.height ?? 0)
-            : loop
-              ? loopChamferDepth({ width: op.width.canonical, angle: op.angle.canonical })
-              : cut === undefined
-                ? 0
-                : entry === 'plunge'
-                  ? cut.plungeDepth
-                  : cut.contourDepth,
+        cutDepth,
+        passDepth: levels > 1 ? cutDepth / levels : cutDepth,
       }
     }
   }
