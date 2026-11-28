@@ -352,7 +352,8 @@ function runReference(r: RunInput): ToolRunZRef {
       const owner = patchOf.get(c.surface)?.owner
       const g = owner === undefined ? undefined : r.byId.get(owner)
       const at = owner === undefined ? undefined : r.cutBy.get(owner)
-      if (g?.kind === 'facing' && at !== undefined && at.index > latest) {
+      // DF145: a region facing's floor is no default (only a whole-face facing's)
+      if (g?.kind === 'facing' && g.region === undefined && at !== undefined && at.index > latest) {
         latest = at.index
         facing = c
       }

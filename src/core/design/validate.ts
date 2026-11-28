@@ -8,7 +8,7 @@
  */
 import { type Issue, issueSummary } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
-import type { Direction } from '../geometry/face'
+import { DIRECTION, type Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
@@ -81,6 +81,42 @@ function factsOf(op: { id: string; shape: Shape }, table?: ShapeFactsTable): Sha
  * returns whether it is valid. A named
  * shape's own values are checked by the shape commands (shapes.md).
  */
+/**
+ * DF145: a band's width is > 0 and at most the face's extent across its edge (`bandWidth`); a
+ * shape region is checked as a pocket's shape (paths `shape.*`).
+ */
+function checkFacingRegion(
+  c: Checker,
+  op: Extract<Operation, { kind: 'facing' }>,
+  direction: Direction,
+  stock: Stock,
+  facts: ShapeFactsTable | undefined,
+): void {
+  const r = op.region
+  if (r === undefined) return
+  if (r.kind === 'shape') {
+    checkShape(c, r.shape)
+    c.check(
+      !factsOf({ id: op.id, shape: r.shape }, facts).open,
+      'shape',
+      'openNeedsOn',
+      'an open path needs a profile on',
+    )
+    return
+  }
+  const path = 'region.band.width'
+  if (!c.positive(r.width, path)) return
+  const d = DIRECTION[direction]
+  const across = stock[r.edge === 'front' || r.edge === 'back' ? d.vSize : d.uSize]
+  c.check(
+    r.width.exact.compare(across.exact) <= 0,
+    path,
+    'bandWidth',
+    `must be at most the face's extent across the ${r.edge} edge`,
+    { max: across.canonical, actual: r.width.canonical },
+  )
+}
+
 function checkShape(c: Checker, s: Shape): boolean {
   if (s.kind === 'named') return true
   if (s.kind === 'circle') return c.positive(s.diameter, 'shape.diameter')
@@ -267,6 +303,7 @@ export function operationIssues(
           `must be less than ${extentName(direction)}`,
           { max: T.canonical, actual: op.depth.canonical },
         )
+      checkFacingRegion(c, op, direction, stock, shapeFacts)
       break
     case 'pocket': {
       checkShape(c, op.shape)

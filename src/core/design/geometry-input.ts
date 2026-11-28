@@ -23,6 +23,7 @@ import type {
   Shape as ShapeGeometry,
   SurfaceReference,
 } from '../geometry/model'
+import { OVERSHOOT } from '../geometry/model'
 import { faceToFace, localStock, stockFaceDirection, type Direction } from '../geometry/face'
 import { orientPath, orientRegion } from '../geometry/2d/place'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
@@ -38,6 +39,7 @@ import {
   isGeneralShape,
   isInlinePath,
   lineDepths,
+  type BandEdge,
   type LinePath,
   type NamedPlacement,
   type Operation,
@@ -174,6 +176,30 @@ function cloneGroups(ops: readonly Operation[]): { cloneGroups?: string[][] } {
   return groups.size === 0 ? {} : { cloneGroups: [...groups.values()] }
 }
 
+/**
+ * DF145: a band as a rectangle in the face frame: `width` deep from `edge` across the face,
+ * reaching `OVERSHOOT` past the stock on its three stock-edge sides (open sides).
+ */
+export function bandShape(
+  edge: BandEdge,
+  width: number,
+  face: { readonly length: number; readonly width: number },
+): ShapeGeometry {
+  const ov = OVERSHOOT
+  const [u0, u1, v0, v1] =
+    edge === 'front'
+      ? [-ov, face.length + ov, -ov, width]
+      : edge === 'back'
+        ? [-ov, face.length + ov, face.width - width, face.width + ov]
+        : edge === 'left'
+          ? [-ov, width, -ov, face.width + ov]
+          : [face.length - width, face.length + ov, -ov, face.width + ov]
+  return {
+    center: [(u0 + u1) / 2, (v0 + v1) / 2],
+    contour: { kind: 'rectangle', length: u1 - u0, width: v1 - v0, cornerRadius: 0 },
+  }
+}
+
 function operationGeometry(
   op: Operation,
   index: number,
@@ -195,8 +221,19 @@ function operationGeometry(
   const direction: { direction?: Direction } =
     on.direction === '+z' ? {} : { direction: on.direction }
   switch (op.kind) {
-    case 'facing':
-      return Ok({ kind: 'facing', id: op.id, ...direction, depth: op.depth.canonical })
+    case 'facing': {
+      const base = { kind: 'facing', id: op.id, ...direction, depth: op.depth.canonical } as const
+      // DF145: a region only when set, so whole-face inputs stay byte-identical
+      if (op.region === undefined) return Ok(base)
+      if (op.region.kind === 'shape')
+        return shapeGeometry(op.region.shape, shapes, port).map((region) => ({ ...base, region }))
+      const face = localStock(on.direction, {
+        length: ctx.stock.length.canonical,
+        width: ctx.stock.width.canonical,
+        thickness: ctx.stock.thickness.canonical,
+      })
+      return Ok({ ...base, region: bandShape(op.region.edge, op.region.width.canonical, face) })
+    }
     case 'pocket':
       return shapeGeometry(op.shape, shapes, port).map((shape) => ({
         kind: 'pocket',

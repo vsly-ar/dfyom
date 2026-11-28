@@ -19,7 +19,7 @@
  */
 import type { ToolType } from '../library/tool.dto'
 import type { Region2dPort } from './2d/port'
-import { regionLoops, type Bounds2 } from './2d/model'
+import { chainBounds, regionLoops, type Bounds2 } from './2d/model'
 import { closestOnChains, regionContains } from './2d/measure'
 import {
   adjacentStockFaces,
@@ -54,7 +54,7 @@ import {
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
 import { rectangleCorners, rectangleWallCorner } from './open-sides'
-import { pocketRegion, profileChain } from './outline'
+import { pocketRegion, profileChain, regionPocket } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
@@ -265,7 +265,7 @@ export function parameterChecks(
         : []
     switch (op.kind) {
       case 'facing':
-        return [...facing(op, options.unitSystem), ...tool]
+        return [...facing(op, options.unitSystem), ...regionOutside(op, stock), ...tool]
       case 'pocket':
         return [
           ...(roughing
@@ -623,6 +623,29 @@ function reach(
       `${none} cuts walls ${mm(wall)} deep with its flutes (longest flute length ` +
         `${mm(flutes)}, less ${mm(FLUTE_MARGIN)}; no shank narrower than the cutter)`,
       { depth: wall, reach: longest, fluteLength: flutes, margin: FLUTE_MARGIN },
+    ),
+  ]
+}
+
+/** DF145: `dfm.shapeOutsideFace` when a facing's region lies wholly outside the stock face. */
+function regionOutside(op: Op<'facing'>, stock: StockGeometry): DfmWarning[] {
+  if (op.region === undefined) return []
+  const r = pocketRegion(regionPocket(op, op.region)).region
+  const b = chainBounds(r.pieces.flatMap((p) => p.outer.elements))
+  const off =
+    b === undefined ||
+    b.max[0] <= EPSILON ||
+    b.max[1] <= EPSILON ||
+    b.min[0] >= stock.length - EPSILON ||
+    b.min[1] >= stock.width - EPSILON
+  if (!off) return []
+  return [
+    warning(
+      'dfm.shapeOutsideFace',
+      op,
+      'region',
+      'the region lies outside the stock face: the facing cuts nothing',
+      { wholly: true },
     ),
   ]
 }

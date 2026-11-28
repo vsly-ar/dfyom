@@ -73,7 +73,7 @@ With a reference model, the depth that faces down to the reference's closest poi
 
 #### Facing region (hardening DF145)
 
-Status: **draft** (2026-11-28, from the user's TG #492; awaits [Q230–Q231](#questions-q230q231)) · Intake: [hardening.md DF145](../plans/hardening.md#intake-user-feedback-goes-here)
+Status: **accepted** (2026-11-28, from the user's TG #492; Q230 and Q231 taken as recommended by delegation D89; FR1 built, see [Implementation](#implementation-fr1fr3)) · Intake: [hardening.md DF145](../plans/hardening.md#intake-user-feedback-goes-here)
 
 The user: "There's no way to limit facing operation to a region. Even if I add a dummy pocket 0.1mm deep to select the surface it creates, there's no way to put facing operation there as well. But I wanted to face only 22mm of the surface. So I used Pocket 2 as some kind of workaround." Today a facing always covers its whole stock face ([design-v0.2.md § Face targets](design-v0.2.md#face-targets-generalised-on)).
 
@@ -105,6 +105,17 @@ The user: "There's no way to limit facing operation to a region. Even if I add a
 | FR1   | **Core:** `region` in the model and DTO, removal region and floor patch, the default-`on` rule, rules and DFM, `region` on `design.facing.add/update` (≈ 0.3 K of `tools/list`, measured) | The user's part: a 22 mm band from the front edge evaluates to the band removed and nothing else; a whole-face facing is byte-equal (goldens)             |
 | FR2   | **Toolpath:** rows clipped to the region, open sides with `overshoot`, boundaries with the tool inside, side or ramp entry; cut-state stamps of the region                                | Heightmap test: the band faced flat to depth, 0 gouge past the boundary, leftover < 0.05 mm; a shape region with no open side ramps; virtual machine Idle |
 | FR3   | **UI:** the Region row (Whole face / Band / Shape), edge picker, viewport region with dashed open sides; component test with axe                                                          | The user faces 22 mm from the front edge in the installed app without a pocket                                                                            |
+
+##### Implementation (FR1–FR3)
+
+**FR1 (built 2026-11-28): model, rules, geometry, agent API.**
+
+- **Model:** `Facing.region?: { kind: 'band', edge, width } | { kind: 'shape', shape }` (operation.ts); stored as `region: { band: { edge, width } }` or `{ shape }` (part.dto.ts `FacingRegionDtoSchema`), left out for the whole face, so earlier records and whole-face geometry inputs stay byte-identical (no `schemaVersion` change). Edges are in the face frame of `on`: `front` = lowest v, `back` = highest v, `left` = lowest u, `right` = highest u.
+- **Agent API:** `region` on `design.facing.add` / `.update` (and `plan.design.operation.update`): `{ band: { edge, width } }`, `{ shape, anchor? }` as a pocket's, `null` = the whole face. The full schema repeats the pocket's shape (≈ 2.7 K), so the listings carry a sketch ("As design.pocket.add shape …"); measured `tools/list` 112,279 → 112,619 chars (+340) of the 120 K budget.
+- **Rules:** `region.band.width` > 0 and ≤ the face's extent across the edge (`bandWidth`, `model.invariant`); a shape region takes the pocket's shape rules and `openNeedsOn`, at the pocket's paths `shape.*` (**decided here:** a facing has no other shape, so the paths stay unambiguous and the inspector's shape fields are the pocket's). A region wholly outside the face is `dfm.shapeOutsideFace` (the facing cuts nothing).
+- **Geometry:** the geometry input's `region` is a placed shape in the face frame (geometry/model.ts); a band becomes a rectangle reaching `OVERSHOOT` past the stock on its three stock-edge sides (`bandShape`, geometry-input.ts). The removal is the pocket of that region from the face, `depth` deep, no fillet (`regionPocket`, outline.ts), so the surfaces are `facingN.floor` plus the region's walls as a pocket names them (`facingN.wall[i]`, `facingN.corner[i]`; **decided here**, the draft named only the floor); walls past the stock cut air and do not appear. The floor patch, the through-depth and material-band clears and the as-cut stamps (cut-state C5) are the region within the face.
+- **Default `on` and Z reference:** only a whole-face top facing's floor becomes the default `on` (`defaultOn`) and the Z-reference default rule `facing` ([z-reference.md](z-reference.md#default-rule)); a region's floor is offered in the lists, never picked by default.
+- **Not covered:** a region facing is not carried to split pieces (finding "faces a region: face the pieces instead"); the tool rule stays the facing's (a flat end mill) with no corner check: inside corners of the boundary are left rounded by the tool radius, as the draft says.
 
 ### Pocket
 

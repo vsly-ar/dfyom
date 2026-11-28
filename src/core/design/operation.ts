@@ -12,9 +12,11 @@ import type { Rational } from '../quantity/rational'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Tolerance } from '../quantity/tolerance'
 import type { UnitSystem } from '../project/document'
+import { BAND_EDGE_VALUES } from './part.dto'
 import type {
   AnchorDTO,
   DrillBottomKind,
+  FacingDTO,
   GeneralToleranceDTO,
   LinePathItemDTO,
   PointDTO,
@@ -130,7 +132,24 @@ export const DEFAULT_STOCK_FACE = 'stock.top'
 export interface Facing extends Common {
   readonly kind: 'facing'
   readonly depth: Quantity
+  /**
+   * DF145: the part of the face it faces; absent = the whole face (records stay unchanged).
+   * Doc: docs/modes/design.md#facing-region-hardening-df145
+   */
+  readonly region?: FacingRegion | undefined
 }
+
+/** The stock edges of a face a band runs along (face frame: front = lowest v, left = lowest u). */
+export const BAND_EDGES = BAND_EDGE_VALUES
+export type BandEdge = (typeof BAND_EDGES)[number]
+
+/**
+ * A facing's region (DF145): a band `width` deep from one stock edge across the whole face, or a
+ * shape placed as a pocket's (clipped to the face).
+ */
+export type FacingRegion =
+  | { readonly kind: 'band'; readonly edge: BandEdge; readonly width: Quantity }
+  | { readonly kind: 'shape'; readonly shape: Shape }
 export interface Pocket extends Common {
   readonly kind: 'pocket'
   readonly shape: Shape
@@ -540,6 +559,9 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
   switch (op.kind) {
     case 'facing':
       add('depth', op.depth)
+      // DF145: a region's shape keeps the pocket's paths (a facing has no other shape)
+      if (op.region?.kind === 'band') add('region.band.width', op.region.width)
+      else if (op.region?.kind === 'shape') shape(op.region.shape)
       break
     case 'pocket':
       shape(op.shape)
@@ -847,13 +869,16 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         : Some<FeatureOwner>({ featureId: dto.featureId, role: dto.featureRole }),
   }
   switch (dto.kind) {
-    case 'facing':
-      return q(dto.depth, 'depth').map((depth) => ({
+    case 'facing': {
+      const region = facingRegionFromDTO(dto.region)
+      return collect<unknown>([q(dto.depth, 'depth'), region]).map(() => ({
         ...base,
         kind: 'facing',
         on: dto.on ?? DEFAULT_STOCK_FACE,
-        depth,
+        depth: q(dto.depth).unwrap(),
+        ...(region.unwrap() === undefined ? {} : { region: region.unwrap() }),
       }))
+    }
     case 'pocket': {
       const shape = shapeFromDTO(dto.shape)
       const depth = q(dto.depth, 'depth')
@@ -1038,6 +1063,24 @@ function linePathToDTO(p: LinePath): LinePathItemDTO {
     : { arc: { start: pt(p.start), through: pt(p.through), end: pt(p.end) } }
 }
 
+/** DF145: a facing's stored region (`band` or `shape`), absent = the whole face. */
+function facingRegionFromDTO(r: FacingDTO['region']): AppResult<FacingRegion | undefined> {
+  if (r === undefined) return Ok(undefined)
+  if ('band' in r)
+    return q(r.band.width, 'region', 'band', 'width').map((width) => ({
+      kind: 'band',
+      edge: r.band.edge,
+      width,
+    }))
+  return shapeFromDTO(r.shape).map((shape) => ({ kind: 'shape', shape }))
+}
+
+function facingRegionToDTO(r: FacingRegion): NonNullable<FacingDTO['region']> {
+  return r.kind === 'band'
+    ? ({ band: { edge: r.edge, width: r.width.toDTO() } } as NonNullable<FacingDTO['region']>)
+    : { shape: shapeToDTO(r.shape) }
+}
+
 function shapeToDTO(s: Shape): OperationShapeDTO {
   const center = [s.center[0].toDTO(), s.center[1].toDTO()]
   // left out at the centre, so v0.1 records stay byte-identical
@@ -1101,6 +1144,8 @@ export function operationToDTO(op: Operation): OperationDTO {
         ...base,
         ...stockFaceOn(op),
         depth: op.depth.toDTO(),
+        // DF145: left out for the whole face, so earlier records stay byte-identical
+        ...(op.region === undefined ? {} : { region: facingRegionToDTO(op.region) }),
       } as OperationDTO
     case 'pocket':
       return {
@@ -1361,5 +1406,9 @@ export function placedShapeIds(
     )
   if ((op.kind === 'pocket' || op.kind === 'profile') && op.shape.kind === 'named')
     return [{ id: op.shape.shapeId, path: ['shape', 'shapeId'] }]
+  // DF145: a facing's shape region
+  const region = op.kind === 'facing' ? op.region : undefined
+  if (region !== undefined && 'shape' in region && region.shape.kind === 'named')
+    return [{ id: region.shape.shapeId, path: ['region', 'shape', 'shapeId'] }]
   return []
 }

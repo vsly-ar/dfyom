@@ -52,7 +52,9 @@ export function removals(
     switch (g.kind) {
       case 'facing':
         depth = g.depth
-        mode = 'all'
+        // DF145: a region facing removes its region only
+        if (g.region === undefined) mode = 'all'
+        else region = shapeRegion(g.region)
         break
       case 'pocket':
         depth = g.depth

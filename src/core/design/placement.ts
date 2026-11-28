@@ -265,13 +265,20 @@ export function shapeFacts(
         if (r.isErr())
           return Err(r.unwrapErr().prefixIssues('operations', op.id, 'shapes', p.shapeId))
       }
-    if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') continue
-    const open = isOpenShape(op.shape, shapes)
+    // DF145: a facing's shape region too
+    const shape =
+      op.kind === 'pocket' || op.kind === 'profile'
+        ? op.shape
+        : op.kind === 'facing' && op.region?.kind === 'shape'
+          ? op.region.shape
+          : undefined
+    if (shape?.kind !== 'named') continue
+    const open = isOpenShape(shape, shapes)
     if (port === undefined) {
       out.set(op.id, { open })
       continue
     }
-    const placed = placeShape(port, op.shape, shapes)
+    const placed = placeShape(port, shape, shapes)
     if (placed.isErr()) return Err(placed.unwrapErr().prefixIssues('operations', op.id))
     const o = placed.unwrap().outline
     if (o.kind === 'path') out.set(op.id, { open: true, loops: 1, length: chainLength(o.path) })

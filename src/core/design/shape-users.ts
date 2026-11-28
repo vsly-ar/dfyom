@@ -9,6 +9,8 @@ interface PartLike {
   readonly operations: readonly {
     readonly id: string
     readonly shape?: unknown
+    /** DF145: a facing's region (`{ shape }` places a shape). */
+    readonly region?: unknown
     readonly paths?: readonly unknown[] | undefined
     readonly featureId?: string | undefined
   }[]
@@ -47,6 +49,7 @@ export function operationsUsingShape(
     .filter(
       (op) =>
         named(op.shape) ||
+        named((op.region as { shape?: unknown } | undefined)?.shape) ||
         (op.paths ?? []).some((p) => ids.has((p as { shapeId?: string }).shapeId ?? '')),
     )
     .map((op) => op.id)

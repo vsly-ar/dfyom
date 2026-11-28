@@ -56,7 +56,13 @@ function outline(g: OperationGeometry, stock: StockGeometry): Bounds2 {
   switch (g.kind) {
     case 'facing': {
       const s = localStock(g.direction ?? '+z', stock)
-      return { min: [0, 0], max: [s.length, s.width] }
+      if (g.region === undefined) return { min: [0, 0], max: [s.length, s.width] }
+      // DF145: the region's bounds within the face
+      const b = shapeBounds(g.region)
+      return {
+        min: [Math.max(0, b.min[0]), Math.max(0, b.min[1])],
+        max: [Math.min(s.length, b.max[0]), Math.min(s.width, b.max[1])],
+      }
     }
     case 'drilling':
       return disc(g.center, g.diameter)

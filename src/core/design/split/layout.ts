@@ -240,7 +240,8 @@ export function splitLayout(
   let bottom = -stock.thickness
   ops.forEach((op, i) => {
     const g = geometry[i]
-    if (op.kind !== 'facing' || g?.kind !== 'facing') return
+    // DF145: a region facing leaves the rest of the face
+    if (op.kind !== 'facing' || g?.kind !== 'facing' || g.region !== undefined) return
     if (g.direction === undefined) top = Math.min(top, -g.depth)
     else if (g.direction === '-z') bottom = Math.max(bottom, -stock.thickness + g.depth)
   })

@@ -53,6 +53,8 @@ import {
   ID_PREFIX,
   KIND_LABEL,
   bottomEdgeFace,
+  BAND_EDGES,
+  type FacingRegion,
   isBottomChamfer,
   operationToDTO,
   isGeneralShape,
@@ -187,9 +189,17 @@ const TabsArg = z.object({
     .describe('Along the loop from its start point; replace count; null clears'),
 })
 
+// DF145: the part of the face (docs/modes/design.md#facing-region-hardening-df145)
+const FacingRegionArg = z.union([
+  z.object({ band: z.object({ edge: z.enum(BAND_EDGES), width: Src }) }),
+  z.object({ shape: ShapeArg, anchor: AnchorArg.optional() }),
+])
 const facingParams = {
   on: StockFaceArg.optional(),
   depth: Src.optional().describe('Default 0.5 mm / 1/64"'),
+  region: FacingRegionArg.nullable()
+    .optional()
+    .describe('band: width from that stock edge; shape: as a pocket; absent/null = whole face'),
 }
 const pocketParams = {
   on: OnArg.optional(),
@@ -811,9 +821,11 @@ function nextNumber(part: Part, kind: OperationKind): number {
   return max + 1
 }
 
-/** design.md: the last top facing's floor, else `stock.top`. */
+/** design.md: the last whole-face top facing's floor (DF145: never a region's), else `stock.top`. */
 export function defaultOn(ops: readonly Operation[]): string {
-  const facing = ops.findLast((o) => o.kind === 'facing' && o.on === STOCK_TOP)
+  const facing = ops.findLast(
+    (o) => o.kind === 'facing' && o.on === STOCK_TOP && o.region === undefined,
+  )
   return facing === undefined ? STOCK_TOP : `${facing.id}.floor`
 }
 
@@ -911,6 +923,8 @@ interface KindSpec<P extends z.ZodRawShape, O extends Operation> {
   readonly required: readonly (keyof P & string)[]
   /** Sketches of args in `design.<kind>.update`'s listing ("As design.<kind>.add …"). */
   readonly updateListed?: ListedArgs
+  /** Sketches of args in `design.<kind>.add`'s listing (DF145: the facing's region). */
+  readonly addListed?: ListedArgs
   /** The tool field is not a parameter: add and update set it (design-v0.2.md § Operation tool). */
   build(
     args: Partial<z.output<z.ZodObject<P>>>,
@@ -925,14 +939,49 @@ const facingSpec: KindSpec<typeof facingParams, Extract<Operation, { kind: 'faci
   kind: 'facing',
   params: facingParams,
   required: [],
-  build: (a, prev, { f, id, name }) => ({
-    kind: 'facing',
-    id,
-    name,
-    generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
-    on: a.on ?? prev?.on ?? STOCK_TOP,
-    depth: f.pick('depth', 'length', a.depth, prev?.depth, 'facingDepth'),
-  }),
+  // the full schema repeats the pocket's shape (≈ 2.7 K of tools/list): sketched instead
+  addListed: {
+    region: z
+      .looseObject({})
+      .nullable()
+      .describe(
+        'As design.pocket.add shape, as {shape,anchor}; or {band:{edge:front|back|left|right,width}}: width from that stock edge; absent/null = whole face',
+      ),
+  },
+  updateListed: { region: listedAs('object', 'design.facing.add region') },
+  build: (a, prev, { f, id, name }) => {
+    const region = facingRegion(f, a.region, prev?.region)
+    return {
+      kind: 'facing',
+      id,
+      name,
+      generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+      on: a.on ?? prev?.on ?? STOCK_TOP,
+      depth: f.pick('depth', 'length', a.depth, prev?.depth, 'facingDepth'),
+      ...(region === undefined ? {} : { region }),
+    }
+  },
+}
+
+/**
+ * DF145: a facing's region from its arg (null: the whole face; absent: `prev`). A shape keeps the
+ * pocket's arg paths (`shape.*`; a facing has no other shape), re-anchored as a pocket's.
+ */
+function facingRegion(
+  f: Fields,
+  a: z.output<typeof FacingRegionArg> | null | undefined,
+  prev: FacingRegion | undefined,
+): FacingRegion | undefined {
+  if (a === null) return undefined
+  if (a === undefined) return prev
+  if ('band' in a)
+    return {
+      kind: 'band',
+      edge: a.band.edge,
+      width: f.q('region.band.width', 'length', a.band.width),
+    }
+  const before = prev?.kind === 'shape' ? prev.shape : undefined
+  return { kind: 'shape', shape: f.placedShape(a.shape, a.anchor, before) }
 }
 
 const pocketSpec: KindSpec<typeof pocketParams, Extract<Operation, { kind: 'pocket' }>> = {
@@ -1229,6 +1278,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       ...addParams,
       ...(lean ? {} : { tool: ToolArg.optional() }),
     }),
+    ...(spec.addListed === undefined ? {} : { listedArgs: spec.addListed }),
     result: z.object({
       operationId: OperationIdSchema,
       tool: DesignToolDtoSchema.optional().describe('Absent: chosen on Apply'),

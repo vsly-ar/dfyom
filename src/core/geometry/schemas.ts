@@ -78,6 +78,7 @@ export const FacingGeometrySchema = z.object({
   id: z.string(),
   direction,
   depth: z.number(),
+  region: ShapeSchema.exactOptional(),
 })
 export const PocketGeometrySchema = z.object({
   kind: z.literal('pocket'),

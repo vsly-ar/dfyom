@@ -11,6 +11,7 @@ import { AppError } from '../../shared/errors/app-error'
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
 import { arcSegments, contourElements, offsetContour, type ContourLabel } from './contour'
 import { faceFrame, localStock, type Direction, type FaceFrame } from './face'
+import { regionPocket } from './outline'
 import {
   AIR,
   localSolids,
@@ -207,8 +208,14 @@ function build(
   context: BuildContext,
 ): AppResult<LocalSolids> {
   switch (op.kind) {
-    case 'facing':
-      return facing(op, stock)
+    case 'facing': {
+      if (op.region === undefined) return facing(op, stock)
+      // DF145: a region facing removes as a pocket of its region from the face (walls by the
+      // pocket's roles; those past the stock edge cut air)
+      const p = regionPocket(op, op.region)
+      if (isAnalyticOperation(p)) return pocket(p)
+      return general(op, context).andThen((c) => shapePocket(p, c))
+    }
     case 'pocket':
       if (isAnalyticOperation(op)) return pocket(op)
       return general(op, context).andThen((c) => shapePocket(op, c))
