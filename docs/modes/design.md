@@ -73,7 +73,7 @@ With a reference model, the depth that faces down to the reference's closest poi
 
 #### Facing region (hardening DF145)
 
-Status: **accepted** (2026-11-28, from the user's TG #492; Q230 and Q231 taken as recommended by delegation D89; FR1 built, see [Implementation](#implementation-fr1fr3)) · Intake: [hardening.md DF145](../plans/hardening.md#intake-user-feedback-goes-here)
+Status: **accepted** (2026-11-28, from the user's TG #492; Q230 and Q231 taken as recommended by delegation D89; FR1–FR2 built, see [Implementation](#implementation-fr1fr3)) · Intake: [hardening.md DF145](../plans/hardening.md#intake-user-feedback-goes-here)
 
 The user: "There's no way to limit facing operation to a region. Even if I add a dummy pocket 0.1mm deep to select the surface it creates, there's no way to put facing operation there as well. But I wanted to face only 22mm of the surface. So I used Pocket 2 as some kind of workaround." Today a facing always covers its whole stock face ([design-v0.2.md § Face targets](design-v0.2.md#face-targets-generalised-on)).
 
@@ -116,6 +116,15 @@ The user: "There's no way to limit facing operation to a region. Even if I add a
 - **Geometry:** the geometry input's `region` is a placed shape in the face frame (geometry/model.ts); a band becomes a rectangle reaching `OVERSHOOT` past the stock on its three stock-edge sides (`bandShape`, geometry-input.ts). The removal is the pocket of that region from the face, `depth` deep, no fillet (`regionPocket`, outline.ts), so the surfaces are `facingN.floor` plus the region's walls as a pocket names them (`facingN.wall[i]`, `facingN.corner[i]`; **decided here**, the draft named only the floor); walls past the stock cut air and do not appear. The floor patch, the through-depth and material-band clears and the as-cut stamps (cut-state C5) are the region within the face.
 - **Default `on` and Z reference:** only a whole-face top facing's floor becomes the default `on` (`defaultOn`) and the Z-reference default rule `facing` ([z-reference.md](z-reference.md#default-rule)); a region's floor is offered in the lists, never picked by default.
 - **Not covered:** a region facing is not carried to split pieces (finding "faces a region: face the pieces instead"); the tool rule stays the facing's (a flat end mill) with no corner check: inside corners of the boundary are left rounded by the tool radius, as the draft says.
+
+**FR2 (built 2026-11-28): toolpath** (`generateRegionFacing`, toolpath/region-facing.ts; a whole-face facing keeps `generateFacing`, its goldens byte-equal).
+
+- **Tool-centre region** C = the face grown by `overshoot + R`, minus the face outside the region grown by R, cut to within `R + overshoot` of the region: open sides run off the stock as a whole facing's rows do; at an inner side the tool's edge is on the boundary.
+- **Rows** as a whole facing's (axis, pattern, climb direction, stepover ≤ the flat diameter) between C's extent over the face (an end on a stock edge: the flat edge `overshoot` past it), each row cut along C's spans (C flattened inside itself, 1e-4 mm).
+- **Entry:** a span starting with the tool clear of the stock plunges there (no ramp); otherwise it ramps down along its row at 3° (`FACING_RAMP_ANGLE`, the WH-D facing's; **decided here:** a facing has no ramp angle of its own, so the draft's "pocket's `rampAngle`" is this fixed angle), back and forth when the row is short. A span shorter than 0.5 mm with both ends over the stock is left to the boundary pass. Zigzag links stay at depth when both ends are clear of the stock on the same side or the link lies inside C; otherwise retract.
+- **Boundary pass (decided here,** replacing the draft's "no finishing pass"**):** after each level's rows the tool follows C's inner sides (tool edge on the boundary) at the same level, climb or conventional as the rows. Without it a slanted or curved boundary, or one across the rows, keeps cusps between the rows' ends (≈ 0.34 R at a 0.75 D stepover). It is no finishing pass (no allowance); a straight inner side a row already runs along is skipped (the user's band has none).
+- **Workholding keep-out (WH-D):** a region facing around workholding clears, as a pocket, its region within the face grown by `overshoot` less the rest of the face.
+- **Tests:** heightmap oracles (region-facing.test.ts): bands from every edge along both axes, a circle with no open side (ramps), a slanted region across a stock edge: leftover < 0.05 mm², no gouge, nothing below the floor, the DF144 deep-cut oracle clean; golden `facing-band-front.txt` (the user's 22 mm band along the front of a 100 mm plate); design → plan → toolpath keeps the tool in front of the band's inner side.
 
 ### Pocket
 
