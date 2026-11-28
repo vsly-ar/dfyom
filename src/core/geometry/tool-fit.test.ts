@@ -9,7 +9,7 @@ import {
 } from './dfm'
 import type { DfmWarning, OperationGeometry } from './model'
 import { TEST_STOCK } from './testing/test-part'
-import { chamferFit, coneSlant, FLUTE_MARGIN, toolFit } from './tool-fit'
+import { chamferFit, chamferInOnePass, coneSlant, FLUTE_MARGIN, toolFit } from './tool-fit'
 
 type Op<K extends OperationGeometry['kind']> = Extract<OperationGeometry, { kind: K }>
 
@@ -322,10 +322,33 @@ describe('chamferFit (chamfer mill fit row)', () => {
     // chamfer slant (6.4 − 3.4)/2/sin 45° = 2.12 mm; a Ø6 pointed V-bit has 4.24 mm of edge
     expect(coneSlant(3.4, 6.4, 90)).toBeCloseTo(2.1213, 4)
     expect(chamferFit(vbit({ diameter: 6 }), m3)).toBeUndefined()
-    // a Ø4 bit with a 2 mm tip has 1.41 mm of edge
-    const short = chamferFit(vbit({ diameter: 4, tipDiameter: 2 }), m3)
-    expect(short?.rule).toBe('slant')
-    expect(short?.values['cuttingEdge']).toBeCloseTo(1.4142, 4)
+    // a Ø4 bit with a 2 mm tip has 1.41 mm of edge: it cuts the chamfer in levels (DF142)
+    const short = vbit({ diameter: 4, tipDiameter: 2 })
+    expect(chamferFit(short, m3)).toBeUndefined()
+    expect(chamferInOnePass(short, m3)).toBe(false)
+    expect(chamferInOnePass(vbit({ diameter: 6 }), m3)).toBe(true)
+  })
+
+  it("DF142: levels need a shank no wider than the cone and the edge's bore cleared", () => {
+    // the M6 countersink Ø6.4 → Ø13.84 with a 1/4" 90° V-bit: slant 5.26 > edge 4.49
+    const m6 = { edgeDiameter: 6.4, diameter: 13.84, angle: 90 }
+    const quarter = vbit({ diameter: 6.35, tipDiameter: 0 })
+    expect(chamferInOnePass(quarter, m6)).toBe(false)
+    expect(chamferFit(quarter, m6)).toBeUndefined()
+    expect(chamferFit({ ...quarter, shankDiameter: 6.35 }, m6)).toBeUndefined()
+    const wide = chamferFit({ ...quarter, shankDiameter: 8 }, m6)
+    expect(wide?.rule).toBe('shank')
+    expect(wide?.values).toEqual({ shankDiameter: 8, toolDiameter: 6.35 })
+    // an inside circle profile's core is still there
+    expect(chamferFit(quarter, { ...m6, edgeCore: true })?.rule).toBe('bore')
+    // in one pass neither matters
+    const big = vbit({ diameter: 16, tipDiameter: 0, shankDiameter: 20 })
+    expect(chamferFit(big, { ...m6, edgeCore: true })).toBeUndefined()
+    // a general edge in levels: the same shank rule
+    expect(chamferFit({ ...quarter, shankDiameter: 8 }, { width: 5, angle: 90 })?.rule).toBe(
+      'shank',
+    )
+    expect(chamferFit({ ...quarter, shankDiameter: 8 }, { width: 3, angle: 90 })).toBeUndefined()
   })
 
   it('toolFit checks reach: plunged to where the tool cone has the chamfer Ø, contoured to the chamfer depth', () => {

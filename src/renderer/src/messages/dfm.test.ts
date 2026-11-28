@@ -180,8 +180,29 @@ describe('dfm messages', () => {
     ).toBe(
       'No tool in the library cuts walls 28.17 mm deep with its flutes (longest flute length 25 mm, 0.5 mm kept spare). Below the flutes the shank rubs the wall: add a tool with longer flutes or a reduced shank.',
     )
+    // chamfer rules (DF142: they fell back to "does not fit")
+    expect(text({ rule: 'angle', toolAngle: 60, angle: 90 })).toBe(
+      'The 6 mm flat end mill is 60°; the chamfer is 90°.',
+    )
+    expect(text({ rule: 'shank', shankDiameter: 8, toolDiameter: 6.35 })).toBe(
+      'The 6 mm flat end mill is too small to cut the chamfer in one pass, and its shank (Ø 8 mm) is wider than its cone (Ø 6.35 mm): in levels the shank would rub the bevel.',
+    )
+    expect(text({ rule: 'bore', edgeDiameter: 6.4, diameter: 13.84 })).toContain(
+      "needs the hole's core removed first",
+    )
     // values missing (unknown rule): still a sentence naming the tool
     expect(text({ rule: 'other' })).toBe('The 6 mm flat end mill does not fit.')
+    // DF142: dfm.chamferNoTool names the reason
+    const noTool = (params: DfmWarning['params']) =>
+      dfmMessages.text(w({ code: 'dfm.chamferNoTool', parameter: 'angle', params }), 'mm', names)
+    const m6 = { angle: 90, edgeDiameter: 6.4, diameter: 13.84 }
+    expect(noTool({ ...m6, reason: 'angle' })).toBe(
+      'The library has no 90° chamfer mill that cuts Ø6.4 mm to Ø13.84 mm.',
+    )
+    expect(noTool({ ...m6, reason: 'shank' })).toContain('their shank is wider than their cone')
+    expect(noTool({ ...m6, reason: 'bore' })).toContain(
+      'Make the hole a drilling or a circle pocket',
+    )
     expect(
       dfmMessages.text(
         w({

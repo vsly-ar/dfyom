@@ -212,13 +212,24 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       ? `The chamfer is ${L(p['depth'])} deep and cuts through the ${L(p['edgeDepth'])} floor above ${edge}.`
       : `The chamfer is ${L(p['depth'])} deep, deeper than ${edge} (${L(p['edgeDepth'])}).`
   },
-  'dfm.chamferNoTool': (p, L) =>
-    p['stepped'] === 1
-      ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
-      : // an edge chamfer along a general edge (edge-chamfers.md E1)
-        p['width'] !== undefined
-        ? `The library has no ${num(p['angle'])}° chamfer mill with a cutting edge for a ${L(p['width'])} bevel.`
-        : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
+  'dfm.chamferNoTool': (p, L) => {
+    if (p['stepped'] === 1)
+      return `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
+    // DF142: the library has mills of the angle; name what stops them
+    const angle = num(p['angle'])
+    switch (p['reason']) {
+      case 'bore':
+        return `The library's ${angle}° chamfer mills are smaller than Ø${L(p['diameter'])}, and cutting it in levels needs the hole's core removed first: the edge leaves it, so their shank would enter it. Make the hole a drilling or a circle pocket, or use a mill of at least Ø${L(p['diameter'])}.`
+      case 'shank':
+        return `The library's ${angle}° chamfer mills are too small to cut it in one pass, and their shank is wider than their cone, so in levels it would rub the bevel. Use a mill whose shank is no wider than its cone.`
+      case 'tip':
+        return `The tips of the library's ${angle}° chamfer mills are not smaller than the Ø${L(p['edgeDiameter'])} edge.`
+    }
+    // an edge chamfer along a general edge (edge-chamfers.md E1)
+    return p['width'] !== undefined
+      ? `The library has no ${angle}° chamfer mill with a cutting edge for a ${L(p['width'])} bevel.`
+      : `The library has no ${angle}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`
+  },
   // edge chamfers E3 (edge-chamfers.md § DFM findings)
   'dfm.chamferMeets': (p, L) =>
     `The bevels meet on a ${L(p['wall'])} wall: its top becomes a ridge. Use a width of at most ${L(num(p['wall']) / 2)}.`,
@@ -409,6 +420,23 @@ function toolUnfitText(p: DfmWarning['params'], L: (mm: unknown) => string): str
       if (has('fluteLength'))
         return `The ${tool} has ${L(p['fluteLength'])} flutes; the walls are ${L(p['depth'])} deep (${L(p['margin'])} kept spare) and its shank ${has('shankDiameter') ? `(Ø ${L(p['shankDiameter'])}) is not narrower than the cutter` : 'Ø is not in the library'}, so the shank would rub the wall. Use a tool with longer flutes.`
       break
+    // chamfers (design-v0.4.md § Chamfer operation, Fit; DF142 levels)
+    case 'angle':
+      if (has('toolAngle'))
+        return `The ${tool} is ${num(p['toolAngle'])}°; the chamfer is ${num(p['angle'])}°.`
+      break
+    case 'tip':
+      if (has('tipDiameter'))
+        return `The tip of the ${tool} (Ø ${L(p['tipDiameter'])}) is not smaller than the Ø ${L(p['edgeDiameter'])} edge.`
+      break
+    case 'slant':
+      return `The ${tool} has no cutting edge for this chamfer.`
+    case 'shank':
+      if (has('shankDiameter'))
+        return `The ${tool} is too small to cut the chamfer in one pass, and its shank (Ø ${L(p['shankDiameter'])}) is wider than its cone (Ø ${L(p['toolDiameter'])}): in levels the shank would rub the bevel.`
+      break
+    case 'bore':
+      return `The ${tool} is smaller than the Ø ${L(p['diameter'])} chamfer, and cutting it in levels needs the hole's core removed first: the edge leaves it, so the shank would enter it.`
     // DF108: a pattern's roughing tool clears the cells' middles, so it is well under their width
     case 'roughingWidth':
       if (has('size'))

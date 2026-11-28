@@ -317,6 +317,13 @@ interface CircleChamferFields {
    * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid is then the terraces.
    */
   readonly stepdown?: number
+  /**
+   * DF142: the edge leaves material inside it (an inside circle profile's core), so a chamfer
+   * wider than the tool's cutting edge cannot be cut in levels (the shank would enter it); absent
+   * for drillings and circle pockets, which clear their bore
+   * (docs/modes/plan-v0.4.md#chamfers-wider-than-the-cutting-edge-hardening-df142).
+   */
+  readonly edgeCore?: true
   readonly edge?: never
 }
 

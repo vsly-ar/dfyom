@@ -1,8 +1,10 @@
 /**
  * Chamfer (v0.4 T1): one circular chamfer per input, plunged at the centre (DC ≥ D) or
- * contoured on one ring at the chamfer depth (the fit rule makes the cutting edge cover the
- * slant, so one ring always cuts it); stepped (F7): terraces by a flat end mill.
- * Doc: docs/modes/plan-v0.4.md#chamfer-toolpath, docs/modes/plan-v0.4.md#stepped-chamfer-f7
+ * contoured on one ring at the chamfer depth when the cutting edge covers the slant; a chamfer
+ * wider than the cutting edge is contoured in levels stepping down and out from the hole (DF142,
+ * E4a's rings with the hole as the air); stepped (F7): terraces by a flat end mill.
+ * Doc: docs/modes/plan-v0.4.md#chamfer-toolpath, docs/modes/plan-v0.4.md#stepped-chamfer-f7,
+ * docs/modes/plan-v0.4.md#chamfers-wider-than-the-cutting-edge-hardening-df142
  */
 import { Err, Ok, type AppResult } from '../../shared/result'
 import {
@@ -19,6 +21,7 @@ import { HELIX_MIN_RADIUS } from './drilling'
 import type { ChamferInput, Toolpath } from './model'
 import { flat, MoveBuilder, slope, type Seg } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
+import { edgeChamferPasses, withoutAsCut, type EdgeChamferRing } from './edge-chamfer'
 
 /** Where the tool cuts a chamfer: its axis' distance from the chamfer's and its tip Z. */
 export interface ChamferCut {
@@ -84,12 +87,14 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
         diameter: tool.diameter,
         chamfer: op.diameter,
       })
+    // DF142: wider than the cutting edge it is cut in levels, which need the hole's core gone
     if (
       st.entry === 'contour' &&
+      op.edgeCore === true &&
       coneSlant(tip, tool.diameter, tool.angle) + TOOL_FIT_TOLERANCE <
         coneSlant(op.edgeDiameter, op.diameter, op.angle)
     )
-      issues.rule('check', 'tool.diameter', 'slant', 'the cutting edge is shorter than the slant', {
+      issues.rule('check', 'operation.edgeCore', 'bore', "levels need the edge's core removed", {
         cuttingEdge: coneSlant(tip, tool.diameter, tool.angle),
         slant: coneSlant(op.edgeDiameter, op.diameter, op.angle),
       })
@@ -111,6 +116,9 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
     b.rapid(at(c, heights.clearanceHeight))
     return Ok(toolpath(input, b.build()))
   }
+
+  const levels = chamferLevels(op, tool)
+  if (levels.length > 1) return Ok(toolpath(input, levelMoves(input, levels).build()))
 
   // Contour: down into the hole to the face (the tool touches nothing there), ramp along the ring
   // to the chamfer depth in whole turns (as helical boring: at most `rampAngle`, never descending
@@ -137,6 +145,80 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
   else for (const s of flat([exit], tipZ)) b.seg(s, cutting.feedRate)
   b.rapid(at(c, heights.clearanceHeight))
   return Ok(toolpath(input, b.build()))
+}
+
+/**
+ * The rings of a contoured chamfer by level (DF142): E4a's `edgeChamferPasses` with the width
+ * (D − d) / 2, so one level of the one ring when the cutting edge covers the slant, else levels
+ * from the edge ring (offset dt/2 into the hole) out to the ring touching the countersink. A ring
+ * at offset o has its axis on the circle of radius d / 2 − o.
+ */
+export function chamferLevels(
+  op: Pick<ChamferInput['operation'], 'edgeDiameter' | 'diameter' | 'angle'>,
+  tool: { readonly diameter: number; readonly tipDiameter?: number },
+): EdgeChamferRing[][] {
+  return edgeChamferPasses({ width: (op.diameter - op.edgeDiameter) / 2, angle: op.angle }, tool)
+}
+
+/**
+ * The moves of a chamfer in levels (DF142, plan-v0.4.md § Chamfers wider than the cutting edge):
+ * down into the hole at the edge ring's start to the face (or a recut's as-cut level); per level
+ * a ramp along the edge ring from the level above, then each ring of the level after a radial
+ * feed outward at depth, and a radial feed back to the edge ring (cleared); at the end the
+ * tangent half circle into the centre and out. Inner rings `rough`, bevel rings `finish`; a
+ * recut drops the rings within its as-cut cone (`withoutAsCut`).
+ */
+function levelMoves(input: ChamferInput, all: EdgeChamferRing[][]): MoveBuilder {
+  const { tool, cutting, heights, operation: op, strategy: st } = input
+  const tip = tool.tipDiameter ?? 0
+  const c = op.center
+  const r0 = (op.edgeDiameter - tip) / 2
+  const sweep = st.direction === 'climb' ? 2 * Math.PI : -2 * Math.PI
+  const ring = (r: number): Extract<Seg, { kind: 'arc' }> => ({
+    kind: 'arc',
+    center: c,
+    radius: r,
+    start: -Math.PI / 2,
+    sweep,
+  })
+  const at = (r: number, z: number): Vec3 => [c[0], c[1] - r, z]
+  const levels = withoutAsCut(all, op, input.material?.top, tip, tool.angle)
+  const b = new MoveBuilder()
+  let kind: 'rough' | 'finish' = levels[0]?.[0]?.bevel === true ? 'finish' : 'rough'
+  b.pass(kind)
+  b.rapid(at(r0, heights.clearanceHeight))
+  b.rapid(at(r0, op.onZ + heights.retractHeight))
+  let z = asCutLevel(op, input.material?.top, tool.angle)
+  b.line(at(r0, z), cutting.plungeRate)
+  const kindOf = (g: EdgeChamferRing) => (g.bevel ? 'finish' : 'rough')
+  for (const rings of levels) {
+    const tipZ = op.onZ - rings[0]!.depth
+    // the ramp belongs to the level's first ring
+    if (kindOf(rings[0]!) !== kind) b.pass((kind = kindOf(rings[0]!)))
+    if (z > tipZ + 1e-9) rampRing(b, ring(r0), z, tipZ, input)
+    z = tipZ
+    let r = r0
+    for (const g of rings) {
+      const rg = op.edgeDiameter / 2 - g.offset
+      if (kindOf(g) !== kind) b.pass((kind = kindOf(g)))
+      if (Math.abs(rg - r) > 1e-9) b.line(at(rg, z), cutting.feedRate)
+      r = rg
+      if (r >= HELIX_MIN_RADIUS) for (const s of flat([ring(r)], z)) b.seg(s, cutting.feedRate)
+    }
+    if (Math.abs(r - r0) > 1e-9) b.line(at(r0, z), cutting.feedRate)
+  }
+  // the last level is the edge ring: leave on a tangent half circle into the centre, as one ring
+  const exit: Seg = {
+    kind: 'arc',
+    center: [c[0], c[1] - r0 / 2],
+    radius: r0 / 2,
+    start: -Math.PI / 2,
+    sweep: sweep / 2,
+  }
+  if (r0 < HELIX_MIN_RADIUS) b.line([c[0], c[1], z], cutting.feedRate)
+  else for (const s of flat([exit], z)) b.seg(s, cutting.feedRate)
+  b.rapid([c[0], c[1], heights.clearanceHeight])
+  return b
 }
 
 /**

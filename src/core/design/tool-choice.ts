@@ -23,7 +23,7 @@ import {
   type StockGeometry,
 } from '../geometry/model'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
-import { shankClears, toolFit, type ToolUnfit } from '../geometry/tool-fit'
+import { chamferInOnePass, shankClears, toolFit, type ToolUnfit } from '../geometry/tool-fit'
 import { faceWaste, type FaceWaste } from '../geometry/waste'
 import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
@@ -260,7 +260,8 @@ function reachReasons(tool: Tool, input: ChoiceInput): string[] {
 }
 
 /**
- * The library tools that fit, ranked (design-v0.2.md § Auto choice): leaves no rest material
+ * The library tools that fit, ranked (design-v0.2.md § Auto choice): a chamfer in one pass
+ * before in levels (DF142) → leaves no rest material
  * (general shapes) → has a preset for the stock's material class → largest size (`sizeClasses`:
  * fewer passes) → shortest reach (stickout, else flute length; every fitting tool reaches, the
  * shortest is the stiffest, DF55) → larger diameter → library id. Fitting includes the flute rule
@@ -303,10 +304,18 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
     input.op.kind === 'line' && c.tool.type === 'chamferMill'
       ? Math.abs(c.tool.angle.mapOr(60, (q) => q.canonical) - 60)
       : 0
+  // DF142: a chamfer mill that cuts the chamfer in one pass (plunge or one ring) before one that
+  // needs levels (plan-v0.4.md § Chamfers wider than the cutting edge)
+  const g = input.geometry
+  const levels = (c: LibraryCandidate) =>
+    g.kind === 'chamfer' && g.stepdown === undefined && !chamferInOnePass(dfmTool(c.tool), g)
+      ? 1
+      : 0
   return out.sort(
     (a, b) =>
       vBit(a) - vBit(b) ||
       off60(a) - off60(b) ||
+      levels(a) - levels(b) ||
       Number(a.leavesRest) - Number(b.leavesRest) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
       cls(a) - cls(b) ||
