@@ -109,7 +109,7 @@ G0 Z10
 (Chamfer 1)
 (Tool change to T2: spindle off, retract)
 M5
-X50 Y50
+X50 Y61
 (Stop the spindle)
 (DFYOM TOOL CHANGE 2: 90 V-bit 1/4in, 6.35 mm chamfer)
 M0 ;Stop spindle, install T2 90 V-bit 1/4in, 6.35 mm, then zero Z

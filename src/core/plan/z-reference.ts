@@ -6,9 +6,11 @@
  * the `plan.zRef` findings. Derived on every call (memoized per loaded plan), never stored.
  * Doc: docs/modes/z-reference.md
  */
-import { STOCK_FACE, type Direction } from '../geometry/face'
+import { localStock, STOCK_FACE, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
-import { regionArea } from '../geometry/2d/model'
+import { line, regionArea, type Region } from '../geometry/2d/model'
+import { cutOffPieces, type CutOffPiece } from '../geometry/cut-off'
+import { keptSide } from './workholding/held'
 import {
   erodedPatch,
   FlatPatches,
@@ -162,6 +164,8 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
   // no touch-off surface (the tool that cut it is not known here)
   // (docs/modes/cut-state.md#cutting-only-the-difference-c4)
   const removals = asCutRemovals(plan, port)
+  // DF151: cut-offs so far whose kept side no one-sided chamfer names
+  const cutOffs: CutOffSoFar[] = []
   const out: ToolRunZRef[] = []
   for (const setup of plan.setups) {
     const direction = setupDirection(setup)
@@ -205,6 +209,7 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
             index,
             byId,
             afterCut,
+            cutOffs: cutOffs.filter((c) => (byId.get(c.line)?.direction ?? '+z') === direction),
           }),
         )
       } else if (op.zRef !== undefined)
@@ -236,6 +241,17 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
         const flat = flatTool && (g.kind !== 'profile' || g.depth !== undefined)
         patches.apply(g, flat)
         cutBy.set(id, { op, index, flat })
+        // DF151: a cut-off frees its offcut: no later touch-off spot on it
+        if (g.kind === 'line' && g.through === true && (g.direction ?? '+z') === direction) {
+          const face = localStock(direction, stock)
+          const pieces = cutOffPieces(g, face)
+          if (pieces === undefined) continue
+          const kept = keptSide(plan, id)
+          if (kept === undefined) cutOffs.push({ line: id, op, pieces })
+          else
+            for (const p of pieces)
+              if (p.side !== kept) patches.free(direction, polygonRegion(p.polygon))
+        }
       }
       if (isCut(op)) afterCut = true
       index++
@@ -262,6 +278,21 @@ interface RunInput {
   readonly byId: ReadonlyMap<string, OperationGeometry>
   /** An already-cut operation comes before the run (DF135). */
   readonly afterCut: boolean
+  /** Cut-offs of this direction before the run with no side named kept (DF151). */
+  readonly cutOffs: readonly CutOffSoFar[]
+}
+
+/** A through Line that cut the stock in two, neither side named the part (DF151). */
+interface CutOffSoFar {
+  readonly line: string
+  readonly op: PlanOperationDTO
+  readonly pieces: readonly CutOffPiece[]
+}
+
+/** A counter-clockwise polygon as a one-piece region. */
+function polygonRegion(poly: readonly Vec2[]): Region {
+  const elements = poly.map((p, i) => line(p, poly[(i + 1) % poly.length]!))
+  return { pieces: [{ outer: { elements }, holes: [] }] }
 }
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -416,6 +447,15 @@ function runReference(r: RunInput): ToolRunZRef {
       'chosen',
       `${capital(toolName)} touches off on ${zRefText(zRef)}; check it`,
       { surface: zRef.surface },
+    )
+  // DF151: after a cut-off with no side named the part, the default spot may be on the offcut
+  const cutOff = r.cutOffs.at(-1)
+  if (zRef !== undefined && !zRef.chosen && cutOff !== undefined)
+    finding(
+      'warning',
+      'cutOff',
+      `${capital(toolName)} touches off at X${zRef.at[0]} Y${zRef.at[1]} after ${planOperationLabel(plan.dto.design.part, cutOff.op.designOperationIds)} has cut the stock in two, and no side is named the part: the spot may be on the loose offcut. Name the part's side (a one-sided chamfer on the Line) or choose a spot on the part`,
+      { surface: zRef.surface, line: cutOff.line },
     )
   if (zRef?.small === true)
     finding(
