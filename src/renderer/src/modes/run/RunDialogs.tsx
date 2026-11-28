@@ -35,6 +35,7 @@ import { SetXyZeroDialog } from './SetXyZeroDialog'
 import { CheckAlignmentDialog } from './CheckAlignmentDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
+import { useFinalizeAndStart } from './finalize-start'
 import { AllCutOffer, useRunCutMarks } from './CutMarks'
 import styles from './Run.module.css'
 
@@ -127,6 +128,22 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
     machineGate ??
     (current?.state === 'done' && current.findings.length > 0 ? m.softLimitsFix : null)
   const startable = gate === null && passed && start.ready
+  const doStart = () =>
+    void a.startRun(
+      info?.setup.id,
+      resume ? from?.planOperationId : undefined,
+      resume ? undefined : start.at,
+    )
+  // DF143: a draft or settled plan on a real machine: "Finalize and start" instead of refusing
+  const finalize = useFinalizeAndStart({
+    open,
+    plan,
+    startable,
+    blocked: gate !== null || current?.state === 'failed',
+    start: doStart,
+  })
+  const offerFinalize = serial && realGate === m.notFinalized && finalize.offered
+  const shownGate = offerFinalize ? m.finalizeOffer : gate
   // "Start run" takes the focus once the check passes, unless the user moved it (ui.md)
   const startRef = useRef<HTMLButtonElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -148,36 +165,42 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               {m.cancel}
             </Button>
           </DialogClose>
-          <Button
-            ref={startRef}
-            variant="primary"
-            icon={<Icon name="run" />}
-            disabled={!startable}
-            {...(startable
-              ? { autoFocus: true }
-              : gate === null
-                ? {}
-                : { 'aria-describedby': whyId })}
-            onClick={() =>
-              void a.startRun(
-                info?.setup.id,
-                resume ? from?.planOperationId : undefined,
-                resume ? undefined : start.at,
-              )
-            }
-          >
-            {resume
-              ? serial
-                ? m.resumeMachine
-                : m.resume
-              : start.at !== undefined
+          {offerFinalize || finalize.busy ? (
+            <Button
+              variant="primary"
+              icon={<Icon name="run" />}
+              disabled={finalize.busy}
+              aria-describedby={whyId}
+              onClick={() => void finalize.run()}
+            >
+              {finalize.busy ? m.finalizing : m.finalizeStart}
+            </Button>
+          ) : (
+            <Button
+              ref={startRef}
+              variant="primary"
+              icon={<Icon name="run" />}
+              disabled={!startable}
+              {...(startable
+                ? { autoFocus: true }
+                : gate === null
+                  ? {}
+                  : { 'aria-describedby': whyId })}
+              onClick={doStart}
+            >
+              {resume
                 ? serial
-                  ? runMessages.startAt.startMachineAtLine(start.at.fromLine)
-                  : runMessages.startAt.startAtLine(start.at.fromLine)
-                : serial
-                  ? m.startMachine
-                  : m.start}
-          </Button>
+                  ? m.resumeMachine
+                  : m.resume
+                : start.at !== undefined
+                  ? serial
+                    ? runMessages.startAt.startMachineAtLine(start.at.fromLine)
+                    : runMessages.startAt.startAtLine(start.at.fromLine)
+                  : serial
+                    ? m.startMachine
+                    : m.start}
+            </Button>
+          )}
         </RunDialogFooter>
       }
     >
@@ -283,10 +306,13 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           {allCut ? '–' : <SoftLimitResult check={current} units={units} />}
         </dd>
       </dl>
-      {gate === null ? null : (
+      {shownGate === null ? null : (
         <p id={whyId} className={styles['why']}>
-          {gate}
+          {shownGate}
         </p>
+      )}
+      {finalize.error === undefined ? null : (
+        <ErrorMessage error={finalize.error} message={m.finalizeFailed} />
       )}
     </Dialog>
   )
@@ -409,6 +435,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
           onZero={(axes) => void a.setWorkZero(axes)}
         />
         <ProbeZButton
+          doc={doc}
           thickness={plate}
           gate={gates.workZero}
           reasonId={ids.zero}

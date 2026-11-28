@@ -126,6 +126,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         onZero={(axes) => void a.setWorkZero(axes)}
       />
       <ProbeZButton
+        doc={doc}
         thickness={plate}
         gate={gates.workZero}
         reasonId={ids.zero}

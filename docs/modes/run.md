@@ -222,8 +222,10 @@ Machine motion the operator has not seen coming is confirmed once, where it star
 | **Start run** on a real connection               | The pre-flight names the real target ("Serial port /dev/cu.usbmodem1101 at 115200 baud") and, beyond today's contents, the plan status and the air-cut hint ("First run: spindle off, Z zero raised above the stock"); its primary button reads "Start on the machine".                    | M1 target line; rest M2 ([run-machine.md](run-machine.md#pre-flight-on-a-real-machine)) |
 | **Continue** after a tool change or setup change | The dialog states the Z zero to set and that the spindle starts again; continuing is the confirmation.                                                                                                                                                                                     | existing                                                                                |
 | **Probe Z** (touch plate, M4), every connection  | "Probe Z?": put the plate on the stock under the bit and the clip on the bit, spindle off; the bit moves down until it touches (at most the probe distance); the plate thickness. Confirm "Probe" ([run-machine.md](run-machine.md#probing-and-re-zero-m4)).                               | M4                                                                                      |
-| **Start spindle** (v0.5 RV1), every connection   | "Start the spindle?": the speed, keep hands and loose clothing clear, Off stops it also while jogging. Confirm "Start spindle". Stop spindle is never confirmed ([run-machine.md](run-machine.md#spindle-while-jogging-rv1)).                                                              |
+| **Start spindle** (v0.5 RV1), every connection   | "Start the spindle?": the speed, keep hands and loose clothing clear, Off stops it also while jogging. Confirm "Start spindle". Stop spindle is never confirmed ([run-machine.md](run-machine.md#spindle-while-jogging-rv1)).                                                              | RV1                                                                                     |
 | Resume after a feed hold                         | No dialog; a deliberate click, never a single key ([ui.md](../conventions/ui.md#confirmations)).                                                                                                                                                                                           | existing                                                                                |
+
+An [advanced user](#advanced-user-df143) skips some of these (DF143); probing also waits for the [probe check](run-probing.md#probe-check-df143), which no setting skips.
 
 Jogs are not confirmed: they are short, cancellable, refused outside the travel (`run.travel`) and start only from a click or a jog hotkey in the app (DF88: never during a run job, never while typing; `Escape` stops them; [ui.md § Jog hotkeys](../conventions/ui.md#jog-hotkeys)).
 
@@ -233,7 +235,7 @@ Checked by `run.job.start` (main) and again by the host at `jobStart` ([run-v0.1
 
 1. The plan is `finalized` or `inUse` ([run-machine.md amendment of decision 5](run-machine.md#amendments-to-run-v01md)). **M1.** An external file instead prepares without refusals ([DF93](#run-an-external-g-code-file-df93)); 2–4 apply to it with the connection's machine in place of the plan's copy.
 2. The controller's `$$` matches the connection's machine copy in every mapped setting and has homing enabled ([run-machine.md § Settings check](run-machine.md#settings-check)); else `run.state`, rule `settingsMismatch`. **M1.**
-3. Idle, homed in this connection (not after an unexpected controller reset: M2), the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing; covered on the serial path in M2).
+3. Idle, homed in this connection (not after an unexpected controller reset: M2; not while the position is unverified after [Unlock and back off](run-machine.md#unlock-and-back-off-df143), rule `positionUnverified`, DF143), the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing; covered on the serial path in M2).
 4. The connection is reserved for the job from its checks to its stream (existing).
 
 ### 5. Watchdogs
@@ -267,6 +269,24 @@ A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is i
 - Stream a program it did not export, in the same job, from a finalized plan at the live work zero; except an external G-code file the user starts from the app after its own checks ([DF93](#run-an-external-g-code-file-df93)), streamed as the file says (only `M6` becomes the tool-change marker).
 - Change a plan's machine copy to match the controller silently ([library.md](../architecture/library.md#grbl--import)).
 - **Accepted (DF129, D79; in force when built):** starting at a line with a generated lead-in instead of never at an arbitrary line ([run-recovery.md § Start from a line](run-recovery.md#start-from-a-line)).
+
+### Advanced user (DF143)
+
+Hardening DF143 (dogfood, TG #488): the app setting **"Advanced user"** (Settings → Run, `advancedUser`, **off** by default) is for an operator who knows the machine and finds the routine confirmations slow. It changes only the UI; the host, the pre-flight checks and agents are unaffected.
+
+**Skipped** (the action runs at the click):
+
+| Confirmation                               | Where                              |
+| ------------------------------------------ | ---------------------------------- |
+| "Home the machine?" (real, not homed)      | Navigator's Home                   |
+| "Unlock without homing?"                   | Navigator's Unlock                 |
+| "Probe Z?"                                 | Every Probe Z (navigator, dialogs) |
+| "Start the spindle?"                       | Spindle under the jog pad          |
+| "Move to the touch-off spot?" (no finding) | Tool-change dialog                 |
+
+It also offers **"Unlock and back off"** after a limit switch hit while jogging ([run-machine.md](run-machine.md#unlock-and-back-off-df143)) with its distance setting.
+
+**Kept** (decided, DF143): the **run pre-flight** (every start: it is the check, not just a question; [§ 4](#4-before-a-real-run-streams)); **Continue** in tool-change and program-pause dialogs; the **probe check** (a disconnected probe crashes the bit); a **workholding-guard finding** before Go to or Move to touch-off spot (and its "Go anyway"); the **recovery** confirmations (Home and restore the work zero, resume points); **power lost / lost connection** notices; **Check alignment**'s start and "skip unticked"; Go to's own dialog; and every **data-loss** confirmation ([ui.md § Confirmations](../conventions/ui.md#confirmations): plan, part and library removes, discard recovery, close or quit with unsaved changes or during a run). Feed hold, Stop and Reset were never confirmed.
 
 ### Testing the rules
 

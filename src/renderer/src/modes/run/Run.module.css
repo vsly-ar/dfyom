@@ -149,6 +149,17 @@
   gap: var(--space-1);
 }
 
+/* DF143: the probe input live, label and chip on one line (docs/modes/run-probing.md#probe-check-df143) */
+.probeInputRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+}
+
 /* DF93: a file's refusals (Start stays disabled) */
 .notice[data-tone='danger'] {
   border-color: var(--danger);
@@ -918,6 +929,13 @@
   line-height: var(--lh-sm);
   font-weight: 600;
   color: var(--text);
+}
+
+/* DF143: "Unlock and back off" under the steps */
+.backOff {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .alarmSteps {

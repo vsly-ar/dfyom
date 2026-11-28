@@ -143,6 +143,12 @@ export const shellMessages = {
     autoReconnect: 'Reconnect automatically after a lost connection',
     autoReconnectHint:
       'When the connection drops during a run, DFYOM connects to the same machine again for up to 2 minutes. It only reads the controller: nothing moves until you say so.',
+    /** Hardening DF143 (docs/modes/run.md#advanced-user-df143). */
+    advancedUser: 'Advanced user',
+    advancedUserHint:
+      'Skips the confirmations before Home, Unlock, Probe Z, Start spindle and Move to touch-off spot, and offers “Unlock and back off” after a limit switch hit while jogging. The run’s pre-flight and the confirmations that guard your data stay.',
+    limitBackOff: 'Back-off distance',
+    limitBackOffHint: 'How far “Unlock and back off” jogs off a limit switch.',
     homeConfirmHint: (n: number) =>
       n === 0
         ? 'Homing a real machine asks for confirmation first.'

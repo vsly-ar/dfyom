@@ -1915,11 +1915,82 @@ describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, ()
     expect(await waitFor(() => t.status().state === 'Door:1' && t.status().pins === 'D')).toBe(true)
     expectOk(await t.client.simulateInput('door', false))
     expect(await waitFor(() => t.status().state === 'Door:0')).toBe(true)
+    // DF143: the probe input, for the probe check ("Touch probe")
+    expectOk(await t.client.simulateInput('probe', true))
+    expect(await waitFor(() => t.status().pins?.includes('P') === true)).toBe(true)
+    expectOk(await t.client.simulateInput('probe', false))
+    expect(await waitFor(() => t.status().pins?.includes('P') !== true)).toBe(true)
     expectOk(await t.run('run.connection.close', {}, ui))
     expectOk(
       await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
     )
     expectErrCode(await t.client.simulateInput('x', true), 'run.state')
+  })
+
+  it('a hard limit from a jog: Unlock and back off, homed but unverified, a run waits for $H (DF143)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const before = t.status().mpos
+    // a jog toward X− runs onto the X switch: ALARM:1 with the jog's direction
+    expectOk(await t.run('run.machine.jog', { by: [-5, 0, 0], feed: 1000 }, ui))
+    expectOk(await t.client.simulateInput('x', true))
+    expect(await waitFor(() => t.status().alarm?.code === 1)).toBe(true)
+    expect(t.status().alarm).toMatchObject({ code: 1, jog: [-1, 0, 0] })
+    expect(t.status().homed).toBe(false)
+    const backed = expectOk(await t.run('run.machine.backOff', { distance: 3 }, ui)) as {
+      jobId: string
+    }
+    // the virtual switch releases as the axis leaves it (a second ALARM:1 on GRBL without its
+    // state check): reset, unlock and back off once more
+    expect(expectOk(await t.d.job(backed.jobId).unwrap().result)).toEqual({
+      positionUnverified: true,
+    })
+    const st = t.status()
+    expect(st).toMatchObject({ state: 'Idle', homed: true, positionUnverified: true })
+    expect(st.alarm).toBeUndefined()
+    expect(st.pins).toBeUndefined()
+    // moved off toward X+ (against the jog), never further than the jog plus twice the back-off
+    expect(st.mpos[0]).toBeGreaterThan(before[0] - 5)
+    expect(st.mpos[0]).toBeLessThanOrEqual(before[0] + 6 + 1e-3)
+    // jogs wait for the quiet time, then work
+    const early = await t.run('run.machine.jog', { by: [-1, 0, 0], feed: 1000 }, ui)
+    if (early.isErr()) expect(early.unwrapErr().issues[0]?.rule).toBe('backingOff')
+    let jogged = false
+    for (const end = Date.now() + 5000; !jogged && Date.now() < end;) {
+      jogged = (await t.run('run.machine.jog', { by: [-1, 0, 0], feed: 1000 }, ui)).isOk()
+      if (!jogged) await sleep(100)
+    }
+    expect(jogged).toBe(true)
+    expect(await waitFor(() => t.status().state === 'Idle')).toBe(true)
+    // a run waits until homed again
+    const start = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    const refused = expectErrCode(await t.d.job(start.jobId).unwrap().result, 'run.state')
+    expect(refused.issues[0]?.rule).toBe('positionUnverified')
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    expect(t.status().positionUnverified).toBeUndefined()
+  })
+
+  it('a hard limit outside a jog has no direction: back off is refused (DF143)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    await sleep(600)
+    expectOk(await t.client.simulateInput('y', true))
+    expect(await waitFor(() => t.status().alarm?.code === 1)).toBe(true)
+    expect(t.status().alarm?.jog).toBeUndefined()
+    const backed = expectOk(await t.run('run.machine.backOff', {}, ui)) as { jobId: string }
+    const refused = expectErrCode(await t.d.job(backed.jobId).unwrap().result, 'run.state')
+    expect(refused.issues[0]?.rule).toBe('notJogLimit')
+  })
+
+  it('a hard limit during a run has no jog direction (DF143: never unlocked in a run)', async () => {
+    const r = await realRun({ settings: { 21: 1 } })
+    await r.streaming()
+    r.port().limitPin('x', true)
+    expect(await waitFor(() => r.t.status().alarm?.code === 1)).toBe(true)
+    expect(r.t.status().alarm?.jog).toBeUndefined()
   })
 
   it('a probe miss at a tool change keeps the run waiting: unlock, probe again, continue', async () => {

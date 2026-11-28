@@ -292,6 +292,12 @@ async function connectAndHome(t: Awaited<ReturnType<typeof renderRun>>) {
   await within(machineGroup()!).findByText('Idle')
 }
 
+/** DF143: the probe check: the input reads touching, then open (the plate touched to the bit). */
+function touchProbe(t: { machine: Machine }) {
+  t.machine.push({ pins: 'P' })
+  t.machine.push({ pins: '' })
+}
+
 describe('Run mode', () => {
   it('says once why the disconnected controls are disabled, and each control points at it', async () => {
     const t = await renderRun()
@@ -328,8 +334,12 @@ describe('Run mode', () => {
     // in Alarm, jog and work zero say why they are disabled
     expect(within(t.nav()).getByRole('button', { name: 'Jog X+' })).toBeDisabled()
     expect(within(t.nav()).getAllByText('Home the machine first.').length).toBeGreaterThan(0)
-    // v0.5 RV3: Test probe, the probe input live
-    expect(within(t.nav()).getByText(/^Probe input: open\./)).toHaveAttribute('role', 'status')
+    // v0.5 RV3, DF143: the probe input live, and the probe check's prompt
+    const probe = within(t.nav()).getByRole('group', { name: 'Probe input' })
+    expect(within(probe).getByText('Open')).toBeInTheDocument()
+    expect(
+      within(probe).getByText('Touch the plate to the bit to test the probe.'),
+    ).toHaveAttribute('role', 'status')
     await expectNoAxeViolations()
   })
 
@@ -1468,6 +1478,21 @@ describe('Run mode', () => {
     await connectAndHome(t)
     const nav = within(t.nav())
     expect(nav.getByText(/Touch plate 10(\.0+)? mm/)).toBeInTheDocument()
+    // DF143: probing waits for the probe check (touching, then open), said by the prompt
+    const button = nav.getByRole('button', { name: 'Probe Z' })
+    expect(button).toBeDisabled()
+    const prompt = nav.getByText('Touch the plate to the bit to test the probe.')
+    expect(button.getAttribute('aria-describedby')).toBe(prompt.id)
+    t.machine.push({ pins: 'P' })
+    expect(nav.getByText('Touching: now let go.')).toBeInTheDocument()
+    expect(
+      within(nav.getByRole('group', { name: 'Probe input' })).getByText('Touching'),
+    ).toBeVisible()
+    expect(button).toBeDisabled()
+    t.machine.push({ pins: '' })
+    expect(nav.getByText('Probe tested: probing is enabled.')).toBeInTheDocument()
+    // the virtual machine offers to touch its probe
+    expect(nav.getByRole('button', { name: 'Touch probe' })).toBeInTheDocument()
     await t.user.click(nav.getByRole('button', { name: 'Probe Z' }))
     const confirm = screen.getByRole('alertdialog', { name: 'Probe Z?' })
     expect(within(confirm).getByText(/clip on the bit/)).toBeInTheDocument()
@@ -1480,6 +1505,7 @@ describe('Run mode', () => {
   it("the toolbar's Resume resumes this window's held Probe Z job (DF82)", async () => {
     const t = await renderRun({ plate: '10' })
     await connectAndHome(t)
+    touchProbe(t)
     // the probe runs until the test lets job.wait answer
     let finish: () => void = () => {}
     t.bridge.handle(
@@ -1550,6 +1576,7 @@ describe('Run mode', () => {
   it("the machine's hold button during this window's Probe Z: Resume resumes the probe (DF82)", async () => {
     const t = await renderRun({ plate: '10' })
     await connectAndHome(t)
+    touchProbe(t)
     t.bridge.handle('job.wait', () => new Promise(() => {}))
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Probe Z' }))
     await t.user.click(
@@ -1580,6 +1607,10 @@ describe('Run mode', () => {
       ...t.machine.job('toolChange', { toolChange: { n: 2, name: 'Drill 6' } }),
     })
     const dialog = await screen.findByRole('dialog', { name: 'Tool change 2' })
+    // DF143: the probe input live in the dialog too, the probe check first
+    expect(within(dialog).getByRole('button', { name: 'Probe Z' })).toBeDisabled()
+    expect(within(dialog).getByRole('group', { name: 'Probe input' })).toBeInTheDocument()
+    touchProbe(t)
     await t.user.click(within(dialog).getByRole('button', { name: 'Probe Z' }))
     await t.user.click(
       within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {
@@ -1802,13 +1833,23 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     expect(within(preflight).getByText(/Run it in the air: spindle off/)).toBeInTheDocument()
     expect(within(preflight).getByText('Plan status')).toBeInTheDocument()
     expect(within(preflight).getByText('Draft')).toBeInTheDocument()
-    // a draft plan does not run on a real machine: said before the click
-    const start = within(preflight).getByRole('button', { name: 'Start on the machine' })
-    expect(start).toBeDisabled()
-    expect(
-      within(preflight).getByText(/A real machine runs only finalized plans/),
-    ).toBeInTheDocument()
+    // a draft plan does not run on a real machine as it is (said before the click); DF143:
+    // "Finalize and start" finalizes it (draft → settled → finalized), then the checks continue
+    expect(within(preflight).queryByRole('button', { name: 'Start on the machine' })).toBeNull()
+    const finalize = within(preflight).getByRole('button', { name: 'Finalize and start' })
+    const why = within(preflight).getByText(/A real machine runs only finalized plans/)
+    expect(finalize.getAttribute('aria-describedby')).toBe(why.id)
     await expectNoAxeViolations(t.container)
+    await t.user.click(finalize)
+    await waitFor(() =>
+      expect(t.callsOf('plan.status.set')).toEqual([
+        { planId: expect.any(String), status: 'settledDesign' },
+        { planId: expect.any(String), status: 'finalized' },
+      ]),
+    )
+    // once the replica shows it finalized and the checks pass, it starts on the machine
+    await waitFor(() => expect(t.callsOf('run.job.start')).toHaveLength(1))
+    expect(within(preflight).queryByText('Draft')).toBeNull()
   })
 
   it('a lost real connection says the machine may still move, in the navigator and the failure dialog (M2)', async () => {
@@ -1968,6 +2009,7 @@ describe('Run mode without a project (DF80)', () => {
     expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['z'] }])
     // the plate thickness comes from the machine profile
     expect(nav.getByText(/Touch plate 10(\.0+)? mm/)).toBeInTheDocument()
+    touchProbe(t)
     await t.user.click(nav.getByRole('button', { name: 'Probe Z' }))
     await t.user.click(
       within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {

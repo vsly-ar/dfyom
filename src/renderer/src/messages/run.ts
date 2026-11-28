@@ -94,6 +94,8 @@ export const runMessages = {
     unlock: 'Unlock',
     homed: 'Homed',
     notHomed: 'Not homed',
+    /** DF143: backed off a limit switch without homing (docs/modes/run-machine.md#unlock-and-back-off-df143). */
+    unverified: 'Position unverified — re-home before cutting',
     jog: 'Jog',
     step: 'Jog step',
     jogButton: (axis: string, dir: '+' | '−') => `Jog ${axis}${dir}`,
@@ -151,6 +153,10 @@ export const runMessages = {
     noPlan: 'Choose a plan first.',
     nothingToStop: 'Nothing to stop: the machine is not moving.',
     otherPlan: 'The connection emulates another plan’s machine. Disconnect to switch plans.',
+    /** DF143: backed off a limit switch: steps may be lost. */
+    unverified: 'Home the machine first: the position is unverified after the limit switch.',
+    /** DF143: the probe check (docs/modes/run-probing.md#probe-check-df143). */
+    probeCheck: 'Touch the plate to the bit to test the probe first.',
   },
 
   /** A jog refused for leaving the travel (`run.travel`, docs/modes/run.md DF33), in the project's unit. */
@@ -239,6 +245,18 @@ export const runMessages = {
       } as Readonly<Record<number, string>>,
       limitPressed: (axes: readonly string[]) =>
         `The ${axes.join(' and ')} limit switch${axes.length > 1 ? 'es are' : ' is'} still pressed. Release it, then home. If the axis rests on its switch, unlock and jog it off (letting go may trip the alarm once more: reset again).`,
+    },
+    /**
+     * DF143 (advanced user): a hard limit hit while jogging, outside a run
+     * (docs/modes/run-machine.md#unlock-and-back-off-df143).
+     */
+    backOff: {
+      button: 'Unlock and back off',
+      what: (move: string, unit: string) =>
+        `Resets the controller if needed, unlocks it and jogs ${move} ${unit} off the switch, slowly. Jogging waits meanwhile.`,
+      unknown: 'The way off the switch is not known: home, or unlock and jog off it by hand.',
+      after:
+        'The position may be off (a hard stop can lose steps): it stays unverified until you home again, and runs wait for that.',
     },
     /** DF134: `Pn:` letters in words, for "Inputs active: …". */
     pins: {
@@ -329,6 +347,19 @@ export const runMessages = {
       touching
         ? 'Probe input: touching. Probing waits until it reads open.'
         : 'Probe input: open. Touch the clip to the plate to test it.',
+    /** DF143: the probe check and the live input (docs/modes/run-probing.md#probe-check-df143). */
+    check: {
+      region: 'Probe input',
+      open: 'Open',
+      touching: 'Touching',
+      label: 'Probe input',
+      prompt: 'Touch the plate to the bit to test the probe.',
+      release: 'Touching: now let go.',
+      ok: 'Probe tested: probing is enabled.',
+      waits: 'Touching: probing waits until it reads open.',
+      touch: 'Touch probe',
+      touchHint: 'The virtual machine: closes the probe input for a moment.',
+    },
   },
 
   /** v0.5 RV5: Set X/Y zero (docs/modes/run-probing.md#set-xy-zero-rv5). */
@@ -987,6 +1018,12 @@ export const runMessages = {
     airCut:
       'First run of this program? Run it in the air: spindle off, Z zero raised above the stock.',
     notFinalized: 'A real machine runs only finalized plans. Finalize the plan in Plan mode first.',
+    /** DF143: "Finalize and start" (docs/modes/run-machine.md#pre-flight-on-a-real-machine). */
+    finalizeOffer:
+      'A real machine runs only finalized plans. Finalize and start finalizes this plan (it becomes read-only; set it back to Settled design in Plan to edit it), then starts once the checks pass.',
+    finalizeStart: 'Finalize and start',
+    finalizing: 'Finalizing…',
+    finalizeFailed: 'The plan could not be finalized:',
     /** DF135 Q199 (cut-state.md § A new blank): every operation of the setup is already cut. */
     allCut: (setup: string) =>
       `Everything in ${setup} is marked already cut. Cutting a new blank? Clear the marks to cut it all again.`,

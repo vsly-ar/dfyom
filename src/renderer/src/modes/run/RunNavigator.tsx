@@ -46,6 +46,7 @@ import { firstRunSetup, runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
+import { ProbeInput } from './ProbeInput'
 import { SpindleControl } from './SpindleControl'
 import { useMachineOverrideLimits } from './OverridesSection'
 import styles from './Run.module.css'
@@ -200,6 +201,9 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   const guardOff = useRun((s) => s.guardOff)
   const machineKey = useMachineJog(doc).key
   const skipHome = useSettings((s) => s.settings.skipHomeConfirm)
+  // DF143: an advanced user homes, unlocks and starts the spindle without confirmations
+  const advanced = useSettings((s) => s.settings.advancedUser)
+  const backOffMm = useSettings((s) => s.settings.limitBackOff)
   const updateSettings = useSettings((s) => s.update)
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
@@ -277,6 +281,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
     zero: reasonId(gates.workZero),
     connect: reasonId(gates.disconnect),
     check: `${whyBase}-check`,
+    probe: `${whyBase}-probe`,
   }
 
   return (
@@ -440,6 +445,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             // DF88: unless "Don't ask again" was checked for this library machine
             onClick={() => {
               const ask =
+                !advanced &&
                 serial &&
                 !status.homed &&
                 (machineKey === undefined || !skipHome.includes(machineKey))
@@ -453,13 +459,19 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           <Button
             size="lg"
             disabled={gates.unlock !== null || !status.state.startsWith('Alarm')}
-            onClick={() => setUnlockOpen(true)}
+            onClick={() => (advanced ? void a.unlock() : setUnlockOpen(true))}
           >
             {m.unlock}
           </Button>
           {connected ? (
-            <StatusChip tone={status.homed ? 'success' : 'warning'}>
-              {status.homed ? m.homed : m.notHomed}
+            <StatusChip
+              tone={status.homed && status.positionUnverified !== true ? 'success' : 'warning'}
+            >
+              {!status.homed
+                ? m.notHomed
+                : status.positionUnverified === true
+                  ? m.unverified
+                  : m.homed}
             </StatusChip>
           ) : null}
         </div>
@@ -515,12 +527,15 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           machine={spindleMachine}
           onSpindle={a.spindle}
           sharedReason={reasonId}
+          confirmStart={!advanced}
         />
       </Section>
 
       {/* DF88: the zero buttons moved to the Position table; Probe Z is what is left */}
       <Section title={m.probing}>
         <ProbeZButton
+          doc={doc}
+          input={ids.probe}
           thickness={plate}
           gate={gates.workZero}
           reasonId={ids.zero}
@@ -569,16 +584,24 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             {checkGate}
           </p>
         ) : null}
-        {/* v0.5 RV3: Test probe, the probe input live from `Pn:P` (run-probing.md) */}
-        {connected ? (
-          <p className={styles['hint']} role="status">
-            {runMessages.probe.input(status.pins?.includes('P') === true)}
-          </p>
-        ) : null}
+        {/* v0.5 RV3 Test probe, DF143 the probe check: the input live from `Pn:P` (run-probing.md) */}
+        <ProbeInput doc={doc} id={ids.probe} />
       </Section>
 
       {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
-      <AlarmPanel status={status} />
+      <AlarmPanel
+        status={status}
+        {...(advanced
+          ? {
+              backOff: {
+                distance: backOffMm,
+                units,
+                busy: busy('run.machine.backOff'),
+                onBackOff: () => void a.backOff(backOffMm),
+              },
+            }
+          : {})}
+      />
       <DoorPanel status={status} />
       <LostConnectionWarning status={status} />
       <ReconnectStatus status={status} onStop={() => void a.reconnect('cancel')} />

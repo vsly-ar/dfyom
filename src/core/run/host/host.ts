@@ -34,6 +34,13 @@ import {
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
 import { limitSwitches, POSITION_ALARMS } from '../grbl/status'
+import {
+  backOffMove,
+  BACK_OFF_QUIET_MS,
+  JOG_ALARM_WINDOW_MS,
+  jogDirection,
+  type JogDirection,
+} from '../back-off'
 import { overrideLimits, overrideSteps } from '../override'
 import { runProbeCycle, type ProbePort } from '../probe-cycle'
 import { runProbeRoutine } from '../probe-routines'
@@ -116,7 +123,25 @@ interface Connection {
    * (docs/modes/z-reference.md#dfyom-run).
    */
   zeroLevel: number
-  alarm?: { readonly code: number; readonly text: string; readonly reset?: true } | undefined
+  alarm?:
+    | {
+        readonly code: number
+        readonly text: string
+        readonly reset?: true
+        /** DF143: a hard limit raised by a jog: its direction. */
+        readonly jog?: JogDirection
+      }
+    | undefined
+  /** DF143: the last jog sent (direction, wall time): a hard limit right after it is the jog's. */
+  lastJog?: { readonly dir: JogDirection; readonly at: number } | undefined
+  /** DF143: `homed` before the hard limit the jog raised (a back-off keeps it, unverified). */
+  homedBeforeLimit?: boolean | undefined
+  /** DF143: backed off a limit switch without homing since; a run waits for `$H`. */
+  positionUnverified?: boolean
+  /** DF143: "Unlock and back off" is running. */
+  backingOff?: boolean
+  /** DF143: jogs are refused until this wall time (the back-off's quiet time). */
+  jogBlockedUntil?: number | undefined
   lastMessage?: string | undefined
   job?: Job | undefined
   /** From the controller's `$$` at connect; undefined when it reports no travel. */
@@ -276,6 +301,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
       ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
+      ...(conn.positionUnverified === true ? { positionUnverified: true as const } : {}),
       ...(s?.pins === undefined ? {} : { pins: s.pins }),
       ...(conn.laserMode ? { laserMode: true as const } : {}),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
@@ -504,6 +530,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     // a banner at the end of `$H` already checked and found Alarm: the homing did not hold
     if ((c.positionResets ?? 0) !== resets) return lostAfterHoming()
     c.homed = true
+    c.positionUnverified = false
     c.alarm = undefined
     log.info('homing done')
     status.now()
@@ -607,6 +634,20 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             where: 'machineHost.jog',
             issues: [{ path: ['to'], rule: 'oneOf', message: 'give to or by' }],
           })
+        // DF143: no jog while backing off a limit switch, nor in its quiet time
+        if (c.backingOff === true || timers.now() < (c.jogBlockedUntil ?? 0))
+          return fail('run.state', 'backing off the limit switch: jog again in a moment', {
+            where: 'machineHost.jog',
+            data: { state },
+            issues: [{ path: [], rule: 'backingOff', message: 'backing off the limit switch' }],
+          })
+        c.lastJog = {
+          dir:
+            action.to !== undefined
+              ? jogDirection(action.to, c.jogEnd ?? c.sender.status?.mpos ?? [0, 0, 0])
+              : jogDirection(action.by ?? [0, 0, 0]),
+          at: timers.now(),
+        }
         if (action.continuous === true) return jogToEdge(c, action.by ?? [0, 0, 0], action.feed)
         const v = action.to ?? action.by ?? [0, 0, 0]
         const mode = action.to !== undefined ? 'G53 G90' : 'G91'
@@ -667,7 +708,11 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           })
         const { input, pressed } = action
         c.controllerSide((e) =>
-          input === 'door' ? e.setDoorPin(pressed) : e.setLimitPin(input, pressed),
+          input === 'door'
+            ? e.setDoorPin(pressed)
+            : input === 'probe'
+              ? e.setProbeShorted(pressed)
+              : e.setLimitPin(input, pressed),
         )
         status.now()
         return Ok(undefined)
@@ -675,7 +720,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       case 'forgetHoming':
         if (jobBusy) return stateError('not while a run is going', state)
         c.homed = false
+        c.positionUnverified = false
         return Ok(undefined)
+      case 'backOff':
+        return backOff(c, action)
       case 'reset':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
@@ -973,6 +1021,132 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (r.isErr()) return Err(r.unwrapErr().withContext(where))
     log.info({ result: r.unwrap() }, 'probed')
     return Ok(r.unwrap())
+  }
+
+  /** Waits `ms` of machine time. */
+  const pause = (c: Connection, ms: number) =>
+    new Promise<void>((resolve) => c.clock.schedule(c.clock.now() + ms, resolve))
+
+  /**
+   * DF143: after a critical hard limit, `0x18` and the controller's restart (the `reset` event
+   * marks the alarm reset), within `ms` of machine time.
+   */
+  async function resetAfterLimit(c: Connection, ms = 5000): Promise<AppResult<void>> {
+    if (!inCriticalAlarm(c)) return Ok(undefined)
+    c.jogEnd = undefined
+    const sent = c.sender.realtime(REALTIME.reset)
+    if (sent.isErr()) return sent
+    const deadline = c.clock.now() + ms
+    while (inCriticalAlarm(c)) {
+      if (conn !== c) return notConnected()
+      if (c.clock.now() >= deadline)
+        return stateError('the controller did not restart after the reset', machineState(c))
+      await pause(c, 50)
+    }
+    return Ok(undefined)
+  }
+
+  /**
+   * DF143, "Unlock and back off" (docs/modes/run-machine.md#unlock-and-back-off-df143): after a
+   * hard limit a jog raised (never in a run): a reset while the alarm is critical, `$X`, then one
+   * slow jog of `distance` off the switch (the pressed switch's axis from `Pn:`, against the last
+   * jog's direction). On controllers that raise the hard limit again when the switch releases
+   * (GRBL without its state check), that second alarm is reset and unlocked once more and the jog
+   * repeated once, if no switch reads pressed any more. Jogs are refused meanwhile and for at least
+   * `BACK_OFF_QUIET_MS`. Homed before → homed again, but `positionUnverified` until `$H`.
+   */
+  async function backOff(
+    c: Connection,
+    a: Extract<MachineAction, { kind: 'backOff' }>,
+  ): Promise<AppResult<unknown>> {
+    const where = 'machineHost.backOff'
+    const state = machineState(c)
+    const dir = c.alarm?.jog
+    if (c.job !== undefined) return stateError('never during a run', state)
+    if (c.backingOff === true) return fail('run.busy', 'already backing off', { where })
+    if (c.alarm?.code !== 1 || dir === undefined)
+      return fail('run.state', 'only after a hard limit raised while jogging', {
+        where,
+        data: { state },
+        issues: [{ path: [], rule: 'notJogLimit', message: 'no hard limit from a jog' }],
+      })
+    const homedBefore = c.homedBeforeLimit === true
+    c.backingOff = true
+    c.jogBlockedUntil = timers.now() + BACK_OFF_QUIET_MS
+    log.info({ jog: dir, distance: a.distance }, 'backing off a limit switch')
+    try {
+      // one try, and one more when the switch's release raised the alarm again
+      for (let attempt = 0; ; attempt++) {
+        const reset = await resetAfterLimit(c)
+        if (reset.isErr()) return Err(reset.unwrapErr().withContext(where))
+        const fresh = await c.sender.freshStatus()
+        const move = backOffMove(dir, fresh?.pins ?? c.sender.status?.pins, a.distance, where)
+        if (move.isErr()) return move
+        if (attempt > 0 && limitSwitches(fresh?.pins).length > 0)
+          return fail('run.state', 'the limit switch is still pressed after backing off', {
+            where,
+            data: { pins: fresh?.pins ?? '' },
+            issues: [{ path: [], rule: 'limitPressed', message: 'release the limit switch' }],
+          })
+        const unlocked = await c.sender.command('$X')
+        if (unlocked.isErr()) return Err(unlocked.unwrapErr().withContext(where))
+        c.alarm = undefined
+        status.now()
+        const v = move.unwrap()
+        const pressed = limitSwitches(fresh?.pins)
+        const jog = await c.sender.command(
+          `$J=G21 G91 X${fmt(v[0])} Y${fmt(v[1])} Z${fmt(v[2])} F${fmt(a.feed)}`,
+        )
+        if (jog.isErr()) return Err(jog.unwrapErr().withContext(where))
+        // the virtual machine: the axis leaves the switch as it moves off it
+        if (c.controllerSide !== undefined && pressed.length > 0) {
+          await pause(c, 20)
+          c.controllerSide((e) => {
+            for (const p of pressed) e.setLimitPin(p.toLowerCase() as 'x' | 'y' | 'z', false)
+          })
+        }
+        const length = Math.hypot(v[0], v[1], v[2])
+        const deadline = c.clock.now() + (length / a.feed) * 60_000 * 2 + 5000
+        let again = false
+        for (;;) {
+          if (conn !== c) return notConnected()
+          if (c.alarm !== undefined) {
+            again = true
+            break
+          }
+          const s = await c.sender.freshStatus()
+          status.now()
+          if (c.alarm !== undefined) {
+            again = true
+            break
+          }
+          if (s?.state === 'Idle') break
+          if (c.clock.now() >= deadline)
+            return stateError('the back-off did not end in time', s?.state ?? machineState(c))
+          await pause(c, 50)
+        }
+        if (!again) break
+        const code = (c.alarm as { code: number } | undefined)?.code
+        if (code !== 1 || attempt > 0)
+          return fail('machine.alarm', `alarm ${code ?? '?'} while backing off`, {
+            where,
+            data: { code: code ?? 0 },
+          })
+        log.info('the switch released with a hard limit: reset and back off once more')
+      }
+    } finally {
+      c.backingOff = false
+      c.jogBlockedUntil = Math.max(c.jogBlockedUntil ?? 0, timers.now())
+    }
+    c.jogEnd = undefined
+    c.homedBeforeLimit = undefined
+    if (homedBefore) {
+      c.homed = true
+      c.positionUnverified = true
+    }
+    log.info({ homed: c.homed }, 'backed off the limit switch')
+    status.now()
+    return Ok({ positionUnverified: homedBefore })
   }
 
   /** RV1: `run.state` with a rule (docs/modes/run-machine.md#spindle-while-jogging-rv1). */
@@ -1313,6 +1487,15 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (fresh.state !== 'Idle')
       return refuse(stateError(`the machine is ${fresh.state}, not Idle`, fresh.state))
     if (!c.homed) return refuse(stateError('the machine is not homed', fresh.state))
+    // DF143: backed off a limit switch: steps may be lost, home again before cutting
+    if (c.positionUnverified === true)
+      return refuse(
+        fail('run.state', 'the position is unverified after a hard limit: home the machine first', {
+          where,
+          data: { state: fresh.state },
+          issues: [{ path: [], rule: 'positionUnverified', message: 'home the machine first' }],
+        }),
+      )
     const wz = await readWorkZero(c)
     if (wz.isErr()) return refuse(Err(wz.unwrapErr()))
     if (wz.unwrap().some((v, i) => Math.abs(v - (expect.workZero[i] ?? Number.NaN)) > 5e-4))
@@ -1458,14 +1641,29 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
 
   function onSenderEvent(c: Connection, e: SenderEvent): void {
     switch (e.kind) {
-      case 'alarm':
+      case 'alarm': {
         c.jogEnd = undefined
         // GRBL's alarm stops the spindle (mc_reset)
         c.manualSpindle = undefined
-        c.alarm = { code: e.code, text: e.text }
-        if (POSITION_ALARMS.has(e.code)) c.homed = false
+        // DF143: a hard limit raised by a jog outside a run (in Jog, or right after a jog was
+        // sent): its direction, for "Unlock and back off"; never during a run or a back-off
+        const last = c.lastJog
+        const byJog =
+          e.code === 1 &&
+          c.job === undefined &&
+          c.backingOff !== true &&
+          last !== undefined &&
+          ((c.sender.status?.state ?? '').startsWith('Jog') ||
+            timers.now() - last.at <= JOG_ALARM_WINDOW_MS)
+        c.alarm = { code: e.code, text: e.text, ...(byJog ? { jog: last.dir } : {}) }
+        if (c.backingOff !== true) c.homedBeforeLimit = byJog ? c.homed : undefined
+        if (POSITION_ALARMS.has(e.code)) {
+          c.homed = false
+          c.positionUnverified = false
+        }
         post({ type: 'event', kind: 'alarm', data: { code: e.code, text: e.text } })
         break
+      }
       case 'error':
         post({
           type: 'event',
@@ -1489,6 +1687,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         // docs/modes/run-machine.md#real-machine-run-rules)
         if (e.positionLost) {
           c.homed = false
+          c.positionUnverified = false
           c.positionResets = (c.positionResets ?? 0) + 1
         }
         post({

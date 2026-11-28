@@ -200,13 +200,27 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     expect(x).toBeGreaterThan(-150)
 
     // M2: the real-machine pre-flight names the plan status and the air cut; a draft does not run
+    // as it is: DF143 offers "Finalize and start" instead of Start on the machine
     await inspector.getByRole('button', { name: 'Start run' }).click()
     const preflight = page.getByRole('dialog', { name: 'Start run?' })
     await expect(preflight.getByText(`Serial port ${PORT} at 115200 baud`)).toBeVisible()
     await expect(preflight.getByText(/Run it in the air/)).toBeVisible()
     await expect(preflight.getByText('Draft')).toBeVisible()
-    await expect(preflight.getByRole('button', { name: 'Start on the machine' })).toBeDisabled()
+    await expect(preflight.getByRole('button', { name: 'Start on the machine' })).toHaveCount(0)
+    await expect(preflight.getByText(/Finalize and start finalizes this plan/)).toBeVisible()
     await render(page, 'm2-preflight')
+    // DF143: finalized (draft → settled → finalized), then the pre-flight continues its checks:
+    // this loopback controller's settings differ from the plan's machine, so it does not start and
+    // says why (the start itself after finalizing: RunMode.test.tsx)
+    await preflight.getByRole('button', { name: 'Finalize and start' }).click()
+    await expect(preflight.getByText('Finalized')).toBeVisible({ timeout: 30_000 })
+    await expect(preflight.getByRole('button', { name: 'Finalize and start' })).toHaveCount(0)
+    await expect(preflight.getByRole('button', { name: 'Start on the machine' })).toBeDisabled()
+    await expect(
+      preflight.getByText(
+        'The controller’s settings differ from the plan’s machine (see Connection).',
+      ),
+    ).toBeVisible()
     await preflight.getByRole('button', { name: 'Cancel' }).click()
 
     await navigator.getByRole('button', { name: 'Disconnect' }).click()
@@ -291,9 +305,28 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
     await overrides.getByRole('radio', { name: '100 %' }).click()
     await expect(feed.getByText('100 %', { exact: true }).first()).toBeVisible()
 
+    // DF143: the probe check first: jog the tool onto the plate (its top at MPos Z −60) and back
+    const probeZ = navigator.getByRole('button', { name: 'Probe Z' })
+    await expect(probeZ).toBeDisabled()
+    const probeInput = navigator.getByRole('group', { name: 'Probe input' })
+    await expect(
+      probeInput.getByText('Touch the plate to the bit to test the probe.'),
+    ).toBeVisible()
+    await navigator.getByRole('radio', { name: '10 mm' }).click()
+    for (let z = -11; z >= -61; z -= 10) {
+      await navigator.getByRole('button', { name: 'Jog Z−' }).click()
+      await expect(cell('Machine position Z')).toHaveText(`${z}.000`)
+    }
+    await expect(probeInput.getByText('Touching: now let go.')).toBeVisible()
+    for (let z = -51; z <= -1; z += 10) {
+      await navigator.getByRole('button', { name: 'Jog Z+' }).click()
+      await expect(cell('Machine position Z')).toHaveText(`${z}.000`)
+    }
+    await expect(probeInput.getByText('Probe tested: probing is enabled.')).toBeVisible()
+
     // M4: the plate is 59 mm below the tool: a 25 mm probe misses (ALARM:5)
     await expect(navigator.getByText(/Touch plate 10\.000 mm/)).toBeVisible()
-    await navigator.getByRole('button', { name: 'Probe Z' }).click()
+    await probeZ.click()
     const confirm = page.getByRole('alertdialog', { name: 'Probe Z?' })
     await expect(confirm.getByText(/Plate thickness: 10\.000 mm/)).toBeVisible()
     await render(page, 'm4-probe-confirm')

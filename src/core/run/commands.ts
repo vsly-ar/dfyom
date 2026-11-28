@@ -17,6 +17,7 @@ import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
 import { ROUTINE_DEFAULTS } from './probe-routines'
+import { BACK_OFF_DEFAULT_MM, BACK_OFF_FEED, BACK_OFF_MAX_MM, BACK_OFF_MIN_MM } from './back-off'
 import { STILL_STATES } from './grbl/sender'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
@@ -371,6 +372,45 @@ export const runMachineUnlock = defineCommand({
   result: Done,
   run: async (_doc, _args, ctx) =>
     (await act(ctx.services, { kind: 'unlock' }, 'run.machine.unlock')).map(() => ({})),
+})
+
+/**
+ * DF143: "Unlock and back off" after a hard limit raised while jogging (never in a run): a job, so
+ * Stop (a reset) ends it (docs/modes/run-machine.md#unlock-and-back-off-df143).
+ */
+export const runMachineBackOff = defineCommand({
+  kind: 'job',
+  name: 'run.machine.backOff',
+  summary:
+    'After a hard limit (ALARM:1) raised by a jog: reset if needed, unlock ($X) and jog distance mm off the switch, against the last jog, at a slow feed. Homed stays, but unverified: home again before a run.',
+  title: () => 'Unlock and back off',
+  machine: true,
+  pause: {
+    kind: 'refuse',
+    message: "Backing off can't be paused; use Stop (it resets the controller)",
+  },
+  args: z.object({
+    distance: z
+      .number()
+      .min(BACK_OFF_MIN_MM)
+      .max(BACK_OFF_MAX_MM)
+      .default(BACK_OFF_DEFAULT_MM)
+      .describe('mm off the switch'),
+    feed: z.number().positive().max(2000).default(BACK_OFF_FEED).describe('mm/min'),
+  }),
+  result: z.object({
+    positionUnverified: z
+      .boolean()
+      .describe('true: homed before the limit; the position may be off until homed again'),
+  }),
+  async run(_doc, args, ctx) {
+    const r = await actStoppable(
+      ctx,
+      { kind: 'backOff', distance: args.distance, feed: args.feed },
+      'run.machine.backOff',
+    )
+    return r.map((v) => v as { positionUnverified: boolean })
+  },
 })
 
 export const runMachineJog = defineCommand({
@@ -968,6 +1008,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runPortsScan,
   runMachineHome,
   runMachineUnlock,
+  runMachineBackOff,
   runMachineJog,
   runMachineJogCancel,
   runWorkZeroSet,
@@ -999,6 +1040,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runPortsScan,
   runMachineHome,
   runMachineUnlock,
+  runMachineBackOff,
   runMachineJog,
   runMachineJogCancel,
   runWorkZeroSet,

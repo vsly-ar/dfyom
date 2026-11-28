@@ -4,13 +4,23 @@
 // GRBL's start-up lock shows as "Needs homing" in neutral colours, not as an error (DF46).
 // Also the warning after a real connection was lost without a reset (M2), and auto-reconnect's
 // state after a connection lost during a run (DF129 RC4: polite, neutral, "Stop trying").
-// Doc: docs/modes/run-machine.md#machine-readiness-m3, #lost-connection-m2,
+// DF143 (advanced user): "Unlock and back off" after a hard limit hit while jogging, outside a run.
+// Doc: docs/modes/run-machine.md#machine-readiness-m3, #lost-connection-m2, #unlock-and-back-off-df143,
 // docs/modes/run.md#run-mode-presentation-df46, docs/modes/run-recovery.md#implementation-rc4
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
 import { Button, Icon } from '../../ui'
 import { limitSwitches } from '../../../../core/run/grbl/status'
-import { activeJob, isConnected, isCriticalAlarm, isResetAlarm, needsHoming } from './machine-state'
+import { backOffMove, type JogDirection } from '../../../../core/run/back-off'
+import type { UnitSystem } from '../../../../core/project/document'
+import {
+  activeJob,
+  formatLength,
+  isConnected,
+  isCriticalAlarm,
+  isResetAlarm,
+  needsHoming,
+} from './machine-state'
 import styles from './Run.module.css'
 
 const m = runMessages.alarm
@@ -26,7 +36,62 @@ export function inAlarm(s: RunStatus): boolean {
   return isConnected(s) && (s.state.startsWith('Alarm') || isCriticalAlarm(s))
 }
 
-export function AlarmPanel({ status }: { status: RunStatus }): React.JSX.Element | null {
+/** DF143: "X+ 3.000" per axis of a back-off move. */
+function moveText(v: readonly number[], units: UnitSystem): string {
+  return v
+    .map((d, i) =>
+      d === 0 ? '' : `${'XYZ'[i]}${d > 0 ? '+' : '−'} ${formatLength(Math.abs(d), units)}`,
+    )
+    .filter((t) => t !== '')
+    .join(', ')
+}
+
+/** DF143: what "Unlock and back off" does here, and the button; or why it cannot. */
+function BackOffOffer({
+  jog,
+  pins,
+  distance,
+  units,
+  busy,
+  onBackOff,
+}: {
+  jog: JogDirection
+  pins: string | undefined
+  distance: number
+  units: UnitSystem
+  busy: boolean
+  onBackOff: () => void
+}): React.JSX.Element {
+  const move = backOffMove(jog, pins, distance)
+  if (move.isErr()) return <p className={styles['hint']}>{m.backOff.unknown}</p>
+  return (
+    <div className={styles['backOff']}>
+      <p className={styles['why']}>
+        {m.backOff.what(moveText(move.unwrap(), units), runMessages.dro.units[units])}
+      </p>
+      <p className={styles['hint']}>{m.backOff.after}</p>
+      <div className={styles['buttons']}>
+        <Button disabled={busy} onClick={onBackOff}>
+          {m.backOff.button}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function AlarmPanel({
+  status,
+  backOff,
+}: {
+  status: RunStatus
+  /** DF143: offered to an advanced user (the setting's distance, mm). */
+  backOff?: {
+    readonly distance: number
+    readonly units: UnitSystem
+    readonly busy: boolean
+    readonly onBackOff: () => void
+  }
+}): React.JSX.Element | null {
   if (!inAlarm(status)) return null
   const code = status.alarm?.code
   const info = code === undefined ? m.codes[0]! : (m.codes[code] ?? m.other)
@@ -71,6 +136,12 @@ export function AlarmPanel({ status }: { status: RunStatus }): React.JSX.Element
           <p className={styles['hint']}>
             {m.grbl}: {status.alarm.text}
           </p>
+        ) : null}
+        {backOff !== undefined &&
+        code === 1 &&
+        status.alarm?.jog !== undefined &&
+        !activeJob(status) ? (
+          <BackOffOffer jog={status.alarm.jog} pins={status.pins} {...backOff} />
         ) : null}
       </div>
     </section>

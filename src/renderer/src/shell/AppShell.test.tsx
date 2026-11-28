@@ -213,6 +213,15 @@ describe('AppShell', () => {
     await user.click(auto)
     await user.click(await screen.findByRole('option', { name: 'Off' }))
     expect(bridge.settingsPatches.at(-1)).toEqual({ autoApplyDelay: 0 })
+    // DF143: "Advanced user", off by default; on, the back-off distance shows
+    const advanced = within(dialog).getByRole('switch', { name: 'Advanced user' })
+    expect(advanced).not.toBeChecked()
+    expect(advanced).toHaveAccessibleDescription(/Skips the confirmations before Home/)
+    expect(within(dialog).queryByRole('combobox', { name: 'Back-off distance' })).toBeNull()
+    await user.click(advanced)
+    expect(bridge.settingsPatches.at(-1)).toEqual({ advancedUser: true })
+    expect(advanced).toBeChecked()
+    expect(await within(dialog).findByRole('combobox', { name: 'Back-off distance' })).toBeVisible()
     await expectNoAxeViolations()
   })
 
@@ -233,6 +242,8 @@ describe('AppShell', () => {
         jogKeys: 'game',
         skipHomeConfirm: [],
         autoReconnect: true,
+        advancedUser: false,
+        limitBackOff: 3,
         jogFeed: {},
         cuttingJogFeed: {},
         jogStep: {},

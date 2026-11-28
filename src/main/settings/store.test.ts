@@ -44,6 +44,8 @@ describe('settings store', () => {
       jogKeys: 'game',
       skipHomeConfirm: [],
       autoReconnect: true,
+      advancedUser: false,
+      limitBackOff: 3,
       jogFeed: {},
       cuttingJogFeed: {},
       jogStep: {},

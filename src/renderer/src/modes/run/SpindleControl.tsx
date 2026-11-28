@@ -1,7 +1,7 @@
 // The spindle under the jog pad (v0.5 RV1): the state from the status report ("Off", or
 // "12 000 rpm · CW" in the accent while it turns), the speed slider over the machine's
 // minSpeed–maxSpeed, "Start spindle" (confirmed; Idle only, its gate's reason as the description)
-// and "Stop spindle" (never confirmed, whenever connected outside a run: in a jog the host cancels
+// (DF143: not for an advanced user) and "Stop spindle" (never confirmed, whenever connected outside a run: in a jog the host cancels
 // the jog first). While it turns, a committed speed is sent at once (in a jog through the spindle
 // override). A manual spindle or laser mode shows why there is no control.
 // Doc: docs/modes/run-machine.md#spindle-while-jogging-rv1
@@ -38,6 +38,7 @@ export function SpindleControl({
   machine,
   onSpindle,
   sharedReason = () => '',
+  confirmStart = true,
 }: {
   status: RunStatus
   machine: MachineOverrideLimits
@@ -47,6 +48,8 @@ export function SpindleControl({
    * once and the buttons point at it (DF34).
    */
   sharedReason?: (text: string) => string
+  /** DF143: false for an advanced user: Start spindle starts at once. */
+  confirmStart?: boolean
 }): React.JSX.Element {
   const range = spindleRange(machine)
   // undefined until chosen: the default follows the machine once its limits have loaded
@@ -105,7 +108,7 @@ export function SpindleControl({
               {...(startGate === null
                 ? {}
                 : { 'aria-describedby': startShared === '' ? startWhy : startShared })}
-              onClick={() => setConfirm(true)}
+              onClick={() => (confirmStart ? setConfirm(true) : void onSpindle(true, shown))}
             >
               {m.start}
             </Button>

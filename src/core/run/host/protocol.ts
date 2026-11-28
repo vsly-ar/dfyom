@@ -14,6 +14,8 @@ export const PROTOCOL_VERSION = 1
 
 const Id = z.string().min(1).max(200)
 const Num = z.number().refine(Number.isFinite, 'must be finite')
+/** DF143: a jog's direction on one axis. */
+const JogSign = z.union([z.literal(-1), z.literal(0), z.literal(1)])
 export const Vec3Schema = z.tuple([Num, Num, Num]).readonly()
 export const TimeScaleSchema = z.union([z.number().min(1).max(MAX_TIME_SCALE), z.literal('max')])
 
@@ -117,8 +119,23 @@ export const HostStatusSchema = z.object({
    * docs/modes/run-machine.md#after-a-hard-limit-df134).
    */
   alarm: z
-    .object({ code: z.number().int(), text: z.string(), reset: z.literal(true).exactOptional() })
+    .object({
+      code: z.number().int(),
+      text: z.string(),
+      reset: z.literal(true).exactOptional(),
+      /**
+       * DF143: a hard limit (`ALARM:1`) raised during a jog outside a run: the jog's direction
+       * per axis (−1, 0, +1), which "Unlock and back off" reverses
+       * (docs/modes/run-machine.md#unlock-and-back-off-df143).
+       */
+      jog: z.tuple([JogSign, JogSign, JogSign]).readonly().exactOptional(),
+    })
     .exactOptional(),
+  /**
+   * DF143: backed off a limit switch after a hard limit without homing: the position may be off by
+   * lost steps. Jogging and Go to work; a run starts only after homing again.
+   */
+  positionUnverified: z.literal(true).exactOptional(),
   /**
    * DF134: the controller's input pins active in the last report (`Pn:`, e.g. `X` a limit switch
    * still pressed, `D` the safety door open); absent when none.
@@ -215,7 +232,7 @@ export type RapidOverride = (typeof RAPID_OVERRIDES)[number]
 export const PROBE_DEFAULTS = { maxTravel: 25, feed: 50, retract: 2 } as const
 
 /** DF134: the virtual machine's inputs that can be simulated (limit switches, the safety door). */
-export const SIMULATED_INPUTS = ['x', 'y', 'z', 'door'] as const
+export const SIMULATED_INPUTS = ['x', 'y', 'z', 'door', 'probe'] as const
 export type SimulatedInput = (typeof SIMULATED_INPUTS)[number]
 
 const Mm = z.number().min(0).max(1000)
@@ -277,7 +294,8 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('simulateLostConnection') }),
   /**
    * DF134: one of the virtual machine's inputs pressed or released (virtual only): a limit switch
-   * (`x`/`y`/`z`, a hard limit with `$21=1`) or the safety door, for practising the alarm flow
+   * (`x`/`y`/`z`, a hard limit with `$21=1`), the safety door, or (DF143) the probe input (the
+   * plate touched to the bit: the probe check), for practising the alarm flow
    * (docs/modes/run-machine.md#after-a-hard-limit-df134).
    */
   z.object({
@@ -290,6 +308,16 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
    * connection forgets that it is homed (GRBL cannot know); not during a job.
    */
   z.object({ kind: z.literal('forgetHoming') }),
+  /**
+   * DF143: after a hard limit raised during a jog (never during a run): a reset if the alarm is
+   * still critical, `$X`, then a slow jog of `distance` mm off the switch, against the last jog
+   * (docs/modes/run-machine.md#unlock-and-back-off-df143).
+   */
+  z.object({
+    kind: z.literal('backOff'),
+    distance: z.number().min(0.1).max(20),
+    feed: z.number().positive().max(5000),
+  }),
   /**
    * Feed hold (`!`) of a manual cycle (Probe Z, hardening DF82); answers once the controller
    * reports `Hold:0`. A run holds through `job.pause` (jobControl). Not during homing.
