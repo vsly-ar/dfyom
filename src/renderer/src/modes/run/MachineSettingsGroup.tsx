@@ -20,7 +20,7 @@ import { commandInput, draftIssues, itemValues, type MachineDraft } from '../../
 import type { LibraryItemDTO } from '../../../../core/library/library-item'
 import { libraryMessages } from '../../messages/library'
 import { runMessages } from '../../messages/run'
-import { useShell } from '../../shell/ShellContext'
+import { useSettings, useShell } from '../../shell/ShellContext'
 import { Button, ErrorMessage, Icon, InspectorGroup, StatusChip } from '../../ui'
 import { useLibraryItems } from '../plan/usePlan'
 import { useMachineJog } from './JogPad'
@@ -118,6 +118,7 @@ export function MachineSettingsGroup({ doc }: { doc: ProjectDoc | undefined }): 
             }}
           />
           <WorkAreaSummary values={item} units={fallbackUnits} />
+          <RepeatabilitySummary machineId={item.id} units={fallbackUnits} />
           {conflict ? (
             <div className={styles['notice']} role="alert">
               <p className={styles['why']}>{m.conflict}</p>
@@ -224,6 +225,39 @@ function ControllerSettings({ rows }: { rows: readonly ControllerSettingRow[] })
         {announce}
       </p>
     </section>
+  )
+}
+
+/**
+ * v0.5 RV8: the machine's last homing repeatability test, read-only (run in the Homing
+ * repeatability dialog, which this opens; docs/modes/run-machine.md#homing-repeatability-rv8).
+ */
+function RepeatabilitySummary({
+  machineId,
+  units,
+}: {
+  machineId: string
+  units: UnitSystem
+}): React.JSX.Element {
+  const store = useRunStore()
+  const r = useSettings((s) => s.settings.homingRepeatability[machineId])
+  const t = runMessages.repeat
+  const unit = runMessages.dro.units[units]
+  const worst =
+    r === undefined ? 0 : Math.max(0, ...Object.values(r.axes).map((x) => x?.spread ?? 0))
+  const date = r === undefined ? '' : new Date(r.date).toLocaleDateString()
+  return (
+    <div className={styles['buttons']} data-repeatability-summary="">
+      <p className={styles['hint']}>
+        <span className={styles['settingName']}>{t.summary}</span>
+        {r === undefined
+          ? t.summaryNone
+          : (r.pass ? t.summaryPass : t.summaryFail)(formatLength(worst, units), unit, date)}
+      </p>
+      <Button size="sm" onClick={() => store.getState().setRepeatOpen(true)}>
+        {t.open}
+      </Button>
+    </div>
   )
 }
 

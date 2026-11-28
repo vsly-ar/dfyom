@@ -49,6 +49,10 @@ export function createMachineClient(o: MachineClientSetup): MachineClient {
     ...(o.autoReconnect === undefined ? {} : { reconnect: { enabled: o.autoReconnect } }),
     // DF135 C2 test seam: e2e tests mark already cut from a virtual machine's run
     ...(process.env['DFYOM_TEST_VIRTUAL_CUT_MARKS'] === '1' ? { virtualCutMarks: true } : {}),
+    // v0.5 RV8 test seam: e2e tests give the virtual machine's homing a scatter (mm)
+    ...(Number(process.env['DFYOM_TEST_HOMING_SCATTER'] ?? '') > 0
+      ? { virtualHomingScatter: Number(process.env['DFYOM_TEST_HOMING_SCATTER']) }
+      : {}),
     onLog: (batch) =>
       void o.forward?.(
         batch,

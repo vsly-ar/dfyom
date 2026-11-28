@@ -34,6 +34,7 @@ import { GoToDialog } from './GoToDialog'
 import { SetXyZeroDialog } from './SetXyZeroDialog'
 import { CheckAlignmentDialog } from './CheckAlignmentDialog'
 import { WorkAreaDialog } from './WorkAreaDialog'
+import { RepeatabilityDialog } from './RepeatabilityDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import { AllCutOffer, useRunCutMarks } from './CutMarks'
@@ -65,6 +66,7 @@ export function RunDialogs(): React.JSX.Element {
       <SetXyZeroDialog doc={doc} />
       <CheckAlignmentDialog doc={doc} />
       <WorkAreaDialog doc={doc} />
+      <RepeatabilityDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>

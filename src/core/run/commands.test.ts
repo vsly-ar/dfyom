@@ -564,6 +564,41 @@ describe('run commands', { timeout: 60_000 }, () => {
     expectOk(await t.run('run.override.set', { spindle: 20, feed: 10 }))
   })
 
+  it('RV8: run.machine.repeatability homes and probes the target each cycle; Stop ends it', async () => {
+    const t = await setup()
+    expectOk(await t.open())
+    expectOk(await (await t.job('run.machine.home', {})).result)
+    const args = {
+      at: [-100, -100, -30],
+      probe: { kind: 'zPlate', tipDiameter: 0 },
+      cycles: 3,
+      travelFeed: 5000,
+    }
+    const { result, jobId } = await t.job('run.machine.repeatability', args)
+    const r = expectOk(await result) as {
+      readings: { z?: number }[]
+      axes: { z?: { spread: number } }
+      pass: boolean
+    }
+    expect(r.readings).toHaveLength(3)
+    for (const x of r.readings) expect(x.z).toBeCloseTo(-35, 2)
+    expect(r.axes.z?.spread).toBeLessThan(0.005)
+    expect(r.pass).toBe(true)
+    expect(t.d.job(jobId).unwrap().progress).toEqual({ done: 3, total: 3 })
+    // nothing written: G54 as homing left it
+    expect(t.status().state).toBe('Idle')
+    // the lost-steps check: one probe, no homing
+    const once = await t.job('run.machine.repeatability', { ...args, cycles: 1, home: false })
+    expect((expectOk(await once.result) as { readings: unknown[] }).readings).toHaveLength(1)
+    // Stop (abort) during the test resets the controller and ends it
+    await t.run('run.timeScale.set', { scale: 1 })
+    const stopped = await t.job('run.machine.repeatability', { ...args, cycles: 5 })
+    expect(await waitFor(() => t.status().state === 'Home')).toBe(true)
+    expectOk(await t.run('job.abort', { jobId: stopped.jobId }))
+    expect((await stopped.result).isErr()).toBe(true)
+    expect(await waitFor(() => t.status().homed === false)).toBe(true)
+  })
+
   it('RV7: run.workArea.set writes the library machine and the open connection follows', async () => {
     const t = await setup()
     const { kind: _, ...m } = machineValues()

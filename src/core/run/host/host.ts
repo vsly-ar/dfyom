@@ -46,6 +46,7 @@ import { limitSwitches, POSITION_ALARMS } from '../grbl/status'
 import { overrideLimits, overrideSteps } from '../override'
 import { runProbeCycle, type ProbePort } from '../probe-cycle'
 import { runProbeRoutine } from '../probe-routines'
+import { runTargetProbe } from '../homing-repeatability'
 import type { ProbeTarget } from '../grbl/emulator/probe-scene'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
@@ -166,6 +167,7 @@ type VirtualStock = NonNullable<Extract<MachineAction, { kind: 'virtualStock' }>
 type ProbeRoutineAction = Extract<MachineAction, { kind: 'probeRoutine' }>
 
 type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
+type TargetProbeAction = Extract<MachineAction, { kind: 'targetProbe' }>
 type SpindleAction = Extract<MachineAction, { kind: 'spindle' }>
 type OverrideAction = Extract<MachineAction, { kind: 'override' }>
 type OverrideToAction = Extract<MachineAction, { kind: 'overrideTo' }>
@@ -377,6 +379,14 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       trace: false,
       ...(target.position === undefined ? {} : { position: target.position }),
       ...(target.workZero === undefined ? {} : { workOffset: target.workZero }),
+      ...(target.homingScatter === undefined
+        ? {}
+        : {
+            homingScatter: target.homingScatter,
+            ...(target.homingScatter.seed === undefined
+              ? {}
+              : { homingSeed: target.homingScatter.seed }),
+          }),
     })
     if (created.isErr()) return Err(created.unwrapErr().withContext('machineHost.connect'))
     const emu = created.unwrap()
@@ -699,6 +709,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return probeZ(c, action)
       case 'probeRoutine':
         return probeRoutine(c, action)
+      case 'targetProbe':
+        return targetProbe(c, action)
       case 'virtualStock': {
         if (c.emulator === undefined)
           return fail('run.state', 'only the virtual machine has a simulated stock', {
@@ -984,6 +996,66 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     status.now()
     if (r.isErr()) return Err(r.unwrapErr().withContext(where))
     log.info({ result: r.unwrap() }, 'probed')
+    return Ok(r.unwrap())
+  }
+
+  /**
+   * v0.5 RV8: one probe of the repeatability target (docs/modes/run-machine.md#homing-repeatability-rv8)
+   * through `runTargetProbe`; homed, Idle, no run. The virtual operator lays the target under the
+   * start (physical: the homing scatter shows in the contact) and takes it away afterwards.
+   */
+  async function targetProbe(c: Connection, a: TargetProbeAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.targetProbe'
+    const state = machineState(c)
+    if (c.job !== undefined) return stateError('cannot probe during a run', state)
+    if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
+    if (!c.homed)
+      return stateError('home the machine first: the target is in machine coordinates', state)
+    const emu = c.emulator
+    if (emu !== undefined) {
+      const below = a.at[2] - Math.min(5, a.zDistance / 2)
+      if (a.probe.kind === 'zPlate') emu.setProbePlate(below)
+      else {
+        const size = a.plateSize ?? 50
+        const wall = a.probe.wallOffset ?? [0, 0]
+        const t = a.probe.plateThickness ?? 0
+        // the corner within the reach of the start, the plate's top `below`
+        const inset = Math.min(a.reach / 2, 5)
+        emu.setProbeScene({
+          targets: [
+            {
+              kind: 'cornerPlate',
+              corner: [a.at[0] + a.corner[0] * inset, a.at[1] + a.corner[1] * inset, below - t],
+              thickness: t,
+              size,
+              wallOffset: wall,
+              facing: a.corner,
+            },
+          ],
+        })
+      }
+      emu.setProbeTip({
+        shape: a.probe.kind === '3d' ? 'ball' : 'cylinder',
+        radius: a.probe.tipDiameter / 2,
+      })
+    }
+    c.jogEnd = undefined
+    const travel = probeTravel(c)
+    const { kind: _kind, plateSize: _size, ...spec } = a
+    const r = await runTargetProbe(probePort(c), {
+      ...spec,
+      ...(travel === undefined ? {} : { travel }),
+      inches: c.inches,
+    })
+    if (emu !== undefined) {
+      emu.setProbePlate(undefined)
+      emu.setProbeScene(touchScene(c))
+      emu.setProbeTip({ shape: 'cylinder', radius: 0 })
+    }
+    await c.sender.freshStatus()
+    status.now()
+    if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    log.info({ reading: r.unwrap() }, 'probed the repeatability target')
     return Ok(r.unwrap())
   }
 

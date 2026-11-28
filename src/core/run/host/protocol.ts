@@ -189,6 +189,18 @@ export const VirtualTargetSchema = z.object({
   workZero: Vec3Schema.exactOptional(),
   /** Home at `max` speed, then set G54 to this MPos (docs/modes/run-v0.1.md decision 7). */
   prepare: z.object({ workZero: Vec3Schema }).exactOptional(),
+  /**
+   * v0.5 RV8 test seam: the emulator's homing scatter (mm, full width per axis) and its seed
+   * (docs/architecture/grbl.md#homing-scatter-and-lost-steps-rv8).
+   */
+  homingScatter: z
+    .object({
+      x: z.number().min(0).max(5).exactOptional(),
+      y: z.number().min(0).max(5).exactOptional(),
+      z: z.number().min(0).max(5).exactOptional(),
+      seed: z.number().int().exactOptional(),
+    })
+    .exactOptional(),
 })
 export type VirtualTarget = z.output<typeof VirtualTargetSchema>
 
@@ -338,6 +350,26 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     fastFeed: Feed,
     slowFeed: Feed,
     moveFeed: Feed,
+    plateSize: PositiveMm.exactOptional(),
+  }),
+  /**
+   * v0.5 RV8: one probe of a fixed target from its start `at` (MPos), from the machine top after a
+   * homing (docs/modes/run-machine.md#homing-repeatability-rv8); writes nothing. Homed, Idle, no
+   * run. The virtual machine lays the target under `at` (a Z plate, else a corner plate).
+   */
+  z.object({
+    kind: z.literal('targetProbe'),
+    at: Vec3Schema,
+    probe: ProbeGeometrySchema,
+    corner: z.tuple([Side, Side]).readonly(),
+    zDistance: PositiveMm,
+    reach: PositiveMm,
+    depth: PositiveMm,
+    clearance: PositiveMm,
+    fastFeed: Feed,
+    slowFeed: Feed,
+    moveFeed: Feed,
+    travelFeed: Feed,
     plateSize: PositiveMm.exactOptional(),
   }),
   /**

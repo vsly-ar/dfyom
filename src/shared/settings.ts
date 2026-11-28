@@ -28,6 +28,39 @@ export const NO_MACHINE_KEY = '*'
 export const PanelLayoutSchema = z.record(z.string(), z.number().min(0).max(100))
 export type PanelLayout = z.output<typeof PanelLayoutSchema>
 
+const AxisResultSchema = z.object({
+  spread: z.number().finite(),
+  stdDev: z.number().finite(),
+  mean: z.number().finite(),
+})
+const ReadingSchema = z.object({
+  x: z.number().finite().optional(),
+  y: z.number().finite().optional(),
+  z: z.number().finite().optional(),
+})
+
+/**
+ * v0.5 RV8: a machine's last homing repeatability test (docs/modes/run-machine.md#homing-repeatability-rv8):
+ * when, where the target's start was (MPos), the probe kind, per axis the spread, standard
+ * deviation and mean (mm), pass (Q224: every spread under 0.02 mm); `check`: the last lost-steps
+ * check against it (one probe without homing: the drift from the means).
+ */
+export const RepeatabilityResultSchema = z.object({
+  date: z.string().min(1).max(40),
+  at: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+  probe: z.string().min(1).max(20),
+  cycles: z.number().int().min(1).max(20),
+  readings: z.array(ReadingSchema).max(20),
+  axes: z.object({
+    x: AxisResultSchema.optional(),
+    y: AxisResultSchema.optional(),
+    z: AxisResultSchema.optional(),
+  }),
+  pass: z.boolean(),
+  check: z.object({ date: z.string().min(1).max(40), drift: ReadingSchema }).optional(),
+})
+export type RepeatabilityResult = z.output<typeof RepeatabilityResultSchema>
+
 const fields = {
   /** Light / Dark / System (follow the OS); `data-theme` on the root (ui.md decision 1). */
   theme: z.enum(THEMES),
@@ -111,6 +144,11 @@ const fields = {
   inspectorGroups: z.record(z.string().min(1).max(100), z.boolean()),
   /** Selected tab per inspector kind (`plan.op` → `feeds`), as `inspectorGroups` (DF110). */
   inspectorTabs: z.record(z.string().min(1).max(100), z.string().min(1).max(100)),
+  /**
+   * v0.5 RV8: the last homing repeatability test per library machine id (app state, not copied
+   * into plans; docs/modes/run-machine.md#homing-repeatability-rv8).
+   */
+  homingRepeatability: z.record(z.string().min(1), RepeatabilityResultSchema),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -133,6 +171,7 @@ export const AppSettingsSchema = z.object({
   jogStep: fields.jogStep.default({}),
   inspectorGroups: fields.inspectorGroups.default({}),
   inspectorTabs: fields.inspectorTabs.default({}),
+  homingRepeatability: fields.homingRepeatability.default({}),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -146,7 +185,7 @@ export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 /**
  * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
  * `cuttingJogFeed`, `jogStep`,
- * `inspectorGroups` and `inspectorTabs` merge by key.
+ * `inspectorGroups`, `inspectorTabs` and `homingRepeatability` merge by key.
  */
 export function mergeSettings(
   current: AppSettings,
@@ -171,5 +210,9 @@ export function mergeSettings(
     jogStep: { ...current.jogStep, ...(patch.jogStep ?? {}) },
     inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
     inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },
+    homingRepeatability: {
+      ...current.homingRepeatability,
+      ...(patch.homingRepeatability ?? {}),
+    },
   }
 }

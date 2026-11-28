@@ -408,6 +408,62 @@ export const runMessages = {
   },
 
   /** v0.5 RV6: Check alignment (docs/modes/alignment.md#check-alignment-rv6). */
+  /** v0.5 RV8: Test homing repeatability (docs/modes/run-machine.md#homing-repeatability-rv8). */
+  repeat: {
+    button: 'Test homing repeatability…',
+    title: 'Homing repeatability',
+    description:
+      'Home several times and probe the same fixed target after each: the spread shows how well homing returns to the same place.',
+    steps: (what: string) =>
+      `Fix ${what} on the bed where nothing will move it. Jog the tool a few mm above it, then press Use this position. Each cycle homes, moves above the target at the top, comes down with a probe move and probes it.`,
+    target: {
+      zPlate: 'the touch plate',
+      xyzPlate: 'the XYZ corner plate (probed on its front-left corner)',
+      tool: 'a metal block with a square front-left corner (the bit probes it)',
+      '3d': 'a block with a square front-left corner (the 3D probe touches it)',
+    } as Record<string, string>,
+    useHere: 'Use this position',
+    start: (x: string, y: string, z: string, unit: string) =>
+      `Start: X ${x} Y ${y} Z ${z} ${unit} (machine)`,
+    noStart: 'No start yet.',
+    cycles: 'Homings',
+    run: 'Start test',
+    checkSteps: 'Check for lost steps',
+    checkHint:
+      'After a run, probe the target once without homing: a drift from the test shows lost steps.',
+    homeFirst: 'Home the machine first.',
+    idleFirst: 'Wait until the machine is idle.',
+    noMachine: 'Choose a library machine: the result is kept with it.',
+    spindleOn: 'Turn the spindle off first.',
+    confirm: {
+      title: 'Test homing repeatability',
+      description: (n: number) =>
+        `The machine homes ${n} times and probes the target after each, moving above it at the top and down with a probe move. Keep clear of the machine; Stop resets it at once.`,
+      confirm: 'Start test',
+    },
+    running: (n: number, of: number, phase: string) =>
+      `Cycle ${n} of ${of}: ${phase === 'home' ? 'homing' : 'probing'}`,
+    progress: 'Repeatability test',
+    stop: 'Stop test',
+    stopped: 'The test was stopped.',
+    result: 'Result',
+    columns: { axis: 'Axis', spread: 'Spread', stdDev: 'Std dev', mean: 'Mean (machine)' },
+    pass: (threshold: string, unit: string) => `Pass: every spread under ${threshold} ${unit}.`,
+    fail: (threshold: string, unit: string) =>
+      `Over ${threshold} ${unit}: check the homing switches and their mounts, the pull-off and the homing feeds ($24, $25), then test again.`,
+    when: (date: string, n: number) => `Tested ${date}, ${n} homings.`,
+    drift: 'Drift since the test',
+    driftAxis: (axis: string, mm: string, unit: string) => `${axis} ${mm} ${unit}`,
+    driftOk: (threshold: string, unit: string) => `No lost steps (under ${threshold} ${unit}).`,
+    driftBad: 'Steps were lost: the position is off by the drift. Home before the next job.',
+    summary: 'Homing repeatability',
+    summaryNone: 'Not tested.',
+    summaryPass: (worst: string, unit: string, date: string) => `Pass, ${worst} ${unit} (${date})`,
+    summaryFail: (worst: string, unit: string, date: string) => `Over, ${worst} ${unit} (${date})`,
+    open: 'Test…',
+    close: 'Close',
+  },
+
   /** v0.5 RV7: the Work area dialog (docs/modes/run.md#work-area-rv7). */
   workArea: {
     button: 'Work area…',

@@ -26,6 +26,11 @@ import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
 import { ROUTINE_DEFAULTS } from './probe-routines'
+import {
+  REPEATABILITY_CYCLES,
+  repeatabilityStats,
+  type TargetReading,
+} from './homing-repeatability'
 import { STILL_STATES } from './grbl/sender'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
@@ -796,6 +801,101 @@ export const runMachineProbe = defineCommand({
   },
 })
 
+const ReadingSchema = z.object({
+  x: z.number().optional(),
+  y: z.number().optional(),
+  z: z.number().optional(),
+})
+const AxisStatsSchema = z.object({ spread: z.number(), stdDev: z.number(), mean: z.number() })
+
+/**
+ * v0.5 RV8: Test homing repeatability (docs/modes/run-machine.md#homing-repeatability-rv8): per
+ * cycle `$H`, then one probe of the fixed target from `at` (MPos, chosen once); the spread per
+ * axis against 0.02 mm (Q224). `home: false` probes once without homing (the before/after-run
+ * check for lost steps). A job: Stop (abort) resets the controller at once, between or inside
+ * cycles. Not an agent tool (Q229).
+ */
+export const runMachineRepeatability = defineCommand({
+  kind: 'job',
+  name: 'run.machine.repeatability',
+  summary:
+    'Home and probe a fixed target N times; the spread per axis (homing repeatability). Moves the machine.',
+  title: () => 'Homing repeatability',
+  machine: true,
+  agentTool: false,
+  pause: {
+    kind: 'refuse',
+    message: "The test can't be paused; use Stop (it resets the controller)",
+  },
+  args: z.object({
+    at: Vec3Schema.describe('The start above the target (MPos, mm)'),
+    probe: ProbeGeometrySchema,
+    cycles: z.number().int().min(1).max(20).default(REPEATABILITY_CYCLES),
+    home: z.boolean().default(true),
+    corner: z
+      .tuple([z.union([z.literal(-1), z.literal(1)]), z.union([z.literal(-1), z.literal(1)])])
+      .readonly()
+      .default([-1, -1]),
+    zDistance: z.number().positive().max(1000).optional(),
+    reach: z.number().positive().max(1000).optional(),
+    depth: z.number().positive().max(100).optional(),
+    clearance: z.number().positive().max(100).optional(),
+    fastFeed: z.number().positive().max(10_000).optional(),
+    slowFeed: z.number().positive().max(10_000).optional(),
+    moveFeed: z.number().positive().max(10_000).optional(),
+    travelFeed: z.number().positive().max(10_000).optional(),
+    plateSize: z.number().positive().max(1000).optional(),
+  }),
+  result: z.object({
+    readings: z.array(ReadingSchema),
+    axes: z.object({
+      x: AxisStatsSchema.optional(),
+      y: AxisStatsSchema.optional(),
+      z: AxisStatsSchema.optional(),
+    }),
+    pass: z.boolean(),
+    worst: z.number(),
+  }),
+  async run(_doc, args, ctx) {
+    const where = 'run.machine.repeatability'
+    const d = ROUTINE_DEFAULTS
+    const readings: TargetReading[] = []
+    for (let k = 0; k < args.cycles; k++) {
+      if (ctx.signal.aborted) return fail('op.aborted', `${where} was stopped`, { where })
+      ctx.progress({ done: k, total: args.cycles, label: args.home ? 'home' : 'probe' })
+      if (args.home) {
+        const h = await actStoppable(ctx, { kind: 'home' }, where)
+        if (h.isErr()) return h
+      }
+      ctx.progress({ done: k, total: args.cycles, label: 'probe' })
+      const r = await actStoppable(
+        ctx,
+        {
+          kind: 'targetProbe',
+          at: args.at,
+          probe: args.probe,
+          corner: args.corner,
+          zDistance: args.zDistance ?? d.zDistance,
+          reach: args.reach ?? d.reach,
+          depth: args.depth ?? d.depth,
+          clearance: args.clearance ?? d.clearance,
+          fastFeed: args.fastFeed ?? d.fastFeed,
+          slowFeed: args.slowFeed ?? d.slowFeed,
+          moveFeed: args.moveFeed ?? d.moveFeed,
+          travelFeed: args.travelFeed ?? 1000,
+          ...(args.plateSize === undefined ? {} : { plateSize: args.plateSize }),
+        },
+        where,
+      )
+      if (r.isErr()) return r
+      readings.push(r.unwrap() as TargetReading)
+    }
+    ctx.progress({ done: args.cycles, total: args.cycles })
+    const stats = repeatabilityStats(readings)
+    return Ok({ readings, axes: stats.axes, pass: stats.pass, worst: stats.worst })
+  },
+})
+
 /**
  * v0.5 RV5 (virtual machine only): the stock the virtual operator laid, in machine coordinates,
  * and whether it closes the probe input while touched (the touch-off's readout;
@@ -1094,6 +1194,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineReset,
   runMachineProbeZ,
   runMachineProbe,
+  runMachineRepeatability,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,
@@ -1126,6 +1227,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineReset,
   runMachineProbeZ,
   runMachineProbe,
+  runMachineRepeatability,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,

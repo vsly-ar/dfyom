@@ -376,6 +376,8 @@ export interface RunState {
   readonly checkAlignOpen: boolean
   /** v0.5 RV7: the Work area dialog is open (docs/modes/run.md#work-area-rv7). */
   readonly workAreaOpen: boolean
+  /** v0.5 RV8: the homing repeatability dialog is open (run-machine.md#homing-repeatability-rv8). */
+  readonly repeatOpen: boolean
   /**
    * v0.5 RV5: the last X/Y zero this window set, for "Undo zero change": G54 X/Y before and
    * after (MPos mm); dropped when the connection closes.
@@ -502,6 +504,7 @@ export interface RunState {
   setXyZeroOpen(open: boolean): void
   setCheckAlignOpen(open: boolean): void
   setWorkAreaOpen(open: boolean): void
+  setRepeatOpen(open: boolean): void
   /**
    * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
    * failed or was stopped (the banner or the alarm panel says why).
@@ -849,6 +852,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       xyZeroOpen: false,
       checkAlignOpen: false,
       workAreaOpen: false,
+      repeatOpen: false,
       zeroUndo: undefined,
       virtualStockKey: undefined,
       startProgram: undefined,
@@ -1189,6 +1193,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setXyZeroOpen: (xyZeroOpen) => set({ xyZeroOpen }),
       setCheckAlignOpen: (checkAlignOpen) => set({ checkAlignOpen }),
       setWorkAreaOpen: (workAreaOpen) => set({ workAreaOpen }),
+      setRepeatOpen: (repeatOpen) => set({ repeatOpen }),
       async probeRoutine(args) {
         const r = await call('run.machine.probe', args)
         if (!r.ok) return undefined

@@ -472,6 +472,13 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             >
               {runMessages.workArea.button}
             </Button>
+            {/* v0.5 RV8: homing repeatability (run-machine.md#homing-repeatability-rv8) */}
+            <Button
+              disabled={activeJob(status) !== undefined}
+              onClick={() => a.setRepeatOpen(true)}
+            >
+              {runMessages.repeat.button}
+            </Button>
           </div>
         ) : null}
         <ConfirmDialog

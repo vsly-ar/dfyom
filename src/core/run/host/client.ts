@@ -117,6 +117,12 @@ export interface MachineClientOptions {
    * `DFYOM_TEST_VIRTUAL_CUT_MARKS=1` (docs/modes/cut-state.md#implementation-c2).
    */
   readonly virtualCutMarks?: boolean
+  /**
+   * v0.5 RV8 test seam: the virtual machine's homing scatter (mm, full width per axis), so e2e
+   * tests see a spread; the app sets it only with `DFYOM_TEST_HOMING_SCATTER=<mm>`
+   * (docs/modes/run-machine.md#homing-repeatability-rv8).
+   */
+  readonly virtualHomingScatter?: number
 }
 
 type ConnectProfile = {
@@ -773,7 +779,12 @@ export class MachineClient implements MachineService {
     const host = this.spawn()
     const ready = await host.ready
     if (ready.isErr()) return this.connectFailed(ready.unwrapErr())
-    const r = await this.request({ type: 'connect', requestId: '', target })
+    const scatter = this.opts.virtualHomingScatter
+    const sent: ConnectTarget =
+      target.kind === 'virtual' && scatter !== undefined && target.homingScatter === undefined
+        ? { ...target, homingScatter: { x: scatter, y: scatter, z: scatter } }
+        : target
+    const r = await this.request({ type: 'connect', requestId: '', target: sent })
     const info = r.andThen((v) => parseWith(ControllerInfoSchema, v, `${WHERE}.connect`))
     if (info.isErr()) return this.connectFailed(info.unwrapErr())
     const connected = info.unwrap()

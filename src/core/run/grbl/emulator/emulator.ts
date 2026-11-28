@@ -87,6 +87,15 @@ export interface EmulatorOptions {
   readonly probeScene?: ProbeScene
   /** v0.5 RV3: the probe's tip (default a point: a cylinder of radius 0). */
   readonly probeTip?: ProbeTip
+  /**
+   * v0.5 RV8: how far each homing may stop from the true switch point, per axis (mm, the full width:
+   * each `$H` draws an offset in ±width/2), as a worn switch does; the physical position then
+   * differs from the reported one by that offset until the next homing. Absent: exact homing
+   * (docs/architecture/grbl.md#homing-scatter-and-lost-steps-rv8).
+   */
+  readonly homingScatter?: { readonly x?: number; readonly y?: number; readonly z?: number }
+  /** v0.5 RV8: the seed of `homingScatter`'s draws (default 1): the same seed, the same offsets. */
+  readonly homingSeed?: number
 }
 
 export interface EmulatorStatus {
@@ -226,6 +235,13 @@ export class GrblEmulator {
   private prb: { readonly pos: Vec3; readonly ok: boolean } = { pos: zero, ok: false }
   /** Fault hook: a hung controller answers nothing. */
   private silent = false
+  /**
+   * v0.5 RV8: physical − reported position (mm): the homing scatter drawn at the last `$H` plus
+   * the steps lost since. The probe scene is physical, so probes see it; the reports do not.
+   */
+  private slip: Vec3 = zero
+  private scatter: Vec3 = zero
+  private seed = 1
 
   private spindle: { dir: SpindleDir; rpm: number } = { dir: 'off', rpm: 0 }
   private spindleSuspended = false
@@ -285,7 +301,12 @@ export class GrblEmulator {
           options.workOffset ?? zero,
           options.probeTip ?? POINT_TIP,
         ),
-      ),
+      ).map((e) => {
+        const w = options.homingScatter
+        e.scatter = [w?.x ?? 0, w?.y ?? 0, w?.z ?? 0]
+        e.seed = (options.homingSeed ?? 1) >>> 0 || 1
+        return e
+      }),
     )
   }
 
@@ -395,6 +416,23 @@ export class GrblEmulator {
    */
   setProbeScene(scene: ProbeScene | undefined): void {
     this.scene = scene ?? { targets: [] }
+  }
+
+  /**
+   * v0.5 RV8 fault hook: the `axis` motor loses `mm` of steps (a stall, a loose pulley): the
+   * machine is physically that far off from what it reports, until the next homing finds the
+   * switch again.
+   */
+  loseSteps(axis: 'x' | 'y' | 'z', mm: number): void {
+    const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+    const s: [number, number, number] = [...this.slip]
+    s[i] += mm
+    this.slip = s
+  }
+
+  /** v0.5 RV8 test hook: physical − reported position now (mm): the scatter and lost steps. */
+  get physicalOffset(): Vec3 {
+    return this.slip
   }
 
   /** RV3 test hook: the probe's tip (the bit as a cylinder, a 3D probe's ball). */
@@ -653,6 +691,19 @@ export class GrblEmulator {
 
   // ── Motion ──────────────────────────────────────────────────────────────────────────────
 
+  /** RV8: one homing's offsets, uniform in ±scatter/2 per axis (mulberry32, seeded). */
+  private drawScatter(): Vec3 {
+    const next = () => {
+      this.seed = (this.seed + 0x6d2b79f5) >>> 0
+      let t = this.seed
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const d = (w: number) => (w > 0 ? (next() - 0.5) * w : 0)
+    return [d(this.scatter[0]), d(this.scatter[1]), d(this.scatter[2])]
+  }
+
   private position(): Vec3 {
     if (this.homingPath !== undefined) return this.homingPosition(this.homingPath)
     const b = this.planner.blocks[0]
@@ -779,7 +830,7 @@ export class GrblEmulator {
 
   /** Probe input: the probe touches a target of the scene (or the input is shorted). */
   private probeClosed(at: Vec3): boolean {
-    return this.probeShorted || probeClosed(this.scene, this.tip, at)
+    return this.probeShorted || probeClosed(this.scene, this.tip, shift(at, this.slip, 1))
   }
 
   /**
@@ -799,7 +850,7 @@ export class GrblEmulator {
     // the scene is fixed during the cycle: where the input changes is known from the start
     const change = this.probeShorted
       ? undefined
-      : firstChange(this.scene, this.tip, this.mpos, s.target, !s.away)
+      : physicalChange(this.scene, this.tip, this.mpos, s.target, !s.away, this.slip)
     this.probing = { away: s.away, noError: s.noError, change }
     const added = this.planner.add(this.mpos, {
       target: s.target,
@@ -910,6 +961,8 @@ export class GrblEmulator {
         homingMask: this.settings.get(23),
         pullOff: this.settings.get(27),
       })
+      // RV8: homing finds the switch again (lost steps gone), within the switch's scatter
+      this.slip = this.drawScatter()
       this.parser = { ...this.parser, position: this.mpos }
       this.state = 'Idle'
       this.sample()
@@ -1421,4 +1474,25 @@ export class GrblEmulator {
 function withPlane(scene: ProbeScene, z: number | undefined): ProbeScene {
   const rest: ProbeTarget[] = scene.targets.filter((t) => t.kind !== 'plane')
   return { targets: z === undefined ? rest : [{ kind: 'plane', z }, ...rest] }
+}
+
+/** `v` + sign × `d` per axis. */
+function shift(v: Vec3, d: Vec3, sign: 1 | -1): Vec3 {
+  return [v[0] + sign * d[0], v[1] + sign * d[1], v[2] + sign * d[2]]
+}
+
+/**
+ * RV8: where the probe input changes on a move from `from` to `to` (reported MPos), with the scene
+ * physical and the machine `slip` off from what it reports; in reported MPos.
+ */
+function physicalChange(
+  scene: ProbeScene,
+  tip: ProbeTip,
+  from: Vec3,
+  to: Vec3,
+  closing: boolean,
+  slip: Vec3,
+): Vec3 | undefined {
+  const c = firstChange(scene, tip, shift(from, slip, 1), shift(to, slip, 1), closing)
+  return c === undefined ? undefined : shift(c, slip, -1)
 }
