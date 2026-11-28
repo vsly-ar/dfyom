@@ -1026,6 +1026,23 @@ export const designMessages = {
     warnings: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
     failed: 'Evaluation failed here',
     removed: (name: string) => `Removed ${name}`,
+    /** DF135: the multi-selection (ui.md § Multi-select in the Design navigator). */
+    multi: {
+      selected: (n: number) => `${n} items selected`,
+      actions: (n: number) => `Actions for ${n} items`,
+      names: 'Selected items',
+      markCut: (n: number) => (n === 1 ? 'Mark 1 as already cut' : `Mark ${n} as already cut`),
+      unmarkCut: (n: number) => (n === 1 ? 'Mark 1 as not cut' : `Mark ${n} as not cut`),
+      disable: (n: number) => `Disable ${n}`,
+      enable: (n: number) => `Enable ${n}`,
+      remove: (n: number) => `Remove ${n} items`,
+      removed: (n: number) => `Removed ${n} items`,
+      /** A refused removal cancels the whole gesture. */
+      refused: (why: string) => `Nothing removed: ${why}`,
+      usedBy: (user: string, used: string) =>
+        `${user} uses ${used}. Select it too, or change it first.`,
+      hint: 'Cmd-click or Ctrl-click a row to add or remove it, Shift-click for a range. Esc clears.',
+    },
     undo: 'Undo',
     undoAlt: 'Undo with Ctrl or Cmd+Z',
   },

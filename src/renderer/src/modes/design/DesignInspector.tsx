@@ -49,6 +49,7 @@ import { FaceInspector } from './FaceInspector'
 import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
 import { currentTolerancePreset, TOLERANCE_PRESETS } from './tolerance-presets'
+import { MultiInspector, useDesignMulti } from './MultiSelection'
 import { ReferencePanel } from './ReferencePanel'
 import { useOpenShape } from './useOpenShape'
 import { PieceInspector, PieceOperationNote, SplitSection } from './SplitSection'
@@ -159,6 +160,7 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
 
 function DesignInspectorBody({ part }: { part: DesignPart | undefined }): React.JSX.Element {
   const [selected] = useDesignSelection()
+  const multi = useDesignMulti(part)
   const warnings = useDesignWarnings(part)
   const draft = useUi((s) => s.clonesDraft)
   const referencePanel = useUi((s) => s.referencePanel)
@@ -177,6 +179,8 @@ function DesignInspectorBody({ part }: { part: DesignPart | undefined }): React.
       </>
     )
   if (draft !== null && !stale) return <ClonesDraft part={part} draft={draft} />
+  // DF135: several top-level rows selected (ui.md § Multi-select in the Design navigator)
+  if (multi !== null) return <MultiInspector part={part} multi={multi} />
   const feature = part.dto.features?.find((f) => f.id === selected)
   if (feature?.kind === 'hole')
     return <HoleInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
