@@ -38,6 +38,7 @@ import { useApplyOnEnter } from '../ApplyButton/ApplyScope'
 import { Button } from '../Button/Button'
 import { Field, type FieldControlProps, type FieldMessage, type FieldProps } from '../Field/Field'
 import { FieldInput } from '../Field/FieldInput'
+import { afterPointerRelease, pointerPressed } from '../Field/pointerRelease'
 import { SegmentedControl } from '../SegmentedControl/SegmentedControl'
 import { UNITS } from '../../../../core/quantity/units'
 import { useStepMemory, useStepScale } from './StepContext'
@@ -294,6 +295,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const [seen, setSeen] = useState(stored)
   const [focused, setFocused] = useState(false)
   const [errorsShown, setErrorsShown] = useState(false)
+  /**
+   * Cancels a blur-time error held until the click that blurred the field has landed: a support
+   * area growing between pointerdown and click would push the button below it away (ui.md#field).
+   */
+  const heldError = useRef<(() => void) | null>(null)
+  useEffect(() => () => heldError.current?.(), [])
   const [echoText, setEchoText] = useState(stored)
   const scale = useStepScale()
   const memory = useStepMemory()
@@ -393,7 +400,12 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   useEffect(() => {
     const echo = setTimeout(() => setEchoText(text), ECHO_DELAY_MS)
-    const error = draft !== null ? setTimeout(() => setErrorsShown(true), ERROR_DELAY_MS) : null
+    const error =
+      draft !== null
+        ? setTimeout(() => {
+            if (heldError.current === null) setErrorsShown(true)
+          }, ERROR_DELAY_MS)
+        : null
     return () => {
       clearTimeout(echo)
       if (error !== null) clearTimeout(error)
@@ -412,7 +424,13 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     setDraft(next)
     setKept(false)
     setErrorsShown(false)
+    releaseHeldError()
     updateList(next, caret)
+  }
+
+  function releaseHeldError(): void {
+    heldError.current?.()
+    heldError.current = null
   }
 
   function updateList(next: string, caret: number | null, all = false): void {
@@ -1015,7 +1033,16 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
                 ]
                 setFocused(false)
                 setList(null)
-                commit()
+                const shownBefore = errorsShown
+                if (!commit() && !shownBefore && pointerPressed()) {
+                  // the error would grow the support area under the pointer: show it after the click
+                  setErrorsShown(false)
+                  releaseHeldError()
+                  heldError.current = afterPointerRelease(() => {
+                    heldError.current = null
+                    setErrorsShown(true)
+                  })
+                }
                 focusLeft(e.relatedTarget)
               }}
             />

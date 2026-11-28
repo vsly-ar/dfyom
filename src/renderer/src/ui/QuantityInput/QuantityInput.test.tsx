@@ -11,6 +11,7 @@ import { fail, None, Ok, Some } from '../../../../shared/result'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import {
   ECHO_DELAY_MS,
+  ERROR_DELAY_MS,
   pickRange,
   QuantityInput,
   type PickInsert,
@@ -190,6 +191,27 @@ describe('QuantityInput: echo collapse after a click', () => {
     await user.pointer({ keys: '[/MouseLeft]', target: next })
     expect(onClick).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.queryByText('= 1.588 mm')).not.toBeInTheDocument())
+  })
+
+  it('holds a blur-time error until the click has landed, so the button below stays put', async () => {
+    const onClick = vi.fn()
+    const { user } = renderUi(<WithButton onClick={onClick} />)
+    const input = screen.getByRole('combobox', { name: 'Width' })
+    // left within the error pause: the error would appear on blur and grow the support area
+    await retype(user, input, '3..')
+    const next = screen.getByRole('button', { name: 'Next' })
+    await user.pointer({ keys: '[MouseLeft>]', target: next })
+    expect(input).not.toHaveFocus()
+    // past the typing pause too: nothing grows while the pointer is down
+    await act(() => new Promise((r) => setTimeout(r, ERROR_DELAY_MS + 50)))
+    expect(screen.queryByText(/Unexpected “\.”/)).toBeNull()
+    expect(input).not.toHaveAttribute('aria-invalid')
+
+    await user.pointer({ keys: '[/MouseLeft]', target: next })
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/Unexpected “\.”/)).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    await expectNoAxeViolations()
   })
 
   it('collapses at once when the field is left with the keyboard', async () => {
