@@ -444,6 +444,34 @@ describe('chamfer UI (U4)', () => {
     await expectNoAxeViolations()
   })
 
+  it('DF147 SL4: Chamfer from a through Line row keeps the left side; Side that stays picks the other', async () => {
+    const { user, chamfer } = await renderDesign(async (d) => {
+      ;(
+        await d.dispatch(
+          'design.line.add',
+          {
+            partId: partId(d),
+            paths: [{ segment: { start: ['0', '22'], end: ['100', '22'] } }],
+            depth: 'through',
+          },
+          ui,
+        )
+      ).unwrap()
+    })
+    const row = await within(navigator()).findByRole('button', { name: /^Line 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: row })
+    await user.click(await screen.findByRole('menuitem', { name: 'Chamfer' }))
+    await waitFor(() => expect(chamfer()).toMatchObject({ edgeOf: 'line1', edgeSide: 'left' }))
+    const side = await within(inspector()).findByRole('radiogroup', { name: 'Side that stays' })
+    expect(within(side).getByRole('radio', { name: 'Left' })).toHaveAttribute('data-state', 'on')
+    // no Diameter, Corner lift or top/bottom Side on a Line's wall
+    expect(within(inspector()).queryByRole('switch', { name: 'Corner lift' })).toBeNull()
+    expect(within(inspector()).queryByRole('radiogroup', { name: 'Side' })).toBeNull()
+    await user.click(within(side).getByRole('radio', { name: 'Right' }))
+    await waitFor(() => expect(chamfer().edgeSide).toBe('right'))
+    await expectNoAxeViolations()
+  })
+
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {
     const { user, chamfer } = await renderDesign(async (d) => {
       await addEdges(d)

@@ -294,7 +294,9 @@ const FLAT = {
   ],
 }
 
-test('line: Depth → Through cuts the part off in Plan, with the cut-off warning (DF147 SL3)', async ({
+const V_BIT_90 = { ...V_BIT, name: 'V-bit 90 × 6', angle: '90' }
+
+test('line: Depth → Through cuts the part off in Plan, with the cut-off warning; a one-sided chamfer on the side that stays (DF147 SL3/SL4)', async ({
   dfyom,
 }) => {
   test.setTimeout(150_000)
@@ -307,6 +309,11 @@ test('line: Depth → Through cuts the part off in Plan, with the cut-off warnin
     ['library.tool.add', { values: FLAT }] as const,
   )
   expect(added.ok, JSON.stringify(added)).toBe(true)
+  const vbit = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: V_BIT_90 }] as const,
+  )
+  expect(vbit.ok, JSON.stringify(vbit)).toBe(true)
   await newProject(page)
 
   // ── Add → Line: Straight across the face, 22 mm from the front edge, Through ───────────────
@@ -323,10 +330,25 @@ test('line: Depth → Through cuts the part off in Plan, with the cut-off warnin
   await expect(inspector.getByText(/^Cuts through the stock/)).toBeVisible()
   await shootPanel(page, inspector, 'line-through')
 
+  // ── SL4: Chamfer from the Line's row menu; Side that stays: Right ──────────────────────────
+  const line = navigator.getByRole('button', { name: /^Line 1/ })
+  await line.click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for Line 1' })
+    .getByRole('menuitem', { name: 'Chamfer' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
+  const side = inspector.getByRole('radiogroup', { name: 'Side that stays' })
+  await expect(side.getByRole('radio', { name: 'Left' })).toHaveAttribute('data-state', 'on')
+  await side.getByRole('radio', { name: 'Right' }).click()
+  await expect(side.getByRole('radio', { name: 'Right' })).toHaveAttribute('data-state', 'on')
+  await shootPanel(page, inspector, 'line-chamfer-side')
+
   // ── Plan: generated; the cut-off warns that both sides come loose ──────────────────────────
   await planWithMachine(page)
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
   await expect(page.getByText(/cuts the stock in two/).first()).toBeVisible()
+  await expect(page.getByText(/the part \(right of /).first()).toBeVisible()
   expect(dfyom.rendererErrors).toEqual([])
 })

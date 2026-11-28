@@ -609,6 +609,7 @@ const sinkSpec: FeatureCommandSpec<typeof sinkParams, Sink> = {
           sourceEdge: None,
           loops: None,
           cornerLift: false,
+          edgeSide: None,
         },
       },
     ]),

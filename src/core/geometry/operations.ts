@@ -29,6 +29,7 @@ import {
   chamferTerraces,
   isAnalyticOperation,
   isLoopChamfer,
+  isWallChamfer,
   type CircleChamferGeometry,
   type AnalyticContour as Contour,
   type AnalyticOperation,
@@ -44,6 +45,7 @@ import { tiledBox, type Triangulate } from './prism'
 import { shapePocket, shapeProfile } from './shape-solids'
 import { loopChamferSolids } from './chamfer-solids'
 import { lineSolids } from './line'
+import { wallChamferSolids } from './wall-chamfer-solids'
 import { analyticTabCentres } from './tab-hold'
 import type { Region2dPort } from './2d/port'
 
@@ -216,6 +218,7 @@ function build(
       return drilling(op, stock)
     case 'chamfer':
       if (isLoopChamfer(op)) return general(op, context).andThen((c) => loopChamferSolids(op, c))
+      if (isWallChamfer(op)) return wallChamferSolids(op, stock)
       return chamfer(op)
     case 'profile':
       if (isAnalyticOperation(op)) return profile(op, stock)

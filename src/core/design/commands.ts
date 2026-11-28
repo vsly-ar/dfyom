@@ -274,6 +274,10 @@ const chamferParams = {
     .nullable()
     .describe('General edge: loop indices to chamfer (0 = the outline, then islands); null = all'),
   cornerLift: z.boolean().describe('General edge: lift the V-bit into sharp inside corners'),
+  edgeSide: z
+    .enum(['left', 'right'])
+    .nullable()
+    .describe('Through Line edge (required): the side that stays, of the line start→end'),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
@@ -1106,6 +1110,13 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
             ? None
             : Some([...new Set(a.loops)].sort((x, y) => x - y)),
       cornerLift: a.cornerLift ?? prev?.cornerLift ?? false,
+      // DF147 SL4: null = none
+      edgeSide:
+        a.edgeSide === undefined
+          ? (prev?.edgeSide ?? None)
+          : a.edgeSide === null
+            ? None
+            : Some(a.edgeSide),
     }
   },
 }
@@ -2191,6 +2202,7 @@ export const OPERATION_UPDATE_ARGS = {
   // E4b: a plan copy's chamfer takes its chosen loops and corner lift too (E4a gap)
   loops: chamferParams.loops.optional(),
   cornerLift: chamferParams.cornerLift.optional(),
+  edgeSide: chamferParams.edgeSide.optional(),
 } as unknown as {
   name: z.ZodOptional<typeof NameArg>
   generalTolerance: z.ZodOptional<typeof ToleranceArg>

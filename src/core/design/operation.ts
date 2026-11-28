@@ -278,7 +278,15 @@ export interface Chamfer extends Common {
   readonly loops: Option<readonly number[]>
   /** E4a: lift the V-bit into the sharp inside corners of a general edge (a mitre). */
   readonly cornerLift: boolean
+  /**
+   * DF147 SL4: along a through Line, the side that stays (left or right of the Line from its start
+   * to its end): only that wall is bevelled. Some exactly for a through Line's chamfer.
+   * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
+   */
+  readonly edgeSide: Option<EdgeSide>
 }
+/** The side of a path, from its start to its end (DF147 SL4 `edgeSide`). */
+export type EdgeSide = 'left' | 'right'
 export interface ChamferSourceEdge {
   readonly shape: Shape
   readonly within: { readonly min: Point; readonly max: Point }
@@ -412,9 +420,11 @@ export function circularEdgeDiameter(op: Operation | undefined): Quantity | unde
  * shape (every loop, islands included); undefined for any other operation (facings, `on`
  * profiles, chamfers).
  */
-export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | undefined {
+export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | 'wall' | undefined {
   if (circularEdgeDiameter(op) !== undefined) return 'circle'
   if (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side !== 'on')) return 'loop'
+  // DF147 SL4: one wall of a through Line's slot (`edgeSide`)
+  if (isThroughLine(op)) return 'wall'
   return undefined
 }
 
@@ -438,9 +448,14 @@ export function bottomEdgeFace(edge: Operation | undefined): string | undefined 
 export const isBottomChamfer = (op: Chamfer, edge: Operation | undefined): boolean =>
   edge !== undefined && op.on !== edge.on && op.on === bottomEdgeFace(edge)
 
-/** A chamfer along a general edge (edge-chamfers.md E1): its `edgeOf` among `ops` is a `loop` edge. */
-export const isLoopChamferOp = (op: Chamfer, ops: readonly Operation[]): boolean =>
-  chamferEdgeKind(ops.find((o) => o.id === op.edgeOf)) === 'loop'
+/**
+ * A chamfer along a general edge (edge-chamfers.md E1): its `edgeOf` among `ops` is a `loop` edge,
+ * or (DF147 SL4) a through Line's wall: both are contoured along the edge, never plunged.
+ */
+export const isLoopChamferOp = (op: Chamfer, ops: readonly Operation[]): boolean => {
+  const kind = chamferEdgeKind(ops.find((o) => o.id === op.edgeOf))
+  return kind === 'loop' || kind === 'wall'
+}
 
 /**
  * A chamfer's diameter in the face plane, mm exact: the edge's Ø + 2 × `width` (D45,
@@ -988,6 +1003,7 @@ function parseOperation(dto: OperationDTO): AppResult<Operation> {
         sourceEdge: e as Option<ChamferSourceEdge>,
         loops: dto.loops === undefined ? None : Some([...dto.loops]),
         cornerLift: dto.cornerLift === true,
+        edgeSide: dto.edgeSide === undefined ? None : Some(dto.edgeSide),
       }))
     }
     case 'line': {
@@ -1193,6 +1209,7 @@ export function operationToDTO(op: Operation): OperationDTO {
           : {}),
         ...(op.loops.isSome() ? { loops: [...op.loops.unwrap()] } : {}),
         ...(op.cornerLift ? { cornerLift: true } : {}),
+        ...(op.edgeSide.isSome() ? { edgeSide: op.edgeSide.unwrap() } : {}),
       } as OperationDTO
     case 'line':
       return {

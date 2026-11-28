@@ -166,6 +166,22 @@ export const LoopChamferGeometrySchema = z.object({
   cornerLift: z.literal(true).exactOptional(),
 })
 
+/** DF147 SL4: a one-sided chamfer along a through Line (engraved-patterns.md § Simple Line). */
+export const WallChamferGeometrySchema = z.object({
+  kind: z.literal('chamfer'),
+  id: z.string(),
+  direction,
+  onZ: z.number(),
+  edgeOf: z.string(),
+  wall: z.object({
+    element: ElementSchema,
+    halfWidth: z.number(),
+    side: z.enum(['left', 'right']),
+  }),
+  width: z.number(),
+  angle: z.number(),
+})
+
 /** Line (engraved-patterns.md E1): docs/modes/engraved-patterns.md#implementation-e1. */
 export const LineGeometrySchema = z.object({
   kind: z.literal('line'),
@@ -223,6 +239,7 @@ export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.union([
     LineGeometrySchema,
   ]),
   LoopChamferGeometrySchema,
+  WallChamferGeometrySchema,
 ])
 
 export const PartGeometryInputSchema: z.ZodType<PartGeometryInput> = z.object({

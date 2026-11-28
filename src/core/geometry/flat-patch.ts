@@ -12,6 +12,7 @@ import {
   arc,
   arcRadius,
   arcSweep,
+  line,
   chainBounds,
   regionArea,
   regionLoops,
@@ -31,7 +32,8 @@ import {
   rectangle,
   slotRegion,
 } from './through-depth'
-import { chamferDepth, isLoopChamfer, loopChamferDepth } from './model'
+import { chamferDepth, isLoopChamfer, isWallChamfer, loopChamferDepth } from './model'
+import { wallBand, wallChamferDepth } from './wall-chamfer'
 
 /** A patch smaller than this (mm²) is gone (boolean slivers). */
 const PATCH_AREA = 1e-2
@@ -82,6 +84,21 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
         },
       ]
     case 'chamfer': {
+      // DF147 SL4: the bevel's band on the kept side only
+      if (isWallChamfer(op)) {
+        const band = wallBand(op.wall, op.width)
+        if (band === undefined) return []
+        const outer = {
+          elements: band.map((p, i) => line(p, band[(i + 1) % band.length]!)),
+        }
+        return [
+          {
+            direction,
+            lowest: op.onZ - wallChamferDepth(op),
+            region: clip({ pieces: [{ outer, holes: [] }] }),
+          },
+        ]
+      }
       if (isLoopChamfer(op)) {
         // a general edge: inside (E1) the air grown by the bevel's width; outside (E2) the band
         // the bevel's width on both sides of the part's loop

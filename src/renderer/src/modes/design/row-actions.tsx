@@ -12,7 +12,7 @@ import { isDisabled } from '../../../../core/design/disabled'
 import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
 import { Icon, type MenuEntry, type MenuItem } from '../../ui'
-import { isChamferEdge } from './chamfer-view'
+import { isChamferEdge, isWallEdge } from './chamfer-view'
 import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
 import { clonesSource } from './feature-view'
 import { disabledOf, type DesignPart } from './model'
@@ -42,10 +42,16 @@ export function useRowActions(part: DesignPart): RowActions {
   // then its inspector
   const chamfer = useCallback(
     async (edgeOf: string) => {
-      const r = await call('design.chamfer.add', { partId, edgeOf })
+      // DF147 SL4: a through Line's chamfer keeps the left side until the user picks
+      const line = part.dto.operations.find((o) => o.id === edgeOf)
+      const r = await call('design.chamfer.add', {
+        partId,
+        edgeOf,
+        ...(line !== undefined && isWallEdge(line) ? { edgeSide: 'left' } : {}),
+      })
       if (r.ok) select('design', (r.value as { operationId: string }).operationId)
     },
-    [call, partId, select],
+    [call, part.dto.operations, partId, select],
   )
 
   // patterns P3: on a pattern's pocket, Chamfer turns the pattern's own chamfer on (the owned

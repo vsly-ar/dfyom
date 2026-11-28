@@ -235,6 +235,8 @@ export const ChamferDtoSchema = z.object({
   loops: z.array(z.number().int().nonnegative()).min(1).optional(),
   /** E4a: lift the V-bit into sharp inside corners (a mitre); absent = off. */
   cornerLift: z.literal(true).optional(),
+  /** DF147 SL4: a through Line's chamfer: the side that stays (of the Line, start to end). */
+  edgeSide: z.enum(['left', 'right']).optional(),
 })
 
 /** The most placed shapes one Line takes (docs/modes/engraved-patterns.md#line-operation). */

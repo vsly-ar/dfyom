@@ -518,11 +518,28 @@ export function operationIssues(
         edgeKind !== undefined,
         'edgeOf',
         'chamferEdge',
-        `must be an earlier drilling, pocket or outside/inside profile${chamferEdgeWhyNot(edge)}`,
+        `must be an earlier drilling, pocket, outside/inside profile or through Line${chamferEdgeWhyNot(edge)}`,
         { actual: op.edgeOf },
       )
+      // DF147 SL4: a through Line's chamfer bevels the wall on the side that stays only
+      if (edgeKind === 'wall') {
+        c.check(
+          op.edgeSide.isSome(),
+          'edgeSide',
+          'chamferSide',
+          'pick the side that stays (left or right of the line, from its start to its end)',
+        )
+        c.check(op.loops.isNone(), 'loops', 'chamferLoops', 'a line has no loops')
+        c.check(!op.cornerLift, 'cornerLift', 'chamferLift', 'a line has no corners')
+      } else
+        c.check(
+          op.edgeSide.isNone(),
+          'edgeSide',
+          'chamferSide',
+          'only a through Line has a side that stays',
+        )
       // F7 terraces stay circular (edge-chamfers.md § Model)
-      if (edgeKind === 'loop')
+      if (edgeKind === 'loop' || edgeKind === 'wall')
         c.check(
           op.stepdown.isNone(),
           'stepdown',
@@ -627,6 +644,7 @@ function chamferEdgeWhyNot(edge: Operation | undefined): string {
   if (edge?.kind === 'facing') return ' (a facing has no edge)'
   if (edge?.kind === 'chamfer') return ' (not another chamfer)'
   if (edge?.kind === 'profile' && edge.side === 'on')
-    return ' (an "on" profile cuts a groove with two edges)'
+    return ' (an "on" profile cuts a groove with two edges: not yet)'
+  if (edge?.kind === 'line') return ' (a Line with depth Through only)'
   return ''
 }

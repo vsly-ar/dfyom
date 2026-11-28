@@ -8,7 +8,7 @@
  */
 import type { Region2dPort } from '../../geometry/2d/port'
 import { regionArea } from '../../geometry/2d/model'
-import { isLoopChamfer, type DfmWarning } from '../../geometry/model'
+import { isLoopChamfer, isWallChamfer, type DfmWarning } from '../../geometry/model'
 import type { Library } from '../../library/library'
 import { Machine } from '../../library/machine'
 import { Stock } from '../../library/stock'
@@ -257,7 +257,7 @@ function geometricDfm(
     }
     // a loop chamfer (E1) follows its edge operation, which has its own finding
     if (g.kind !== 'drilling' && g.kind !== 'chamfer') return
-    if (g.kind === 'chamfer' && isLoopChamfer(g)) return
+    if (g.kind === 'chamfer' && (isLoopChamfer(g) || isWallChamfer(g))) return
     const r = g.diameter / 2
     const c: [number, number] =
       dir === '+z' ? [g.center[0], g.center[1]] : [g.center[0], W - g.center[1]]

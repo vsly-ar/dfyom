@@ -37,7 +37,11 @@ function edgeDiameterDto(op: OperationDTO) {
  * by edge-chamfers.md E1/E2): a drilling, any pocket, any outside or inside profile.
  */
 export const isChamferEdge = (op: OperationDTO): boolean =>
-  edgeDiameterDto(op) !== undefined || isLoopEdge(op)
+  edgeDiameterDto(op) !== undefined || isLoopEdge(op) || isWallEdge(op)
+
+/** DF147 SL4: a through Line: its chamfer bevels the wall on the side that stays (`edgeSide`). */
+export const isWallEdge = (op: OperationDTO): boolean =>
+  op.kind === 'line' && op.depth === 'through'
 
 /**
  * A general edge (edge-chamfers.md E1/E2): a pocket or inside profile that is not round, or any
@@ -139,9 +143,11 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
   const before = index < 0 ? part.operations : part.operations.slice(0, index)
   const options = before.filter(isChamferEdge).map((o) => ({
     value: o.id,
-    label: isLoopEdge(o)
-      ? chamferMessages.edgeLoopOption(o.name, loopEdgeRole(o))
-      : chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
+    label: isWallEdge(o)
+      ? chamferMessages.edgeLineOption(o.name)
+      : isLoopEdge(o)
+        ? chamferMessages.edgeLoopOption(o.name, loopEdgeRole(o))
+        : chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
   }))
   if (!options.some((o) => o.value === chamfer.edgeOf))
     options.push({
@@ -222,9 +228,17 @@ export function wallSectionValues(
   const edge = part.dto.operations.find((o) => o.id === chamfer.edgeOf)
   const width = quantityOf(chamfer.width)?.canonical
   const angle = quantityOf(chamfer.angle)?.canonical
-  if (edge === undefined || width === undefined || angle === undefined || !isLoopEdge(edge))
+  if (
+    edge === undefined ||
+    width === undefined ||
+    angle === undefined ||
+    !(isLoopEdge(edge) || isWallEdge(edge))
+  )
     return undefined
-  const { depth, through } = edgeDepth(part, edge)
+  // DF147 SL4: a through Line's slot goes through
+  const { depth, through } = isWallEdge(edge)
+    ? { depth: Number.NaN, through: true }
+    : edgeDepth(part, edge)
   return {
     width,
     angle,

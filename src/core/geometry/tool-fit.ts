@@ -13,6 +13,7 @@ import {
   CHAMFER_ANGLE_TOLERANCE,
   chamferDepth,
   isLoopChamfer,
+  isWallChamfer,
   loopChamferDepth,
   coneSlant,
   EPSILON,
@@ -21,6 +22,7 @@ import {
 } from './model'
 import { inradius } from './operations'
 import { lineMaxDepth } from './line'
+import { wallChamferDepth, type ChamferWall } from './wall-chamfer'
 import { rectangleCorners, rectangleWallCorner } from './open-sides'
 import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
 import type { FaceWaste } from './waste'
@@ -42,6 +44,8 @@ export type FitRule =
   | 'roughingWidth'
   // chamfer (design-v0.4.md § Chamfer operation, Fit)
   | 'angle'
+  // DF147 SL4: a one-sided chamfer's cone reaches past its slot's other wall
+  | 'otherWall'
   | 'tip'
   | 'slant'
   // a chamfer cut in levels (DF142): the shank is wider than the cone, or the edge leaves a core
@@ -128,9 +132,11 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
   if (op.kind === 'pocket') return [op.throughDepth ?? op.depth - op.onZ, 'depth']
   // the cone's bottom (the tool tip when contoured; a plunged tip goes deeper, `toolFit`)
   if (op.kind === 'chamfer')
-    return isLoopChamfer(op)
-      ? [loopChamferDepth(op) - op.onZ, 'width']
-      : [chamferDepth(op) - op.onZ, 'diameter']
+    return isWallChamfer(op)
+      ? [wallChamferDepth(op) - op.onZ, 'width']
+      : isLoopChamfer(op)
+        ? [loopChamferDepth(op) - op.onZ, 'width']
+        : [chamferDepth(op) - op.onZ, 'diameter']
   // a Line (engraved-patterns.md E1): its deepest point below the stock face
   if (op.kind === 'line') return [lineMaxDepth(op) - op.onZ, 'depth']
   return op.bottom.kind === 'through'
@@ -338,12 +344,12 @@ export function toolFit(
       if (unfit !== undefined) return unfit
       break
     case 'chamfer': {
-      unfit = chamferFit(tool, op)
+      unfit = chamferFit(tool, op) ?? (isWallChamfer(op) ? wallFit(tool, op) : undefined)
       if (unfit !== undefined || tool.reach === undefined) return unfit
       // plunged (DC covers the chamfer): the tip ends where the tool cone has the chamfer's Ø
       const tip = tool.tipDiameter ?? 0
       const depth =
-        !isLoopChamfer(op) && tool.diameter + TOL >= op.diameter
+        !isLoopChamfer(op) && !isWallChamfer(op) && tool.diameter + TOL >= op.diameter
           ? chamferDepth({ ...op, edgeDiameter: tip }) - op.onZ
           : reachDepth(op, stock)[0]
       return tool.reach + EPSILON >= depth
@@ -439,6 +445,29 @@ export type ChamferFitInput =
     }
 
 export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
+
+/**
+ * DF147 SL4: a one-sided chamfer's tool stays within its slot: the cone at the wall (its tip's
+ * edge on the wall, the axis tip/2 into the slot), at the bevel's depth, reaches no farther than
+ * the slot's other wall at the face (rule `otherWall`). Doc:
+ * docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
+ */
+export function wallFit(
+  tool: Pick<DfmTool, 'diameter' | 'tipDiameter' | 'angle'>,
+  op: { readonly width: number; readonly angle: number; readonly wall: ChamferWall },
+): ToolUnfit | undefined {
+  const tip = tool.tipDiameter ?? 0
+  const t = Math.tan((((tool.angle ?? op.angle) / 2) * Math.PI) / 180)
+  const reach = Math.min(tool.diameter / 2, tip / 2 + wallChamferDepth(op) * t)
+  const slot = 2 * op.wall.halfWidth
+  return tip / 2 + reach <= slot + TOL
+    ? undefined
+    : {
+        rule: 'otherWall',
+        detail: `the cone (${mm(tip / 2 + reach)} from the wall) reaches past the ${mm(slot)} slot's other wall`,
+        values: { slot, reach: tip / 2 + reach },
+      }
+}
 
 /**
  * The fit row of a circular chamfer (design-v0.4.md § Chamfer operation, Fit): a `chamferMill`

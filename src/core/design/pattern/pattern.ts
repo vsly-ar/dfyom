@@ -629,6 +629,7 @@ function chamfers(p: Pattern, ctx: ExpansionContext): ExpandedOperation[] {
       sourceEdge: None,
       loops: None,
       cornerLift: false,
+      edgeSide: None,
     },
   })
   const out: ExpandedOperation[] = []

@@ -33,6 +33,7 @@ import {
 import {
   chamferDepth,
   isLoopChamfer,
+  isWallChamfer,
   loopChamferDepth,
   loopChamferTabGap,
   type CircleChamferGeometry,
@@ -843,6 +844,21 @@ function chamfer(
   own?: OperationTool,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
+  // DF147 SL4: a one-sided chamfer along a through Line: the library check only (its slot is
+  // through; the slot's other wall is the tool fit's `otherWall`)
+  if (isWallChamfer(op)) {
+    if (!lib.empty && candidates(op, lib).length === 0)
+      out.push(
+        warning(
+          'dfm.chamferNoTool',
+          op,
+          'angle',
+          `no chamfer mill of ${op.angle}° in the library has a cutting edge for a ${mm(op.width)} bevel`,
+          { angle: op.angle, width: op.width },
+        ),
+      )
+    return out
+  }
   const edge = all.find((o) => o.id === op.edgeOf)
   const through =
     (edge?.kind === 'drilling' && edge.bottom.kind === 'through') ||
