@@ -36,6 +36,8 @@ import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from
 import { limitSwitches, POSITION_ALARMS } from '../grbl/status'
 import { overrideLimits, overrideSteps } from '../override'
 import { runProbeCycle, type ProbePort } from '../probe-cycle'
+import { runProbeRoutine } from '../probe-routines'
+import type { ProbeTarget } from '../grbl/emulator/probe-scene'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
 import type { ControllerTransport } from '../transport'
@@ -145,7 +147,12 @@ interface Connection {
   manualSpindle?: { readonly rpm: number } | undefined
   /** RV1: a spindle off is cancelling a jog: new jogs are refused until it is done. */
   spindleStopping?: boolean
+  /** v0.5 RV5: the virtual machine's stock (MPos) and whether it closes the probe input now. */
+  virtualStock?: { readonly stock?: VirtualStock; readonly touch: boolean } | undefined
 }
+
+type VirtualStock = NonNullable<Extract<MachineAction, { kind: 'virtualStock' }>['stock']>
+type ProbeRoutineAction = Extract<MachineAction, { kind: 'probeRoutine' }>
 
 type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
 type SpindleAction = Extract<MachineAction, { kind: 'spindle' }>
@@ -674,6 +681,25 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return c.sender.realtime(REALTIME.reset)
       case 'probeZ':
         return probeZ(c, action)
+      case 'probeRoutine':
+        return probeRoutine(c, action)
+      case 'virtualStock': {
+        if (c.emulator === undefined)
+          return fail('run.state', 'only the virtual machine has a simulated stock', {
+            where: 'machineHost.machine',
+            data: { state },
+          })
+        // without `stock` the stock laid before stays (the touch step switches its readout)
+        const stock = action.stock ?? c.virtualStock?.stock
+        c.virtualStock = { ...(stock === undefined ? {} : { stock }), touch: action.touch }
+        c.emulator.setProbeScene(touchScene(c))
+        c.emulator.setProbeTip({
+          shape: 'cylinder',
+          radius: action.touch ? (action.toolDiameter ?? 0) / 2 : 0,
+        })
+        status.now()
+        return Ok(undefined)
+      }
       case 'spindle':
         return action.on ? spindleOn(c, action) : spindleOff(c)
       case 'feedHold':
@@ -854,6 +880,99 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (wz.isErr()) return Err(wz.unwrapErr())
     log.info({ contact, workZero: wz.unwrap() }, 'probed Z')
     return Ok({ workZero: wz.unwrap(), contact })
+  }
+
+  /** v0.5 RV5: the virtual scene outside a cycle: the stock while the touch-off is open. */
+  function touchScene(c: Connection): { targets: ProbeTarget[] } {
+    const v = c.virtualStock
+    return v?.touch === true && v.stock !== undefined
+      ? { targets: [{ kind: 'box', ...v.stock }] }
+      : { targets: [] }
+  }
+
+  /**
+   * v0.5 RV4: the virtual operator's set-up for a routine: the bit (a cylinder) or the 3D probe's
+   * ball, and the stock (the bit or a 3D probe touches it) or the corner plate on the probed
+   * corner (an edge: beside the tool), which is taken away afterwards
+   * (docs/modes/run-probing.md#implementation-rv4).
+   */
+  function routineScene(c: Connection, a: ProbeRoutineAction, at: Vec3): ProbeTarget[] {
+    const stock = c.virtualStock?.stock
+    if (stock === undefined) return []
+    if (a.probe.kind !== 'xyzPlate') return [{ kind: 'box', ...stock }]
+    const size = a.plateSize ?? 50
+    const r = a.routine
+    const [sx, sy]: readonly [-1 | 1, -1 | 1] =
+      r.cycle === 'corner'
+        ? r.corner
+        : r.cycle === 'edge' && r.axis === 'x'
+          ? [r.side, -1]
+          : [-1, -1]
+    const wall = a.probe.wallOffset ?? [0, 0]
+    const edge = (i: 0 | 1, side: -1 | 1) => (side < 0 ? stock.min[i] : stock.max[i])
+    // an edge: the plate's other wall half a plate beyond the tool, so only this edge is touched
+    const along = (i: 0 | 1, side: -1 | 1) => at[i] + side * (size / 2 - wall[i])
+    const corner: Vec3 =
+      r.cycle === 'edge'
+        ? r.axis === 'x'
+          ? [edge(0, sx), along(1, sy), stock.max[2]]
+          : [along(0, sx), edge(1, r.side), stock.max[2]]
+        : [edge(0, sx), edge(1, sy), stock.max[2]]
+    const facing: readonly [-1 | 1, -1 | 1] =
+      r.cycle === 'edge' && r.axis === 'y' ? [sx, r.side] : [sx, sy]
+    return [
+      {
+        kind: 'cornerPlate',
+        corner,
+        thickness: a.probe.plateThickness ?? 0,
+        size,
+        wallOffset: wall,
+        facing,
+      },
+    ]
+  }
+
+  /**
+   * v0.5 RV4: an edge, corner or centre routine from here (docs/modes/run-probing.md#xy-probing-rv4)
+   * through the probe-cycle runner; writes nothing. Idle without a run only.
+   */
+  async function probeRoutine(c: Connection, a: ProbeRoutineAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.probeRoutine'
+    const state = machineState(c)
+    if (c.job !== undefined) return stateError('cannot probe during a run', state)
+    if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
+    const s = c.sender.status
+    if (s === undefined) return stateError('no status report yet', state)
+    const emu = c.emulator
+    if (emu !== undefined) {
+      emu.setProbeScene({ targets: routineScene(c, a, s.mpos) })
+      emu.setProbeTip({
+        shape: a.probe.kind === '3d' ? 'ball' : 'cylinder',
+        radius: a.probe.tipDiameter / 2,
+      })
+    }
+    c.jogEnd = undefined
+    const env = c.envelope
+    const { kind: _kind, plateSize: _size, ...spec } = a
+    log.info({ routine: a.routine, probe: a.probe.kind }, 'probing')
+    const r = await runProbeRoutine(probePort(c), {
+      ...spec,
+      ...(env?.softLimits === true
+        ? { travel: { min: [-env.travel[0], -env.travel[1], -env.travel[2]], max: [0, 0, 0] } }
+        : {}),
+      inches: c.inches,
+    })
+    if (emu !== undefined) {
+      // the operator takes the plate away and the clip off
+      emu.setProbeScene(touchScene(c))
+      emu.setProbeTip({ shape: 'cylinder', radius: 0 })
+    }
+    // the next action sees the Idle the routine ended in, not a report from its moves
+    await c.sender.freshStatus()
+    status.now()
+    if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    log.info({ result: r.unwrap() }, 'probed')
+    return Ok(r.unwrap())
   }
 
   /** RV1: `run.state` with a rule (docs/modes/run-machine.md#spindle-while-jogging-rv1). */

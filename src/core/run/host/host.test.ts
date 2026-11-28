@@ -217,6 +217,67 @@ describe('machine host', () => {
     await h.pump(() => lastStatus(h)?.wpos[2] === 5)
   })
 
+  it('v0.5 RV4/RV5: a corner probe on the virtual stock with the XYZ plate; the touch readout', async () => {
+    const h = harness()
+    await connectedHost(h)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    // the virtual operator's stock: X −200…−100, Y −300…−250, top at Z −50
+    const stock = { min: [-200, -300, -70], max: [-100, -250, -50] }
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'virtualStock', stock, touch: false } }),
+    )
+    // above the plate on the X−/Y− corner (plate 10 thick, 40 square, walls 5 and 4 out)
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', to: [-190, -290, -30], feed: 3000 },
+      }),
+    )
+    await h.pump(() => lastStatus(h)?.state === 'Idle' && lastStatus(h)?.mpos[2] === -30)
+    const r = expectOk(
+      await h.request({
+        type: 'machine',
+        action: {
+          kind: 'probeRoutine',
+          routine: { cycle: 'corner', corner: [-1, -1] },
+          probe: { kind: 'xyzPlate', tipDiameter: 6, plateThickness: 10, wallOffset: [5, 4] },
+          reach: 40,
+          zDistance: 30,
+          depth: 3,
+          clearance: 2,
+          fastFeed: 300,
+          slowFeed: 50,
+          moveFeed: 600,
+          plateSize: 40,
+        },
+      }),
+    ) as { top: { value: number }; x: { value: number }; y: { value: number } }
+    expect(r.top.value).toBeCloseTo(-50, 2)
+    expect(r.x.value).toBeCloseTo(-200, 2)
+    expect(r.y.value).toBeCloseTo(-300, 2)
+    // nothing written; the plate is taken away
+    expect(lastStatus(h)?.workZero).toEqual([0, 0, 0])
+    // the touch readout: with touch on, the bit's tip (a point) in the stock reads as touching
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'virtualStock', stock, touch: true } }),
+    )
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', to: [-150, -280, -55], feed: 3000 },
+      }),
+    )
+    await h.pump(
+      () => lastStatus(h)?.state === 'Idle' && lastStatus(h)?.pins?.includes('P') === true,
+    )
+    expect(lastStatus(h)?.pins).toContain('P')
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'virtualStock', stock, touch: false } }),
+    )
+    await h.pump(() => lastStatus(h)?.pins?.includes('P') !== true)
+    expect(lastStatus(h)?.pins ?? '').not.toContain('P')
+  })
+
   it('machine frame: envelope, power-up position, queued jogs checked against the travel (DF33, DF34)', async () => {
     const h = harness()
     await connectedHost(h, {

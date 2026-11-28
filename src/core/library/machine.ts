@@ -21,7 +21,7 @@ import {
   toOption,
 } from './item'
 import { checkHolder, holderFromDTO, holderToDTO, type Holder } from './holder'
-import type { HomingCorner, MachineValuesDTO, Rigidity } from './machine.dto'
+import type { HomingCorner, MachineValuesDTO, ProbeDTO, ProbeKind, Rigidity } from './machine.dto'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 
 export interface Axes<T> {
@@ -43,6 +43,74 @@ export interface Spindle {
   readonly controllerMinSpeed: Option<Quantity>
   /** Rated output power (kind `power`); None skips the feeds-and-speeds power check. */
   readonly power: Option<Quantity>
+}
+
+/**
+ * What probes and how (v0.5 RV4); feeds and the retract unset take the defaults
+ * (docs/modes/run-probing.md#probe-settings-rv4).
+ */
+export interface ProbeSettings {
+  readonly kind: ProbeKind
+  /** XYZ corner plate: its walls' outer faces out from the stock's edges (length ≥ 0). */
+  readonly wallOffsetX: Option<Quantity>
+  readonly wallOffsetY: Option<Quantity>
+  /** 3D probe: the ball's Ø (length > 0). */
+  readonly tipDiameter: Option<Quantity>
+  readonly fastFeed: Option<Quantity>
+  readonly slowFeed: Option<Quantity>
+  /** The lift above the top and the gap kept when stepping out (length > 0). */
+  readonly retract: Option<Quantity>
+}
+
+const PROBE_QUANTITIES = [
+  ['wallOffsetX', 'length', 'nonNegative'],
+  ['wallOffsetY', 'length', 'nonNegative'],
+  ['tipDiameter', 'length', 'positive'],
+  ['fastFeed', 'feedRate', 'positive'],
+  ['slowFeed', 'feedRate', 'positive'],
+  ['retract', 'length', 'positive'],
+] as const
+
+function checkProbe(c: InvariantChecker, p: ProbeSettings) {
+  for (const [field, kind, rule] of PROBE_QUANTITIES) {
+    const q = p[field]
+    if (q.isNone()) continue
+    const path = ['probe', field]
+    if (rule === 'positive') checkPositive(c, path, q.unwrap(), kind)
+    else if (checkKind(c, path, q.unwrap(), kind))
+      c.check(
+        q.unwrap().exact.compare(Rational.ZERO) >= 0,
+        path,
+        'nonNegative',
+        'must be 0 or more',
+        {
+          actual: q.unwrap().canonical,
+        },
+      )
+  }
+}
+
+function probeFromDTO(dto: ProbeDTO): AppResult<ProbeSettings> {
+  return collectFields({
+    wallOffsetX: optionalQuantityFromDTO(dto.wallOffsetX, 'probe', 'wallOffsetX'),
+    wallOffsetY: optionalQuantityFromDTO(dto.wallOffsetY, 'probe', 'wallOffsetY'),
+    tipDiameter: optionalQuantityFromDTO(dto.tipDiameter, 'probe', 'tipDiameter'),
+    fastFeed: optionalQuantityFromDTO(dto.fastFeed, 'probe', 'fastFeed'),
+    slowFeed: optionalQuantityFromDTO(dto.slowFeed, 'probe', 'slowFeed'),
+    retract: optionalQuantityFromDTO(dto.retract, 'probe', 'retract'),
+  }).map((q) => ({ kind: dto.kind, ...q }))
+}
+
+function probeToDTO(p: ProbeSettings): ProbeDTO {
+  return {
+    kind: p.kind,
+    ...optionalQuantityDTO('wallOffsetX', p.wallOffsetX),
+    ...optionalQuantityDTO('wallOffsetY', p.wallOffsetY),
+    ...optionalQuantityDTO('tipDiameter', p.tipDiameter),
+    ...optionalQuantityDTO('fastFeed', p.fastFeed),
+    ...optionalQuantityDTO('slowFeed', p.slowFeed),
+    ...optionalQuantityDTO('retract', p.retract),
+  } as ProbeDTO
 }
 
 export interface MachineProps {
@@ -87,6 +155,8 @@ export interface MachineProps {
    * (docs/modes/run-machine.md#probing-and-re-zero-m4, hardening M4).
    */
   readonly probePlateThickness: Option<Quantity>
+  /** v0.5 RV4: the probe kind, plate walls, feeds; None = a Z plate with the defaults. */
+  readonly probe: Option<ProbeSettings>
   /**
    * Collet nut and spindle body; None = the tool is checked as a cylinder up to infinity (WH-F)
    * (docs/modes/tool-holder.md#model, hardening DF132).
@@ -146,6 +216,7 @@ export class Machine implements MachineProps {
     readonly spoilboardThickness: Option<Quantity>,
     readonly probePlateSize: Option<Quantity>,
     readonly probePlateThickness: Option<Quantity>,
+    readonly probe: Option<ProbeSettings>,
     readonly holder: Option<Holder>,
   ) {
     invariants('Machine', (c) => {
@@ -183,6 +254,7 @@ export class Machine implements MachineProps {
       if (noseToTable.isSome()) checkPositive(c, ['noseToTable'], noseToTable.unwrap(), 'length')
       if (probePlateSize.isSome())
         checkPositive(c, ['probePlateSize'], probePlateSize.unwrap(), 'length')
+      if (probe.isSome()) checkProbe(c, probe.unwrap())
       if (holder.isSome()) checkHolder(c, ['holder'], holder.unwrap())
       if (spoilboardThickness.isSome()) {
         const board = spoilboardThickness.unwrap()
@@ -209,6 +281,7 @@ export class Machine implements MachineProps {
     if (acceleration.isSome()) Object.freeze(acceleration.unwrap())
     if (stepsPerMm.isSome()) Object.freeze(stepsPerMm.unwrap())
     if (holder.isSome()) Object.freeze(holder.unwrap())
+    if (probe.isSome()) Object.freeze(probe.unwrap())
     Object.freeze(spindle)
     Object.freeze(this)
   }
@@ -239,6 +312,7 @@ export class Machine implements MachineProps {
           p.spoilboardThickness,
           p.probePlateSize,
           p.probePlateThickness,
+          p.probe.map((x) => ({ ...x })),
           p.holder.map((h) => ({ ...h })),
         ),
     )
@@ -277,6 +351,7 @@ export class Machine implements MachineProps {
       spoilboardThickness: optionalQuantityFromDTO(dto.spoilboardThickness, 'spoilboardThickness'),
       probePlateSize: optionalQuantityFromDTO(dto.probePlateSize, 'probePlateSize'),
       probePlateThickness: optionalQuantityFromDTO(dto.probePlateThickness, 'probePlateThickness'),
+      probe: dto.probe === undefined ? Ok(None) : probeFromDTO(dto.probe).map((p) => Some(p)),
       holder:
         dto.holder === undefined
           ? Ok(None)
@@ -310,6 +385,7 @@ export class Machine implements MachineProps {
         spoilboardThickness: q.spoilboardThickness,
         probePlateSize: q.probePlateSize,
         probePlateThickness: q.probePlateThickness,
+        probe: q.probe,
         holder: q.holder,
       }),
     )
@@ -350,6 +426,7 @@ export class Machine implements MachineProps {
       ...optionalQuantityDTO('spoilboardThickness', this.spoilboardThickness),
       ...optionalQuantityDTO('probePlateSize', this.probePlateSize),
       ...optionalQuantityDTO('probePlateThickness', this.probePlateThickness),
+      ...optionalField('probe', this.probe.map(probeToDTO)),
       ...optionalField('holder', this.holder.map(holderToDTO)),
     } as MachineValuesDTO
   }

@@ -31,6 +31,25 @@ export const HomingCornerSchema = z.enum(HOMING_CORNERS)
 
 const axes = <S extends z.ZodType>(s: S) => z.object({ x: s, y: s, z: s })
 
+/**
+ * What probes (v0.5 RV4): a Z touch plate, an XYZ corner plate (the clip on the bit), the bit on
+ * a conductive stock, a 3D touch probe. Doc: docs/modes/run-probing.md#probe-settings-rv4
+ */
+export const PROBE_KINDS = ['zPlate', 'xyzPlate', 'tool', '3d'] as const
+export type ProbeKind = (typeof PROBE_KINDS)[number]
+
+/** The probe's settings (v0.5 RV4); thickness and size stay `probePlateThickness`/`Size`. */
+export const ProbeDtoSchema = z.object({
+  kind: z.enum(PROBE_KINDS),
+  wallOffsetX: quantityDto('length').optional().describe('xyzPlate X wall out from the edge'),
+  wallOffsetY: quantityDto('length').optional(),
+  tipDiameter: quantityDto('length').optional().describe('3d ball Ø'),
+  fastFeed: quantityDto('feedRate').optional(),
+  slowFeed: quantityDto('feedRate').optional(),
+  retract: quantityDto('length').optional(),
+})
+export type ProbeDTO = z.output<typeof ProbeDtoSchema>
+
 export const MachineValuesDtoSchema = z.object({
   kind: z.literal('machine'),
   ...commonValuesShape,
@@ -84,6 +103,8 @@ export const MachineValuesDtoSchema = z.object({
   probePlateThickness: quantityDto('length')
     .optional()
     .describe('Z touch plate thickness; unset = no plate, Run offers no Probe Z'),
+  // v0.5 RV4: X/Y probing (docs/modes/run-probing.md#probe-settings-rv4); unset = a Z plate
+  probe: ProbeDtoSchema.optional(),
   // collet nut and spindle body (docs/modes/tool-holder.md#model, hardening DF132 H1)
   holder: HolderDtoSchema.optional(),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),

@@ -1960,3 +1960,90 @@
 .settingsTable tr[data-differs] th {
   background: var(--warning-subtle);
 }
+
+/* v0.5 RV5: Set X/Y zero (docs/modes/run-probing.md#set-xy-zero-rv5) */
+.xyZero {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.xyZero > .hint {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+/* the stock top seen from above: the stock fills the middle 75 %, the picks on its corners and edges */
+.xyZeroPicture {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  max-height: 200px;
+  margin-inline: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-viewport);
+}
+
+.xyZeroStock {
+  position: absolute;
+  inset: 12.5%;
+  border: 1px solid var(--vp-edge);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--vp-stock) 35%, var(--bg-viewport));
+}
+
+.xyZeroPick {
+  position: absolute;
+  width: var(--control-sm, 24px);
+  height: var(--control-sm, 24px);
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: 50%;
+  background: var(--bg-control);
+  transform: translate(-50%, 50%);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.xyZeroPick:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.xyZeroPick[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  transform: translate(-50%, 50%) scale(1.1);
+}
+
+.xyZeroPick:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* the plan's zero: a ring around the pick it is on, off the stock when the plan puts it there */
+.xyZeroRing {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border: 2px dashed var(--text);
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+}
+
+.xyZeroList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyZeroPick {
+    transition: none;
+  }
+}

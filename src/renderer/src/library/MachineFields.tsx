@@ -5,7 +5,12 @@
 // GRBL controller and manual tool change are fixed values (library.md#machine).
 // Docs: docs/conventions/ui-library-window.md#layout, L4;
 // docs/conventions/inspector-layout.md#per-inspector-target-layout
-import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
+import {
+  HOMING_CORNERS,
+  PROBE_KINDS,
+  RIGIDITY_PRESETS,
+  type ProbeDTO,
+} from '../../../core/library/machine.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
@@ -53,6 +58,14 @@ export const MACHINE_FIELDS: readonly string[] = [
   'spoilboardThickness',
   'probePlateSize',
   'probePlateThickness',
+  'probe',
+  'probe.kind',
+  'probe.wallOffsetX',
+  'probe.wallOffsetY',
+  'probe.tipDiameter',
+  'probe.fastFeed',
+  'probe.slowFeed',
+  'probe.retract',
   'holder',
   'holder.preset',
   'holder.nutDiameter',
@@ -253,6 +266,87 @@ export function MachineFields({
       )}
     </InspectorGroup>
   )
+  // v0.5 RV4: the probe for X/Y probing and its feeds (run-probing.md#probe-settings-rv4)
+  const probe = (patch: Partial<ProbeDTO>) =>
+    set({ probe: { ...(values.probe ?? { kind: 'zPlate' }), ...patch } })
+  const kind = values.probe?.kind ?? 'zPlate'
+  const probeSettings = [
+    <Field key="probe.kind" label={m.probeKind} messages={messages('probe.kind')}>
+      <Select
+        options={PROBE_KINDS.map((k) => ({ value: k, label: m.probeKinds[k] }))}
+        value={kind}
+        onValueChange={(k) => probe({ kind: k })}
+      />
+    </Field>,
+    ...(kind === 'xyzPlate'
+      ? [
+          q(
+            'probe.wallOffsetX',
+            'small',
+            m.probeWallOffsetX,
+            'length',
+            values.probe?.wallOffsetX,
+            'positionX',
+            (wallOffsetX) => probe({ wallOffsetX }),
+            { optional: true, info: m.probeWallOffsetNote },
+          ),
+          q(
+            'probe.wallOffsetY',
+            'small',
+            m.probeWallOffsetY,
+            'length',
+            values.probe?.wallOffsetY,
+            'positionY',
+            (wallOffsetY) => probe({ wallOffsetY }),
+            { optional: true },
+          ),
+        ]
+      : []),
+    ...(kind === '3d'
+      ? [
+          q(
+            'probe.tipDiameter',
+            'small',
+            m.probeTipDiameter,
+            'length',
+            values.probe?.tipDiameter,
+            'ballTip',
+            (tipDiameter) => probe({ tipDiameter }),
+            { optional: true, info: m.probeTipDiameterNote },
+          ),
+        ]
+      : []),
+    q(
+      'probe.fastFeed',
+      'feed',
+      m.probeFastFeed,
+      'feedRate',
+      values.probe?.fastFeed,
+      'plunge',
+      (fastFeed) => probe({ fastFeed }),
+      { optional: true, info: m.probeFastFeedNote },
+    ),
+    q(
+      'probe.slowFeed',
+      'feed',
+      m.probeSlowFeed,
+      'feedRate',
+      values.probe?.slowFeed,
+      'plunge',
+      (slowFeed) => probe({ slowFeed }),
+      { optional: true, info: m.probeSlowFeedNote },
+    ),
+    q(
+      'probe.retract',
+      'small',
+      m.probeRetract,
+      'length',
+      values.probe?.retract,
+      'retract',
+      (retract) => probe({ retract }),
+      { optional: true, info: m.probeRetractNote },
+    ),
+  ]
   const spindleGroup = (
     <InspectorGroup title={m.spindle} {...sub}>
       <Choice caption={m.control}>
@@ -403,6 +497,7 @@ export function MachineFields({
             (probePlateSize) => set({ probePlateSize }),
             { optional: true, info: m.probePlateSizeNote },
           )}
+          {probeSettings}
         </InspectorGroup>
         {travel}
         {homing}
@@ -432,6 +527,7 @@ export function MachineFields({
       {rigidity}
       {travel}
       {zHeight}
+      <InspectorGroup title={m.probe}>{probeSettings}</InspectorGroup>
       {homing}
       <InspectorGroup title={g.controller}>
         <FixedField label={m.controller} value={m.controllerValue} />
