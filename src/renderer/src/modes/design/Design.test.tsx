@@ -546,7 +546,10 @@ describe('design mode', () => {
     expect(row.querySelector('[title="2 warnings"]')).not.toBeNull()
     expect(within(row.parentElement!).getAllByRole('button')).toEqual([row])
     expect(row).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
-    expect(row).toHaveAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown Shift+F10 Delete')
+    expect(row).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+ArrowUp Alt+ArrowDown Shift+ArrowUp Shift+ArrowDown Shift+F10 Delete',
+    )
   })
 
   it('moves operations with Alt+↑/↓ (announced) and removes them from the row menu or with Delete', async () => {

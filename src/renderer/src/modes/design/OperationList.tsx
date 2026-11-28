@@ -12,10 +12,13 @@
 // Every row with an applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove):
 // right-click, Shift+F10 / the Menu key; rows have no action buttons (DF70, ui.md decision 27), so
 // badges and markers never move on hover, and such rows are described by the list's hint.
+// DF135: top-level rows multi-select – Cmd/Ctrl-click toggles, Shift-click and Shift+↑/↓ select a
+// range from the anchor, Escape clears; a selected row's menu (and Delete) act on all of them
+// (MultiSelection.tsx, ui.md#multi-select-in-the-design-navigator-df135).
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #clones-in-the-navigator,
 // #reordering-lists-d45, #panels-and-inspectors, #confirmations, row menu in #feature-rows-and-add;
 // docs/modes/design.md#ordering-and-composition
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { isDisabled, type DisabledState } from '../../../../core/design/disabled'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
@@ -56,6 +59,8 @@ import {
 import { axisNames, disabledOf, surfaceDirection, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 import { useRowActions } from './row-actions'
+import { useBulkActions, useDesignMulti } from './MultiSelection'
+import { inOrder, rangeOf, toggled } from './multi-select'
 import { useSkipToggle } from './ClonesInspector'
 import { instanceId } from './clones-view'
 import { featureIcon, partOperationIconProps } from './operation-icon'
@@ -119,9 +124,12 @@ interface ListContext {
   readonly warnings: readonly DfmWarning[]
   readonly failedAt: string | undefined
   readonly selected: string | null
+  /** Whether row `id` is selected: the single selection or in the multi-selection (DF135). */
+  isSelected(id: string): boolean
   readonly expanded: ReadonlySet<string>
   toggle(key: string): void
-  select(id: string): void
+  /** A row click: alone, or with Cmd/Ctrl (toggle) or Shift (range) on a top-level row (DF135). */
+  click(e: MouseEvent, id: string): void
   key(e: KeyboardEvent, rowId: string): void
   rowRef(id: string): (el: HTMLButtonElement | null) => void
   /** Focus row `id`'s button. */
@@ -168,6 +176,8 @@ export function OperationList({
   const partId = part.dto.id
   const hintId = useId()
   const readOnly = part.dto.derivedFrom !== undefined
+  const multi = useDesignMulti(part)
+  const selectMany = useUi((s) => s.selectDesignMany)
 
   // a selected owned or nested operation (viewport click, breadcrumb, undo) shows inside its open
   // feature(s)
@@ -203,6 +213,22 @@ export function OperationList({
 
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const [announcement, setAnnouncement] = useState('')
+  const bulk = useBulkActions(part, multi?.ids ?? [], (why) => {
+    setRefusal(why)
+    setAnnouncement(why)
+  })
+  // DF135: every change of the multi-selection is announced ("3 items selected")
+  const selectRows = (ids: readonly string[], from: string) => {
+    selectMany(ids, from)
+    if (ids.length >= 2) setAnnouncement(m.navigator.multi.selected(ids.length))
+  }
+  const top = units.map((u) => u.id)
+  /** The multi-selection's start: its anchor, or the single selection if it is a top-level row. */
+  const anchor = (fallback: string) =>
+    multi?.anchor ?? (selected !== null && top.includes(selected) ? selected : fallback)
+  /** The current selection as top-level rows (for Cmd/Ctrl toggles and Cmd/Ctrl+Shift ranges). */
+  const current = (): string[] =>
+    multi !== null ? [...multi.ids] : selected !== null && top.includes(selected) ? [selected] : []
   const unitName = (u: OperationUnit) => (u.kind === 'feature' ? u.feature.name : u.op.name)
 
   /** Moves a unit to unit position `to`; `keep` is the row that keeps focus. False: refused. */
@@ -273,6 +299,20 @@ export function OperationList({
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) e.preventDefault()
       return
     }
+    // DF135: Escape clears the selection (one row or several)
+    if (e.key === 'Escape' && (selected !== null || multi !== null)) {
+      e.preventDefault()
+      return select(null)
+    }
+    // DF135: Shift+↑/↓ extends the selection from the anchor to the next top-level row
+    if (!readOnly && e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault()
+      const next = top[top.indexOf(unit.id) + (e.key === 'ArrowUp' ? -1 : 1)]
+      if (next === undefined) return
+      const from = anchor(unit.id)
+      selectRows(rangeOf(top, from, next), from)
+      return focusRow(next)
+    }
     // Shift+F10 / the Menu key: the row's menu, at the row (DF16)
     if (isContextMenuKey(e)) {
       const el = e.currentTarget.closest('[data-row-menu]')
@@ -284,6 +324,8 @@ export function OperationList({
     // Remove; refused silently while blocked, the reason shows under the row)
     if ((e.key === 'Delete' || e.key === 'Backspace') && row.id === unit.id) {
       e.preventDefault()
+      // DF135: on a row of the multi-selection, Remove N items (one undo step)
+      if (multi?.ids.includes(unit.id) === true) return bulk.remove()
       if (unit.kind === 'feature' && featureRemoveBlocked(part, unit.id) !== undefined) return
       return void remove(unit)
     }
@@ -320,9 +362,21 @@ export function OperationList({
     warnings,
     failedAt,
     selected,
+    isSelected: (id) => selected === id || multi?.ids.includes(id) === true,
     expanded,
     toggle: (key) => setExpanded(key, !expanded.has(key)),
-    select: (id) => select(selected === id ? null : id),
+    click: (e, id) => {
+      const toggle = e.metaKey || e.ctrlKey
+      // nested rows and a piece's rows select alone (ui.md § Multi-select)
+      if (readOnly || !top.includes(id) || (!toggle && !e.shiftKey))
+        return select(selected === id && multi === null ? null : id)
+      if (e.shiftKey) {
+        const from = anchor(id)
+        const range = rangeOf(top, from, id)
+        return selectRows(toggle ? inOrder(top, [...current(), ...range]) : range, from)
+      }
+      selectRows(toggled(top, current(), id), id)
+    },
     key: onKey,
     focus: focusRow,
     rowRef: (id) => (el) => {
@@ -348,12 +402,17 @@ export function OperationList({
         {units.map((unit, i) => {
           const name = unitName(unit)
           const blocked = unit.kind === 'feature' ? featureRemoveBlocked(part, unit.id) : undefined
+          const inMulti = multi?.ids.includes(unit.id) === true
           const actions: RowActions = readOnly
             ? { item: undefined, grip: undefined, menu: [] }
             : {
                 item: reorder.itemProps(i),
                 grip: units.length > 1 ? reorder.gripProps(i) : undefined,
-                menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
+                // DF135: a row of the multi-selection has the bulk menu
+                menu: inMulti
+                  ? bulk.entries
+                  : rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
+                ...(inMulti ? { label: m.navigator.multi.actions(multi!.ids.length) } : {}),
               }
           return unit.kind === 'operation' ? (
             <OperationRow
@@ -384,6 +443,8 @@ interface RowActions {
   readonly grip: ReturnType<Reorder['gripProps']> | undefined
   /** The row menu (DF16): right-click, Shift+F10 / the Menu key; Remove last. */
   readonly menu: readonly MenuEntry[]
+  /** The menu's label when not "Actions for <name>" (DF135: "Actions for 3 items"). */
+  readonly label?: string
 }
 
 /**
@@ -398,7 +459,12 @@ function rowKeys(
   reasonId?: string,
 ): { 'aria-keyshortcuts': string; 'aria-describedby'?: string } {
   const moves = ctx.readOnly ? keys.replace(/Alt\+\S+ ?/g, '').trim() : keys
-  const all = [moves, menu.length > 0 ? 'Shift+F10' : '', top && !ctx.readOnly ? 'Delete' : '']
+  const all = [
+    moves,
+    top && !ctx.readOnly ? 'Shift+ArrowUp Shift+ArrowDown' : '',
+    menu.length > 0 ? 'Shift+F10' : '',
+    top && !ctx.readOnly ? 'Delete' : '',
+  ]
   const described = [menu.length > 0 ? ctx.hintId : '', reasonId ?? ''].filter((x) => x !== '')
   return {
     'aria-keyshortcuts': all.filter((x) => x !== '').join(' '),
@@ -415,18 +481,20 @@ function RowMenu({
   id,
   name,
   items,
+  label,
   children,
 }: {
   ctx: ListContext
   id: string
   name: string
   items: readonly MenuEntry[]
+  label?: string | undefined
   children: React.JSX.Element
 }): React.JSX.Element {
   if (items.length === 0) return children
   return (
     <ContextMenu
-      label={m.navigator.actions(name)}
+      label={label ?? m.navigator.actions(name)}
       items={items}
       onCloseAutoFocus={(e) => {
         e.preventDefault()
@@ -542,23 +610,23 @@ function OperationRow({
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
   const menu = actions?.menu ?? ctx.rowMenu(op.id)
   return (
-    <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
+    <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu} label={actions?.label}>
       <li
         {...actions?.item}
         className={styles['op']}
         data-nested={actions === undefined ? '' : undefined}
         data-off={isDisabled(ctx.off, op.id) ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
-        data-selected={ctx.selected === op.id ? '' : undefined}
+        data-selected={ctx.isSelected(op.id) ? '' : undefined}
       >
         <RowGrip actions={actions} />
         <button
           type="button"
           ref={ctx.rowRef(op.id)}
           className={styles['opSelect']}
-          aria-pressed={ctx.selected === op.id}
+          aria-pressed={ctx.isSelected(op.id)}
           {...rowKeys(ctx, 'Alt+ArrowUp Alt+ArrowDown', menu, actions !== undefined)}
-          onClick={() => ctx.select(op.id)}
+          onClick={(e) => ctx.click(e, op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
           <Icon {...partOperationIconProps(ctx.part.dto, op)} />
@@ -604,19 +672,19 @@ function RoughingOwnerRow({
       data-nested={actions === undefined ? '' : undefined}
       data-open={open || undefined}
     >
-      <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
+      <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu} label={actions?.label}>
         <div
           className={styles['op']}
           data-off={off ? '' : undefined}
           data-row-menu={menu.length > 0 ? '' : undefined}
-          data-selected={ctx.selected === op.id ? '' : undefined}
+          data-selected={ctx.isSelected(op.id) ? '' : undefined}
         >
           <RowGrip actions={actions} />
           <button
             type="button"
             ref={ctx.rowRef(op.id)}
             className={`${styles['opSelect']} ${styles['featureSelect']}`}
-            aria-pressed={ctx.selected === op.id}
+            aria-pressed={ctx.isSelected(op.id)}
             aria-expanded={open}
             aria-controls={childrenId}
             {...rowKeys(
@@ -626,7 +694,7 @@ function RoughingOwnerRow({
               actions !== undefined,
             )}
             aria-label={`${m.navigator.withRoughing(op.name)}${off ? `, ${m.navigator.off}` : ''}`}
-            onClick={() => ctx.select(op.id)}
+            onClick={(e) => ctx.click(e, op.id)}
             onKeyDown={(e) => ctx.key(e, op.id)}
           >
             <Chevron open={open} name={op.name} onToggle={() => ctx.toggle(op.id)} />
@@ -665,7 +733,7 @@ function FeatureRow({
   unit: FeatureUnit
   actions?: RowActions
 }): React.JSX.Element {
-  const { part, selected } = ctx
+  const { part } = ctx
   const feature = unit.feature
   const clones = feature.kind === 'clones'
   const port = useRegion2d()
@@ -694,19 +762,19 @@ function FeatureRow({
       data-nested={actions === undefined ? '' : undefined}
       data-open={open || undefined}
     >
-      <RowMenu ctx={ctx} id={feature.id} name={feature.name} items={menu}>
+      <RowMenu ctx={ctx} id={feature.id} name={feature.name} items={menu} label={actions?.label}>
         <div
           className={styles['op']}
           data-off={isDisabled(ctx.off, feature.id) ? '' : undefined}
           data-row-menu={menu.length > 0 ? '' : undefined}
-          data-selected={selected === feature.id ? '' : undefined}
+          data-selected={ctx.isSelected(feature.id) ? '' : undefined}
         >
           <RowGrip actions={actions} />
           <button
             type="button"
             ref={ctx.rowRef(feature.id)}
             className={`${styles['opSelect']} ${styles['featureSelect']}`}
-            aria-pressed={selected === feature.id}
+            aria-pressed={ctx.isSelected(feature.id)}
             aria-expanded={open}
             aria-controls={childrenId}
             {...rowKeys(
@@ -717,7 +785,7 @@ function FeatureRow({
               blocked !== undefined ? reasonId : undefined,
             )}
             aria-label={isDisabled(ctx.off, feature.id) ? `${name}, ${m.navigator.off}` : name}
-            onClick={() => ctx.select(feature.id)}
+            onClick={(e) => ctx.click(e, feature.id)}
             onKeyDown={(e) => ctx.key(e, feature.id)}
           >
             <Chevron open={open} name={feature.name} onToggle={() => ctx.toggle(feature.id)} />
@@ -810,16 +878,16 @@ function OwnedRow({
         data-owned=""
         data-off={isDisabled(ctx.off, op.id) ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
-        data-selected={ctx.selected === op.id ? '' : undefined}
+        data-selected={ctx.isSelected(op.id) ? '' : undefined}
       >
         <button
           type="button"
           ref={ctx.rowRef(op.id)}
           className={styles['opSelect']}
-          aria-pressed={ctx.selected === op.id}
+          aria-pressed={ctx.isSelected(op.id)}
           aria-label={`${f.ownedName(op.name, featureName)}${isDisabled(ctx.off, op.id) ? `, ${m.navigator.off}` : ''}`}
           {...rowKeys(ctx, 'Alt+ArrowUp Alt+ArrowDown ArrowLeft', menu, false)}
-          onClick={() => ctx.select(op.id)}
+          onClick={(e) => ctx.click(e, op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
           <Icon {...partOperationIconProps(ctx.part.dto, op)} />
@@ -929,7 +997,7 @@ function ClonesChildren({
                   className={styles['instanceSelect']}
                   aria-pressed={selected}
                   aria-label={c.instanceRow(x.n, x.kind, x.mirrored)}
-                  onClick={() => ctx.select(id)}
+                  onClick={(e) => ctx.click(e, id)}
                   onKeyDown={(e) => ctx.key(e, id)}
                 >
                   <span className={styles['instanceName']}>

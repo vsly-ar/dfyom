@@ -40,6 +40,8 @@ import { deviationView, worstRegion } from './reference-compare-state'
 import { lengthSource } from './reference-view'
 import { countsAsWarning } from './feature-view'
 import { useClonesScene } from './useClonesScene'
+import { useDesignMulti } from './MultiSelection'
+import { isSelectedOwner } from '../../viewport/colours'
 import { useSplitScene } from './useSplitScene'
 import { slotDimension } from './slot-dimension'
 import { constructionOverlays } from './construction-view'
@@ -59,6 +61,8 @@ export function useDesignScene(): SceneProps {
   const evaluation = useDesignEvaluation(part)
   const { warnings } = useDesignWarnings(part)
   const [selected, select] = useDesignSelection()
+  // DF135: a multi-selection draws every selected item selected, without one item's overlays
+  const multi = useDesignMulti(part)
   const pick = useUi((s) => s.pick)
   const rotationGuide = useUi((s) => s.rotationGuide)
   const snapOn = useUi((s) => s.snapOn)
@@ -303,11 +307,33 @@ export function useDesignScene(): SceneProps {
     if (owner === undefined || rough === undefined) return null
     return new Set([owner, rough.id, ...(clones.selectedAlso ?? [])])
   }, [part, shown, clones.selectedAlso])
+  const multiAlso = useMemo(() => {
+    if (multi === null || part === undefined) return null
+    const ids = new Set(multi.ids)
+    const off = disabledOf(part)
+    return new Set(
+      part.dto.operations
+        .filter(
+          (o) =>
+            !isDisabled(off, o.id) &&
+            (ids.has(o.id) ||
+              (o.featureId !== undefined && ids.has(o.featureId)) ||
+              ('roughingOf' in o && o.roughingOf !== undefined && ids.has(o.roughingOf)) ||
+              multi.ids.some((x) => isSelectedOwner(o.id, x))),
+        )
+        .map((o) => o.id),
+    )
+  }, [multi, part])
   // the exploded split preview while the part inspector (its Split section) shows (4a polish)
   const clonesDraft = useUi((s) => s.clonesDraft)
   const splitScene = useSplitScene(
     part,
-    selected === null && !panel && pick === null && compare === null && clonesDraft === null,
+    selected === null &&
+      multi === null &&
+      !panel &&
+      pick === null &&
+      compare === null &&
+      clonesDraft === null,
     warnings,
   )
   const announcement = useUi((s) => s.announcement)
@@ -378,7 +404,7 @@ export function useDesignScene(): SceneProps {
     construction,
     highlight,
     clonePath: clones.clonePath,
-    selectedAlso: roughingAlso ?? clones.selectedAlso,
+    selectedAlso: multiAlso ?? roughingAlso ?? clones.selectedAlso,
     outlineOnly,
     announcement,
     ghosts,

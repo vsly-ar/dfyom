@@ -19,6 +19,13 @@ import {
 } from '../modes/design/reference-compare-state'
 import type { Box } from '../viewport/mesh'
 
+/** The Design navigator's multi-selection (DF135): top-level row ids in design order. */
+export interface DesignMulti {
+  readonly ids: readonly string[]
+  /** The row Shift ranges start from (the last row clicked or Cmd/Ctrl-clicked). */
+  readonly anchor: string
+}
+
 /** Pick mode: a field asks the viewport for a surface (ui.md#selection-and-picking). */
 export interface PickRequestState {
   /** Which field asked (unique per field; labels repeat across operations). */
@@ -100,7 +107,16 @@ export interface UiState {
    * design selection of another id closes the Reference panel (ui.md § Reference panel).
    */
   readonly selection: Readonly<Record<AppMode, string | null>>
+  /** Selects one item (or none); in design it replaces a multi-selection (`designMulti`). */
   select(mode: AppMode, id: string | null): void
+  /**
+   * The Design navigator's multi-selection (DF135, ui.md § Multi-select in the Design navigator):
+   * two or more top-level rows in design order and the anchor of Shift ranges; `selection.design`
+   * is null meanwhile. Null: none (the single selection applies).
+   */
+  readonly designMulti: DesignMulti | null
+  /** Sets the multi-selection: 2+ ids; one id becomes the single selection, none clears. */
+  selectDesignMany(ids: readonly string[], anchor: string): void
   /**
    * The Reference panel in the right sidebar (dogfood DF3, ui.md § Reference panel): open while
    * true; its reference is the design selection.
@@ -330,6 +346,7 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
           : {
               designPart,
               selection: { ...s.selection, design: null },
+              designMulti: null,
               referencePanel: false,
               referencePreview: null,
               shapeEditor: null,
@@ -341,13 +358,25 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     select: (mode, id) =>
       set((s) => ({
         selection: { ...s.selection, [mode]: id },
+        ...(mode === 'design' ? { designMulti: null } : {}),
         ...(mode === 'design' && s.referencePanel && id !== s.selection.design
           ? { referencePanel: false, referencePreview: null }
           : {}),
       })),
+    designMulti: null,
+    selectDesignMany: (ids, anchor) =>
+      set((s) => {
+        const single = ids.length === 1 ? ids[0]! : null
+        const designMulti = ids.length >= 2 ? { ids, anchor } : null
+        const selection = { ...s.selection, design: single }
+        return s.referencePanel
+          ? { designMulti, selection, referencePanel: false, referencePreview: null }
+          : { designMulti, selection }
+      }),
     referencePanel: false,
     openReferencePanel: (id) =>
       set((s) => ({
+        designMulti: null,
         referencePanel: true,
         selection: { ...s.selection, design: id },
         inspectorRequest: s.referencePanel ? s.inspectorRequest : s.inspectorRequest + 1,
