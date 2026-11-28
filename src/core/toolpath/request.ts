@@ -126,7 +126,8 @@ const SingleRequestSchema: z.ZodType<SingleRequest> = z.discriminatedUnion('kind
   }),
   z.object({ kind: z.literal('edgeChamfer'), inputs: one(EdgeChamferInputSchema), wcs }),
   z.object({ kind: z.literal('mark'), inputs: one(MarkInputSchema), wcs }),
-  z.object({ kind: z.literal('line'), inputs: one(LineInputSchema), wcs }),
+  // DF147 SL4: a one-sided chamfer's rings, one Line each
+  z.object({ kind: z.literal('line'), inputs: z.array(LineInputSchema).min(1).readonly(), wcs }),
 ])
 
 export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.union([
@@ -220,7 +221,10 @@ function generateLocal(
     case 'mark':
       return generateMark(request.inputs[0]!, steps)
     case 'line':
-      return generateLine(request.inputs[0]!, steps)
+      // DF147 SL4: a one-sided chamfer's rings, joined
+      return request.inputs.length === 1
+        ? generateLine(request.inputs[0]!, steps)
+        : joined(request.inputs, generateLine, 'chamfer', steps)
     case 'edgeChamfer': {
       const input = request.inputs[0]!
       return region2d().andThen((port) => generateEdgeChamfer(input, port, steps))

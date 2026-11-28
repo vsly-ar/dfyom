@@ -194,11 +194,16 @@ export function updateArgs(
       paths[i] = p
       return { paths }
     }
-    if (head === 'depth' && rest.length > 0 && 'start' in op.depth) {
+    if (
+      head === 'depth' &&
+      rest.length > 0 &&
+      typeof op.depth === 'object' &&
+      'start' in op.depth
+    ) {
       const depth = { start: src(op.depth.start), end: src(op.depth.end) }
       return { depth: { ...depth, [rest[0]!]: source } }
     }
-    if (head === 'depth' && rest.length > 0 && 'min' in op.depth) {
+    if (head === 'depth' && rest.length > 0 && typeof op.depth === 'object' && 'min' in op.depth) {
       const depth = { min: src(op.depth.min), max: src(op.depth.max) }
       return { depth: { ...depth, [rest[0]!]: source } }
     }

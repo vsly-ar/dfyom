@@ -14,6 +14,7 @@ import type { Region2dPort } from '../../geometry/2d/port'
 import type { OperationGeometry, Shape } from '../../geometry/model'
 import { shapeOutline } from '../../geometry/outline'
 import { grooveWidth, lineMaxDepth } from '../../geometry/line'
+import { wallBounds } from '../../geometry/wall-chamfer'
 import type { Flip, UV } from './path'
 
 /** The Minkowski sum of the box centre ± (hu, hv) and a disk of radius `r` (a circle: hu = hv = 0). */
@@ -112,6 +113,13 @@ export function sourceFootprint(
         return [box(op.center[0], op.center[1], 0, 0, op.diameter / 2)]
       case 'chamfer':
         // a loop chamfer (E1): its edge's shape grown by the bevel's width
+        if (op.wall !== undefined) {
+          // DF147 SL4: a one-sided chamfer along a through Line
+          const b = wallBounds(op.wall, op.width)
+          const hu = (b.max[0] - b.min[0]) / 2
+          const hv = (b.max[1] - b.min[1]) / 2
+          return [box(b.min[0] + hu, b.min[1] + hv, hu, hv, 0)]
+        }
         return op.edge !== undefined
           ? shapePart(op.edge.shape, op.width, port)
           : [box(op.center[0], op.center[1], 0, 0, op.diameter / 2)]

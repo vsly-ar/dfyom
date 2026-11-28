@@ -563,6 +563,7 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
           sourceEdge: None,
           loops: None,
           cornerLift: false,
+          edgeSide: None,
         },
       }))
   if (h.head.type === 'countersink') {

@@ -264,10 +264,111 @@ function startAtLongest(l: ResolvedLine): readonly Element[] {
   return [second, ...l.elements.slice(best + 1), ...l.elements.slice(0, best), first]
 }
 
-/** A line to cut: its path and Z profile; an open line maybe reversed (entered at its far end). */
+/**
+ * A line to cut: its path and Z profile; an open line maybe reversed (entered at its far end).
+ * `open` (DF147 SL3, a through Line): its start / end runs out past the stock edge (the path
+ * already holds the lead), so a pass that starts there enters from outside the stock at full depth.
+ */
 interface Cut {
   readonly path: LinePath
   readonly z: ZProfile
+  readonly open?: readonly [boolean, boolean]
+}
+
+/** A through Line's lead past the stock edge beyond the tool's radius (mm, DF147 SL3). */
+export const THROUGH_LEAD_CLEARANCE = 2
+
+/** Distance from `p` to the rectangle 0..L × 0..W (0 inside it). */
+function rectDistance(p: Vec2, L: number, W: number): number {
+  const dx = Math.max(0 - p[0], 0, p[0] - L)
+  const dy = Math.max(0 - p[1], 0, p[1] - W)
+  return Math.hypot(dx, dy)
+}
+
+/**
+ * The lead of an open end (DF147 SL3): the end `p` lies on or past the face's edge and the line's
+ * outward tangent `t` takes the tool clear of the stock (radius + `THROUGH_LEAD_CLEARANCE`) within
+ * a few radii; the lead's length, else undefined (an end inside the face keeps its ramp-back).
+ */
+export function openLead(
+  p: Vec2,
+  t: Vec2,
+  R: number,
+  stock: { readonly length: number; readonly width: number },
+): number | undefined {
+  const { length: L, width: W } = stock
+  const e = 1e-6
+  const inside = p[0] > e && p[0] < L - e && p[1] > e && p[1] < W - e
+  if (inside) return undefined
+  const need = R + THROUGH_LEAD_CLEARANCE
+  for (let k = 1; k <= 40; k++) {
+    const l = (need * k) / 8
+    if (l < need) continue
+    const q: Vec2 = [p[0] + t[0] * l, p[1] + t[1] * l]
+    if (rectDistance(q, L, W) >= need - 1e-9) return l
+  }
+  return undefined
+}
+
+/** The unit tangent of an element at its start (`u` = 0) or end (`u` = 1), along it. */
+function tangentAt(e: Element, u: 0 | 1): Vec2 {
+  if (e.kind === 'line') {
+    const d = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1])
+    return [(e.b[0] - e.a[0]) / d, (e.b[1] - e.a[1]) / d]
+  }
+  const p = u === 0 ? e.a : e.b
+  const r: Vec2 = [p[0] - e.centre[0], p[1] - e.centre[1]]
+  const l = Math.hypot(r[0], r[1])
+  // counter-clockwise: the radius turned left
+  return e.ccw ? [-r[1] / l, r[0] / l] : [r[1] / l, -r[0] / l]
+}
+
+/**
+ * A through Line's open line (DF147 SL3): entered at an open end (reversed when only its end is
+ * open), with a straight lead past the stock edge at each open end; the depth is constant.
+ */
+function throughCut(
+  l: ResolvedLine,
+  R: number,
+  stock: { readonly length: number; readonly width: number },
+  onZ: number,
+): Cut {
+  const leadsOf = (x: ResolvedLine) => {
+    const first = x.elements[0]!
+    const last = x.elements.at(-1)!
+    const t0 = tangentAt(first, 0)
+    const t1 = tangentAt(last, 1)
+    return {
+      a: elementPoint(first, 0),
+      b: elementPoint(last, 1),
+      t0: [-t0[0], -t0[1]] as Vec2,
+      t1,
+      l0: x.closed ? undefined : openLead(elementPoint(first, 0), [-t0[0], -t0[1]], R, stock),
+      l1: x.closed ? undefined : openLead(elementPoint(last, 1), t1, R, stock),
+    }
+  }
+  let line = l
+  let k = leadsOf(line)
+  if (k.l0 === undefined && k.l1 !== undefined) {
+    line = reversed(line)
+    k = leadsOf(line)
+  }
+  const elements: Element[] = [...line.elements]
+  if (k.l0 !== undefined)
+    elements.unshift({
+      kind: 'line',
+      a: [k.a[0] + k.t0[0] * k.l0, k.a[1] + k.t0[1] * k.l0],
+      b: k.a,
+    })
+  if (k.l1 !== undefined)
+    elements.push({ kind: 'line', a: k.b, b: [k.b[0] + k.t1[0] * k.l1, k.b[1] + k.t1[1] * k.l1] })
+  const path = new LinePath(elements, line.closed)
+  const d = Math.max(...line.profile.d)
+  return {
+    path,
+    z: { s: [0, path.length], z: [onZ - d, onZ - d] },
+    open: [k.l0 !== undefined, k.l1 !== undefined],
+  }
 }
 
 function reversed(l: ResolvedLine): ResolvedLine {
@@ -362,7 +463,15 @@ export function cutLine(
     const sA = fwd ? 0 : L
     const dir = fwd ? 1 : -1
     const zA = evalZ(target, sA)
-    if (st.entry === 'plunge') {
+    // DF147 SL3: an open end of a through Line is entered from outside the stock at full depth
+    if (cut.open?.[fwd ? 0 : 1] === true) {
+      if (first) {
+        b.rapid(at(sA, heights.clearanceHeight))
+        b.rapid(at(sA, retract))
+      }
+      b.line(at(sA, zA), c.plungeRate)
+      rampLengths.push(0)
+    } else if (st.entry === 'plunge') {
       if (first) {
         b.rapid(at(sA, heights.clearanceHeight))
         b.rapid(at(sA, retract))
@@ -457,16 +566,11 @@ export function generateLine(input: LineInput, steps: Steps = noSteps): AppResul
     })
     const l0 = left.splice(best, 1)[0]!
     const l = flip ? reversed(l0) : l0
-    const path = new LinePath(startAtLongest(l), l.closed)
-    const r = cutLine(
-      b,
-      { path, z: zOf(l.profile, op.onZ) },
-      op.onZ,
-      c,
-      st,
-      heights,
-      input.material?.top,
-    )
+    const cut: Cut =
+      op.through === true
+        ? throughCut(l, input.tool.diameter / 2, input.stock, op.onZ)
+        : { path: new LinePath(startAtLongest(l), l.closed), z: zOf(l.profile, op.onZ) }
+    const r = cutLine(b, cut, op.onZ, c, st, heights, input.material?.top)
     here = r.end
   }
   return Ok(toolpath(input, b.build()))

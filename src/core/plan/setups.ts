@@ -326,7 +326,9 @@ export function setupStockSize(
  * profile (DF122 R4) leaves a skin.
  */
 const isThroughProfile = (op: Part['operations'][number] | undefined): boolean =>
-  op?.kind === 'profile' && op.depth.isNone() && op.roughing !== true
+  (op?.kind === 'profile' && op.depth.isNone() && op.roughing !== true) ||
+  // DF147 SL3: a through Line cuts the stock in two
+  (op?.kind === 'line' && op.depth.kind === 'through')
 
 /**
  * `plan.cutoutBeforeSetup` (warning): a through profile in a setup before another setup; the part

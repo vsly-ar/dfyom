@@ -51,6 +51,7 @@ import {
   edgeLoopLabels,
   edgeOptions,
   isLoopEdge,
+  isWallEdge,
   wallSectionValues,
 } from './chamfer-view'
 import { constructionAt, defaultUnit, dfmNames } from './model'
@@ -124,6 +125,7 @@ export function ChamferInspector({
       <InspectorGroup title={t.groups.edge} level={level}>
         {target('edgeOf', <EdgeField ctx={ctx} op={op} />)}
         <SideField ctx={ctx} />
+        <EdgeSideField ctx={ctx} />
       </InspectorGroup>
       <InspectorGroup title={t.groups.chamfer} level={level}>
         {sketch !== undefined ? (
@@ -209,7 +211,7 @@ function DiameterField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
   const op = ctx.op
   if (op.kind !== 'chamfer') return null
   const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
-  if (edge !== undefined && isLoopEdge(edge)) return null
+  if (edge !== undefined && (isLoopEdge(edge) || isWallEdge(edge))) return null
   const d = chamferDiameter(ctx.part.dto, op, ctx.units)
   return (
     <Field
@@ -340,6 +342,39 @@ function SideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element 
         value={value}
         disabled={ctx.readOnly}
         onValueChange={(v) => v !== value && ctx.send({ on: v === 'bottom' ? bottom : top }, 'on')}
+      />
+    </Field>
+  )
+}
+
+/**
+ * DF147 SL4: a through Line's chamfer: the side that stays (`edgeSide`), Left / Right of the line
+ * from its start to its end; none on any other edge.
+ */
+function EdgeSideField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'chamfer') return null
+  const edge = ctx.part.dto.operations.find((o) => o.id === op.edgeOf)
+  if (edge === undefined || !isWallEdge(edge)) return null
+  const messages: FieldMessage[] = [
+    ...ctx.errors
+      .filter((e) => e.path === 'edgeSide')
+      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+  ]
+  return (
+    <Field
+      label={t.edgeSide}
+      kind="toggle"
+      messages={messages}
+      info={t.edgeSideNote}
+      readOnly={ctx.readOnly}
+    >
+      <SegmentedControl<'left' | 'right'>
+        label={t.edgeSide}
+        options={(['left', 'right'] as const).map((v) => ({ value: v, label: t.edgeSides[v] }))}
+        value={op.edgeSide ?? 'left'}
+        disabled={ctx.readOnly}
+        onValueChange={(v) => v !== op.edgeSide && ctx.send({ edgeSide: v }, 'edgeSide')}
       />
     </Field>
   )

@@ -8,6 +8,7 @@
  */
 import type { Direction } from './face'
 import type { Path, Region } from './2d/model'
+import type { ChamferWall } from './wall-chamfer'
 
 /** Coincidence, collapse and zero-length threshold (mm). */
 export const EPSILON = 1e-6
@@ -243,6 +244,7 @@ export type OperationGeometry = FacePlacement &
       }
     | CircleChamferFields
     | LoopChamferFields
+    | WallChamferFields
     | LineFields
   )
 
@@ -303,6 +305,13 @@ interface LineFields {
    */
   readonly within?: { readonly min: Vec2; readonly max: Vec2 }
   readonly cutter: LineCutter
+  /**
+   * DF147 SL3: cut through the stock (one open path, a flat cutter). `depth` is the material below
+   * `on`; the removal solid runs on past the far face, the plan adds `breakthrough`, and an end on
+   * or beyond the face's edge is entered from outside the stock.
+   * Doc: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
+   */
+  readonly through?: true
 }
 
 export type LineGeometry = FacePlacement & LineFields
@@ -336,6 +345,7 @@ interface CircleChamferFields {
    */
   readonly edgeCore?: true
   readonly edge?: never
+  readonly wall?: never
 }
 
 /**
@@ -364,6 +374,7 @@ interface LoopChamferFields {
    * Doc: docs/modes/edge-chamfers.md#implementation-e4a
    */
   readonly cornerLift?: true
+  readonly wall?: never
 }
 
 /** The general edge a loop chamfer follows, in the edge operation's face frame. */
@@ -421,9 +432,31 @@ export const LOOP_CHAMFER_TAB_CLEARANCE = 1
 export const loopChamferTabGap = (tab: LoopChamferTab, width: number, tipDiameter = 0): number =>
   tab.width / 2 + width + tipDiameter / 2 + LOOP_CHAMFER_TAB_CLEARANCE
 
+/**
+ * DF147 SL4: a one-sided chamfer along a through Line (`edgeSide`): the bevel `width` × `angle` on
+ * the slot's wall on the side that stays only (`wall`, see wall-chamfer.ts); `onZ` the Line's face.
+ * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
+ */
+interface WallChamferFields {
+  readonly kind: 'chamfer'
+  readonly id: string
+  readonly onZ: number
+  readonly edgeOf: string
+  readonly wall: ChamferWall
+  readonly width: number
+  readonly angle: number
+  readonly edge?: never
+  readonly stepdown?: never
+}
+
 export type ChamferGeometry = Extract<OperationGeometry, { kind: 'chamfer' }>
 export type CircleChamferGeometry = FacePlacement & CircleChamferFields
 export type LoopChamferGeometry = FacePlacement & LoopChamferFields
+export type WallChamferGeometry = FacePlacement & WallChamferFields
+
+/** A one-sided chamfer along a through Line (DF147 SL4). */
+export const isWallChamfer = (op: ChamferGeometry): op is WallChamferGeometry =>
+  'wall' in op && op.wall !== undefined
 
 /** A chamfer along a general edge (edge-chamfers.md E1), not a circular mouth (v0.4). */
 export const isLoopChamfer = (op: ChamferGeometry): op is LoopChamferGeometry =>

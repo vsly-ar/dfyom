@@ -197,7 +197,8 @@ const spec: FeatureCommandSpec<typeof params, Engraving> = {
             ? 'clip'
             : prev.fit
           : defaultFit(motif, layout)),
-      depth: lineDepthOf(f, a.depth, prev?.depth, () => ({
+      // a through depth (DF147 SL3) is a Line's alone: read as a length, it is refused
+      depth: lineDepthOf(f, a.depth === 'through' ? '' : a.depth, prev?.depth, () => ({
         kind: 'levels',
         min: f.pick('depth.min', 'length', undefined, undefined, 'lineLevelMin'),
         max: f.pick('depth.max', 'length', undefined, undefined, 'lineLevelMax'),

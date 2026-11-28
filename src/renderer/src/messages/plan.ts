@@ -986,6 +986,9 @@ export function findingText(
       // DF57: an operation after the cut that releases the part
       if (w.rule === 'releaseFirst')
         return `${capital(names.design(profile))} releases the part before ${names.design(inside)}: the part is held only by its tabs.`
+      // DF147 SL3: a through Line before another cut of its face
+      if (w.rule === 'cutOffFirst')
+        return `${capital(names.design(profile))} cuts the stock in two before ${names.design(inside)}: both sides are held only by the workholding.`
       return `${capital(names.design(profile))} is cut before ${names.design(inside)} inside it: the piece may be loose.`
     }
     case 'plan.cutoutBeforeSetup': {

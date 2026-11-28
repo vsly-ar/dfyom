@@ -124,6 +124,12 @@ export interface PlanOperationInput {
    */
   readonly instances?: ReadonlyMap<string, InstanceInput>
   /**
+   * DF147 SL4: a one-sided chamfer along a through Line: the Ø of the tool that cuts the Line's
+   * slot in this plan (its wall is half of it from the line); absent = the design's cutter.
+   * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
+   */
+  readonly edgeSlot?: number
+  /**
    * Already cut (DF135, its design operations are marked in Design, docs/modes/cut-state.md):
    * generated (later operations and the links read its removal) but left out of the program.
    * Not in the hash.
@@ -334,6 +340,7 @@ export function planOperationInputs(
             }),
           )
         : undefined
+    const edgeSlot = e.kind === 'chamfer' ? wallSlot(plan, e.ops[0]) : undefined
     out.push({
       planId,
       planOperationId: op.id,
@@ -361,6 +368,7 @@ export function planOperationInputs(
       ...(restAfter === undefined ? {} : { restAfter }),
       ...(leave === undefined || leave.floor <= 0 ? {} : { roughingFloor: leave.floor }),
       ...(instances === undefined ? {} : { instances }),
+      ...(edgeSlot === undefined ? {} : { edgeSlot }),
       // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
       inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })
@@ -417,4 +425,20 @@ export function roughingLeave(
   const s =
     (owner ?? own) === undefined ? undefined : evaluateOperation(plan, (owner ?? own)!).strategy
   return { wall: s?.kind === 'pocket' || s?.kind === 'profile' ? s.finishAllowance : 0, floor }
+}
+
+/**
+ * DF147 SL4: the Ø of the tool of the plan operation that cuts the through Line a one-sided
+ * chamfer bevels; undefined for any other operation or an unresolved tool.
+ */
+function wallSlot(plan: LoadedPlan, op: Operation | undefined): number | undefined {
+  if (op?.kind !== 'chamfer') return undefined
+  const edge = plan.part.operations.find((o) => o.id === op.edgeOf)
+  if (edge?.kind !== 'line' || edge.depth.kind !== 'through') return undefined
+  const cut = plan.setups
+    .flatMap((s) => s.operations)
+    .find((p) => p.designOperationIds.includes(edge.id))
+  if (cut === undefined) return undefined
+  const tool = evaluateOperation(plan, cut).tool
+  return tool.isSome() ? tool.unwrap().diameter.canonical : undefined
 }

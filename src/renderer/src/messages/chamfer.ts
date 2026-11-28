@@ -44,6 +44,13 @@ export const chamferMessages = {
     `Section: chamfer ${p.width} wide at ${p.angle}, ${p.depth} deep, along ${p.side === 'outside' ? 'the outline of' : 'the wall of'} ${p.edgeName}, ${p.edgeBottom}.`,
   /** An Edge option for a general edge (E3): "Profile 1 · outline", "Pocket 2 · rim". */
   edgeLoopOption: (name: string, role: 'rim' | 'opening' | 'outline') => `${name} · ${role}`,
+  /** DF147 SL4: a through Line in the Edge field. */
+  edgeLineOption: (name: string) => `${name} · cut-off`,
+  /** DF147 SL4: a through Line's chamfer: the side that stays (of the line, start to end). */
+  edgeSide: 'Side that stays',
+  edgeSides: { left: 'Left', right: 'Right' },
+  edgeSideNote:
+    'Only the wall on this side is bevelled, left or right looking from the line’s start to its end. The other side is the offcut.',
   /** E4a: the Loops group of a general edge with several loops, one checkbox per loop. */
   loops: 'Loops',
   /** The Loops accordion's summary while closed: how many loops are bevelled. */

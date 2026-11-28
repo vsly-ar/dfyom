@@ -49,10 +49,16 @@ import { OnField, ParamField, type OperationFieldsContext } from './OperationFie
 const t = lineMessages
 
 type LineDTO = Extract<OperationDTO, { kind: 'line' }>
-type Mode = 'constant' | 'ramp' | 'levels'
+type Mode = 'constant' | 'ramp' | 'levels' | 'through'
 
 const modeOf = (op: LineDTO): Mode =>
-  'start' in op.depth ? 'ramp' : 'min' in op.depth ? 'levels' : 'constant'
+  op.depth === 'through'
+    ? 'through'
+    : 'start' in op.depth
+      ? 'ramp'
+      : 'min' in op.depth
+        ? 'levels'
+        : 'constant'
 
 export function LineInspector({
   ctx,
@@ -76,16 +82,23 @@ export function LineInspector({
         <Field label={t.depthMode} kind="toggle" readOnly={ctx.readOnly}>
           <SegmentedControl<Mode>
             label={t.depthMode}
-            options={(['constant', 'ramp', 'levels'] as const).map((m) => ({
-              value: m,
-              label: t.modes[m],
-            }))}
+            options={(['constant', 'ramp', 'levels', 'through'] as const)
+              // DF147 SL3: through for one Straight / Arc only (a shape is cut out by a Profile)
+              .filter(
+                (m) => m !== 'through' || mode === 'through' || geometryModeOf(op) !== 'shape',
+              )
+              .map((m) => ({
+                value: m,
+                label: t.modes[m],
+              }))}
             value={mode}
             disabled={ctx.readOnly}
             onValueChange={(m) => ctx.send({ depth: depthFor(op, m, ctx.units) }, 'depth')}
           />
         </Field>
-        {mode === 'levels' ? (
+        {mode === 'through' ? (
+          <p className={styles['note']}>{t.throughDepth}</p>
+        ) : mode === 'levels' ? (
           <>
             <ParamField
               ctx={ctx}
@@ -334,6 +347,14 @@ function LevelsLegend({
  * keep the deepest as `max` and take the shallower ramp end, else the default, as `min`.
  */
 export function depthFor(op: LineDTO, mode: Mode, units: UnitSystem): unknown {
+  if (mode === 'through') return 'through'
+  // from through (DF147 SL3): the default depth
+  if (op.depth === 'through')
+    return mode === 'constant'
+      ? DEFAULTS.lineDepth[units]
+      : mode === 'ramp'
+        ? { start: DEFAULTS.lineDepth[units], end: DEFAULTS.lineDepth[units] }
+        : { min: DEFAULTS.lineLevelMin[units], max: DEFAULTS.lineLevelMax[units] }
   const d = op.depth
   const deeper = (a: string, b: string, sa: string, sb: string): [string, string] => {
     const x = quantityAt(op, a)?.canonical ?? 0

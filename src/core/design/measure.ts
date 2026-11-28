@@ -84,7 +84,10 @@ export function holeCentres(input: PartGeometryInput): MeasureTarget[] {
   const out: MeasureTarget[] = []
   for (const op of input.operations) {
     let uvw: Vec3 | undefined
-    if (op.kind === 'drilling' || (op.kind === 'chamfer' && op.edge === undefined))
+    if (
+      op.kind === 'drilling' ||
+      (op.kind === 'chamfer' && op.edge === undefined && op.wall === undefined)
+    )
       uvw = [op.center[0], op.center[1], op.onZ]
     else if (op.kind === 'pocket' && op.shape.contour.kind === 'circle')
       uvw = [op.shape.center[0], op.shape.center[1], op.onZ]

@@ -27,7 +27,15 @@ export const lineMessages = {
   pathV: 'Position v',
   pathNote: 'The shape’s centre on the face. Every loop and open path of the shape is a line.',
   depthMode: 'Depth',
-  modes: { constant: 'Constant', ramp: 'Start → end', levels: 'From SVG levels' },
+  modes: {
+    constant: 'Constant',
+    ramp: 'Start → end',
+    levels: 'From SVG levels',
+    through: 'Through',
+  },
+  /** DF147 SL3: a through Line (engraved-patterns.md § Cutting the part out along a line). */
+  throughDepth:
+    'Cuts through the stock with a flat end mill: the slot is as wide as the tool, and an end on the stock edge is entered from outside. Hold both sides of the line: they come apart on the last pass.',
   depth: 'Depth',
   start: 'At start',
   end: 'At end',

@@ -273,3 +273,82 @@ test('line: depth from SVG levels, varying depth in the Plan program (E2)', asyn
   expect(new Set(zs.map((z) => z.toFixed(2))).size).toBeGreaterThan(5)
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+const FLAT = {
+  name: 'Flat 6',
+  type: 'flatEndMill',
+  diameter: '6',
+  fluteLength: '32',
+  overallLength: '60',
+  fluteCount: '2',
+  toolMaterial: 'carbide',
+  presets: [
+    {
+      name: 'Plywood',
+      materialClass: 'sheetGood',
+      spindleSpeed: '18000',
+      feedRate: '1500',
+      plungeRate: '400',
+      stepdown: '2',
+    },
+  ],
+}
+
+const V_BIT_90 = { ...V_BIT, name: 'V-bit 90 × 6', angle: '90' }
+
+test('line: Depth → Through cuts the part off in Plan, with the cut-off warning; a one-sided chamfer on the side that stays (DF147 SL3/SL4)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(150_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const added = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: FLAT }] as const,
+  )
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+  const vbit = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: V_BIT_90 }] as const,
+  )
+  expect(vbit.ok, JSON.stringify(vbit)).toBe(true)
+  await newProject(page)
+
+  // ── Add → Line: Straight across the face, 22 mm from the front edge, Through ───────────────
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Operations' })
+    .getByRole('menuitem', { name: 'Line' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await setField(inspector, 'Start v', '22')
+  await setField(inspector, 'End v', '22')
+  await inspector.getByRole('radio', { name: 'Through' }).click()
+  await expect(inspector.getByText(/^Cuts through the stock/)).toBeVisible()
+  await shootPanel(page, inspector, 'line-through')
+
+  // ── SL4: Chamfer from the Line's row menu; Side that stays: Right ──────────────────────────
+  const line = navigator.getByRole('button', { name: /^Line 1/ })
+  await line.click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for Line 1' })
+    .getByRole('menuitem', { name: 'Chamfer' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
+  const side = inspector.getByRole('radiogroup', { name: 'Side that stays' })
+  await expect(side.getByRole('radio', { name: 'Left' })).toHaveAttribute('data-state', 'on')
+  await side.getByRole('radio', { name: 'Right' }).click()
+  await expect(side.getByRole('radio', { name: 'Right' })).toHaveAttribute('data-state', 'on')
+  await shootPanel(page, inspector, 'line-chamfer-side')
+
+  // ── Plan: generated; the cut-off warns that both sides come loose ──────────────────────────
+  await planWithMachine(page)
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByText(/cuts the stock in two/).first()).toBeVisible()
+  await expect(page.getByText(/the part \(right of /).first()).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
+})

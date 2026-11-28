@@ -147,6 +147,29 @@ describe('Line inspector: Straight / Arc / Shape (DF147 SL2)', () => {
   })
 })
 
+describe('Line inspector: Through (DF147 SL3)', () => {
+  it('Depth → Through stores a through Line, shows its note, and offers no fields', async () => {
+    const { user, part } = await renderLine()
+    within(navigator()).getByRole('button', { name: 'Add' }).focus()
+    await user.keyboard('{Enter}')
+    const ops = within(await screen.findByRole('menu')).getByRole('group', { name: 'Operations' })
+    await user.click(within(ops).getByRole('menuitem', { name: 'Line' }))
+    await within(inspector()).findByRole('heading', { name: 'Line 1' })
+    await user.click(within(inspector()).getByRole('radio', { name: 'Through' }))
+    await waitFor(() => expect(part().operations[0]).toMatchObject({ depth: 'through' }))
+    expect(within(inspector()).getByText(/^Cuts through the stock/)).toBeVisible()
+    expect(within(inspector()).queryByLabelText('Depth', { selector: 'input' })).toBeNull()
+    await expectNoAxeViolations(inspector())
+    // back to Constant: the default depth
+    await user.click(within(inspector()).getByRole('radio', { name: 'Constant' }))
+    await waitFor(() => expect(part().operations[0]).toMatchObject({ depth: { kind: 'length' } }))
+    // Shape mode offers no Through (a shape is cut out by a Profile)
+    await user.click(within(inspector()).getByRole('radio', { name: 'Shape' }))
+    await waitFor(() => expect(pathsOf(part())[0]!.shapeId).toBeDefined())
+    expect(within(inspector()).queryByRole('radio', { name: 'Through' })).toBeNull()
+  })
+})
+
 describe('Line inspector: Shape Editor access (DF147 SL1)', () => {
   it('"New shape…" in the Path picker adds an open path, picks it and opens it, one undo step', async () => {
     const { user, d, part, partId, bridge } = await renderLine()

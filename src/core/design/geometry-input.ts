@@ -27,7 +27,7 @@ import { OVERSHOOT } from '../geometry/model'
 import { faceToFace, localStock, stockFaceDirection, type Direction } from '../geometry/face'
 import { orientPath, orientRegion } from '../geometry/2d/place'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
-import { profileChain } from '../geometry/outline'
+import { profileChain, shapeOutline } from '../geometry/outline'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -292,6 +292,28 @@ function operationGeometry(
       }))
     case 'chamfer': {
       const edgeOp = ops.slice(0, index).find((o) => o.id === op.edgeOf)
+      // DF147 SL4: one wall of a through Line's slot, the side that stays
+      if (chamferEdgeKind(edgeOp) === 'wall') {
+        const line = ctx.built.find((o) => o.id === op.edgeOf)
+        const outline = line?.kind === 'line' ? shapeOutline(line.paths[0]!) : undefined
+        const element = outline?.kind === 'path' ? outline.path.elements[0] : undefined
+        if (line?.kind !== 'line' || element === undefined)
+          return bug(op, `edge ${op.edgeOf} is not an earlier through Line of one element`)
+        return Ok({
+          kind: 'chamfer',
+          id: op.id,
+          ...direction,
+          onZ: line.onZ,
+          edgeOf: op.edgeOf,
+          wall: {
+            element,
+            halfWidth: line.cutter.diameter / 2,
+            side: op.edgeSide.unwrapOr('left'),
+          },
+          width: op.width.canonical,
+          angle: op.angle.canonical,
+        })
+      }
       // a general edge (edge-chamfers.md E1, E2): the bevel follows every loop of its shape; on a
       // split piece the source's edge within the piece's cell (`sourceEdge`)
       if (
@@ -405,7 +427,8 @@ function operationGeometry(
         ...direction,
         onZ: on.faceZ.toNumber(),
         paths: paths.unwrap(),
-        depth: lineDepths(op.depth),
+        // DF147 SL3: a through Line's depth is the material below `on`, read fresh
+        depth: lineDepths(op.depth, on.faceZ.add(table.extent(on.direction)).toNumber()),
         ...(levels.some((l) => l !== null) ? { levels } : {}),
         ...(op.depth.kind === 'levels' && op.blend.isSome()
           ? { blend: op.blend.unwrap().canonical }
@@ -419,6 +442,7 @@ function operationGeometry(
             }
           : {}),
         cutter: lineCutter(op, ctx.snapshots),
+        ...(op.depth.kind === 'through' ? { through: true as const } : {}),
       })
     }
   }

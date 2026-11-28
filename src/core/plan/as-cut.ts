@@ -13,10 +13,12 @@ import { partFromDTO } from '../design/operation'
 import type { OperationDTO, PartDTO } from '../design/part.dto'
 import type { Region2dPort } from '../geometry/2d/port'
 import { lineChains } from '../geometry/line'
+import { wallChamferDepth } from '../geometry/wall-chamfer'
 import {
   chamferDepth,
   EPSILON,
   isLoopChamfer,
+  isWallChamfer,
   loopChamferDepth,
   type ChamferGeometry,
   type OperationGeometry,
@@ -133,7 +135,11 @@ export function asCutTops(
     } else if (op.kind === 'chamfer' && twin.kind === 'chamfer') {
       const key = chamferKey(op)
       if (key === undefined || key !== chamferKey(twin)) continue
-      const depth = isLoopChamfer(twin) ? loopChamferDepth(twin) : chamferDepth(twin)
+      const depth = isWallChamfer(twin)
+        ? wallChamferDepth(twin)
+        : isLoopChamfer(twin)
+          ? loopChamferDepth(twin)
+          : chamferDepth(twin)
       if (depth > EPSILON) out.set(id, { top: op.onZ - depth })
     }
   }
@@ -148,6 +154,7 @@ export function asCutTops(
 function chamferKey(g: ChamferGeometry): string | undefined {
   const at = [g.direction ?? '+z', g.onZ, g.edgeOf, g.angle]
   if (isLoopChamfer(g)) return JSON.stringify(['loop', ...at, g.edge])
+  if (isWallChamfer(g)) return JSON.stringify(['wall', ...at, g.wall])
   if (g.stepdown !== undefined) return undefined
   return JSON.stringify(['circle', ...at, g.center, g.edgeDiameter])
 }

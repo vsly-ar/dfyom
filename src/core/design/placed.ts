@@ -11,6 +11,7 @@ import { faceFrame, localStock, toPartFrame } from '../geometry/face'
 import {
   chamferDepth,
   isLoopChamfer,
+  isWallChamfer,
   loopChamferDepth,
   type OperationGeometry,
   type Shape,
@@ -20,6 +21,7 @@ import {
 } from '../geometry/model'
 import { toGeometryInput } from './geometry-input'
 import { grooveWidth, lineMaxDepth } from '../geometry/line'
+import { wallBounds, wallChamferDepth } from '../geometry/wall-chamfer'
 import type { Operation, Part } from './operation'
 import type { Stock } from '../library/stock'
 
@@ -67,6 +69,7 @@ function outline(g: OperationGeometry, stock: StockGeometry): Bounds2 {
     case 'drilling':
       return disc(g.center, g.diameter)
     case 'chamfer': {
+      if (isWallChamfer(g)) return wallBounds(g.wall, g.width)
       if (!isLoopChamfer(g)) return disc(g.center, g.diameter)
       // a general edge: its shape grown by the bevel's width
       const b = shapeBounds(g.edge.shape)
@@ -161,7 +164,15 @@ function depthRange(g: OperationGeometry, stock: StockGeometry): readonly [numbe
         0,
       ]
     case 'chamfer':
-      return [g.onZ - (isLoopChamfer(g) ? loopChamferDepth(g) : chamferDepth(g)), g.onZ]
+      return [
+        g.onZ -
+          (isWallChamfer(g)
+            ? wallChamferDepth(g)
+            : isLoopChamfer(g)
+              ? loopChamferDepth(g)
+              : chamferDepth(g)),
+        g.onZ,
+      ]
     case 'line':
       return [g.onZ - lineMaxDepth(g), g.onZ]
   }

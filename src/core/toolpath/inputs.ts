@@ -11,11 +11,13 @@ import type { Region2dPort } from '../geometry/2d/port'
 import {
   isAnalyticOperation,
   isLoopChamfer,
+  isWallChamfer,
   type OperationGeometry,
   type StockGeometry,
 } from '../geometry/model'
 import type { EdgeChamferOperation } from './edge-chamfer'
 import { isCutter } from './line'
+import { wallChamferRings } from './wall-chamfer'
 import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
 import { slotSplit } from '../geometry/slots'
 import type { MaterialBand } from '../geometry/through-depth'
@@ -361,7 +363,8 @@ export function toGeneratorInputs(
   if (
     aid === undefined &&
     ops.length > 1 &&
-    (SINGLE_KINDS.has(input.kind) || ops.some((o) => o.kind === 'chamfer' && isLoopChamfer(o)))
+    (SINGLE_KINDS.has(input.kind) ||
+      ops.some((o) => o.kind === 'chamfer' && (isLoopChamfer(o) || isWallChamfer(o))))
   )
     return groupRequest(input, region2d)
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
@@ -757,6 +760,49 @@ export function toGeneratorInputs(
       }))
     }
     case 'chamfer': {
+      // DF147 SL4: a one-sided chamfer along a through Line: never grouped; its rings cut as Lines
+      // along the wall (one pass each, entered from outside the stock at open ends)
+      if (ops.some((o) => o.kind === 'chamfer' && isWallChamfer(o)))
+        return single('chamfer').andThen((op) =>
+          (isWallChamfer(op)
+            ? wallChamferRings(
+                // the slot as wide as the plan's tool on the Line
+                input.edgeSlot === undefined
+                  ? op
+                  : { ...op, wall: { ...op.wall, halfWidth: input.edgeSlot / 2 } },
+                tool,
+                stock,
+              )
+            : fail('internal.unexpected', 'not a wall chamfer', { where: WHERE })
+          ).andThen((rings) =>
+            rings.length === 0
+              ? fail('model.invariant', `${op.id}: nothing of the wall is left to chamfer`, {
+                  where: WHERE,
+                  data: { planOperationId: id },
+                })
+              : cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map(
+                  (c): GeneratorRequest => ({
+                    kind: 'line',
+                    ...turned,
+                    inputs: rings.map((r) => ({
+                      ...base,
+                      cutting: {
+                        spindleSpeed: c.spindleSpeed,
+                        feedRate: c.feedRate,
+                        plungeRate: c.plungeRate,
+                        // each ring in one pass at its level (as the edge chamfer's rings)
+                        stepdown: r.depth,
+                      },
+                      operation: r.operation,
+                      strategy: {
+                        entry: 'ramp' as const,
+                        rampAngle: s.kind === 'chamfer' ? s.rampAngle : 10,
+                      },
+                    })),
+                  }),
+                ),
+          ),
+        )
       // a general edge (edge-chamfers.md E1): never grouped, its own generator in the face frame
       if (ops.some((o) => o.kind === 'chamfer' && isLoopChamfer(o)))
         return single('chamfer').andThen((op) =>
@@ -785,7 +831,8 @@ export function toGeneratorInputs(
           ),
         )
       const chamfers = ops.filter(
-        (o): o is ChamferOperation => o.kind === 'chamfer' && !isLoopChamfer(o),
+        (o): o is ChamferOperation =>
+          o.kind === 'chamfer' && !isLoopChamfer(o) && !isWallChamfer(o),
       )
       const visits = nearestNeighbourOrder(
         chamfers.map((operation) => ({
@@ -832,7 +879,8 @@ export function toGeneratorInputs(
                   plungeRate: c.plungeRate,
                   stepdown: c.stepdown,
                 },
-                operation,
+                // DF147 SL3: a through Line goes `breakthrough` below the opposite face
+                operation: throughLine(operation, s.breakthrough),
                 strategy: { entry: s.entry, rampAngle: s.rampAngle },
               },
             ],
@@ -840,4 +888,15 @@ export function toGeneratorInputs(
         ),
       )
   }
+}
+
+/** A through Line's depth plus `breakthrough` (DF147 SL3); any other Line unchanged. */
+function throughLine<T extends { readonly through?: true; readonly depth: object }>(
+  op: T,
+  breakthrough: number | undefined,
+): T {
+  if (op.through !== true || !('start' in op.depth)) return op
+  const d = op.depth as { start: number; end: number }
+  const b = breakthrough ?? 0
+  return { ...op, depth: { start: d.start + b, end: d.end + b } }
 }
