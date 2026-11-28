@@ -102,7 +102,7 @@ export type CalibrationRecord = z.output<typeof CalibrationRecordSchema>
 const Num = z.number().finite()
 
 /**
- * v0.5 RV10: a setup's stock surface map (docs/modes/run-surface.md#storage): when, the probe kind,
+ * v0.5 RV10: a setup's stock surface map (docs/modes/run-surface.md#the-map): when, the probe kind,
  * the margin it was laid out with, the grid (work X/Y, mm), the heights relative to the first
  * point (null: not measured, under a clamp or missed), the skipped points, and G54 X/Y (machine)
  * it was taken at.
@@ -228,7 +228,7 @@ const fields = {
   calibration: z.record(z.string().min(1), z.array(CalibrationRecordSchema).max(50)),
   /**
    * v0.5 RV10: the stock surface map per `planId/setupId` (app state, not in the plan; null in a
-   * patch clears one; docs/modes/run-surface.md#storage).
+   * patch clears one; docs/modes/run-surface.md#the-map).
    */
   surfaceMaps: z.record(z.string().min(1).max(500), SurfaceMapRecordSchema.nullable()),
   /** v0.5 RV10: the largest map range "Follow the surface map" accepts (mm, default 1). */
