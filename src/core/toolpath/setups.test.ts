@@ -11,7 +11,12 @@ import { exportPlan } from '../post/plan-export'
 import { createToolpathCache } from './cache'
 import { toGeneratorInputs } from './inputs'
 import type { Move, Toolpath } from './model'
-import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from './request'
+import {
+  generateRequest,
+  GeneratorRequestSchema,
+  type GeneratorRequest,
+  type SingleRequest,
+} from './request'
 import { toolpathStats } from './stats'
 import { render } from './testing/oracles'
 import {
@@ -88,7 +93,7 @@ const inputsOf = (s: PlanSetup, planId: string, setup: string): PlanOperationInp
   return expectOk(planOperationInputs(s.d.doc, planId, ids))
 }
 const toolpathOf = (input: PlanOperationInput): Toolpath =>
-  expectOk(generateRequest(expectOk(toGeneratorInputs(input))))
+  expectOk(generateRequest(expectOk(toGeneratorInputs(input)) as SingleRequest))
 
 /** Every position a toolpath reaches (move ends, arc centers at the end's Z, drill tops/bottoms). */
 function points(tp: Toolpath): Vec3[] {
@@ -207,7 +212,7 @@ describe('toolpaths per setup', () => {
       ['Top', { length: 100, width: 60, thickness: 20 }],
     ] as const)
       for (const input of inputsOf(s, planId, name)) {
-        const r = expectOk(toGeneratorInputs(input))
+        const r = expectOk(toGeneratorInputs(input)) as SingleRequest
         expect(GeneratorRequestSchema.safeParse(r).success).toBe(true)
         expect(r.wcs).toBeUndefined()
         for (const g of r.inputs) {
@@ -216,7 +221,10 @@ describe('toolpaths per setup', () => {
         }
       }
     const [pocket] = inputsOf(s, planId, 'Bottom').filter((i) => i.kind === 'pocket')
-    const r = expectOk(toGeneratorInputs(pocket!)) as Extract<GeneratorRequest, { kind: 'pocket' }>
+    const r = expectOk(toGeneratorInputs(pocket!)) as SingleRequest as Extract<
+      GeneratorRequest,
+      { kind: 'pocket' }
+    >
     // on the bottom facing's floor, 0.5 below the bottom stock face
     expect(r.inputs[0]!.operation).toMatchObject({
       onZ: -0.5,
@@ -262,7 +270,7 @@ describe('toolpaths per setup', () => {
       await s.run('plan.setup.update', { planId, setupId, rotation })
       const inputs = inputsOf(s, planId, 'Bottom')
       const after = inputs.map((i) => {
-        const r = expectOk(toGeneratorInputs(i))
+        const r = expectOk(toGeneratorInputs(i)) as SingleRequest
         expect(r.wcs).toEqual({ rotation, size: [100, 60] })
         expect(GeneratorRequestSchema.safeParse(r).success).toBe(true)
         // generators still get the face frame
@@ -302,7 +310,7 @@ describe('toolpaths per setup', () => {
     const setupId = s.plan(planId).setups[0]!.id
     const order = () => {
       const [input] = expectOk(planOperationInputs(s.d.doc, planId))
-      const r = expectOk(toGeneratorInputs(input!)) as Extract<
+      const r = expectOk(toGeneratorInputs(input!)) as SingleRequest as Extract<
         GeneratorRequest,
         { kind: 'drilling' }
       >

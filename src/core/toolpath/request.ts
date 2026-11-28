@@ -50,7 +50,25 @@ import { turnToolpath, type SetupWcs } from './wcs'
 import type { Unmachined } from './keep-out'
 import { Vec2Schema } from '../geometry/schemas'
 
-export type GeneratorRequest = (
+/**
+ * A clone group (hardening DF146) of a kind cut one operation at a time (facing, pocket, profile,
+ * Line, edge chamfer): each instance's own request, generated in turn and joined in path order
+ * (each part starts and ends at clearance), every pass named by its design operation.
+ * Doc: docs/modes/features.md#implementation-df146
+ */
+export interface GroupRequest {
+  readonly kind: 'group'
+  readonly parts: readonly SingleRequest[]
+  /** The design operation each part machines (its passes' `operationId`), as `parts`. */
+  readonly operationIds: readonly string[]
+  /** The parts' unmachined material (WH-D), host side only. */
+  readonly unmachined?: readonly Unmachined[]
+}
+
+export type GeneratorRequest = SingleRequest | GroupRequest
+
+/** The request of one plan operation over one generator kind. */
+export type SingleRequest = (
   | { readonly kind: 'facing'; readonly inputs: readonly FacingInput[] }
   | { readonly kind: 'pocket'; readonly inputs: readonly PocketInput[] }
   | { readonly kind: 'drilling'; readonly inputs: readonly DrillingInput[] }
@@ -85,7 +103,7 @@ const wcs = z
   })
   .exactOptional()
 
-export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminatedUnion('kind', [
+const SingleRequestSchema: z.ZodType<SingleRequest> = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('facing'), inputs: one(FacingInputSchema), wcs }),
   z.object({ kind: z.literal('pocket'), inputs: one(PocketInputSchema), wcs }),
   z.object({
@@ -110,6 +128,19 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
   z.object({ kind: z.literal('line'), inputs: one(LineInputSchema), wcs }),
 ])
 
+export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.union([
+  SingleRequestSchema,
+  z
+    .object({
+      kind: z.literal('group'),
+      parts: z.array(SingleRequestSchema).min(1).readonly(),
+      operationIds: z.array(z.string()).readonly(),
+    })
+    .refine((g) => g.parts.length === g.operationIds.length, {
+      message: 'one operation id per part',
+    }),
+])
+
 /** The 2D port of the worker, loaded on first use; the region generators need it. */
 export type PortSource = () => AppResult<Region2dPort>
 
@@ -125,15 +156,48 @@ export function generateRequest(
   steps: Steps = noSteps,
   region2d: PortSource = noPort,
 ): AppResult<Toolpath> {
+  if (request.kind === 'group') return generateGroup(request, steps, region2d)
   const tp = generateLocal(request, steps, region2d)
   const turn = request.wcs
   if (turn === undefined) return tp
   return tp.map((t) => turnToolpath(t, turn, request.inputs[0]?.maxFeedRate))
 }
 
+/**
+ * A clone group's toolpath (DF146): each part in the setup's WCS, in turn, joined; stats over
+ * all of them. Each pass names its instance's design operation (position comments, P-E).
+ */
+function generateGroup(
+  request: GroupRequest,
+  steps: Steps,
+  region2d: PortSource,
+): AppResult<Toolpath> {
+  const passes: Pass[] = []
+  let first: Toolpath | undefined
+  for (const [i, part] of request.parts.entries()) {
+    const total = request.parts.length
+    const step = steps.step({ done: i, total, label: `instance ${i + 1}/${total}` })
+    if (step.isErr()) return Err(step.unwrapErr())
+    const tp = generateRequest(part, steps, region2d)
+    if (tp.isErr()) return Err(tp.unwrapErr().withContext('generateRequest', { instance: i }))
+    first ??= tp.unwrap()
+    const operationId = request.operationIds[i]
+    passes.push(
+      ...tp.unwrap().passes.map((p) => (operationId === undefined ? p : { ...p, operationId })),
+    )
+  }
+  if (first === undefined)
+    return fail('internal.unexpected', 'a clone group without parts', { where: 'generateRequest' })
+  return Ok({
+    ...first,
+    passes,
+    stats: toolpathStats(passes, request.parts[0]?.inputs[0]?.maxFeedRate),
+  })
+}
+
 /** The toolpath in the face frame (generators are top-down). */
 function generateLocal(
-  request: GeneratorRequest,
+  request: SingleRequest,
   steps: Steps,
   region2d: PortSource,
 ): AppResult<Toolpath> {

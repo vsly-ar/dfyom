@@ -35,6 +35,7 @@ import type { Vec2 } from '../geometry/model'
 import type { ResolvedStrategy } from './strategy'
 import type { KeepOut } from '../toolpath/keep-out'
 import { setupWorkholding } from './workholding/setup'
+import { SINGLE_KINDS } from '../toolpath/inputs'
 import { aidGeometry, type AidGeometry } from './aids'
 
 /** One plan operation, ready for a generator. Lengths in mm, feeds in mm/min, speed in rpm. */
@@ -116,6 +117,13 @@ export interface PlanOperationInput {
    */
   readonly roughingFloor?: number
   /**
+   * A clone group (hardening DF146) of a kind cut one operation at a time (facing, pocket,
+   * profile, Line): each instance's own `material`, `restAfter` and `roughingFloor` by design
+   * operation id (the fields above are the first instance's). Absent for one operation.
+   * Doc: docs/modes/features.md#implementation-df146
+   */
+  readonly instances?: ReadonlyMap<string, InstanceInput>
+  /**
    * Already cut (DF135, its design operations are marked in Design, docs/modes/cut-state.md):
    * generated (later operations and the links read its removal) but left out of the program.
    * Not in the hash.
@@ -130,6 +138,13 @@ export interface PlanOperationInput {
    * input marks a cached toolpath stale.
    */
   readonly inputHash: string
+}
+
+/** One clone instance's own inputs (DF146, `PlanOperationInput.instances`). */
+export interface InstanceInput {
+  readonly material?: MaterialCover
+  readonly restAfter?: RoughingReach
+  readonly roughingFloor?: number
 }
 
 /**
@@ -299,6 +314,26 @@ export function planOperationInputs(
       leave !== undefined && (e.strategy.kind === 'pocket' || e.strategy.kind === 'profile')
         ? { ...e.strategy, finishAllowance: leave.wall }
         : e.strategy
+    // DF146: a clone group cut one operation at a time keeps each instance's own material and
+    // roughing rest (the fields above are the first's)
+    const instances =
+      e.ops.length > 1 && SINGLE_KINDS.has(e.kind)
+        ? new Map(
+            e.ops.map((o): [string, InstanceInput] => {
+              const band = planMaterialBands(plan, port).get(o.id)
+              const after = rests ? roughingBefore(plan, o, index) : undefined
+              const floor = rests ? roughingLeave(plan, o)?.floor : undefined
+              return [
+                o.id,
+                {
+                  ...(band === undefined ? {} : { material: band }),
+                  ...(after === undefined ? {} : { restAfter: after }),
+                  ...(floor === undefined || floor <= 0 ? {} : { roughingFloor: floor }),
+                },
+              ]
+            }),
+          )
+        : undefined
     out.push({
       planId,
       planOperationId: op.id,
@@ -325,6 +360,7 @@ export function planOperationInputs(
       ...(aid === undefined ? {} : { aid }),
       ...(restAfter === undefined ? {} : { restAfter }),
       ...(leave === undefined || leave.floor <= 0 ? {} : { roughingFloor: leave.floor }),
+      ...(instances === undefined ? {} : { instances }),
       // the keep-out joins this operation's hash, not the chain (later operations keep theirs)
       inputHash: keepOut === undefined ? chain : hashJson({ chain, keepOut }),
     })

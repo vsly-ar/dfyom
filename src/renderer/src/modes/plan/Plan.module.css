@@ -717,6 +717,78 @@
   color: var(--text);
 }
 
+/* DF146 G2: a group row's chevron in its start padding (as the design list's feature rows) and
+   its instances, read-only, sliding open below it one indent step in */
+.planRow {
+  position: relative;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  left: var(--grip-slot, 0px);
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-3);
+  height: var(--control-md);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+}
+
+.opSelect > .chevron > svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.opSelect > .chevron[data-open] > svg {
+  transform: none;
+}
+
+.planRow:hover .chevron {
+  color: var(--text);
+}
+
+.instancesWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-standard);
+}
+
+.instancesWrap[data-open] {
+  grid-template-rows: 1fr;
+}
+
+.instances {
+  display: grid;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0 var(--space-1);
+  overflow: hidden;
+  list-style: none;
+}
+
+.instanceSelect {
+  width: 100%;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2) 0
+    calc(var(--grip-slot, 0px) + var(--space-3) + var(--icon-md) + var(--space-2));
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.instanceSelect:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* drag to reorder (hardening U3, ui.md#reordering-lists-d45): as the design operation list, a
    setup list or plan operation list that can move reserves a grip slot before the row icons, and
    the grip shows there with the row's actions (hover, focus, selection, a running drag) */

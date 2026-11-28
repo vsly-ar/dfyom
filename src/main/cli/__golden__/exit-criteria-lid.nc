@@ -844,7 +844,7 @@ Y55.9 I0 J0.2
 Y55.5 I0 J-0.2
 G1 Y55.7
 G0 Z10
-(Bolt hole 2 - counterbore)
+(Bolt hole 2 - counterbore x 6)
 (Clones 2 #1)
 X205.5 Y98.8
 Z2
@@ -920,7 +920,6 @@ Y97.5 I0 J-2.5
 G1 Y97.7
 G0 Z2
 Z10
-(Bolt hole 2 - counterbore - 2)
 (Clones 2 #2)
 X196.5 Y114.388
 Z2
@@ -996,7 +995,6 @@ Y113.088 I0 J-2.5
 G1 Y113.288
 G0 Z2
 Z10
-(Bolt hole 2 - counterbore - 3)
 (Clones 2 #3)
 X178.5 Y114.388
 Z2
@@ -1072,7 +1070,6 @@ Y113.088 I0 J-2.5
 G1 Y113.288
 G0 Z2
 Z10
-(Bolt hole 2 - counterbore - 4)
 (Clones 2 #4)
 X169.5 Y98.8
 Z2
@@ -1148,7 +1145,6 @@ Y97.5 I0 J-2.5
 G1 Y97.7
 G0 Z2
 Z10
-(Bolt hole 2 - counterbore - 5)
 (Clones 2 #5)
 X178.5 Y83.212
 Z2
@@ -1224,7 +1220,6 @@ Y81.912 I0 J-2.5
 G1 Y82.112
 G0 Z2
 Z10
-(Bolt hole 2 - counterbore - 6)
 (Clones 2 #6)
 X196.5 Y83.212
 Z2
@@ -1469,7 +1464,7 @@ Y85.162 I0 J0.75
 Y83.662 I0 J-0.75
 G1 Y84.412
 G0 Z10
-(Profile 3)
+(Profile 3 x 6)
 (Clones 3 #1)
 X55 Y69
 Z2
@@ -1518,7 +1513,6 @@ G3 Y69 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Profile 3 - 2)
 (Clones 3 #2)
 X55 Y79
 Z2
@@ -1567,7 +1561,6 @@ G3 Y79 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Profile 3 - 3)
 (Clones 3 #3)
 X55 Y89
 Z2
@@ -1616,7 +1609,6 @@ G3 Y89 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Profile 3 - 5)
 (Clones 3 #5)
 X55 Y109
 Z2
@@ -1665,7 +1657,6 @@ G3 Y109 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Profile 3 - 6)
 (Clones 3 #6)
 X55 Y119
 Z2
@@ -1714,7 +1705,6 @@ G3 Y119 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Profile 3 - 7)
 (Clones 3 #7)
 X55 Y129
 Z2

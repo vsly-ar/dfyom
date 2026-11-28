@@ -13,6 +13,7 @@ import { len, libraryInput } from '../library/library.fixture'
 import { exportPlan } from '../post/plan-export'
 import { createToolpathCache } from '../toolpath/cache'
 import type { Pass, Toolpath } from '../toolpath/model'
+import { toolpathStats } from '../toolpath/stats'
 import { flat6, opsOf, planSetup, type PlanSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
@@ -54,20 +55,28 @@ async function lid() {
   return { s, svc }
 }
 
-/** The part planned and generated: design ids in plan order, toolpaths by design id, program. */
+/**
+ * The part planned and generated: design ids in plan order, toolpaths by design id (a clone
+ * group's instance: the passes it names, DF146), program.
+ */
 async function planned(s: PlanSetup, svc: object) {
   const planId = await s.create({ partId: s.partId, machineLibraryItemId: s.machineId })
   const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
     .value as { jobId: string }
   expectOk(await s.d.job(jobId).unwrap().result)
   const ops = opsOf(s.plan(planId))
-  const paths = new Map(
-    ops.map((o) => [
-      o.designOperationIds.join('+'),
-      (s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as { toolpath: Toolpath })
-        .toolpath,
-    ]),
-  )
+  const paths = new Map<string, Toolpath>()
+  for (const o of ops) {
+    const tp = (
+      s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as { toolpath: Toolpath }
+    ).toolpath
+    paths.set(o.designOperationIds.join('+'), tp)
+    if (o.designOperationIds.length > 1)
+      for (const id of o.designOperationIds) {
+        const passes = tp.passes.filter((p) => p.operationId === id)
+        paths.set(id, { ...tp, passes, stats: toolpathStats(passes) })
+      }
+  }
   const e = expectOk(await exportPlan(s.d.doc, planId, svc as never))
   return { ids: ops.map((o) => o.designOperationIds.join('+')), paths, lines: e.lines }
 }
@@ -148,11 +157,10 @@ describe('Clones mirror through the plan (DF126 M1)', () => {
     })
     await s.run('project.apply', {})
     const r = await planned(s, svc)
+    // one plan operation per clone source operation (DF146)
     expect(r.ids).toEqual([
-      'pocket1_roughing',
-      'clones1_2_pocket1_roughing',
-      'pocket1',
-      'clones1_2_pocket1',
+      'pocket1_roughing+clones1_2_pocket1_roughing',
+      'pocket1+clones1_2_pocket1',
     ])
     expect(toolChanges(r.lines)).toBe(1)
     // the mirrored owner cuts the same rest as its source

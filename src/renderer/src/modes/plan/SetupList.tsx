@@ -26,6 +26,7 @@ import {
 } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import { cutIds } from '../../../../core/plan/cut'
+import { groupInstances } from '../../../../core/plan/labels'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -152,8 +153,26 @@ export function SetupList({
     const r = await call('plan.update', { planId: plan.id, disabled })
     if (r.ok) setAnnouncement(said)
   }
-  /** Every row in the order shown, for ↑/↓. */
-  const order = plan.setups.flatMap((s) => [s.id, ...s.operations.map((o) => o.id)])
+  /** DF146 G2: the group rows shown expanded (their instances), this window only. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (id: string, open: boolean) =>
+    setExpanded((was) => {
+      if (was.has(id) === open) return was
+      const next = new Set(was)
+      if (open) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  /** Every row in the order shown, for ↑/↓: an expanded group's instances after it. */
+  const order = plan.setups.flatMap((s) => [
+    s.id,
+    ...s.operations.flatMap((o) => [
+      o.id,
+      ...(expanded.has(o.id) && o.designOperationIds.length > 1
+        ? o.designOperationIds.map((d) => instanceKey(o.id, d))
+        : []),
+    ]),
+  ])
   const focus = (id: string) => rows.current.get(id)?.focus()
   const [announcement, setAnnouncement] = useState('')
 
@@ -200,13 +219,23 @@ export function SetupList({
     if (step === undefined) return
     await operationTo(id, step)
   }
-  const onKey = (e: KeyboardEvent, id: string, move: (by: -1 | 1) => void) => {
+  const onKey = (
+    e: KeyboardEvent,
+    id: string,
+    move: (by: -1 | 1) => void,
+    side?: (right: boolean) => void,
+  ) => {
     // Shift+F10 / the Menu key: the row's menu, at the row (as the design list, DF16)
     if (isContextMenuKey(e)) {
       const el = e.currentTarget.closest('[data-row-menu]')
       if (el === null) return
       e.preventDefault()
       return openContextMenu(el)
+    }
+    // DF146 G2: right / left open and close a group row (as the design list's feature rows)
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.altKey && side !== undefined) {
+      e.preventDefault()
+      return side(e.key === 'ArrowRight')
     }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
@@ -335,6 +364,20 @@ export function SetupList({
                     reorder={reorder}
                     index={i}
                     rowRef={ref(op.id)}
+                    open={expanded.has(op.id)}
+                    onToggle={(open) => toggle(op.id, open)}
+                    instanceRef={(d) => ref(instanceKey(op.id, d))}
+                    onInstanceSelect={() => select(op.id)}
+                    onInstanceKeyDown={(e, d) =>
+                      onKey(
+                        e,
+                        instanceKey(op.id, d),
+                        () => {},
+                        (right) => {
+                          if (!right) focus(op.id)
+                        },
+                      )
+                    }
                     onMenuClose={() => focus(op.id)}
                     onSelect={() => select(selected === op.id ? null : op.id)}
                     onShowFindings={(e) => {
@@ -343,12 +386,24 @@ export function SetupList({
                       store.getState().revealFindings(op.id)
                     }}
                     onKeyDown={(e) =>
-                      onKey(e, op.id, (by) => {
-                        // a step within the setup glides; one into a neighbouring setup does not
-                        const to = i + by
-                        if (to >= 0 && to < setup.operations.length) reorder.glide(i, to)
-                        void moveOperation(op.id, by)
-                      })
+                      onKey(
+                        e,
+                        op.id,
+                        (by) => {
+                          // a step within the setup glides; one into a neighbouring setup does not
+                          const to = i + by
+                          if (to >= 0 && to < setup.operations.length) reorder.glide(i, to)
+                          void moveOperation(op.id, by)
+                        },
+                        op.designOperationIds.length > 1 && op.aid === undefined
+                          ? (right) => {
+                              // right on an open group steps into its first instance
+                              if (right && expanded.has(op.id))
+                                focus(instanceKey(op.id, op.designOperationIds[0]!))
+                              else toggle(op.id, right)
+                            }
+                          : undefined,
+                      )
                     }
                     onMove={(by) => void moveOperation(op.id, by)}
                     onSplit={() =>
@@ -406,6 +461,10 @@ export function SetupList({
     </>
   )
 }
+
+/** The row key of a group's instance (DF146 G2): its plan operation and design operation. */
+const instanceKey = (planOperationId: string, designOperationId: string) =>
+  `${planOperationId}/${designOperationId}`
 
 /** The plan operation's DTO by id, in any setup. */
 function planOperationOf(plan: PlanDTO, id: string): PlanOperationDTO | undefined {
@@ -498,6 +557,11 @@ function OperationRow({
   reorder,
   index,
   rowRef,
+  open,
+  onToggle,
+  instanceRef,
+  onInstanceSelect,
+  onInstanceKeyDown,
   onSelect,
   onMenuClose,
   onShowFindings,
@@ -522,6 +586,13 @@ function OperationRow({
   reorder: Reorder
   index: number
   rowRef: (el: HTMLButtonElement | null) => void
+  /** DF146 G2: a group row shows its instances. */
+  open: boolean
+  onToggle: (open: boolean) => void
+  instanceRef: (designOperationId: string) => (el: HTMLButtonElement | null) => void
+  /** An instance row was chosen: its group is selected (never toggled off). */
+  onInstanceSelect: () => void
+  onInstanceKeyDown: (e: KeyboardEvent, designOperationId: string) => void
   onSelect: () => void
   /** The row menu closed: the focus goes back to the row. */
   onMenuClose: () => void
@@ -548,6 +619,11 @@ function OperationRow({
   const roughing = roughingBefore(plan, op)
   const rest = roughing === undefined ? undefined : planOperationName(plan, roughing)
   const others = sameDirectionSetups(plan, setup)
+  // DF146 G2: a group's instances (read-only rows); none for an alignment aid
+  const group =
+    op.aid === undefined ? groupInstances(plan.design.part, op.designOperationIds) : undefined
+  const instances = group?.instances ?? []
+  const listId = `${op.id}-instances`
   const menu: MenuEntry[] = [
     {
       label: m.operations.moveUpItem,
@@ -606,10 +682,25 @@ function OperationRow({
           ref={rowRef}
           className={`${styles['opSelect']} ${styles['planRow']}`}
           aria-pressed={selected}
+          {...(instances.length > 0 ? { 'aria-expanded': open, 'aria-controls': listId } : {})}
           {...menuKeys}
           onClick={onSelect}
           onKeyDown={onKeyDown}
         >
+          {instances.length > 0 ? (
+            <span
+              className={styles['chevron']}
+              data-open={open || undefined}
+              title={open ? m.operations.collapse(name) : m.operations.expand(name)}
+              onClick={(e) => {
+                // part of the row's toggle (pointer), not a tab stop of its own (right / left keys)
+                e.stopPropagation()
+                onToggle(!open)
+              }}
+            >
+              <Icon name="chevron-down" />
+            </span>
+          ) : null}
           <Icon {...planOperationIconProps(plan, op.designOperationIds, op.aid)} />
           <span className={styles['opText']}>
             <span className={styles['opName']} title={name}>
@@ -678,6 +769,40 @@ function OperationRow({
             ) : null}
           </span>
         </button>
+        {instances.length > 0 ? (
+          // closed: inert and hidden (out of the tab order and the accessibility tree) while it
+          // slides shut
+          <div
+            className={styles['instancesWrap']}
+            data-open={open || undefined}
+            inert={!open}
+            aria-hidden={!open || undefined}
+          >
+            <ol
+              id={listId}
+              className={styles['instances']}
+              aria-label={m.operations.instancesLabel(name)}
+            >
+              {instances.map((x) => (
+                <li key={x.id} className={styles['instance']}>
+                  <button
+                    type="button"
+                    ref={instanceRef(x.id)}
+                    className={styles['instanceSelect']}
+                    aria-label={
+                      x.n === undefined ? x.name : m.operations.instanceOf(x.n, group!.of)
+                    }
+                    title={m.operations.instanceTip(name)}
+                    onClick={onInstanceSelect}
+                    onKeyDown={(e) => onInstanceKeyDown(e, x.id)}
+                  >
+                    {x.n === undefined ? x.name : m.operations.instance(x.n)}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
       </li>
     </RowMenu>
   )

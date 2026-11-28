@@ -120,6 +120,41 @@ export function planOpLabel(
   return op.aid?.name ?? planOperationLabel(part, op.designOperationIds)
 }
 
+/** One design operation of a plan operation group, as its read-only row (DF146 G2). */
+export interface GroupInstance {
+  readonly id: string
+  /** Its Clones position (1 = the source); undefined outside Clones (equal holes). */
+  readonly n: number | undefined
+  /** The design operation's name. */
+  readonly name: string
+}
+
+/**
+ * The instance rows of a plan operation of several design operations (hardening DF146 G2), in its
+ * order (path order): each with its stable Clones number (skipped positions are absent), and
+ * `of`, the name the group repeats ("Bolt hole 1 · countersink"). No rows for a single operation.
+ * Doc: docs/modes/features.md#clone-groups-in-plan-hardening-df146
+ */
+export function groupInstances(
+  part: PartDTO,
+  designOperationIds: readonly string[],
+): { readonly of: string; readonly instances: readonly GroupInstance[] } {
+  const first = operationOf(part, designOperationIds[0] ?? '')
+  const of = first === undefined ? UNKNOWN_OPERATION : baseName(first, part)
+  if (designOperationIds.length < 2) return { of, instances: [] }
+  const ns = designOperationIds.map((id) => clonesPosition(part, id)?.n)
+  // a source the Clones does not name itself (a pocket's roughing) is still position 1
+  const cloned = ns.some((n) => n !== undefined)
+  return {
+    of,
+    instances: designOperationIds.map((id, i) => ({
+      id,
+      n: ns[i] ?? (cloned && i === 0 ? 1 : undefined),
+      name: operationOf(part, id)?.name ?? UNKNOWN_OPERATION,
+    })),
+  }
+}
+
 /** `{ aid }` of the plan operation `id` when it is an alignment aid (for `planOpLabel`). */
 export function aidName(
   plan: { readonly setups: readonly { readonly operations: readonly PlanOperationDTO[] }[] },

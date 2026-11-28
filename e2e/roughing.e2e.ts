@@ -385,7 +385,8 @@ test('roughing R5: Make Clones on a roughed pocket, both instances rough, export
   await navigator.getByRole('button', { name: 'Clone 2', exact: true }).click()
   await expect(inspector.getByTestId('instance-roughing')).toContainText('Roughing: ')
 
-  // ── Plan: both roughings (one Ø 8 run), then both pockets on their rest ───────────────────
+  // ── Plan: both roughings (one Ø 8 run, one clone group), then both pockets on their rest ──
+  // (DF146: a clone source operation and its instance share one plan operation)
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
   const start = page.getByRole('dialog', { name: 'Plan the part' })
@@ -401,11 +402,10 @@ test('roughing R5: Make Clones on a roughed pocket, both instances rough, export
     .getByRole('list', { name: 'Setups in machining order' })
     .getByRole('list', { name: 'Plan operations in machining order' })
   const rows = list.getByRole('button', { name: /^Pocket 1/ })
-  await expect(rows).toHaveCount(4)
-  await expect(rows.nth(0)).toContainText('Pocket 1 · roughing')
-  await expect(rows.nth(1)).toContainText('Pocket 1 · roughing · 2')
-  await expect(rows.nth(2).getByTitle('Cuts only what Pocket 1 · roughing left')).toBeVisible()
-  await expect(rows.nth(3).getByTitle('Cuts only what Pocket 1 · roughing · 2 left')).toBeVisible()
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('Pocket 1 · roughing × 2')
+  await expect(rows.nth(1)).toContainText('Pocket 1 × 2')
+  await expect(rows.nth(1).getByTitle('Cuts only what Pocket 1 · roughing × 2 left')).toBeVisible()
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
   await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
   await navigator
@@ -421,7 +421,10 @@ test('roughing R5: Make Clones on a roughed pocket, both instances rough, export
   expect(program).toContain('(Tool 1: Flat 8, dia 8 mm, min stickout ')
   expect(program).toContain('(Tool 2: Flat 3, dia 3 mm, min stickout ')
   expect(program).not.toContain('(Tool 3:')
-  expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeGreaterThan(-1)
-  expect(program.indexOf('(Pocket 1 - roughing - 2)')).toBeLessThan(program.indexOf('(Pocket 1)'))
+  // both roughings (positions #1, #2) before both pockets
+  const roughing = program.indexOf('(Pocket 1 - roughing x 2)')
+  expect(roughing).toBeGreaterThan(-1)
+  expect(roughing).toBeLessThan(program.indexOf('(Pocket 1 x 2)'))
+  expect(program.indexOf('(Clones 1 #2)', roughing)).toBeLessThan(program.indexOf('(Pocket 1 x 2)'))
   expect(dfyom.rendererErrors).toEqual([])
 })

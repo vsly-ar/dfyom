@@ -10,7 +10,7 @@ import { fakeIds, uiSource } from '../commands/testing'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from './cache'
 import type { Toolpath } from './model'
-import type { GeneratorRequest } from './request'
+import type { SingleRequest as GeneratorRequest } from './request'
 
 const ui = uiSource()
 

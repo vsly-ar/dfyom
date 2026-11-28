@@ -166,12 +166,12 @@ describe(
       expect(plan.setups).toHaveLength(1)
       const setup = plan.setups[0]!
       const planned = setup.operations.map((o) => [o.kind, o.tool, o.designOperationIds.length])
+      // one plan operation per clone source operation (DF146): the 12 counterbores, the 12
+      // holes, the cutout and its copy, the two chamfers
       expect(planned).toEqual([
-        ...Array.from({ length: 12 }, () => ['pocket', LID_TOOLS.mill.name, 1]),
+        ['pocket', LID_TOOLS.mill.name, 12],
         ['drilling', LID_TOOLS.mill.name, 12],
-        ['profile', LID_TOOLS.profile.name, 1],
-        ['profile', LID_TOOLS.profile.name, 1],
-        // equal chamfers share one plan operation
+        ['profile', LID_TOOLS.profile.name, 2],
         ['chamfer', LID_TOOLS.chamfer.name, 2],
       ])
       const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })

@@ -11,7 +11,7 @@ import { libraryInput, machineValues } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
-import type { GeneratorRequest } from '../toolpath/request'
+import type { SingleRequest as GeneratorRequest } from '../toolpath/request'
 import type { TravelFit } from './export'
 import {
   exportPlan,
