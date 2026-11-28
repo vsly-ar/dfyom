@@ -8,8 +8,13 @@
 // (DF144 `deepCuts`); no move near the block. Report: docs/research/2026-11-28-plate-dogfood.md
 import { describe, expect, it } from 'vitest'
 import { Ok } from '../../shared/result'
+import { expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers } from '../commands/jobs'
+import { partGeometryInput } from '../design/load'
+import { evaluatePart } from '../geometry/evaluate'
+import { loadManifold } from '../geometry/manifold'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
+import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import type { Toolpath, ToolpathTool } from '../toolpath/model'
 import { createToolpathCache } from '../toolpath/cache'
 import { chamferMill, endMill } from '../toolpath/testing/fixtures'
@@ -110,6 +115,16 @@ describe("the user's plate job (dogfood TG #492)", () => {
     ] as const)
       await s.run('design.operation.tool.set', { partId, operationId, tool: specific(id) })
     await s.run('project.apply', {})
+
+    // DF160: the design's cut-off warning names the offcut (the chamfer keeps the part's side)
+    const kernel = (await loadManifold(nodeManifoldSource())).unwrap()
+    const input = expectOk(partGeometryInput(s.d.doc, partId, region2d))
+    const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
+    const cut = solid.warnings.filter((w) => w.code === 'dfm.loosePiece')
+    expect(cut).toMatchObject([{ operation: 'line1', params: { cutOff: true, kept: true } }])
+    expect(cut[0]!.message).toMatch(/^line1: cuts the offcut \(\d+\.\d mm³\) off the part/)
+    // the offcut is the 100 × (60 − 22 − 6.22) mm side, not the kept 22 mm strip
+    expect(cut[0]!.params['volume']).toBeCloseTo(100 * (60 - 22 - 6.22) * 10.1, -2)
 
     const planId = await s.create({ machineLibraryItemId: s.machineId })
     const setupId = s.plan(planId).setups[0]!.id

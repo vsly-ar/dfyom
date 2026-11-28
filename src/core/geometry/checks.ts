@@ -42,6 +42,11 @@ export interface CheckInput {
   readonly operations: readonly ComposedOperation[]
   /** original id → operation (incl. the stock), as used for surface mapping. */
   readonly tables: ReadonlyMap<number, OperationSolids>
+  /**
+   * DF160: one-sided chamfer id → the through Line whose side it keeps (SL4 `edgeSide`): the
+   * piece its bevel bounds is the part, the Line's other piece the offcut.
+   */
+  readonly keeps?: ReadonlyMap<string, string>
 }
 
 export interface CheckResult {
@@ -117,6 +122,9 @@ const isProfile = (op: OperationSolids): boolean => op.surfaces.includes('offcut
  * `decompose()` into pieces > ε_V. A piece is waste when it is bounded by a profile's `offcut`
  * surface and by no profile's shape side (wall, corner, tab). The part is the largest piece
  * that is not waste (the largest piece if all are); every other piece gets `dfm.loosePiece`.
+ * DF160: a piece a one-sided chamfer of a cut-off bounds (`keeps`) is the side kept: the part is
+ * the largest such piece, and the cut-off's other piece is named the offcut.
+ * Doc: docs/modes/engraved-patterns.md#cutting-the-part-out-along-a-line
  */
 function loosePieces(
   input: CheckInput,
@@ -162,7 +170,15 @@ function loosePieces(
       (best, p) => (best && best.volume >= p.volume ? best : p),
       undefined,
     )
-  const part = largest(pieces.filter((p) => !p.offcut)) ?? largest(pieces)!
+  const keeps = input.keeps ?? new Map<string, string>()
+  const keptBy = (p: Piece) =>
+    p.operations.filter((id) => keeps.has(id)).map((id) => keeps.get(id)!)
+  const part =
+    largest(pieces.filter((p) => !p.offcut && keptBy(p).length > 0)) ??
+    largest(pieces.filter((p) => !p.offcut)) ??
+    largest(pieces)!
+  // the cut-offs whose kept side is the part: their other piece is the offcut
+  const kept = new Set(keptBy(part))
 
   const profiles = new Set(input.operations.filter((c) => isProfile(c.op)).map((c) => c.op.id))
   // DF147 SL3: a through Line's slot (role `cutOff`) cuts a piece off on purpose
@@ -173,15 +189,24 @@ function loosePieces(
     .filter((p) => p !== part)
     .map((p): DfmWarning => {
       const cutOff = p.operations.find((id) => cutOffs.has(id))
-      if (!p.offcut && cutOff !== undefined)
+      if (!p.offcut && cutOff !== undefined) {
+        const offcut = kept.has(cutOff)
+        const what = offcut ? 'the offcut' : 'a piece'
         return {
           code: 'dfm.loosePiece',
           severity: 'warning',
-          message: `${cutOff}: cuts a piece (${mm3(p.volume)}) off the part; it comes loose on the last pass, so hold both sides of the line`,
+          message: `${cutOff}: cuts ${what} (${mm3(p.volume)}) off the part; it comes loose on the last pass, so hold both sides of the line`,
           operation: cutOff,
           parameter: 'depth',
-          params: { volume: p.volume, offcut: false, operations: p.operations, cutOff: true },
+          params: {
+            volume: p.volume,
+            offcut: false,
+            operations: p.operations,
+            cutOff: true,
+            ...(offcut ? { kept: true } : {}),
+          },
         }
+      }
       const operation = p.operations.find((id) => profiles.has(id)) ?? p.operations[0] ?? 'stock'
       const what = p.offcut ? 'an offcut' : 'a piece of the part'
       return {

@@ -72,8 +72,9 @@ type Render = (p: DfmWarning['params'], L: (mm: unknown) => string, name: DfmNam
 const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.loosePiece': (p) =>
     // DF147 SL3: a through Line cuts a piece off on purpose
+    // DF160: the offcut, once a one-sided chamfer names the side kept
     p['cutOff'] === true
-      ? 'This line cuts a piece off the part: it comes loose on the last pass. Hold both sides of the line.'
+      ? `This line cuts ${p['kept'] === true ? 'the offcut' : 'a piece'} off the part: it comes loose on the last pass. Hold both sides of the line.`
       : p['offcut'] === true
         ? 'An offcut is not held and comes loose. Add tabs or make them thicker.'
         : 'A piece of the part is not held and comes loose. Check the cut that separates it.',
