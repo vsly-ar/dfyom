@@ -52,8 +52,10 @@ export const chamferMessages = {
   edgeSides: { left: 'Left', right: 'Right' },
   /** Along a closed loop (a profile `on`): left of the counter-clockwise loop is inside. */
   edgeSidesLoop: { left: 'Inside', right: 'Outside' },
+  /** The viewport side arrow's anchors (pressed for the kept side): "Inside stays". */
+  edgeSideStays: (side: string) => `${side} stays`,
   edgeSideNote:
-    'Only the wall on this side is bevelled, left or right looking from the line’s start to its end (inside or outside a closed loop). Click either side of the line in the view to pick it.',
+    'Only the wall on this side is bevelled, left or right looking from the line’s start to its end (inside or outside a closed loop). Click either side of the groove in the view to pick it; the arrow shows the side that stays.',
   /** E4a: the Loops group of a general edge with several loops, one checkbox per loop. */
   loops: 'Loops',
   /** The Loops accordion's summary while closed: how many loops are bevelled. */
