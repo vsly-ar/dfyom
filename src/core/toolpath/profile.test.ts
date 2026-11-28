@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contourParam, offsetContour, perimeter } from '../geometry/contour'
+import { contourFrame, contourParam, offsetContour, perimeter } from '../geometry/contour'
 import type { AnalyticContour as Contour, Vec2 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
 import { analyticTabCentres } from '../geometry/tab-hold'
@@ -41,28 +41,65 @@ function random(seed: number): () => number {
 /**
  * Independent tab oracle: is `q` in the slot within a tab's stretch of the shape? The centres are
  * the count rule's, with tabs over free sides of `stock` moved (`analyticTabCentres`, tested in
- * geometry/tab-hold.test.ts).
+ * geometry/tab-hold.test.ts). Taken once per operation: the probe sweep in `checkProfile` asks it
+ * millions of times (docs/conventions/testing.md#load-stable-tests).
  */
-const centreCache = new WeakMap<ProfileOperation, readonly number[]>()
-function centresOf(op: ProfileOperation): readonly number[] {
-  let c = centreCache.get(op)
-  if (c === undefined)
-    centreCache.set(op, (c = analyticTabCentres(op, stock, op.tabs.count).centres))
-  return c
+interface TabOracle {
+  readonly centres: readonly number[]
+  readonly inTab: (q: Vec2) => boolean
+  /** False only if no point within `r` of `q` is in a tab (a cheap box test first). */
+  readonly near: (q: Vec2, r: number) => boolean
+}
+const tabCache = new WeakMap<ProfileOperation, TabOracle>()
+function tabOracle(op: ProfileOperation): TabOracle {
+  let t = tabCache.get(op)
+  if (t === undefined) tabCache.set(op, (t = makeTabOracle(op)))
+  return t
 }
 function inTab(op: ProfileOperation, q: Vec2): boolean {
+  return tabOracle(op).inTab(q)
+}
+function makeTabOracle(op: ProfileOperation): TabOracle {
+  if (op.tabs.count === 0 || slotCoversOpening(op))
+    return { centres: [], inTab: () => false, near: () => false }
   const { contour } = op.shape
   const c = op.shape.center
-  const d = insideDistance(contour, c, q)
-  const inSlot = op.side === 'outside' ? d <= 0 && d >= -op.slotWidth : d >= 0 && d <= op.slotWidth
-  if (!inSlot || op.tabs.count === 0 || slotCoversOpening(op)) return false
   const P = perimeter(contour)
-  const s = contourParam(contour, [q[0] - c[0], q[1] - c[1]])
-  for (const center of centresOf(op)) {
-    const off = ((((s - center) % P) + P * 1.5) % P) - P / 2
-    if (Math.abs(off) <= op.tabs.width / 2) return true
+  const { width } = op.tabs
+  const centres = analyticTabCentres(op, stock, op.tabs.count).centres
+  const inTab = (q: Vec2): boolean => {
+    const d = insideDistance(contour, c, q)
+    const inSlot =
+      op.side === 'outside' ? d <= 0 && d >= -op.slotWidth : d >= 0 && d <= op.slotWidth
+    if (!inSlot) return false
+    const s = contourParam(contour, [q[0] - c[0], q[1] - c[1]])
+    for (const center of centres) {
+      const off = ((((s - center) % P) + P * 1.5) % P) - P / 2
+      if (Math.abs(off) <= width / 2) return true
+    }
+    return false
   }
-  return false
+  // A point of a tab lies within slotWidth of its stretch (its nearest contour point), and every
+  // stretch point within h/2 of a sample h apart: boxes of the samples grown by slotWidth + h.
+  const h = 0.1
+  const boxes = centres.map((center) => {
+    const box = [Infinity, Infinity, -Infinity, -Infinity]
+    for (let s = center - width / 2; ; s = Math.min(s + h, center + width / 2)) {
+      const [x, y] = contourFrame(contour, s).unwrap().point
+      box[0] = Math.min(box[0]!, x + c[0])
+      box[1] = Math.min(box[1]!, y + c[1])
+      box[2] = Math.max(box[2]!, x + c[0])
+      box[3] = Math.max(box[3]!, y + c[1])
+      if (s >= center + width / 2) break
+    }
+    return box.map((v, i) => v + (i < 2 ? -1 : 1) * (op.slotWidth + h))
+  })
+  const near = (q: Vec2, r: number): boolean =>
+    boxes.some(
+      ([x0, y0, x1, y1]) =>
+        q[0] >= x0! - r && q[0] <= x1! + r && q[1] >= y0! - r && q[1] <= y1! + r,
+    )
+  return { centres, inTab, near }
 }
 
 function checkProfile(op: ProfileOperation, tool: ToolpathTool, over = {}) {
@@ -106,12 +143,17 @@ function checkProfile(op: ProfileOperation, tool: ToolpathTool, over = {}) {
       const a = (k * Math.PI) / 16
       probes.push([(R - 0.001) * r * Math.cos(a), (R - 0.001) * r * Math.sin(a)])
     }
+  const tabs = tabOracle(op)
   const bad: string[] = []
   for (const s of steps(tp)) {
     if (s.move.kind === 'rapid') continue
     if (Math.min(s.from[2], s.move.to[2]) >= tabTop - 1e-6) continue
     for (const p of samples(s, 0.25))
-      if (p[2] < tabTop - 1e-6 && probes.some(([x, y]) => inTab(op, [p[0] + x, p[1] + y])))
+      if (
+        p[2] < tabTop - 1e-6 &&
+        tabs.near([p[0], p[1]], R) &&
+        probes.some(([x, y]) => tabs.inTab([p[0] + x, p[1] + y]))
+      )
         bad.push(`cuts a tab at ${p.map((n) => n.toFixed(3))}`)
   }
   expect(bad.slice(0, 3)).toEqual([])
@@ -167,7 +209,7 @@ describe('generateProfile', () => {
     )
   })
 
-  // profiles checked on a heightmap: ~1 s alone, several times that
+  // profiles checked on a heightmap and by the tab probe sweep: ~0.6 s alone, several times that
   // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
   it('cuts outside and inside slots with tabs left at their height', { timeout: 60_000 }, () => {
     checkProfile(profile(rect(30, 20, 3), 'outside', 6), endMill(6))
@@ -175,7 +217,7 @@ describe('generateProfile', () => {
     // 4 mm from the stock front: the front tab moves off the free side (TB1), the cut lifts there
     const nearFront = profile(rect(30, 20, 3), 'outside', 6)
     const moved = { ...nearFront, shape: { ...nearFront.shape, center: [30, 14] as Vec2 } }
-    expect(centresOf(moved)[0]).not.toBeCloseTo(12, 3)
+    expect(tabOracle(moved).centres[0]).not.toBeCloseTo(12, 3)
     checkProfile(moved, endMill(6))
     checkProfile(profile(rect(30, 24, 4), 'inside', 6), endMill(6))
     checkProfile(profile(rect(30, 24, 1), 'inside', 7), endMill(4)) // corners smaller than the slot
@@ -225,6 +267,8 @@ describe('generateProfile', () => {
     expect(tabCells).toBeGreaterThan(100)
   })
 
+  // 40 profiles through the same checks: ~1.2 s alone (4 s before the tab oracle's box test),
+  // several times that under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
   it('40 seeded random profiles keep every property', { timeout: 60_000 }, () => {
     const rnd = random(11)
     let checked = 0
