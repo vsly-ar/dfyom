@@ -80,6 +80,7 @@ settingsCheck: {
 - **A run on a real connection needs `matches`** (`run.job.start` → `run.state`, rule `settingsMismatch`, `data.differences`). The fix is the user's: import the controller's `$$` into the library machine ([library.md](../architecture/library.md#grbl--import), "Import $$…") and update the plan's copy (`plan.libraryItem.update`), or change the controller with another tool. DFYOM never writes `$x=`.
 - **Checked again (DF87):** `run.settings.check { planId | machineId }` (a query; `{}` without a serial connection) compares the open connection's `$$` with the machine as it is now. The window asks it again after every library change, so a machine fixed in the Library window clears the warning without reconnecting; the plan's copy changes only with `plan.libraryItem.update`.
 - The run store keeps the check of the open connection; the navigator shows a hard warning under the connection: "The controller's settings differ from the plan's machine: $130 travel X is 400 mm on the controller, 300 mm in the plan. Runs are refused until they match." with a "Review" link that opens the Library window on the machine (M3 adds the inline diff view). It names the first three differences and counts the rest ("; and 4 more").
+- **All settings (v0.5 RV2):** the result also carries `settings` (the controller's `$$` by number) on any open connection, the virtual machine included, with or without `planId`/`machineId`; the Run inspector's "Machine settings" group shows them as the read-only controller settings table ([ui.md § Run settings](../conventions/ui.md#run-settings-v05-rv2)). Query outputs are not in `tools/list`.
 - With homing disabled (`$22=0`) the check fails with "Homing is off on the controller ($22=0): DFYOM runs only on a homed machine."
 
 ## Real-machine run rules
@@ -173,7 +174,7 @@ The DRO shows "—" until homed ([run.md DF46](run.md#run-mode-presentation-df46
 
 A Z touch plate replaces the nominal-thickness assumption for Z0 ([v0.2 known issues](../plans/v0.2.md#known-issues-and-risks)): the plate lies on the stock, its clip on the bit, and a probe move stops on contact. Implemented with M4 ([below](#implementation-m4)).
 
-- **Plate thickness** is a machine field, `probePlateThickness` ([library.md](../architecture/library.md#machine)), set once in the Library window ("Touch plate thickness", group "Z height", beside DF69's "Touch plate size"). Run mode takes it from the plan's machine copy, else from the library machine the copy was taken from (the plate belongs to the workshop, not the plan; setting it in the library needs no plan update), and on a manual connection from the chosen library machine. Without a plate thickness no probe control shows; "Set Z zero here" stays.
+- **Plate thickness** is a machine field, `probePlateThickness` ([library.md](../architecture/library.md#machine)), set once in the Library window ("Touch plate thickness", group "Z height", beside DF69's "Touch plate size"). Run mode takes it from the library machine the plan's copy was taken from, else from the copy (since v0.5 RV2, which edits it in Run's "Machine settings": the plate belongs to the workshop, not the plan; setting it needs no plan update), and on a manual connection from the chosen library machine. Without a plate thickness no probe control shows; "Set Z zero here" stays.
 - **Command** `run.machine.probeZ { plateThickness, maxTravel?: 25, feed?: 50, retract?: 2 }` (a `job`, like homing: a probe takes up to half a minute; `machine: true`, UI only on a real machine, [run.md § Safety 2](run.md#2-who-may-command-a-real-connection-q50)) → `{ workZero, contact }` (G54 and the contact point, machine coordinates, mm).
 - **Host sequence:**
   1. Allowed when Idle without a run, or while a run waits at a tool change; else `run.state`. The spindle must report 0 rpm (`FS`), else `run.state`, rule `spindleOn` (a hand-switched router is the operator's: the confirmation asks). With soft limits on, the probe distance is cut to the travel (the probe never targets below `−$132`); less than 1 mm left → `run.travel`.
@@ -302,6 +303,8 @@ Per [testing.md](../conventions/testing.md); no hardware in CI.
 | `src/renderer/src/modes/run/RunDialogs.tsx`               | Pre-flight resume mode, failure dialog "Resume from…" (M5)                               |
 | `src/renderer/src/modes/run/SetupChangeDialog.tsx`        | Zero to set, part corner, stock on the machine (M7)                                      |
 | `src/renderer/src/modes/run/SpindleControl.tsx`           | The spindle under the jog pad: state, speed, Start (confirmed), Stop (RV1)               |
+| `src/renderer/src/modes/run/MachineSettingsGroup.tsx`     | Run inspector "Machine settings": library machine fields, `$$` table (RV2)               |
+| `src/core/run/grbl/settings-catalog.ts`                   | GRBL 1.1 setting names and units, `controllerSettingsTable` (RV2)                        |
 
 ## Implementation (M1)
 

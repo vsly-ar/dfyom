@@ -294,3 +294,39 @@ export function applySettingsChanges(
     if (accept.includes(c.setting)) next = setAt(next, c.field.split('.'), c.stored)
   return Ok(next)
 }
+
+/** What a setting maps to in the machine (v0.5 RV2, the Run controller settings table). */
+export interface MappedSetting {
+  /** Dotted path below the machine values. */
+  readonly field: string
+  /** The machine's value in GRBL's unit (the `$n=` copy value); undefined when it has none. */
+  readonly value: number | undefined
+  /** The machine's value with its unit, as the diff shows it. */
+  readonly text: string | undefined
+}
+
+/**
+ * The machine field setting `$n` maps to and the machine's value of it, as the diff maps it
+ * (`$30`/`$31` to the controller range when set, `$20` soft limits, `$23` the homing corner's
+ * bits 0–1); undefined for a setting DFYOM does not map.
+ */
+export function mappedSetting(machine: MachineValuesDTO, n: number): MappedSetting | undefined {
+  if (n === 20) {
+    const on = machine.softLimits ?? true
+    return { field: 'softLimits', value: on ? 1 : 0, text: on ? 'on' : 'off' }
+  }
+  if (n === 23) {
+    const corner = machine.homingCorner ?? HOMING_CORNERS[0]
+    return { field: 'homingCorner', value: HOMING_CORNERS.indexOf(corner), text: corner }
+  }
+  const mapped = DEFS.find((d) => d.n === n)
+  if (mapped === undefined) return undefined
+  const def = controllerRange(machine, mapped)
+  const dto = at(machine, def.path)
+  const q = dto === undefined ? undefined : Quantity.fromDTO(dto)
+  return {
+    field: def.path.join('.'),
+    value: q?.isOk() ? q.unwrap().canonical : undefined,
+    text: dto === undefined ? undefined : quantityWithUnit(dto, def.scalarUnit),
+  }
+}

@@ -136,6 +136,8 @@ v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisio
 
 `acceleration` and `stepsPerMm` are set for all three axes or for none. Axes are fixed X/Y/Z in v0.1; 4th/5th axis, Z homing down, tool length sensor and tool table come later. Machine coordinates follow GRBL: the travel is `[−travel, 0]` on every axis whatever the homing corner ([grbl.md](grbl.md#homing-and-machine-coordinates)).
 
+Run edits a subset of these fields in its inspector's "Machine settings" group (v0.5 RV2, [ui.md § Run settings](../conventions/ui.md#run-settings-v05-rv2)) through the same `library.machine.update`; the controller's `$$` is shown there read-only with the import's mapping, and differences offer a `$n=value` line to copy (DFYOM never writes `$` settings).
+
 ## GRBL `$$` import
 
 Status: implemented (paste import, D30; diff on a real-machine connect, hardening M1, draft) · Origin: ported from the user's cnc-code `grblSettings.ts` (relicensed GPL-3.0-or-later)

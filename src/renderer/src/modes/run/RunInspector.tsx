@@ -33,6 +33,7 @@ import { AlignmentPanel } from './AlignmentPanel'
 import { ClearanceChip } from './ClearanceChip'
 import { Dro } from './Dro'
 import { OverridesSection, useMachineOverrideLimits } from './OverridesSection'
+import { MachineSettingsGroup } from './MachineSettingsGroup'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { CutMarksNote } from './CutMarks'
@@ -334,6 +335,9 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
             units={units}
           />
         ) : null}
+
+        {/* v0.5 RV2: the library machine's Run fields and the controller's $$ */}
+        <MachineSettingsGroup doc={doc} />
 
         {isConnected(status) ? (
           // no title: the button names it; the rule of a following group (DF110)

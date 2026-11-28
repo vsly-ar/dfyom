@@ -583,6 +583,11 @@ describe('run commands', { timeout: 60_000 }, () => {
         timeScale: 1,
       }),
     )
+    // v0.5 RV2: the virtual machine's $$ for the controller settings table
+    const all = expectOk(t.d.query('run.settings.check', {}, ui)).value as {
+      settings?: Record<string, number>
+    }
+    expect(all.settings?.['22']).toBeDefined()
     const rule = (r: AppResult<unknown>, code: ErrorCode) => expectErrCode(r, code).issues[0]?.rule
     expect(
       rule(await t.run('run.machine.spindle', { on: true, rpm: 5000 }), 'input.malformed'),
@@ -1566,6 +1571,13 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
       settingsCheck: { matches: boolean; differences: { setting: string }[] }
     }
     expect(before.settingsCheck.differences.map((d) => d.setting)).toEqual(['$110'])
+    // v0.5 RV2: the whole $$ comes with it, also without a machine to compare with
+    const all = expectOk(t.d.query('run.settings.check', {}, ui)).value as {
+      settings: Record<string, number>
+      settingsCheck?: unknown
+    }
+    expect(all.settings['110']).toBe(1234)
+    expect(all.settingsCheck).toBeUndefined()
     // the user fixes the library machine (here by importing the controller's $110)
     const found = t.s.library.lookup('machine', t.s.machineId)
     const revision = found.state === 'found' ? found.item.revision : 0

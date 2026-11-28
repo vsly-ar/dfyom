@@ -602,16 +602,26 @@ export const runSettingsCheck = defineQuery({
     planId: PlanIdSchema.optional(),
     machineId: ItemIdSchema.optional(),
   }),
-  result: z.object({ settingsCheck: SettingsCheckSchema.optional() }),
+  result: z.object({
+    settingsCheck: SettingsCheckSchema.optional(),
+    /**
+     * v0.5 RV2: the open connection's `$$` by setting number, on any connection (the Run
+     * inspector's controller settings table, docs/conventions/ui.md#run-settings-v05-rv2).
+     */
+    settings: z.record(z.string(), z.number()).optional(),
+  }),
   run(doc, args, ctx) {
     const m = ctx.services.machine
     const settings = m?.controllerSettings
-    if (m?.target !== 'serial' || settings === undefined) return Ok({})
+    if (settings === undefined) return Ok({})
+    const all = { settings: { ...settings } }
+    if (m?.target !== 'serial' || (args.planId === undefined && args.machineId === undefined))
+      return Ok(all)
     const chosen = connectionMachine(doc, ctx.services, args, 'run.settings.check')
     if (chosen.isErr()) return Err(chosen.unwrapErr())
     const against = args.planId === undefined ? 'machine' : 'plan'
     const values = chosen.unwrap().machine.toDTO() as MachineValuesDTO
-    return Ok({ settingsCheck: settingsCheck(values, settings, against) })
+    return Ok({ ...all, settingsCheck: settingsCheck(values, settings, against) })
   },
 })
 

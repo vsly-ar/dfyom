@@ -225,8 +225,8 @@ function plateOf(values: unknown): number | undefined {
 
 /**
  * The touch plate thickness (mm) for a probe (docs/modes/run-machine.md#probing-and-re-zero-m4):
- * the plan's machine copy, else the library machine it was copied from; without a plan the chosen
- * library machine. Undefined: no plate set (no probe control).
+ * the library machine the plan's copy came from, else the copy (v0.5 RV2); without a plan the
+ * chosen library machine. Undefined: no plate set (no probe control).
  */
 export function plateThickness(
   plan: PlanDTO | undefined,
@@ -237,7 +237,9 @@ export function plateThickness(
   if (plan === undefined) return lib(machineId)
   const copy = plan.snapshots.find((x) => x.id === plan.machine)
   if (copy === undefined) return undefined
-  return plateOf(copy.values) ?? lib(copy.libraryItemId)
+  // v0.5 RV2: the plate is the shop's accessory, edited in Run's "Machine settings": the library
+  // machine's first, the plan's copy when the library machine is gone or has none
+  return lib(copy.libraryItemId) ?? plateOf(copy.values)
 }
 
 /** What the machine profile puts on the overrides (DF85, docs/modes/run-machine.md#overrides-m6). */

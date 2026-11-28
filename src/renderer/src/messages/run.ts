@@ -508,6 +508,29 @@ export const runMessages = {
     confirm: 'Unlock',
   },
 
+  /** v0.5 RV2: the Run inspector's "Machine settings" (docs/conventions/ui.md#run-settings-v05-rv2). */
+  machineSettings: {
+    title: 'Machine settings',
+    noMachine: 'Choose a machine to see its settings.',
+    of: (name: string) =>
+      `Library machine “${name}”. Saved values apply to manual control, the settings check and new plans.`,
+    planCopy:
+      "The plan uses its own copy of the machine; update the plan's machine to use these values.",
+    unsaved: 'Unsaved',
+    save: 'Save',
+    revert: 'Revert',
+    conflict: 'The machine changed elsewhere.',
+    reload: 'Reload',
+    controller: 'Controller settings',
+    controllerHint:
+      'Read from the controller ($$). DFYOM never changes them: copy a line into your sender’s console, or import $$ into the machine in the Library.',
+    columns: { setting: 'Setting', controller: 'Controller', machine: 'Machine' },
+    differs: 'Differs from the machine',
+    copy: (line: string) => `Copy ${line}`,
+    copied: (line: string) => `${line} copied to the clipboard.`,
+    copyFailed: 'Could not copy to the clipboard.',
+  },
+
   dro: {
     title: 'Position',
     work: 'Work',

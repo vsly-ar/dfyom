@@ -1906,3 +1906,57 @@
   margin-left: var(--space-1);
   vertical-align: middle;
 }
+
+/* v0.5 RV2: the controller's $$ in "Machine settings" (docs/conventions/ui.md#run-settings-v05-rv2) */
+.controllerSettings {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.controllerTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settingsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.settingsTable th,
+.settingsTable td {
+  padding: var(--space-1) var(--space-1);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.settingsTable th[scope='col'] {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.settingsTable th[scope='row'] {
+  font-weight: var(--weight-regular);
+}
+
+.settingName {
+  display: block;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.settingsTable tr[data-differs] td,
+.settingsTable tr[data-differs] th {
+  background: var(--warning-subtle);
+}

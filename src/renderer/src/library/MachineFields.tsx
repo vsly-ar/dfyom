@@ -116,6 +116,8 @@ export function MachineFields({
   variant,
 }: FormProps<MachineDraft>): React.JSX.Element {
   const full = variant === 'full'
+  // v0.5 RV2: inside Run's "Machine settings" group, the groups are its subgroups
+  const sub = variant === 'run' ? { level: 4 as const } : {}
   const set = (patch: Partial<MachineDraft>) => onChange({ ...values, ...patch })
   const spindle = (patch: Partial<MachineDraft['spindle']>) =>
     set({ spindle: { ...values.spindle, ...patch } })
@@ -195,10 +197,12 @@ export function MachineFields({
     <NameField value={values.name} messages={messages('name')} onChange={(name) => set({ name })} />
   )
   const travel = (
-    <InspectorGroup title={m.travel}>{axes('travel', 'length', m.travelAxis)}</InspectorGroup>
+    <InspectorGroup title={m.travel} {...sub}>
+      {axes('travel', 'length', m.travelAxis)}
+    </InspectorGroup>
   )
   const maxFeed = (
-    <InspectorGroup title={m.maxFeed}>
+    <InspectorGroup title={m.maxFeed} {...sub}>
       {axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}
     </InspectorGroup>
   )
@@ -250,7 +254,7 @@ export function MachineFields({
     </InspectorGroup>
   )
   const spindleGroup = (
-    <InspectorGroup title={m.spindle}>
+    <InspectorGroup title={m.spindle} {...sub}>
       <Choice caption={m.control}>
         <SegmentedControl<'manual' | 'gcode'>
           label={m.control}
@@ -342,6 +346,71 @@ export function MachineFields({
     </Choice>
   )
 
+  const homing = (
+    <InspectorGroup
+      // in Run the navigator already has a "Homing" region (a landmark's name is unique)
+      title={variant === 'run' ? m.homingLimits : m.homing}
+      {...sub}
+    >
+      <Field label={m.homingCorner} messages={messages('homingCorner')} info={m.homingCornerNote}>
+        <Select
+          options={HOMING_CORNERS.map((c) => ({ value: c, label: m.homingCorners[c] }))}
+          value={values.homingCorner ?? 'backRight'}
+          onValueChange={(homingCorner) => set({ homingCorner })}
+        />
+      </Field>
+      {q(
+        'pullOff',
+        'depth',
+        m.pullOff,
+        'length',
+        values.pullOff,
+        'depth',
+        (pullOff) => set({ pullOff }),
+        { optional: true, info: m.pullOffNote },
+      )}
+      <Switch
+        label={m.softLimits}
+        checked={values.softLimits ?? true}
+        onCheckedChange={(softLimits) => set({ softLimits })}
+      />
+    </InspectorGroup>
+  )
+
+  // v0.5 RV2: the Run inspector's "Machine settings": what Run uses, no name, no tabs
+  // (docs/conventions/ui.md#run-settings-v05-rv2)
+  if (variant === 'run')
+    return (
+      <>
+        <InspectorGroup title={m.probe} {...sub}>
+          {q(
+            'probePlateThickness',
+            'depth',
+            m.probePlateThickness,
+            'length',
+            values.probePlateThickness,
+            'depth',
+            (probePlateThickness) => set({ probePlateThickness }),
+            { optional: true, info: m.probePlateThicknessNote },
+          )}
+          {q(
+            'probePlateSize',
+            'depth',
+            m.probePlateSize,
+            'length',
+            values.probePlateSize,
+            'width',
+            (probePlateSize) => set({ probePlateSize }),
+            { optional: true, info: m.probePlateSizeNote },
+          )}
+        </InspectorGroup>
+        {travel}
+        {homing}
+        {maxFeed}
+        {spindleGroup}
+      </>
+    )
+
   // the quick "New machine…" dialog: the v0.1 fields in one column, as before
   if (!full)
     return (
@@ -363,30 +432,7 @@ export function MachineFields({
       {rigidity}
       {travel}
       {zHeight}
-      <InspectorGroup title={m.homing}>
-        <Field label={m.homingCorner} messages={messages('homingCorner')} info={m.homingCornerNote}>
-          <Select
-            options={HOMING_CORNERS.map((c) => ({ value: c, label: m.homingCorners[c] }))}
-            value={values.homingCorner ?? 'backRight'}
-            onValueChange={(homingCorner) => set({ homingCorner })}
-          />
-        </Field>
-        {q(
-          'pullOff',
-          'depth',
-          m.pullOff,
-          'length',
-          values.pullOff,
-          'depth',
-          (pullOff) => set({ pullOff }),
-          { optional: true, info: m.pullOffNote },
-        )}
-        <Switch
-          label={m.softLimits}
-          checked={values.softLimits ?? true}
-          onCheckedChange={(softLimits) => set({ softLimits })}
-        />
-      </InspectorGroup>
+      {homing}
       <InspectorGroup title={g.controller}>
         <FixedField label={m.controller} value={m.controllerValue} />
         <FixedField label={m.toolChanger} value={m.toolChangerValue} />
