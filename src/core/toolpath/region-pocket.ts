@@ -195,11 +195,19 @@ export function generateRegionPocket(
     const r = port.offset({ pieces: [piece] }, a)
     if (r.isErr()) return Err(r.unwrapErr())
     const got = r.unwrap().pieces
-    if (got.length === 0) rootPieces.push(piece)
-    else {
-      rootPieces.push(...got)
-      finishPieces.push(piece)
+    if (got.length === 0) {
+      rootPieces.push(piece)
+      continue
     }
+    rootPieces.push(...got)
+    finishPieces.push(piece)
+    // DF144: a neck or arm of the piece narrower than 2a (a slot narrower than D + 2a off a wider
+    // part) vanishes from the shrunk piece; the finishing ring would cut it alone, as deep as
+    // finishStepdown and as wide as the tool (a full-depth slot through uncut stock). Its tool
+    // positions farther than `narrowReach` from the roughing roots are roughed at the wall itself.
+    const left = narrowLeft(port, piece, got, narrowReach(a, flatRadius), a)
+    if (left.isErr()) return Err(left.unwrapErr())
+    rootPieces.push(...left.unwrap())
   }
   const roots: Region = { pieces: rootPieces }
   const step = clearingStep(tool, cutting.stepover)
@@ -737,6 +745,47 @@ export function generateRegionPocket(
   const end = b.position
   if (end !== undefined) b.rapid([end[0], end[1], heights.clearanceHeight])
   return Ok(toolpath(input, b.build()))
+}
+
+/**
+ * How far (× the finishing allowance) a wall tool position may lie from the roughing roots before
+ * it is roughed at the wall (DF144). 4: the tip of a corner of 29° or more stays within reach (it
+ * lies a / sin(θ/2) from the shrunk corner), a neck or arm narrower than 2a does not.
+ * Doc: docs/modes/plan-v0.3.md#narrow-parts-roughed-at-the-wall-df144
+ */
+export const NARROW_REACH = 4
+
+/**
+ * `NARROW_REACH` × the allowance, at most the flat radius (DF144): the roughing tools on either
+ * side of the gap (the roots and the parts roughed at the wall) then meet over it.
+ */
+export function narrowReach(allowance: number, flatRadius: number): number {
+  return Math.min(NARROW_REACH * allowance, flatRadius)
+}
+
+/**
+ * The parts of a wall piece (tool-centre region) farther than `reach` from its pieces shrunk by
+ * the allowance (`shrunk`): the narrow necks and arms the roughing would never visit (DF144).
+ * Parts whose box diagonal is at most `minLength` (the allowance: offset slivers, the very tip
+ * of a corner sharper than 29°) are left to the finishing ring, which cuts them at most
+ * `reach` + `minLength` past the roughing.
+ */
+export function narrowLeft(
+  port: Region2dPort,
+  piece: RegionPiece,
+  shrunk: readonly RegionPiece[],
+  reach: number,
+  minLength: number,
+): AppResult<RegionPiece[]> {
+  return port
+    .offset({ pieces: [...shrunk] }, -reach)
+    .andThen((near) => port.difference({ pieces: [piece] }, near))
+    .map((left) =>
+      left.pieces.filter((p) => {
+        const b = chainBounds(p.outer.elements)
+        return b !== undefined && Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1]) > minLength
+      }),
+    )
 }
 
 /**

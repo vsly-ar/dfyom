@@ -17,7 +17,7 @@ import {
 } from './region-profile'
 import { cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
 import { render } from './testing/oracles'
-import { placeLoops, pocketRapids } from './testing/region-coverage'
+import { placeLoops, pocketDeepCuts, pocketRapids } from './testing/region-coverage'
 import { bracket, hook, slot, svgBracket, triangle, twoIslands } from './testing/region-fixtures'
 import { violations } from './testing/rules'
 
@@ -123,6 +123,8 @@ describe('golden files: region pockets', () => {
       const wall = port.offset(inp.operation.region, 3 - 1e-4).unwrap()
       expect(rules(tp, inp, 0, -depth, 3, inRegion(wall, 0, -depth), true)).toEqual([])
       expect(pocketRapids(tp, inp)).toEqual([])
+      // DF144: no feed move meets more than the stepdown of uncut material
+      expect(pocketDeepCuts(tp, inp, { cell: 0.2 })).toEqual([])
       await expect(render(tp)).toMatchFileSnapshot(`__golden__/${name}.txt`)
     })
 

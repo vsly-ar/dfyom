@@ -10,7 +10,7 @@ import { regionArea } from '../geometry/2d/model'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { generateRegionPocket, type RegionPocketInput } from './region-pocket'
 import { cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
-import { placeLoops, pocketRapids, regionCoverage } from './testing/region-coverage'
+import { placeLoops, pocketDeepCuts, pocketRapids, regionCoverage } from './testing/region-coverage'
 import { random, randomRegion } from './testing/region-fixtures'
 import { violations } from './testing/rules'
 
@@ -73,6 +73,7 @@ describe('30 seeded random regions (heightmap oracle)', () => {
         const expectedRest = regionArea(port.difference(region, opening).unwrap())
         expect(cov.gouge, what).toBe(0)
         expect(pocketRapids(tp.unwrap(), inp, CELL), what).toEqual([])
+        expect(pocketDeepCuts(tp.unwrap(), inp, { cell: CELL }), what).toEqual([])
         expect(cov.belowFloor, what).toBe(0)
         expect(cov.leftover, what).toBeLessThan(0.5)
         expect(Math.abs(cov.rest - expectedRest), what).toBeLessThan(
