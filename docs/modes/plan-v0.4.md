@@ -108,7 +108,7 @@ The stepped chamfer ([§ Stepped chamfer](#stepped-chamfer-f7)): `generateChamfe
 
 How it is built: [Implementation (P1)](#implementation-p1).
 
-- **Grouping:** P-B plus the existing hole grouping; Clones need nothing else ([features.md § Plan and cut order](features.md#plan-and-cut-order)).
+- **Grouping:** P-B plus the existing hole grouping; Clones need nothing else ([features.md § Plan and cut order](features.md#plan-and-cut-order)). Since hardening DF146 a clone source operation and its instances share one plan operation for every kind ([features.md § Clone groups in Plan](features.md#clone-groups-in-plan-hardening-df146)).
 - **Plan-only edits** work per owned operation, as [features.md § Plan](features.md#plan) says; a rebuild discards them as today.
 - **Labels:** plan operations whose operations share one feature show its name; grouped clone instances show "Hole 1 · drill × 6".
 - **Program comments:** P-E; the post already writes operation comments ([grbl.md](../architecture/grbl.md)).

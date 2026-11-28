@@ -13,6 +13,7 @@ import { len, libraryInput } from '../library/library.fixture'
 import { exportPlan } from '../post/plan-export'
 import { createToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
+import { toolpathStats } from '../toolpath/stats'
 import type { PlanWarning } from './checks'
 import { flat6, opsOf, planSetup, type PlanSetup } from './plan.fixture'
 
@@ -52,13 +53,18 @@ async function planned(s: PlanSetup, svc: object, partId: string) {
     .value as { jobId: string }
   expectOk(await s.d.job(jobId).unwrap().result)
   const ops = opsOf(s.plan(planId))
-  const paths = new Map(
-    ops.map((o) => [
-      o.designOperationIds.join('+'),
-      (s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as { toolpath: Toolpath })
-        .toolpath,
-    ]),
-  )
+  const paths = new Map<string, Toolpath>()
+  for (const o of ops) {
+    const tp = (
+      s.query('plan.toolpath.get', { planId, planOperationId: o.id }) as { toolpath: Toolpath }
+    ).toolpath
+    paths.set(o.designOperationIds.join('+'), tp)
+    if (o.designOperationIds.length > 1)
+      for (const id of o.designOperationIds) {
+        const passes = tp.passes.filter((p) => p.operationId === id)
+        paths.set(id, { ...tp, passes, stats: toolpathStats(passes) })
+      }
+  }
   const e = expectOk(await exportPlan(s.d.doc, planId, svc as never))
   return { ids: ops.map((o) => o.designOperationIds.join('+')), paths, lines: e.lines }
 }
@@ -90,11 +96,10 @@ describe('roughing repeats (DF122 R5)', () => {
     })
     await s.run('project.apply', {})
     const r = await planned(s, svc, s.partId)
+    // one plan operation per clone source operation (DF146)
     expect(r.ids).toEqual([
-      'pocket1_roughing',
-      'clones1_2_pocket1_roughing',
-      'pocket1',
-      'clones1_2_pocket1',
+      'pocket1_roughing+clones1_2_pocket1_roughing',
+      'pocket1+clones1_2_pocket1',
     ])
     // one tool change: Ø 8 for both roughings, then Ø 3 for both owners
     expect(toolChanges(r.lines)).toBe(1)

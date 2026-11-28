@@ -26,6 +26,7 @@ import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
 import { FEED_FIELD_LABEL, type ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
+import type { OperationKind } from '../design/part.dto'
 import type { FeedField } from '../plan/plan.dto'
 import type {
   AxisRates,
@@ -39,7 +40,7 @@ import type {
   ToolpathTool,
 } from './model'
 import type { RegionProfileOperation } from './region-profile'
-import type { GeneratorRequest } from './request'
+import type { GeneratorRequest, SingleRequest } from './request'
 import { setupWcs, toWcs } from './wcs'
 import { facingRegion, keepOutRegion } from './keep-out'
 
@@ -253,9 +254,52 @@ function partGeometry(input: PlanOperationInput, region2d?: Region2dPort): AppRe
   return r
 }
 
+/** Kinds whose generators cut one operation per request (DF146: a clone group is split). */
+export const SINGLE_KINDS: ReadonlySet<OperationKind> = new Set([
+  'facing',
+  'pocket',
+  'profile',
+  'line',
+])
+
+/**
+ * A clone group of a kind cut one operation at a time (DF146): one request per instance, in
+ * path order (design order), each with its own material and roughing rest
+ * (`PlanOperationInput.instances`).
+ */
+function groupRequest(
+  input: PlanOperationInput,
+  region2d: Region2dPort | undefined,
+): AppResult<GeneratorRequest> {
+  const { material: _m, restAfter: _r, roughingFloor: _f, instances, ...shared } = input
+  const parts: SingleRequest[] = []
+  for (const op of input.operations) {
+    const one = toGeneratorInputs(
+      { ...shared, ...instances?.get(op.id), operations: [op] },
+      region2d,
+    )
+    if (one.isErr()) return Err(one.unwrapErr())
+    const r = one.unwrap()
+    if (r.kind === 'group')
+      return fail('internal.unexpected', 'a clone instance mapped to a group', {
+        where: WHERE,
+        data: { planOperationId: input.planOperationId },
+      })
+    parts.push(r)
+  }
+  const unmachined = parts.flatMap((p) => p.unmachined ?? [])
+  return Ok({
+    kind: 'group',
+    parts,
+    operationIds: input.operations.map((o) => o.id),
+    ...(unmachined.length === 0 ? {} : { unmachined }),
+  })
+}
+
 /**
  * The generator request of one plan operation: one input, except drilling and chamfers (one per
- * hole or chamfer, nearest-neighbour order). Mapper bugs are `internal.unexpected`.
+ * hole or chamfer, nearest-neighbour order); a clone group of another kind is a `group` of one
+ * request per instance (DF146). Mapper bugs are `internal.unexpected`.
  */
 export function toGeneratorInputs(
   input: PlanOperationInput,
@@ -314,6 +358,12 @@ export function toGeneratorInputs(
       ops.push(t === undefined ? rest : { ...rest, throughDepth: t })
     } else ops.push(local)
   }
+  if (
+    aid === undefined &&
+    ops.length > 1 &&
+    (SINGLE_KINDS.has(input.kind) || ops.some((o) => o.kind === 'chamfer' && isLoopChamfer(o)))
+  )
+    return groupRequest(input, region2d)
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
   const stock: StockGeometry = localStock(input.setup.direction, partStock)
   const wcs = setupWcs(input.setup.direction, input.setup.rotation, partStock, input.setup.zero)

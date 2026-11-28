@@ -480,17 +480,18 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   // for the outline: one Flat 6 run more than without it (X2)
   expect(planned).toEqual([
     ['drilling', 'Flat 3', ids('hole1_drill', 'clones1_%_hole1_drill', [2, 3, 4])],
-    ...[1, 2, 3, 4, 5, 6].map((n) => [
-      'pocket',
-      'Flat 3',
-      n === 1 ? 'hole2_counterbore' : `clones2_${n}_hole2_counterbore`,
-    ]),
+    // one plan operation per clone source operation (DF146): the counterbores, the vents
+    ['pocket', 'Flat 3', ids('hole2_counterbore', 'clones2_%_hole2_counterbore', [2, 3, 4, 5, 6])],
     ['drilling', 'Flat 3', ids('hole2_drill', 'clones2_%_hole2_drill', [2, 3, 4, 5, 6])],
-    ...EXPECTED.vents.map((v) => [
+    [
       'profile',
       'Flat 3',
-      v.n === 1 ? vent.operationId : `${ventClones.featureId}_${v.n}_${vent.operationId}`,
-    ]),
+      ids(
+        vent.operationId,
+        `${ventClones.featureId}_%_${vent.operationId}`,
+        EXPECTED.vents.filter((v) => v.n > 1).map((v) => v.n),
+      ),
+    ],
     ['profile', 'Flat 6', cutout.operationId],
     [
       'chamfer',

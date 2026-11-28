@@ -35,12 +35,17 @@ function reach(port: Region2dPort, region: Region, R: number): AppResult<Region>
  * The rest region of a `regionPocket` or `regionProfile` request whose operation comes after its
  * roughing (`restAfter`); undefined for any other request, or when the roughing left nothing.
  * The rest is the owner's reach (its region, or a profile's slot, opened by its tool radius) less
- * what the roughing cleared at its floor (`roughCleared`, `profileRoughCleared`).
+ * what the roughing cleared at its floor (`roughCleared`, `profileRoughCleared`). A clone group
+ * (DF146) shows its first instance's (the source's) rest only.
  */
 export function restShading(
   request: GeneratorRequest,
   port: Region2dPort,
 ): AppResult<RestShading | undefined> {
+  if (request.kind === 'group') {
+    const first = request.parts[0]
+    return first === undefined ? Ok(undefined) : restShading(first, port)
+  }
   const shown = (owner: AppResult<Region>, cleared: AppResult<Region>, level: number) =>
     owner
       .andThen((o) =>

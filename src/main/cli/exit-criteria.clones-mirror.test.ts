@@ -108,7 +108,7 @@ describe(
       ).value
       expect(plan.setups).toHaveLength(1)
       const setup = plan.setups[0]!
-      expect(setup.operations).toHaveLength(2)
+      expect(setup.operations).toHaveLength(1) // the pocket and its mirror: one clone group (DF146)
       const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })
       const generated = (await waitJob(gen.value.jobId)) as { ok: boolean }
       expect(generated.ok, JSON.stringify(generated)).toBe(true)

@@ -7,7 +7,12 @@ import { planOperationInputs, type PlanOperationInput } from '../plan/inputs'
 import { planSetup } from '../plan/plan.fixture'
 import { generateDrilling } from './drilling'
 import { nearestNeighbourOrder, toGeneratorInputs, toolpathTool } from './inputs'
-import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from './request'
+import {
+  generateRequest,
+  GeneratorRequestSchema,
+  type GeneratorRequest,
+  type SingleRequest,
+} from './request'
 import { toolpathStats } from './stats'
 
 /** The test part's plan with every input resolvable (the 6 mm drill has no data: overrides). */
@@ -78,7 +83,7 @@ describe('nearestNeighbourOrder', () => {
 describe('toGeneratorInputs', () => {
   it('maps every kind of the test plan to plain inputs in canonical mm', async () => {
     const inputs = await resolvedInputs()
-    const requests = inputs.map((i) => expectOk(toGeneratorInputs(i)))
+    const requests = inputs.map((i) => expectOk(toGeneratorInputs(i)) as SingleRequest)
     expect(requests.map((r) => [r.kind, r.inputs.length])).toEqual([
       ['facing', 1],
       ['drilling', 1],
@@ -133,7 +138,7 @@ describe('toGeneratorInputs', () => {
 
   it('drilling: one input per hole in nearest-neighbour order, joined into one toolpath', async () => {
     const inputs = await resolvedInputs()
-    const group = expectOk(toGeneratorInputs(byDesign(inputs, 'drill3', 'drill4')))
+    const group = expectOk(toGeneratorInputs(byDesign(inputs, 'drill3', 'drill4'))) as SingleRequest
     expect(group.kind).toBe('drilling')
     const holes = group.inputs as Extract<GeneratorRequest, { kind: 'drilling' }>['inputs']
     expect(holes.map((h) => h.operation.id)).toEqual(['drill3', 'drill4'])
@@ -163,7 +168,7 @@ describe('toGeneratorInputs', () => {
 
   it('an end mill bores with helix: rampAngle 3° and climb by default', async () => {
     const inputs = await resolvedInputs()
-    const helix = expectOk(toGeneratorInputs(byDesign(inputs, 'drill2')))
+    const helix = expectOk(toGeneratorInputs(byDesign(inputs, 'drill2'))) as SingleRequest
     const hole = (helix as Extract<GeneratorRequest, { kind: 'drilling' }>).inputs[0]!
     expect(hole.tool).toMatchObject({ type: 'flatEndMill', diameter: 4 })
     expect(hole.operation).toMatchObject({ bottom: { kind: 'flat', depth: 12 } })

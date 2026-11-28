@@ -10,7 +10,7 @@ import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
 import { cutIds } from '../plan/cut'
-import { withoutOperationName } from '../plan/labels'
+import { planOperationLabel, withoutOperationName } from '../plan/labels'
 import type { PlanDTO } from '../plan/plan.dto'
 import {
   runLinkSavings,
@@ -414,6 +414,17 @@ export class ResultShaper {
           id,
           kind: listed?.['kind'] ?? null,
           designOperationIds: o['designOperationIds'],
+          // DF146: a group's label names its source and count ("Bolt hole 1 · drill × 4")
+          ...(isObj(design['part']) &&
+          Array.isArray(o['designOperationIds']) &&
+          o['designOperationIds'].length > 1
+            ? {
+                label: planOperationLabel(
+                  design['part'] as unknown as PlanDTO['design']['part'],
+                  o['designOperationIds'] as string[],
+                ),
+              }
+            : {}),
           // an alignment aid (alignment.md S13): its kind, name and setup-frame position
           ...(isObj(o['aid']) ? { aid: o['aid'] } : {}),
           ...(cut.has(id) ? { alreadyCut: true } : {}),

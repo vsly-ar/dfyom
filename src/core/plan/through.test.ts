@@ -9,7 +9,7 @@ import { expectOk } from '../../shared/testing/result'
 import { noSteps } from '../workers/steps'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { toGeneratorInputs } from '../toolpath/inputs'
-import { generateRequest } from '../toolpath/request'
+import { generateRequest, type SingleRequest } from '../toolpath/request'
 import type { Toolpath } from '../toolpath/model'
 import { Heightmap } from '../toolpath/testing/oracles'
 import type { PlanWarning } from './checks'
@@ -65,7 +65,7 @@ const profileToolpath = (s: PlanSetup, planId: string): Toolpath => {
   const [input] = expectOk(
     planOperationInputs(s.d.doc, planId, [profileOp(s, planId).id], region2d),
   )
-  return expectOk(generateRequest(expectOk(toGeneratorInputs(input!, region2d))))
+  return expectOk(generateRequest(expectOk(toGeneratorInputs(input!, region2d)) as SingleRequest))
 }
 
 const zs = (tp: Toolpath) =>
@@ -161,8 +161,10 @@ const inputOf = (s: PlanSetup, planId: string, id: string) =>
 
 const toolpathOf = (s: PlanSetup, planId: string, id: string): Toolpath =>
   expectOk(
-    generateRequest(expectOk(toGeneratorInputs(inputOf(s, planId, id), region2d)), noSteps, () =>
-      Ok(region2d),
+    generateRequest(
+      expectOk(toGeneratorInputs(inputOf(s, planId, id), region2d)) as SingleRequest,
+      noSteps,
+      () => Ok(region2d),
     ),
   )
 
@@ -236,18 +238,20 @@ describe('partial coverage and holes on cleared material (DF61 follow-ups)', () 
     const { s, planId } = await stacked()
     const input = inputOf(s, planId, 'pocket2')
     expect(input.material?.partial?.level).toBe(-6)
-    const request = expectOk(toGeneratorInputs(input, region2d))
+    const request = expectOk(toGeneratorInputs(input, region2d)) as SingleRequest
     expect(request.kind).toBe('regionPocket')
     expect(request.inputs).toHaveLength(2)
     const split = toolpathOf(s, planId, 'pocket2')
     const { material: _, ...plain } = input
     const whole = expectOk(
-      generateRequest(expectOk(toGeneratorInputs(plain, region2d)), noSteps, () => Ok(region2d)),
+      generateRequest(expectOk(toGeneratorInputs(plain, region2d)) as SingleRequest, noSteps, () =>
+        Ok(region2d),
+      ),
     )
     expect(split.stats.estimatedSeconds).toBeLessThan(whole.stats.estimatedSeconds)
     // heightmap oracle: pocket 1 then pocket 2 leaves what pocket 1 then the unsplit pocket leaves
     const first = toolpathOf(s, planId, 'pocket1')
-    const tool = expectOk(toGeneratorInputs(input, region2d)).inputs[0]!.tool
+    const tool = (expectOk(toGeneratorInputs(input, region2d)) as SingleRequest).inputs[0]!.tool
     const after = (tp: Toolpath) => {
       const map = new Heightmap(100, 60, 0.25)
       map.sweep(tool, first)
@@ -340,7 +344,7 @@ describe('through pockets after an earlier setup (patterns P4 follow-up)', () =>
     const [input] = expectOk(
       planOperationInputs(s.d.doc, planId, [grilleOp(s, planId).id], region2d),
     )
-    const request = expectOk(toGeneratorInputs(input!, region2d))
+    const request = expectOk(toGeneratorInputs(input!, region2d)) as SingleRequest
     const tp = expectOk(generateRequest(request, noSteps, () => Ok(region2d)))
     return { input: input!, z: Math.min(...zs(tp)) }
   }

@@ -18,10 +18,11 @@ const ui = uiSource()
 const flat3 = () => ({ ...flat4(), name: 'Flat 3', diameter: len('3') })
 
 /**
- * A Ø3.6 circle pocket (only Flat 3 fits) repeated by a 10 × 10 grid: 100 instances, each its own
- * plan operation; a second pocket outside the Clones for previews.
+ * A Ø3.6 circle pocket (only Flat 3 fits) repeated by a 10 × 10 grid: 100 instances (one plan
+ * operation since DF146); a second pocket outside the Clones for previews. `separate`: the 100
+ * pockets added one by one instead, each its own plan operation (the plan X2 measured).
  */
-async function setup() {
+async function setup(separate = false) {
   const s = await planSetup({ part: false })
   await s.run('library.tool.add', { values: libraryInput(flat3()) })
   const pocket = (x: string, y: string) =>
@@ -30,12 +31,17 @@ async function setup() {
       shape: { kind: 'circle', center: [x, y], diameter: '3.6' },
       depth: '1',
     })
-  await pocket('6', '4')
-  await s.run('design.clones.add', {
-    partId: s.partId,
-    source: { operationIds: ['pocket1'] },
-    rows: [{ kind: 'grid', cols: 10, rows: 10, du: '9.5', dv: '5.5' }],
-  })
+  if (separate)
+    for (let i = 0; i < 100; i++)
+      await pocket(String(6 + 9.5 * (i % 10)), String(4 + 5.5 * Math.floor(i / 10)))
+  else {
+    await pocket('6', '4')
+    await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { operationIds: ['pocket1'] },
+      rows: [{ kind: 'grid', cols: 10, rows: 10, du: '9.5', dv: '5.5' }],
+    })
+  }
   await pocket('50', '30')
   await s.run('project.apply', {})
   const planId = await s.create({ machineLibraryItemId: s.machineId })
@@ -66,7 +72,7 @@ const bytes = (v: unknown) => JSON.stringify(v).length
 
 describe('X2 shaping at the agent boundary (DF38, DF41)', () => {
   it('plan_warning_list groups a 100-operation plan under 32 KB, with a next step (DF38, DF39)', async () => {
-    const t = await setup()
+    const t = await setup(true)
     const full = shaped(t, 'plan.warning.list', { planId: t.planId, detail: 'full' })
     const findings = full['warnings'] as { code: string; rule: string; next?: string }[]
     const unresolved = findings.filter((f) => f.code === 'plan.check' && f.rule === 'unresolved')
@@ -137,6 +143,19 @@ describe('X2 shaping at the agent boundary (DF38, DF41)', () => {
     ])
     const instances = (summary['clones'] as { instances: { n: number }[] }[])[0]!.instances
     expect(instances.map((i) => i.n)).not.toContain(5)
+  })
+
+  it('plan_get lists a clone group as one operation with its instances and label (DF146)', async () => {
+    const t = await setup()
+    const r = shaped(t, 'plan.get', { planId: t.planId })
+    const ops = (
+      r['plan'] as { setups: { operations: { label?: string; designOperationIds: string[] }[] }[] }
+    ).setups[0]!.operations
+    expect(ops).toHaveLength(2)
+    const group = ops.find((o) => o.designOperationIds.length === 100)!
+    expect(group.designOperationIds[0]).toBe('pocket1')
+    expect(group.label).toBe('Pocket 1 × 100')
+    expect(ops.find((o) => o !== group)).not.toHaveProperty('label')
   })
 
   it('design_clones_preview leaves out the drawn path unless detail: "full" (F11)', async () => {

@@ -63,32 +63,27 @@ describe('feature operations in a plan', () => {
     const t = await setup({ type: 'counterbore', diameter: '6', cbDiameter: '11', cbDepth: '3' })
     expect(t.errors()).toEqual([])
     const rows = t.rows()
+    // one plan operation per clone source operation (DF146 G1): the counterbores too
     expect(rows.map((r) => r.ids)).toEqual([
-      ['hole1_counterbore'],
-      ['clones1_2_hole1_counterbore'],
-      ['clones1_3_hole1_counterbore'],
+      ['hole1_counterbore', 'clones1_2_hole1_counterbore', 'clones1_3_hole1_counterbore'],
       ['hole1_drill', 'clones1_2_hole1_drill', 'clones1_3_hole1_drill'],
     ])
     expect(rows.map((r) => r.label)).toEqual([
-      'Bolt hole 1 · counterbore',
-      'Bolt hole 1 · counterbore · 2',
-      'Bolt hole 1 · counterbore · 3',
+      'Bolt hole 1 · counterbore × 3',
       'Bolt hole 1 · drill × 3',
     ])
-    // two distinct tools, kept adjacent: one tool change (X1's assertion, D34)
-    expect(new Set(rows.slice(0, 3).map((r) => r.tool)).size).toBe(1)
-    expect(rows[3]!.tool).not.toBe(rows[0]!.tool)
+    // two distinct tools: one tool change (X1's assertion, D34)
+    expect(rows[1]!.tool).not.toBe(rows[0]!.tool)
     const e = await t.exported()
     expect(e.stats.toolChanges).toBe(1)
     const comments = e.lines.filter(
       (l) => l.startsWith('(Bolt hole 1') || l.startsWith('(Clones 1'),
     )
+    // the counterbores in path order, each position named
     expect(comments).toEqual([
-      '(Bolt hole 1 - counterbore)',
+      '(Bolt hole 1 - counterbore x 3)',
       '(Clones 1 #1)',
-      '(Bolt hole 1 - counterbore - 2)',
       '(Clones 1 #2)',
-      '(Bolt hole 1 - counterbore - 3)',
       '(Clones 1 #3)',
       '(Bolt hole 1 - drill x 3)',
       '(Clones 1 #1)',
@@ -149,5 +144,23 @@ describe('clone groups in Plan (hardening DF146)', () => {
     expect(
       opsOf(plan).map((o) => planOperationLabel(plan.design.part, o.designOperationIds)),
     ).toEqual(['Bolt hole 1 · drill × 4', 'Bolt hole 1 · countersink × 4'])
+  })
+
+  // a Clones is one cut unit with its source, so a clone group is cut whole or not at all; equal
+  // holes of their own are not: an already cut one never shares with an uncut one (DF135)
+  it('an already cut hole stays apart from an equal uncut one', async () => {
+    const s = await planSetup({ part: false })
+    for (const center of [
+      ['20', '20'],
+      ['50', '20'],
+    ])
+      await s.run('design.hole.add', { partId: s.partId, center, diameter: '6' })
+    await s.run('design.part.update', { partId: s.partId, alreadyCut: ['hole1'] })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    expect(opsOf(s.plan(planId)).map((o) => o.designOperationIds)).toEqual([
+      ['hole1_drill'],
+      ['hole2_drill'],
+    ])
   })
 })

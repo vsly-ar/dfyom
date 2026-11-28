@@ -13,7 +13,7 @@
 G90 G94 G17 G21
 G54
 G0 Z10
-(Pocket 1)
+(Pocket 1 x 2)
 (DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat, min stickout 11 mm)
 M3 S18000
 (Set spindle to 18000 rpm)
@@ -98,7 +98,6 @@ G1 X31.317 Y43.961
 G3 X28.764 Y40.573 I0.417 J-2.971
 G0 Z2
 Z10
-(Pocket 1 - 2)
 (Clones 1 #2)
 X129.966 Y37.342
 Z2
