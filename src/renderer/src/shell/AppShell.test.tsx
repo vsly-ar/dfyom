@@ -251,6 +251,8 @@ describe('AppShell', () => {
         inspectorTabs: {},
         homingRepeatability: {},
         calibration: {},
+        surfaceMaps: {},
+        surfaceMapMaxRange: 1,
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

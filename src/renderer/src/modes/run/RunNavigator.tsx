@@ -590,6 +590,12 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           >
             {runMessages.checkAlign.button}
           </Button>
+          {/* v0.5 RV10: Map stock surface (run-surface.md#probing-a-map) */}
+          {!manual ? (
+            <Button disabled={xyZeroGate !== null} onClick={() => a.setSurfaceMapOpen(true)}>
+              {runMessages.surface.button}
+            </Button>
+          ) : null}
           {zeroUndo === undefined ? null : (
             <Button
               variant="ghost"

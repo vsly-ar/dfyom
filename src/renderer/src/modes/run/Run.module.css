@@ -2065,3 +2065,42 @@
     transition: none;
   }
 }
+
+/* v0.5 RV10: the stock surface map's heat map (docs/modes/run-surface.md#heat-map) */
+.surfaceMap {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.surfaceGrid {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 4 / 3;
+  color: var(--text-muted);
+}
+
+.surfaceGrid rect[data-failed] {
+  stroke: var(--danger);
+  stroke-width: 0.08;
+}
+
+.surfaceCellEmpty {
+  stroke: var(--border);
+  stroke-width: 0.03;
+  stroke-dasharray: 0.1 0.08;
+}
+
+.surfaceLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+}
+
+.surfaceLegend > span {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}

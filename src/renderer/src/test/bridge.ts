@@ -413,6 +413,11 @@ export function createFakeBridge(
           inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },
           jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
           jogStep: { ...current.jogStep, ...(patch.jogStep ?? {}) },
+          surfaceMaps: Object.fromEntries(
+            Object.entries({ ...current.surfaceMaps, ...(patch.surfaceMaps ?? {}) }).filter(
+              ([, v]) => v !== null,
+            ),
+          ),
         } as AppSettings
         settings.emit(current)
         return Promise.resolve({ ok: true, value: current, revision: 0 })

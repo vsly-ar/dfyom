@@ -27,7 +27,8 @@ import { settingsCheck } from './settings-check'
 import type { ProjectDoc } from '../project/document'
 import { commentLine } from '../post/grbl/format'
 import type { GrblExport } from '../post/export'
-import { exportPlan } from '../post/plan-export'
+import { exportPlan, type PlanExportOptions } from '../post/plan-export'
+import { surfaceMapZero } from './surface-probe'
 import { cutTest } from '../plan/cut'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
@@ -70,10 +71,67 @@ const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
  */
 const FromLineArg = z.number().int().optional()
 
+/**
+ * v0.5 RV10: `surfaceMap` of `run.job.start` / `run.job.check`: the setup's stock map to follow
+ * (docs/modes/run-surface.md#following-the-map); plan runs only. The argument is `unknown` in the
+ * tool schema (the tools/list budget: the grid's schema cost about 1 000 characters) and parsed
+ * here (`input.malformed`).
+ */
+const SurfaceMapArg = z.unknown().optional()
+const SurfaceMapSchema = z
+  .object({
+    setupId: z.string().exactOptional(),
+    origin: z.tuple([z.number(), z.number()]),
+    spacing: z.tuple([z.number(), z.number()]),
+    cols: z.number().int(),
+    rows: z.number().int(),
+    z: z.array(z.number().nullable()),
+    skipped: z.array(z.number().int()).exactOptional(),
+    workZero: z.tuple([z.number(), z.number()]),
+    maxRange: z.number().exactOptional(),
+  })
+  .strict()
+
+/** The map for the export once it parses and belongs to this run (`surfaceMapZero`), or none. */
+function followMap(
+  arg: unknown,
+  setupId: string,
+  workZero: readonly [number, number, number],
+): AppResult<{ heightMap?: NonNullable<PlanExportOptions['heightMap']> }> {
+  if (arg === undefined) return Ok({})
+  const parsed = SurfaceMapSchema.safeParse(arg)
+  if (!parsed.success)
+    return fail('input.malformed', 'surfaceMap is not a surface map', {
+      where: 'followMap',
+      issues: parsed.error.issues.map((i) => ({
+        path: ['surfaceMap', ...i.path.map((k) => (typeof k === 'symbol' ? String(k) : k))],
+        rule: 'schema',
+        message: i.message,
+      })),
+    })
+  const map = parsed.data
+  const zero = surfaceMapZero(map, setupId, workZero)
+  if (zero.isErr()) return zero
+  const { maxRange, setupId: _s, ...grid } = map
+  return Ok({ heightMap: { map: grid, ...(maxRange === undefined ? {} : { maxRange }) } })
+}
+
+/** RV10: a gCode file is never followed (Q227: plan programs only). */
+function noFileMap(map: unknown, where: string): AppResult<void> {
+  if (map === undefined) return Ok(undefined)
+  const message = 'A surface map is followed by plan programs only, not by a gCode file.'
+  return fail('run.surfaceMap', message, {
+    where,
+    issues: [{ path: ['surfaceMap'], rule: 'planOnly', message }],
+  })
+}
+
 /** A start at a line: the line and the hash of the program it refers to (start only). */
 interface StartAt {
   readonly fromLine?: number | undefined
   readonly programHash?: string | undefined
+  /** RV10: the stock map to follow (`SurfaceMapSchema`, parsed by `followMap`). */
+  readonly surfaceMap?: unknown
 }
 
 const ResumeFindingSchema = z.discriminatedUnion('rule', [
@@ -682,10 +740,14 @@ async function checkAndStart(
   const where = 'run.job.start'
   const { planId, setupId, from } = run
   const status = { workZero }
+  // RV10: the stock map, once it is this setup's at this G54
+  const follow = followMap(run.at.surfaceMap, setupId, workZero)
+  if (follow.isErr()) return Err(follow.unwrapErr().withContext(where, { planId }))
   // 2. program, exported with the live G54 (a resume: from an operation's start, M5)
   const exported = await exportPlan(doc, planId, ctx.services, {
     setupId,
     workZero: status.workZero,
+    ...follow.unwrap(),
     ...(from === undefined ? {} : { resumeFrom: from }),
     signal: ctx.signal,
     progress: (p) => ctx.progress({ done: 0, label: `Export: ${p.label ?? ''}`.trim() }),
@@ -831,6 +893,7 @@ export const runJobStart = defineCommand({
     // undescribed (tools/list budget): run.job.check's result says what it is
     programHash: z.string().optional(),
     file: FileArg,
+    surfaceMap: SurfaceMapArg,
   }),
   result: RunJobResult,
   run: (doc, args, ctx) => {
@@ -838,7 +901,15 @@ export const runJobStart = defineCommand({
     if (one.isErr()) return Promise.resolve(Err(one.unwrapErr()))
     const start = oneStart(args, 'run.job.start')
     if (start.isErr()) return Promise.resolve(Err(start.unwrapErr()))
-    const at: StartAt = { fromLine: args.fromLine, programHash: args.programHash }
+    const at: StartAt = {
+      fromLine: args.fromLine,
+      programHash: args.programHash,
+      surfaceMap: args.surfaceMap,
+    }
+    if (args.file !== undefined) {
+      const plain = noFileMap(args.surfaceMap, 'run.job.start')
+      if (plain.isErr()) return Promise.resolve(Err(plain.unwrapErr()))
+    }
     return args.file !== undefined
       ? runFileJob(args.file, at, ctx)
       : runJob(doc, args.planId ?? '', args.setupId, args.from, at, ctx)
@@ -865,9 +936,12 @@ export const runJobCheck = defineCommand({
     // undescribed (tools/list budget): the pre-flight's "Start at" reads the program (DF129 RC3)
     program: z.boolean().optional(),
     file: FileArg,
+    surfaceMap: SurfaceMapArg,
   }),
   result: z.object({
     setupId: z.string().optional(),
+    // RV10, output only: what following the map did (docs/modes/run-surface.md#following-the-map)
+    surface: z.object({ maxDz: z.number(), range: z.number(), split: z.number() }).optional(),
     findings: z.array(PlanWarningSchema).describe('softLimit findings; empty = inside the travel'),
     resume: ResumePreviewSchema.optional().describe('With fromLine: the lead-in and findings'),
     program: CheckedProgramSchema.optional().describe(
@@ -879,6 +953,8 @@ export const runJobCheck = defineCommand({
     const one = oneOfPlanOrFile(args, where)
     if (one.isErr()) return one
     if (args.file !== undefined) {
+      const plain = noFileMap(args.surfaceMap, where)
+      if (plain.isErr()) return plain
       const file = await fileChecks(args.file, ctx.services, where, { fromLine: args.fromLine })
       return file.map((f) => ({
         findings: f.findings,
@@ -892,12 +968,16 @@ export const runJobCheck = defineCommand({
     const checked = startChecks(doc, planId, args.setupId, ctx.services, where)
     if (checked.isErr()) return checked
     const { setup, workZero, m, plan } = checked.unwrap()
+    const follow = followMap(args.surfaceMap, setup.id, workZero)
+    if (follow.isErr()) return Err(follow.unwrapErr().withContext(where, { planId }))
     const exported = await exportPlan(doc, planId, ctx.services, {
       setupId: setup.id,
       workZero,
+      ...follow.unwrap(),
     })
     if (exported.isErr()) return Err(exported.unwrapErr().withContext(where, { planId }))
     const e = exported.unwrap()
+    const surface = e.surface === undefined ? {} : { surface: { ...e.surface } }
     const operationStarts = e.operationLines.map((o) => o.fromLine)
     const program =
       args.program === true
@@ -914,6 +994,7 @@ export const runJobCheck = defineCommand({
         setupId: setup.id,
         findings: [...findings, ...areaFindings(m, e.lines, workZero)],
         ...program,
+        ...surface,
       })
     }
     const envelope = envelopeFor(m, where)
@@ -936,7 +1017,7 @@ export const runJobCheck = defineCommand({
       travel: envelope.unwrap().travel,
       workArea: m.status().envelope?.workArea,
     })
-    return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview, ...program })
+    return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview, ...program, ...surface })
   },
 })
 

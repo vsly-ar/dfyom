@@ -54,6 +54,7 @@ import { overrideLimits, overrideSteps } from '../override'
 import { runProbeCycle, type ProbePort } from '../probe-cycle'
 import { runProbeRoutine } from '../probe-routines'
 import { runTargetProbe } from '../homing-repeatability'
+import { probeSurfacePoint, VIRTUAL_TILT } from '../surface-probe'
 import type { ProbeTarget } from '../grbl/emulator/probe-scene'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
@@ -186,6 +187,8 @@ interface Connection {
   spindleStopping?: boolean
   /** v0.5 RV5: the virtual machine's stock (MPos) and whether it closes the probe input now. */
   virtualStock?: { readonly stock?: VirtualStock; readonly touch: boolean } | undefined
+  /** v0.5 RV10: the virtual stock's surface a map probes (laid once per G54), MPos. */
+  virtualSurface?: { readonly key: string; readonly z: number } | undefined
 }
 
 type VirtualStock = NonNullable<Extract<MachineAction, { kind: 'virtualStock' }>['stock']>
@@ -193,6 +196,7 @@ type ProbeRoutineAction = Extract<MachineAction, { kind: 'probeRoutine' }>
 
 type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
 type TargetProbeAction = Extract<MachineAction, { kind: 'targetProbe' }>
+type SurfacePointAction = Extract<MachineAction, { kind: 'surfacePoint' }>
 type SpindleAction = Extract<MachineAction, { kind: 'spindle' }>
 type OverrideAction = Extract<MachineAction, { kind: 'override' }>
 type OverrideToAction = Extract<MachineAction, { kind: 'overrideTo' }>
@@ -759,6 +763,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return probeRoutine(c, action)
       case 'targetProbe':
         return targetProbe(c, action)
+      case 'surfacePoint':
+        return surfacePoint(c, action)
       case 'virtualStock': {
         if (c.emulator === undefined)
           return fail('run.state', 'only the virtual machine has a simulated stock', {
@@ -1230,6 +1236,55 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     status.now()
     if (r.isErr()) return Err(r.unwrapErr().withContext(where))
     log.info({ reading: r.unwrap() }, 'probed the repeatability target')
+    return Ok(r.unwrap())
+  }
+
+  /**
+   * v0.5 RV10: one surface map point (docs/modes/run-surface.md#probing-a-map) through
+   * `probeSurfacePoint`; Idle without a run. The virtual operator's stock top is a height field
+   * tilted by `VIRTUAL_TILT` about the G54 X/Y, at the virtual stock's top, else G54 Z once Z was
+   * zeroed, else 5 mm under the first point's start; laid for the point and taken away after.
+   */
+  async function surfacePoint(c: Connection, a: SurfacePointAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.surfacePoint'
+    const state = machineState(c)
+    if (c.job !== undefined) return stateError('cannot probe during a run', state)
+    if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
+    const s = c.sender.status
+    if (s === undefined) return stateError('no status report yet', state)
+    const emu = c.emulator
+    if (emu !== undefined) {
+      const wz = c.workZero
+      const key = wz.join(',')
+      if (c.virtualSurface?.key !== key) {
+        const stock = c.virtualStock?.stock
+        const z = stock !== undefined ? stock.max[2] : wz[2] < 0 ? wz[2] : s.mpos[2] - 5
+        c.virtualSurface = { key, z }
+      }
+      emu.setProbeScene({
+        targets: [
+          {
+            kind: 'heightField',
+            z: c.virtualSurface.z,
+            tilt: VIRTUAL_TILT,
+            origin: [wz[0], wz[1]],
+          },
+        ],
+      })
+      emu.setProbeTip({ shape: 'cylinder', radius: 0 })
+    }
+    c.jogEnd = undefined
+    const travel = probeTravel(c)
+    const { kind: _kind, ...spec } = a
+    const r = await probeSurfacePoint(probePort(c), {
+      ...spec,
+      ...(travel === undefined ? {} : { travel }),
+      inches: c.inches,
+    })
+    if (emu !== undefined) emu.setProbeScene(touchScene(c))
+    await c.sender.freshStatus()
+    status.now()
+    if (r.isErr()) return Err(r.unwrapErr().withContext(where))
     return Ok(r.unwrap())
   }
 

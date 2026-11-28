@@ -53,6 +53,8 @@ describe('settings store', () => {
       inspectorTabs: {},
       homingRepeatability: {},
       calibration: {},
+      surfaceMaps: {},
+      surfaceMapMaxRange: 1,
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

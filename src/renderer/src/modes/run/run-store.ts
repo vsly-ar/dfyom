@@ -169,8 +169,17 @@ export type PreflightCheck =
       readonly findings: readonly SoftLimitFinding[]
       /** DF129 RC3: with a start line, `run.job.check`'s lead-in preview. */
       readonly resume?: ResumePreviewView | undefined
+      /** v0.5 RV10: following the surface map: the largest |dz|, the range, the split moves. */
+      readonly surface?: SurfaceView | undefined
     }
   | { readonly state: 'failed'; readonly key: string; readonly error: AppErrorData }
+
+/** v0.5 RV10: `run.job.check`'s `surface` (docs/modes/run-surface.md#following-the-map). */
+export interface SurfaceView {
+  readonly maxDz: number
+  readonly range: number
+  readonly split: number
+}
 
 /** `run.job.check { fromLine }`'s `resume` (docs/modes/run-recovery.md#start-from-a-line). */
 export interface ResumePreviewView {
@@ -386,6 +395,13 @@ export interface RunState {
   readonly repeatOpen: boolean
   /** v0.5 RV9: the calibration cut dialog is open (run-calibration.md). */
   readonly calibrationOpen: boolean
+  /** v0.5 RV10: the Map stock surface dialog is open (run-surface.md). */
+  readonly surfaceMapOpen: boolean
+  /**
+   * v0.5 RV10: the pre-flight's "Follow the surface map": the map `run.job.check`/`start` get as
+   * `surfaceMap`; off (undefined) whenever the pre-flight opens (docs/modes/run-surface.md).
+   */
+  readonly followSurface: object | undefined
   /** v0.5 RV9: the checked calibration program the viewport previews instead of the plan's. */
   readonly calibrationPreview: readonly string[] | undefined
   /**
@@ -522,6 +538,9 @@ export interface RunState {
   setWorkAreaOpen(open: boolean): void
   setRepeatOpen(open: boolean): void
   setCalibrationOpen(open: boolean): void
+  setSurfaceMapOpen(open: boolean): void
+  /** RV10: tick (the map) or untick (undefined) "Follow the surface map". */
+  setFollowSurface(map: object | undefined): void
   setCalibrationPreview(lines: readonly string[] | undefined): void
   /**
    * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
@@ -873,6 +892,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       repeatOpen: false,
       calibrationOpen: false,
       calibrationPreview: undefined,
+      surfaceMapOpen: false,
+      followSurface: undefined,
       zeroUndo: undefined,
       virtualStockKey: undefined,
       probeCheck: NO_PROBE_CHECK,
@@ -979,9 +1000,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
                 resumeFrom: undefined,
                 startAt: { kind: 'beginning' },
                 startHash: undefined,
+                followSurface: undefined,
               }
             : {
                 preflightOpen,
+                followSurface: undefined,
                 preflightCheck: { state: 'idle' },
                 startAt: { kind: 'beginning' },
                 startHash: undefined,
@@ -1220,6 +1243,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setCheckAlignOpen: (checkAlignOpen) => set({ checkAlignOpen }),
       setWorkAreaOpen: (workAreaOpen) => set({ workAreaOpen }),
       setRepeatOpen: (repeatOpen) => set({ repeatOpen }),
+      setSurfaceMapOpen: (surfaceMapOpen) => set({ surfaceMapOpen }),
+      setFollowSurface: (followSurface) => set({ followSurface, startProgram: undefined }),
       setCalibrationOpen: (calibrationOpen) =>
         set(
           calibrationOpen
@@ -1307,13 +1332,15 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         }
         const planId = get().planId
         const setupId = chosen ?? get().setupId
-        set(closed)
+        const surfaceMap = get().followSurface
+        set({ ...closed, followSurface: undefined })
         if (planId === undefined || planId === NO_PLAN) return
         const r = await call('run.job.start', {
           planId,
           ...(setupId === undefined ? {} : { setupId }),
           ...(from === undefined || from === '' ? {} : { from }),
           ...startAt,
+          ...(surfaceMap === undefined ? {} : { surfaceMap }),
         })
         if (!r.ok) return
         const { jobId } = r.value as { jobId: string }
@@ -1337,7 +1364,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (now.state !== 'idle' && now.key === key) return
         set({ preflightCheck: { state: 'checking', key } })
         // DF129 RC3: a plan's program for "Start at", once per open pre-flight and setup
-        const programKey = `${planId ?? ''}|${setupId ?? ''}`
+        const surfaceMap = ofFile ? undefined : get().followSurface
+        const programKey = `${planId ?? ''}|${setupId ?? ''}|${surfaceMap === undefined ? '' : 'map'}`
         const readProgram = !ofFile && get().startProgram?.key !== programKey
         const at = fromLine === undefined ? {} : { fromLine }
         // not through `call`: a failed check shows in the dialog, not in the action banner
@@ -1350,6 +1378,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
                 ...(setupId === undefined ? {} : { setupId }),
                 ...at,
                 ...(readProgram ? { program: true } : {}),
+                ...(surfaceMap === undefined ? {} : { surfaceMap }),
               },
         )
         const cur = get().preflightCheck
@@ -1362,9 +1391,16 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           findings: SoftLimitFinding[]
           resume?: ResumePreviewView
           program?: Omit<CheckedProgramView, 'key'>
+          surface?: SurfaceView
         }
         set({
-          preflightCheck: { state: 'done', key, findings: value.findings, resume: value.resume },
+          preflightCheck: {
+            state: 'done',
+            key,
+            findings: value.findings,
+            resume: value.resume,
+            surface: value.surface,
+          },
           ...(value.program === undefined
             ? {}
             : { startProgram: { key: programKey, ...value.program } }),

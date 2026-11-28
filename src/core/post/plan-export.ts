@@ -26,7 +26,13 @@ import type { PartDTO } from '../design/part.dto'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
-import { exportGrbl, type ExportOperation, type GrblExport, type TravelFit } from './export'
+import {
+  exportGrbl,
+  type ExportInput,
+  type ExportOperation,
+  type GrblExport,
+  type TravelFit,
+} from './export'
 import { gcodeFileStem } from './file-name'
 import { commentLine, MAX_LINE_BYTES, sanitizeComment } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
@@ -111,6 +117,8 @@ export interface PlanExportOptions {
    * `unknownOperation`.
    */
   readonly resumeFrom?: string
+  /** v0.5 RV10: follow a surface map (`ExportInput.heightMap`, docs/modes/run-surface.md). */
+  readonly heightMap?: ExportInput['heightMap']
 }
 
 export interface PlanExport extends GrblExport {
@@ -459,6 +467,7 @@ export async function exportPlan(
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
       ...(exportedFrom === undefined ? {} : { resumeFrom: exportedFrom }),
+      ...(opts.heightMap === undefined ? {} : { heightMap: opts.heightMap }),
     },
     {
       generator: opts.generator ?? programGenerator(services.appVersion),

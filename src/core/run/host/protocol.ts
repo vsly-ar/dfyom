@@ -401,6 +401,21 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     plateSize: PositiveMm.exactOptional(),
   }),
   /**
+   * v0.5 RV10: one point of a stock surface map (docs/modes/run-surface.md#probing-a-map): up to
+   * `travelZ` (MPos) along Z, across to `at` (MPos X/Y) with `G38.3`, `G38.2` down at most
+   * `zDistance`, retract; writes nothing. The virtual machine lays a tilted surface on the stock top.
+   */
+  z.object({
+    kind: z.literal('surfacePoint'),
+    at: z.tuple([Num, Num]).readonly(),
+    travelZ: Num,
+    zDistance: PositiveMm,
+    retract: PositiveMm,
+    fastFeed: Feed,
+    slowFeed: Feed,
+    moveFeed: Feed,
+  }),
+  /**
    * v0.5 RV5 (virtual only): the stock the virtual operator laid (`stock` absent: the one laid before); with
    * `touch` it closes the probe input whenever the tool touches it (the touch-off's readout).
    */

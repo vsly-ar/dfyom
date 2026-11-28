@@ -214,6 +214,10 @@ Examples: "enclosure-hardwood-250x100x40-two-setups" (one plan, two setups) → 
 - `G0 X Y` above the start point, `G0 Z<approach>`, `G1 Z<start> F<plunge>`, then `[G91] F<feed>`: the distance mode and feed at the line.
 - The program's first motion line after the lead-in that relies on a modal motion word gets it (`X10 Y5` under `G2` → `G2 X10 Y5`): GRBL cannot set `G2`/`G3` without axis words. All other program lines go out unchanged.
 
+### Surface maps (v0.5 RV10)
+
+`ExportInput.heightMap` (`{ map, maxRange? }`) makes the export follow a probed stock map ([run-surface.md § Following the map](../modes/run-surface.md#following-the-map)): `applyHeightMap` (`src/core/post/height-map.ts`) rewrites the `MachiningProgram`'s blocks between `toMachiningProgram` and the post. Moves with an end below `clearanceZ` become `G1`/`G0` segments of at most half the smaller grid spacing (≤ 2 mm) in X/Y, arcs among them linearised (chords of ≤ 0.002 mm sagitta, so no `G2`/`G3` is written below the clearance), each end offset by the bilinear map minus its value at the tool run's touch-off spot (`ProgramZRef.at`); moves at or above the clearance are written unchanged. The machine checks (soft limits, travel fit) run on the followed program; `GrblExport.surface` reports the largest |dz|, the range and the split moves; refusals are `run.surfaceMap` ([§ Refusals](../modes/run-surface.md#refusals)). Plan programs only: Run passes it for a run with Follow the surface map ticked. Golden: `src/core/post/__golden__/height-map-engraving.nc`.
+
 ## Virtual machine (task 3.8)
 
 A GRBL 1.1 emulator: a pure, deterministic state machine in `src/core` fed bytes and a clock, producing bytes. It answers **exactly like GRBL** for the subset below so the same sender works against it and a real controller. Banner after reset: `Grbl 1.1h ['$' for help]`.
@@ -363,6 +367,7 @@ Implemented (task 3.8): `src/core/run/clock.ts`, `transport.ts`, `grbl/emulator/
 | `src/core/post/program.ts`                 | `MachiningProgram` and block types (the plan → post contract)                       |
 | `src/core/post/export.ts`                  | `exportGrbl`, `toMachiningProgram`, export checks, stats                            |
 | `src/core/post/file-name.ts`               | `gcodeFileStem`: the suggested gCode file name (DF62)                               |
+| `src/core/post/height-map.ts`              | `HeightMap`, `applyHeightMap`: surface map compensation (v0.5 RV10)                 |
 | `src/core/post/grbl/post.ts`, `format.ts`  | `postGrbl`, number and comment formatting                                           |
 | `src/core/plan/setup-header.ts`            | `setupHeader`, `setupMotion`, `setupCorner`: the header's setup instructions (DF58) |
 | `src/core/run/clock.ts`                    | `Clock` port, `VirtualClock`, `ScaledClock`                                         |
