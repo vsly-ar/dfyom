@@ -66,6 +66,11 @@ export type Engagement =
   | {
       readonly kind: 'chamfer'
       readonly depth: number
+      /**
+       * DF157: the deepest one pass cuts when the chamfer is cut in levels (DF142, E4a): F6's `ap`
+       * (De stays at `depth`); absent = `depth`.
+       */
+      readonly ap?: number
       readonly plunge?: { readonly edgeDiameter: number }
     }
   /**
@@ -74,9 +79,12 @@ export type Engagement =
    */
   | { readonly kind: 'taper'; readonly depth: number }
 
-/** The engagement's fixed axial depth: the helix pitch or the chamfer depth; else undefined. */
+/**
+ * The engagement's fixed axial depth: the helix pitch or the chamfer's pass depth (DF157: one
+ * level's, else the chamfer depth); else undefined.
+ */
 export const fixedAp = (e: Engagement): number | undefined =>
-  e.kind === 'helix' ? e.ap : e.kind === 'chamfer' ? e.depth : undefined
+  e.kind === 'helix' ? e.ap : e.kind === 'chamfer' ? (e.ap ?? e.depth) : undefined
 
 /**
  * Locked values: fixed inputs the calculator recommends every other field around, in canonical
@@ -519,12 +527,16 @@ const ROUTER_CLASSES: ReadonlySet<Rigidity> = new Set([
 /**
  * `feeds.manyFlutes` (DF131): 3 or more flutes slotting aluminium on a router-class machine pack
  * the flutes with chips (re-cut chips, welding, a jump in load); 1–2 flutes clear them.
+ * DF157: only for an end mill in a closed cut: not a chamfer mill (its cone cuts an edge, the
+ * chips leave over the open side), not a stepover pass narrower than the tool (facing: one side
+ * open). Doc: docs/architecture/feeds-speeds.md#hobby-metal-cutting-hardening-df131
  */
 function manyFlutes(c: Ctx, z: number): CuttingWarning | undefined {
   const e = c.input.engagement
   if (c.row.materialClass !== 'aluminum' || z < 3 || !ROUTER_CLASSES.has(c.rigidity))
     return undefined
-  if (e.kind === 'stepover' && Math.min(c.locked.ae ?? e.ae, c.D) < c.D / 2) return undefined
+  if (e.kind === 'chamfer') return undefined
+  if (e.kind === 'stepover' && Math.min(c.locked.ae ?? e.ae, c.D) < c.D - 1e-9) return undefined
   return warn(
     'feeds.manyFlutes',
     `A ${z}-flute end mill clogs with aluminium chips in a slot on this machine: use a 1 or 2 flute end mill, with air or a drop of cutting fluid.`,

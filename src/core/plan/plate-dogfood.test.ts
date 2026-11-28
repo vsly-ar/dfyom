@@ -22,6 +22,7 @@ import { Heightmap, samples, steps } from '../toolpath/testing/oracles'
 import { deepCuts } from '../toolpath/testing/region-coverage'
 import type { PlanWarning } from './checks'
 import { generated } from './line-through.fixture'
+import { machineValues } from '../library/library.fixture'
 import { opsOf, planSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
@@ -126,7 +127,19 @@ describe("the user's plate job (dogfood TG #492)", () => {
     // the offcut is the 100 × (60 − 22 − 6.22) mm side, not the kept 22 mm strip
     expect(cut[0]!.params['volume']).toBeCloseTo(100 * (60 - 22 - 6.22) * 10.1, -2)
 
-    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    // the user's machine: an extrusion-frame 3020 with an 800 W spindle up to 29,300 rpm
+    const { kind: _, ...shapeoko } = machineValues()
+    const nova = (await s.run('library.machine.add', {
+      values: {
+        ...shapeoko,
+        name: '3020 Nova',
+        travel: { x: '300', y: '200', z: '80' },
+        rigidity: 'extrusion',
+        maxFeedRate: { x: '3000', y: '3000', z: '1000' },
+        spindle: { control: 'manual', minSpeed: '6200', maxSpeed: '29300', power: '800' },
+      },
+    })) as { id: string }
+    const planId = await s.create({ machineLibraryItemId: nova.id })
     const setupId = s.plan(planId).setups[0]!.id
     // the user's stop block left of the stock, below its top
     await s.run('plan.workholding.set', {
@@ -145,6 +158,15 @@ describe("the user's plate job (dogfood TG #492)", () => {
       ['chamfer1', 1],
       ['line1', 1],
     ])
+    // DF157: with automatic feeds the only feeds finding is the line chamfer's spindle clamp (De 2
+    // mm wants 48,500 rpm): no `manyFlutes` on the open-sided facing or the V-bit, no `rubbing` on
+    // the countersinks (F6 meets one DF142 level of 1.21 mm, not the whole 3.62 mm cone)
+    const auto = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }).warnings
+    expect(
+      auto
+        .filter((w) => w.code.startsWith('feeds.'))
+        .map((w) => [w.code, ops.find((o) => o.id === w.planOperationId)?.designOperationIds[0]]),
+    ).toEqual([['feeds.rpmAboveMachine', 'chamfer1']])
     for (const op of ops)
       await s.run('plan.operation.update', {
         planId,

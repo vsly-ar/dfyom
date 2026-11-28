@@ -1692,7 +1692,9 @@ const operationFeedsGet = defineQuery({
         engagement: z.object({
           kind: z.enum(['slot', 'stepover', 'helix', 'drill', 'chamfer', 'taper']),
           ae: Num.optional().describe('Stepover, mm'),
-          ap: Num.optional().describe('Helix pitch, mm'),
+          ap: Num.optional().describe(
+            'Helix pitch; a chamfer cut in levels: one level (F6 ap, DF157), mm',
+          ),
           depth: Num.optional().describe(
             'Chamfer depth below the tip, or the taper Line depth, mm',
           ),
@@ -1766,6 +1768,7 @@ const operationFeedsGet = defineQuery({
                     ? {
                         kind: g.kind,
                         depth: g.depth,
+                        ...(g.ap === undefined ? {} : { ap: g.ap }),
                         ...(g.plunge === undefined
                           ? {}
                           : { plungeEdgeDiameter: g.plunge.edgeDiameter }),
