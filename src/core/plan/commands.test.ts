@@ -280,11 +280,11 @@ describe('snapshot independence and stale detection', () => {
     expect(pocket.tool).toBe(pocketOp.tool)
     expect(src(pocket.overrides.feedRate)).toBe('500')
     expect(designIds(p)).not.toContain('profile1')
-    // the new through hole gets its own plan operation with a suggested tool, among the drillings
+    // the new through hole equals drill1: it joins its plan operation, with its tool (DF146 G0)
     const ids = designIds(p)
-    expect(ids).toContain('drill5')
-    expect(ids.indexOf('drill5')).toBeLessThan(ids.indexOf('pocket1'))
-    expect(opsOf(p)[ids.indexOf('drill5')]!.tool).toBeDefined()
+    expect(ids).toContain('drill1+drill5')
+    expect(ids.indexOf('drill1+drill5')).toBeLessThan(ids.indexOf('pocket1'))
+    expect(opsOf(p)[ids.indexOf('drill1+drill5')]!.tool).toBeDefined()
   })
 
   it('a drilling group splits when its holes no longer match', async () => {
@@ -327,7 +327,7 @@ describe('draft follow on Apply (plan.draftFollow)', () => {
     expect(p.design.taken).toEqual(s.part())
     expect(stale(s, draft)).toMatchObject({ pendingApply: false, operations: [] })
     expect(opsOf(p).find((o) => o.designOperationIds[0] === 'pocket1')!.tool).toBe(pocketTool)
-    expect(designIds(p)).toContain('drill5')
+    expect(designIds(p)).toContain('drill1+drill5') // joins its equal hole (DF146 G0)
     expect(s.plan(settled)).toEqual(settledBefore)
     // undoing the Apply reverts the automation and keeps the edits pending
     await s.undo()

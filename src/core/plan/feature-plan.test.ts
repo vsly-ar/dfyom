@@ -120,3 +120,34 @@ describe('feature operations in a plan', () => {
     )
   })
 })
+
+describe('clone groups in Plan (hardening DF146)', () => {
+  // G0, the user's 100 mm plate (TG #492): the bolt hole was planned before its Clones; the
+  // rebuild gave the new instances their own plan operations (grouped among themselves) and left
+  // the source's apart: "drill", "drill × 3", "countersink", "countersink × 3"
+  it('a rebuild after adding Clones merges the source and its instances (G0)', async () => {
+    const services = { toolpaths: createToolpathCache(), workers: createInProcessWorkers() }
+    const s = await planSetup({ part: false, services })
+    await s.run('design.hole.add', {
+      partId: s.partId,
+      center: ['20', '20'],
+      type: 'countersink',
+      diameter: '6',
+      csDiameter: '10',
+      csAngle: '90',
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { featureId: 'hole1' },
+      rows: [{ kind: 'offset', count: 3, du: '20', dv: '0' }],
+    })
+    await s.run('project.apply', {})
+    await s.run('plan.rebuild', { planId })
+    const plan = s.plan(planId)
+    expect(
+      opsOf(plan).map((o) => planOperationLabel(plan.design.part, o.designOperationIds)),
+    ).toEqual(['Bolt hole 1 · drill × 4', 'Bolt hole 1 · countersink × 4'])
+  })
+})

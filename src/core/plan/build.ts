@@ -46,7 +46,7 @@ import { takeDesignSnapshot } from './snapshot'
 import { designToolField, sameDesignToolField } from './design-tool'
 import { resolveTool } from './tool-resolution'
 import { isAid } from './aids'
-import { cutFirst, cutTest } from './cut'
+import { cutFirst, cutTest, type CutTest } from './cut'
 import { checkPartFits, sameValue } from './validity'
 
 export interface BuildContext {
@@ -123,6 +123,15 @@ function chamferKey(
   ].join('|')
 }
 
+/**
+ * The key the design operations sharing one plan operation have in common; undefined for an
+ * operation planned on its own. `byId`: the part's operations.
+ */
+export function groupKey(op: Operation, byId: ReadonlyMap<string, Operation>): string | undefined {
+  const direction = surfaceDirection(op.on, byId)
+  return drillKey(op, direction) ?? chamferKey(op, direction, byId)
+}
+
 /** Groups of design operation ids, one per plan operation, in design order (`all`: the part's). */
 export function groupOperations(
   ops: readonly Operation[],
@@ -132,8 +141,7 @@ export function groupOperations(
   const groups: string[][] = []
   const byKey = new Map<string, string[]>()
   for (const op of ops) {
-    const direction = surfaceDirection(op.on, byId)
-    const key = drillKey(op, direction) ?? chamferKey(op, direction, byId)
+    const key = groupKey(op, byId)
     const existing = key === undefined ? undefined : byKey.get(key)
     if (existing !== undefined) existing.push(op.id)
     else {
@@ -143,6 +151,62 @@ export function groupOperations(
     }
   }
   return groups
+}
+
+/**
+ * A rebuild's grouping of the kept plan operations (hardening DF146 G0): in each setup, plan
+ * operations with one group key merge into the one machining the operation first in design
+ * order, at its place and with its settings; `join` adds a group of new design operations to the
+ * kept plan operation of its key (false when there is none: it gets its own). A plan made before
+ * Clones (or another equal hole) was added thus plans the source and its instances as one, as
+ * `plan.create` does. A cut plan operation and an uncut one never merge (DF135). Ids in design
+ * order (path order).
+ */
+function mergeGroups(
+  setups: SetupDTO[],
+  ops: readonly Operation[],
+  isCut: CutTest,
+): { join: (designOperationIds: string[]) => boolean } {
+  const byId = new Map(ops.map((o) => [o.id, o]))
+  const index = new Map(ops.map((o, i) => [o.id, i]))
+  const at = (id: string) => index.get(id) ?? Infinity
+  const inOrder = (ids: readonly string[]) => [...ids].sort((a, b) => at(a) - at(b))
+  const first = (ids: readonly string[]) => Math.min(...ids.map(at))
+  const keyOf = (ids: readonly string[], cut: boolean): string | undefined => {
+    const op = byId.get(ids[0] ?? '')
+    const key = op === undefined ? undefined : groupKey(op, byId)
+    return key === undefined ? undefined : `${key}|${cut ? 'cut' : 'uncut'}`
+  }
+  const all = new Map<string, PlanOperationDTO>()
+  for (const s of setups) {
+    const keeper = new Map<string, PlanOperationDTO>()
+    for (const p of s.operations) {
+      const key = isAid(p) ? undefined : keyOf(p.designOperationIds, isCut(p))
+      if (key === undefined) continue
+      const k = keeper.get(key)
+      if (k === undefined || first(p.designOperationIds) < first(k.designOperationIds))
+        keeper.set(key, p)
+    }
+    const merged = new Map<PlanOperationDTO, string[]>()
+    s.operations = s.operations.filter((p) => {
+      const key = isAid(p) ? undefined : keyOf(p.designOperationIds, isCut(p))
+      const k = key === undefined ? undefined : keeper.get(key)
+      if (k === undefined || k === p) return true
+      merged.set(k, [...(merged.get(k) ?? k.designOperationIds), ...p.designOperationIds])
+      return false
+    })
+    for (const [k, ids] of merged) k.designOperationIds = inOrder(ids)
+    for (const [key, k] of keeper) if (!all.has(key)) all.set(key, k)
+  }
+  return {
+    join: (ids) => {
+      const key = keyOf(ids, isCut({ designOperationIds: ids }))
+      const k = key === undefined ? undefined : all.get(key)
+      if (k === undefined) return false
+      k.designOperationIds = inOrder([...k.designOperationIds, ...ids])
+      return true
+    },
+  }
 }
 
 function newPlanOperation(ids: IdGenerator, designOperationIds: string[]): PlanOperationDTO {
@@ -450,6 +514,7 @@ export function rebuildPlan(
   }
   if (parked.length > 0) plan.parked = parked
   else delete plan.parked
+  const keepers = mergeGroups(setups, ops, cutTest(plan.design.part))
   const covered = new Set([
     ...setups.flatMap((s) => s.operations.flatMap((p) => p.designOperationIds)),
     ...loose.flatMap((p) => p.designOperationIds),
@@ -457,7 +522,9 @@ export function rebuildPlan(
   const fresh = groupOperations(
     ops.filter((o) => !covered.has(o.id)),
     ops,
-  ).map((g) => newPlanOperation(c.ids, g))
+  )
+    .filter((g) => !keepers.join(g))
+    .map((g) => newPlanOperation(c.ids, g))
   const direction = operationDirections(
     [...setups.flatMap((s) => s.operations), ...loose, ...fresh],
     part.unwrap(),
