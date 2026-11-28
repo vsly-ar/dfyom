@@ -18,6 +18,7 @@ import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { runPlanHash } from '../../../../core/run/plan-hash'
 import type { RunStatus } from '../../../../core/run/service'
+import type { PlanStock } from '../../../../core/run/xy-zero'
 import {
   setupFrame,
   setupOrientation,
@@ -198,6 +199,16 @@ export function setupPlacement(
         : [{ id: p.id, name: p.name, n: i + 1, at: [p.frame[0], p.frame[1]] as const }],
     ),
   }
+}
+
+/**
+ * v0.5 RV5/RV6: the setup's stock as Set X/Y zero and Check alignment read it (seen from above in
+ * the setup frame: length along X, width along Y, the work zero from its front-left corner).
+ */
+export function setupStock(placed: SetupPlacement | undefined): PlanStock | undefined {
+  if (placed === undefined) return undefined
+  const [length, width, thickness] = placed.orientation.size
+  return { length, width, thickness, zero: placed.zero }
 }
 
 /**

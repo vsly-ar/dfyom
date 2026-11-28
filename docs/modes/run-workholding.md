@@ -63,7 +63,7 @@ How the guard answers ([Q185](#questions-for-the-user)): **a soft stop**, like a
 ## Go to and the touch-off spot
 
 - **Go to ([Q187](#questions-for-the-user)):** each step of `goToMoves` runs through `jogGuard` on every change of the fields. A contact is a finding next to the fields, as the existing checks ([run-goto.md § Checks](run-goto.md#checks)): "Step 3 (down to Z 1.000) hits Toe clamp 2: the collet nut stops 2 mm above it at Z 14.200." and Go is disabled. The path turns red from the contact. A checkbox **"Go anyway (the clamps are not where the plan says)"** under the finding enables Go for this target; it unchecks when the target changes. The safe order itself already keeps X/Y above the setup's clearance (highest item + margin, [workholding.md § Implementation notes](workholding.md#implementation-notes-df59)), so hits come from targets on or beside an item, a machine-frame target low in the travel, or no plan (5 mm safe height).
-- **"Move to touch-off spot"** ([z-reference.md](z-reference.md#implementation-notes-df69)) and the alignment pointer's moves ([alignment.md](alignment.md)) use the same check; a hit shows the finding in their dialog with the same "Go anyway".
+- **"Move to touch-off spot"** ([z-reference.md](z-reference.md#implementation-notes-df69)), the alignment pointer's moves ([alignment.md](alignment.md)) and Check alignment's pointer and Measure moves (v0.5 RV6, [alignment.md § Check alignment](alignment.md#check-alignment-rv6)) use the same check; a hit shows the finding in their dialog with the same "Go anyway".
 
 ## Live clearance
 

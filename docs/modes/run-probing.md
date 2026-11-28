@@ -84,7 +84,7 @@ The Probing section's **Set X/Y zero…** opens a dialog (at the window's end ed
 7. **Undo:** after a set, the Probing section shows **Undo zero change** until the next set or the connection closes: G54 X/Y back to what they were before the last set (the window's last change; another window's or a run's later change is not tracked).
 
 - **The value written:** a measured edge e (MPos) on an axis gets the plan's work coordinate w of that edge (the setup frame has the stock on `[0, L] × [0, W]`, the work coordinates are it less the setup's zero): G54 = e − w (X− edge: w = −zero_x; X+ edge: w = L − zero_x). Without a plan, w is the entered value.
-- **Not here:** hole and boss centres (no UI until a 3D probe, Q220), Z (Probe Z stays the Z method), rotated stock (RV6's alignment check measures it; an edge probe on a rotated stock measures where the probe touched).
+- **Not here:** hole and boss centres (no UI until a 3D probe, Q220), Z (Probe Z stays the Z method), rotated stock ([alignment.md § Check alignment](alignment.md#check-alignment-rv6) measures it with two edge routines; an edge probe on a rotated stock measures where the probe touched).
 
 ## Implementation (RV3)
 

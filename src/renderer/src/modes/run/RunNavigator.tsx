@@ -258,6 +258,10 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
   // v0.5 RV5: Set X/Y zero needs the work-zero gate and no program (the routine is a job)
   const xyZeroGate =
     gates.workZero ?? (activeJob(status) !== undefined ? runMessages.xyZero.gate.running : null)
+  // v0.5 RV6: Check alignment as Set X/Y zero, once G54 X/Y is set (the stops follow it)
+  const checkGate =
+    xyZeroGate ??
+    (status.workZero[0] === 0 && status.workZero[1] === 0 ? runMessages.checkAlign.zeroFirst : null)
   // one line per distinct reason (home, jog, work zero, disconnect), in that order
   const gated = [gates.home, gates.jog, gates.workZero, connected ? gates.disconnect : null]
   const reasons = [...new Set(gated.filter((r) => r !== null))].map((text, i) => ({
@@ -272,6 +276,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
     jog: reasonId(gates.jog),
     zero: reasonId(gates.workZero),
     connect: reasonId(gates.disconnect),
+    check: `${whyBase}-check`,
   }
 
   return (
@@ -533,6 +538,16 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
           >
             {runMessages.xyZero.button}
           </Button>
+          {/* v0.5 RV6: Check alignment (alignment.md#check-alignment-rv6), after the X/Y zero */}
+          <Button
+            disabled={checkGate !== null}
+            {...(checkGate === null
+              ? {}
+              : { 'aria-describedby': xyZeroGate === null ? ids.check : ids.zero })}
+            onClick={() => a.setCheckAlignOpen(true)}
+          >
+            {runMessages.checkAlign.button}
+          </Button>
           {zeroUndo === undefined ? null : (
             <Button
               variant="ghost"
@@ -549,6 +564,11 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             </Button>
           )}
         </div>
+        {xyZeroGate === null && checkGate !== null ? (
+          <p id={ids.check} className={styles['hint']}>
+            {checkGate}
+          </p>
+        ) : null}
         {/* v0.5 RV3: Test probe, the probe input live from `Pn:P` (run-probing.md) */}
         {connected ? (
           <p className={styles['hint']} role="status">

@@ -402,6 +402,118 @@ export const runMessages = {
     },
   },
 
+  /** v0.5 RV6: Check alignment (docs/modes/alignment.md#check-alignment-rv6). */
+  checkAlign: {
+    button: 'Check alignment…',
+    zeroFirst: 'Set the X/Y zero first: the stops are where the plan puts the stock.',
+    title: 'Check alignment',
+    description:
+      'Move the bit around the stock at a gap to see whether it is square to the axes, or measure an edge with the probe.',
+    view: 'Check',
+    pointer: 'Pointer',
+    measure: 'Measure',
+    stockPlan: (l: string, w: string, unit: string, setup: string) =>
+      `Stock ${l} × ${w} ${unit}, from ${setup}.`,
+    noPlan: 'No plan: enter the stock and where the work zero is on it.',
+    length: 'Length (X)',
+    width: 'Width (Y)',
+    zeroAt: 'Work zero at',
+    zeroCorners: {
+      '-1,-1': 'Front left',
+      '1,-1': 'Front right',
+      '1,1': 'Back right',
+      '-1,1': 'Back left',
+    } as Record<string, string>,
+    pattern: 'Pattern',
+    patterns: { corners: 'Corners', edges: 'Edges', perimeter: 'Perimeter', both: 'Both' },
+    gap: 'Gap',
+    gapHint: 'The bit’s axis this far outside each stock edge.',
+    height: 'Height',
+    heightHint: 'The tip this far above the stock top; below 0 it passes beside the edge.',
+    pointerSteps: (gap: string, height: string, unit: string) =>
+      `The bit’s axis stops ${gap} ${unit} outside the stock’s edges, the tip ${height} ${unit} ${height.startsWith('-') ? 'below' : 'above'} the top. Compare the gap between the bit and the edge at each stop: where it differs, the stock is turned. Move the stock, not the program, then set the X/Y zero again.`,
+    spindleOff: 'The spindle must be off. The machine moves only when you press a button.',
+    traceFeed: (feed: string, unit: string) =>
+      `Along the stock at ${feed} ${unit}; to the first stop at the jog feed, raised to the safe height first.`,
+    stops: 'Stops',
+    corners: {
+      '-1,-1': 'Front left corner',
+      '1,-1': 'Front right corner',
+      '1,1': 'Back right corner',
+      '-1,1': 'Back left corner',
+    } as Record<string, string>,
+    edges: {
+      'y-1': 'Front edge',
+      y1: 'Back edge',
+      'x-1': 'Left edge',
+      x1: 'Right edge',
+    } as Record<string, string>,
+    ends: {
+      y: { '-1': 'left end', '1': 'right end' },
+      x: { '-1': 'front end', '1': 'back end' },
+    } as Record<'x' | 'y', Record<string, string>>,
+    stopAt: (x: string, y: string) => `X ${x} Y ${y}`,
+    start: 'Go to the first stop',
+    startTrace: 'Start the trace',
+    next: 'Next',
+    previous: 'Previous',
+    continue: 'Continue',
+    again: 'Trace again',
+    moving: (name: string) => `Moving to the ${name}…`,
+    at: (name: string, n: number, total: number) =>
+      `At the ${name} (${n} of ${total}). Look at the gap to the stock edge.`,
+    traceDone: 'Back at the start: the trace is done.',
+    travel: 'A stop lies outside the machine’s travel: check the zero, or make the gap smaller.',
+    stopped: (x: string, y: string, z: string, unit: string) =>
+      `Stopped at X ${x} Y ${y} Z ${z} ${unit} (work).`,
+    problem: {
+      belowBottom: 'The height is below the stock’s bottom.',
+      sideTouches: (min: string, unit: string) =>
+        `Below the top the bit’s side would touch the edge: make the gap at least ${min} ${unit}.`,
+      negativeGap: 'The gap cannot be negative.',
+      invalid: 'Enter valid sizes.',
+    },
+    edge: 'Edge',
+    measureEdges: {
+      'y-1': 'Front edge (Y−)',
+      y1: 'Back edge (Y+)',
+      'x-1': 'Left edge (X−)',
+      x1: 'Right edge (X+)',
+    } as Record<string, string>,
+    measureNo:
+      'Measure touches the edge at two points: it needs the bit on a conductive stock or a 3D probe (Machine settings, Probe). Use the pointer to check by eye.',
+    measureSteps: (edge: string, kind: 'tool' | '3d', between: string, unit: string) =>
+      kind === 'tool'
+        ? `Put the clip on the bit and on the stock (it must conduct). It probes the ${edge} at two points ${between} ${unit} apart: Z on the top, then the edge from outside, at each.`
+        : `It probes the ${edge} with the 3D probe at two points ${between} ${unit} apart: Z on the top, then the edge from outside, at each.`,
+    measureGo: 'Measure',
+    measuring: (n: number) => `Probing point ${n} of 2…`,
+    measureFailed: 'Measure stopped: nothing was measured. The message above says why.',
+    points: 'Probed',
+    point: (
+      n: number,
+      edgeAxis: string,
+      value: string,
+      alongAxis: string,
+      along: string,
+      pm: string,
+      unit: string,
+    ) => `${n} · ${edgeAxis} ${value} ± ${pm} ${unit} at ${alongAxis} ${along} (machine)`,
+    angle: (deg: string, pm: string, ccw: boolean) =>
+      `Turned ${deg}° ${ccw ? 'counter-clockwise' : 'clockwise'} (± ${pm}°).`,
+    square: (tol: string, unit: string) =>
+      `Square: the far end is within ${tol} ${unit} of the near one.`,
+    nudge: (keep: string, move: string, mm: string, unit: string, toward: string) =>
+      `Keep the ${keep} where it is and move the ${move} ${mm} ${unit} toward ${toward}.`,
+    after:
+      'Then set the X/Y zero again and measure once more. Nothing was written: the program is not rotated.',
+    again2: 'Measure again',
+    close: 'Close',
+    gate: {
+      invalid: 'Enter a valid Ø.',
+    },
+  },
+
   /** DF69: "Move to touch-off spot" at a tool change (docs/modes/z-reference.md#dfyom-run). */
   touchOff: {
     button: 'Move to touch-off spot',
