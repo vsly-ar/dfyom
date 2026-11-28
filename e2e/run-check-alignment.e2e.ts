@@ -178,6 +178,12 @@ test('check alignment (v0.5 RV6): perimeter trace at the gap, Measure a turned s
   await dialog.getByRole('radio', { name: 'Measure' }).click()
   await expect(dialog.getByRole('radio', { name: 'Front edge (Y−)' })).toBeChecked()
   await expect(dialog.getByRole('textbox', { name: 'Bit Ø' })).toHaveValue('6.000')
+  // DF143: the probe check: "Touch probe" closes the virtual probe input for a moment
+  await dialog
+    .getByRole('group', { name: 'Probe input' })
+    .getByRole('button', { name: 'Touch probe' })
+    .click()
+  await expect(dialog.getByText('Probe tested: probing is enabled.')).toBeVisible()
   await dialog.getByRole('button', { name: 'Measure', exact: true }).click()
   const angle = dialog.locator('[data-measure-angle]')
   await expect(angle).toHaveText(/^Turned [\d.]+° counter-clockwise/, { timeout: 120_000 })

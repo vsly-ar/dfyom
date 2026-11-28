@@ -422,6 +422,12 @@ test('run: the later tool touches off on the faced floor, moves to its spot and 
   await move.getByRole('button', { name: 'Move' }).click()
   await expect(moveTo).toHaveCount(0)
   // the touch plate on the faced floor: Z0 there, 0.5 mm below the stock top
+  // DF143: the probe check: "Touch probe" closes the virtual probe input for a moment
+  await change
+    .getByRole('group', { name: 'Probe input' })
+    .getByRole('button', { name: 'Touch probe' })
+    .click()
+  await expect(change.getByText('Probe tested: probing is enabled.')).toBeVisible()
   await change.getByRole('button', { name: 'Probe Z' }).click()
   const probe = page.getByRole('alertdialog', { name: 'Probe Z?' })
   await expect(

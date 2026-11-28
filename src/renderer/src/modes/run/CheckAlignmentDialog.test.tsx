@@ -87,7 +87,7 @@ async function renderRun(opts: { probe?: 'tool'; zero?: boolean } = {}) {
   await screen.findByRole('group', { name: 'Machine' })
   await r.user.click(within(nav()).getByRole('button', { name: 'Home' }))
   await within(screen.getByRole('group', { name: 'Machine' })).findByText('Idle')
-  return { ...r, nav, at, callsOf, probeResults }
+  return { ...r, nav, at, callsOf, probeResults, push }
 }
 
 const dialog = () => screen.getByRole('dialog', { name: 'Check alignment' })
@@ -205,6 +205,13 @@ describe('Check alignment (v0.5 RV6)', () => {
     const bit = within(dialog()).getByRole('textbox', { name: 'Bit Ø' })
     await t.user.clear(bit)
     await t.user.type(bit, '6')
+    // DF143: Measure waits for the probe check (the input touching, then open), shown in the dialog
+    const measure = within(dialog()).getByRole('button', { name: 'Measure' })
+    expect(measure).toBeDisabled()
+    expect(measure).toHaveAccessibleDescription(/Touch the plate to the bit to test the probe/)
+    expect(within(dialog()).getByRole('group', { name: 'Probe input' })).toBeInTheDocument()
+    t.push({ pins: 'P' })
+    t.push({ pins: '' })
     // the front edge rises 0.5 mm over the 70 mm between the probes
     t.probeResults.push(
       { cycle: 'edge', y: { value: -150.1, uncertainty: 0.001 }, start: [-235, -145, -75] },

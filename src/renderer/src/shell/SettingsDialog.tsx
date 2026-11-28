@@ -9,6 +9,7 @@ import { useEffect, useId, useState } from 'react'
 import type { LocalHttpState } from '../../../shared/preload-api'
 import { JOG_KEY_STYLES, THEMES, type ThemeSetting } from '../../../shared/settings'
 import { Quantity } from '../../../core/quantity/quantity'
+import { BACK_OFF_MAX_MM, BACK_OFF_MIN_MM } from '../../../core/run/back-off'
 import type { UnitId } from '../../../core/quantity/units'
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import { designMessages } from '../messages/design'
@@ -44,6 +45,20 @@ const positive = (q: Quantity): AppResult<Quantity> =>
         issues: [{ path: ['exact'], rule: 'positive', message: m.snapGridPositive }],
       })
 
+/** DF143: the back-off distance's range (mm). */
+const backOffRange = (q: Quantity): AppResult<Quantity> =>
+  q.canonical >= BACK_OFF_MIN_MM && q.canonical <= BACK_OFF_MAX_MM
+    ? Ok(q)
+    : fail('model.invariant', 'out of range', {
+        issues: [
+          {
+            path: ['exact'],
+            rule: 'range',
+            message: `${BACK_OFF_MIN_MM}–${BACK_OFF_MAX_MM} mm`,
+          },
+        ],
+      })
+
 export function SettingsDialog(): React.JSX.Element {
   const { bridge } = useShell()
   const open = useUi((s) => s.settingsOpen)
@@ -59,6 +74,8 @@ export function SettingsDialog(): React.JSX.Element {
   const jogKeysHint = useId()
   const homeHint = useId()
   const reconnectHint = useId()
+  const advancedHint = useId()
+  const backOffHint = useId()
   const delays: readonly number[] = AUTO_APPLY_DELAYS.includes(
     settings.autoApplyDelay as (typeof AUTO_APPLY_DELAYS)[number],
   )
@@ -240,6 +257,39 @@ export function SettingsDialog(): React.JSX.Element {
               {m.autoReconnectHint}
             </p>
           </div>
+          {/* DF143: advanced user (docs/modes/run.md#advanced-user-df143) */}
+          <div className={styles['settingRow']}>
+            <Switch
+              label={m.advancedUser}
+              checked={settings.advancedUser}
+              onCheckedChange={(advancedUser) => update({ advancedUser })}
+              aria-describedby={advancedHint}
+            />
+            <p id={advancedHint} className={styles['settingHint']}>
+              {m.advancedUserHint}
+            </p>
+          </div>
+          {settings.advancedUser ? (
+            <div className={styles['settingRow']}>
+              <span className={styles['settingLabel']} aria-hidden="true">
+                {m.limitBackOff}
+              </span>
+              <div className={styles['settingSelect']}>
+                <QuantityInput
+                  label={m.limitBackOff}
+                  stepKind="small"
+                  kind="length"
+                  defaultUnit="mm"
+                  value={gridValue(settings.limitBackOff, 'mm')}
+                  validate={backOffRange}
+                  onCommit={(q) => update({ limitBackOff: q.canonical })}
+                />
+              </div>
+              <p id={backOffHint} className={styles['settingHint']}>
+                {m.limitBackOffHint}
+              </p>
+            </div>
+          ) : null}
         </InspectorGroup>
         <InspectorGroup title={m.groups.agents} className={styles['settingsGroup']}>
           <div className={styles['settingRow']}>

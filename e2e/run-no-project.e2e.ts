@@ -96,6 +96,13 @@ test('Run without a project: start panel → Run → connect the emulator → ho
   await expect(cell('Machine position X')).toHaveText('-11.000')
   await expect(machine.getByText('Idle')).toBeVisible()
   // the touch plate from the machine profile
+  await expect(navigator.getByRole('button', { name: 'Probe Z' })).toBeDisabled()
+  // DF143: the probe check: "Touch probe" closes the virtual probe input for a moment
+  await navigator
+    .getByRole('group', { name: 'Probe input' })
+    .getByRole('button', { name: 'Touch probe' })
+    .click()
+  await expect(navigator.getByText('Probe tested: probing is enabled.')).toBeVisible()
   await expect(navigator.getByRole('button', { name: 'Probe Z' })).toBeEnabled()
   await render(page, 'df80-run-no-project-connected')
 

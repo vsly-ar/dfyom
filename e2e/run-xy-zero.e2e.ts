@@ -128,6 +128,12 @@ test('set X/Y zero (v0.5 RV4/RV5): corner probe with the bit, →0 on the corner
   await expect(dialog.getByText(/Plan zero: this corner/)).toBeVisible()
   await expect(dialog.getByRole('radio', { name: 'Probe' })).toBeChecked()
   await expect(dialog.getByRole('textbox', { name: 'Bit Ø' })).toHaveValue('6.000')
+  // DF143: the probe check: "Touch probe" closes the virtual probe input for a moment
+  await dialog
+    .getByRole('group', { name: 'Probe input' })
+    .getByRole('button', { name: 'Touch probe' })
+    .click()
+  await expect(dialog.getByText('Probe tested: probing is enabled.')).toBeVisible()
   await shot(page, 'rv5-1-pick-probe')
   await dialog.getByRole('button', { name: 'Probe', exact: true }).click()
   await expect(dialog.getByText(/^G54 X: -400\.000 → -396\.8\d\d mm/)).toBeVisible({

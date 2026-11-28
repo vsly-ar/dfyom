@@ -29,6 +29,17 @@ Every probing feature of v0.5 (edges, corners, hole centres, the X/Y zero, the a
 
 The navigator's Probing section shows the probe input live while connected, from `Pn:P` of each report: "Probe input: open. Touch the clip to the plate to test it." or "Probe input: touching. Probing waits until it reads open." (a polite `role="status"`, so touching the clip to the plate is announced). It is the check before the first cycle; on the virtual machine `Pn:P` comes from the probe scene ([grbl.md](../architecture/grbl.md#probe-scene-rv3)).
 
+## Probe check (DF143)
+
+Hardening DF143 (dogfood, TG #488): a probe cycle whose wire or clip is not connected drives the bit into the stock (GRBL never sees the contact). So **every probing action waits for the probe check**, and each one shows the probe input live and prominently beside it: Probe Z (navigator, tool-change dialog, setup-change prompt), Probe in Set X/Y zero, Measure in Check alignment (and the X/Y routines through them).
+
+- **The input:** a notice group "Probe input" with a chip **Open** / **Touching** (from `Pn:P` of each report) and one polite `role="status"` line: before the check "Touch the plate to the bit to test the probe.", then "Touching: now let go.", then "Probe tested: probing is enabled." (afterwards a touching input reads "Touching: probing waits until it reads open."). The group has the warning tone until the check passes.
+- **The check:** the probe buttons stay disabled (their `aria-describedby` points at the prompt; "Touch the plate to the bit to test the probe first." where a dialog lists its reasons) until the input read **touching, then open** once.
+- **Scope:** per window and per connection, for the probe kind in use (the plan's or the manual machine's `probe.kind`). A disconnect, a lost connection or a reconnect starts it again, and so does another probe kind (a touch plate and a 3D probe are separate wires). It is a UI rule like the confirmations: the host and agents are not gated (an agent can't touch a plate; `machine: true` commands are UI-only on a real connection anyway, Q50).
+- **Virtual machine:** the group has a **"Touch probe"** button that closes the virtual probe input for 0.4 s (`run.simulateInput('probe', true)`, then `false`; machine action `simulateInput`, emulator `setProbeShorted`), the same way the limit switches are practised ([run-machine.md § After a hard limit](run-machine.md#after-a-hard-limit-df134)).
+- The [Test probe](#test-probe-rv3) line is replaced by this group in the navigator; the touch-off readout of Set X/Y zero (`data-touch-readout`) stays.
+- Code: `src/renderer/src/modes/run/probe-check.ts` (pure steps), `ProbeInput.tsx` (`useProbeCheck`, the group), the store's `probeCheck`.
+
 ## Probe settings (RV4)
 
 The probe is one optional object field `probe` on the library machine ([library.md](../architecture/library.md#machine)), edited in the Run inspector's Machine settings › Probe and the Library window's Machine tab; unset is a Z touch plate with the defaults. No `schemaVersion` change: every part is optional.

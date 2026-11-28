@@ -41,6 +41,7 @@ import { useJogControls, useMachineJog } from './JogPad'
 import { formatFeed, formatLength, goToGate } from './machine-state'
 import { findingText, mayGo, MoveGuardFinding, useGoAnyway, useMoveGuard } from './MoveGuardFinding'
 import { machineProbe, planRunInfo, setupClearance, setupPlacement, setupStock } from './plan-info'
+import { ProbeInput, useProbeCheck } from './ProbeInput'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type RunStore } from './run-store'
 import { RunDialogFooter } from './RunStop'
 import { useRunWorkholding } from './useRunWorkholding'
@@ -149,6 +150,7 @@ function CheckOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element 
   const setupName =
     plan === undefined ? undefined : planRunInfo(plan, setupId).setup.name.toLowerCase()
   const probe = machineProbe(plan, machines, machineId)
+  const probeOk = useProbeCheck(doc)
   const canMeasure = (MEASURE_KINDS as readonly string[]).includes(probe.kind)
 
   // the stock: the plan's, or entered (length, width and the corner the work zero is on)
@@ -365,7 +367,9 @@ function CheckOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element 
         ? m.gate.invalid
         : stock === undefined
           ? m.problem.invalid
-          : null)
+          : !probeOk
+            ? runMessages.why.probeCheck
+            : null)
   const canMeasureNow =
     !moving && measureWhy === null && measurePath.length > 0 && mayGo(guard, anyway)
 
@@ -703,6 +707,8 @@ function CheckOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element 
                   )}{' '}
                   {runMessages.xyZero.spindleOff.replace('Probe', 'Measure')}
                 </p>
+                {/* DF143: the probe input live, and the probe check before the first probe */}
+                <ProbeInput doc={doc} />
               </>
             )}
             {measure.kind === 'done' && res !== undefined ? (

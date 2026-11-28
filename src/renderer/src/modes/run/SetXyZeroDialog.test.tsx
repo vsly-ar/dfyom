@@ -175,6 +175,14 @@ describe('Set X/Y zero (v0.5 RV5)', () => {
     await t.user.clear(bit)
     await t.user.type(bit, '6.35')
     expect(within(dialog()).getByText(/the clip on the bit and on the stock/)).toBeInTheDocument()
+    // DF143: probing waits for the probe check, the probe input live in the dialog
+    expect(within(dialog()).getByRole('button', { name: 'Probe' })).toBeDisabled()
+    const input = within(dialog()).getByRole('group', { name: 'Probe input' })
+    expect(within(input).getByText('Open')).toBeInTheDocument()
+    await expectNoAxeViolations()
+    t.push({ pins: 'P' })
+    expect(within(input).getByText('Touching')).toBeInTheDocument()
+    t.push({ pins: '' })
     t.setProbeResult({
       cycle: 'corner',
       top: { value: -80, uncertainty: 0.001 },

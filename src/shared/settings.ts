@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { AnchorDtoSchema } from '../core/design/part.dto'
 import { UnitSystemSchema } from '../core/project/document'
 import { APP_MODES } from '../core/modes'
+import { BACK_OFF_DEFAULT_MM, BACK_OFF_MAX_MM, BACK_OFF_MIN_MM } from '../core/run/back-off'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
@@ -78,6 +79,14 @@ const fields = {
    */
   skipHomeConfirm: z.array(z.string().min(1)).max(1000),
   /**
+   * Hardening DF143: "Advanced user" (off by default): skips the motion confirmations listed in
+   * docs/modes/run.md#advanced-user-df143 and offers "Unlock and back off" after a limit switch hit
+   * while jogging. Confirmations that guard data or a run's pre-flight stay.
+   */
+  advancedUser: z.boolean(),
+  /** DF143: how far "Unlock and back off" jogs off a limit switch (mm). */
+  limitBackOff: z.number().min(BACK_OFF_MIN_MM).max(BACK_OFF_MAX_MM),
+  /**
    * DF129 RC4: after a connection lost during a run, reconnect to the same device by itself (reads
    * only, never moves; docs/modes/run-recovery.md#auto-reconnect); default on.
    */
@@ -128,6 +137,8 @@ export const AppSettingsSchema = z.object({
   jogKeys: fields.jogKeys.default('game'),
   skipHomeConfirm: fields.skipHomeConfirm.default([]),
   autoReconnect: fields.autoReconnect.default(true),
+  advancedUser: fields.advancedUser.default(false),
+  limitBackOff: fields.limitBackOff.default(BACK_OFF_DEFAULT_MM),
   jogFeed: fields.jogFeed.default({}),
   cuttingJogFeed: fields.cuttingJogFeed.default({}),
   jogStep: fields.jogStep.default({}),
@@ -166,6 +177,8 @@ export function mergeSettings(
     jogKeys: patch.jogKeys ?? current.jogKeys,
     skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
     autoReconnect: patch.autoReconnect ?? current.autoReconnect,
+    advancedUser: patch.advancedUser ?? current.advancedUser,
+    limitBackOff: patch.limitBackOff ?? current.limitBackOff,
     jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
     cuttingJogFeed: { ...current.cuttingJogFeed, ...(patch.cuttingJogFeed ?? {}) },
     jogStep: { ...current.jogStep, ...(patch.jogStep ?? {}) },

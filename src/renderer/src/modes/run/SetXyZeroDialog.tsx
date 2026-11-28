@@ -35,6 +35,7 @@ import { JogPad, useJogControls } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
 import { findingText, mayGo, MoveGuardFinding, useGoAnyway, useMoveGuard } from './MoveGuardFinding'
 import { machineProbe, setupPlacement, setupStock } from './plan-info'
+import { ProbeInput, useProbeCheck } from './ProbeInput'
 import { NO_PLAN, useRun, useRunStore, useRunUnits, type ProbedValue } from './run-store'
 import { RunDialogFooter } from './RunStop'
 import { useRunWorkholding } from './useRunWorkholding'
@@ -85,6 +86,7 @@ function XyZeroOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
   const jog = useJogControls(doc)
   const wh = useRunWorkholding()
   const ids = { jog: useId(), why: useId(), finding: useId() }
+  const probeOk = useProbeCheck(doc)
 
   const plan = planId === undefined || planId === NO_PLAN ? undefined : doc?.plans[planId]
   const placed = plan === undefined ? undefined : setupPlacement(plan, setupId, units)
@@ -184,7 +186,15 @@ function XyZeroOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
     (activeJob(status) !== undefined ? m.gate.running : status.spindle > 0 ? m.gate.spindle : null)
   const probeWhy =
     gate ??
-    (!canProbe ? m.probeKindNo : !plateReady ? m.probeGeometryNo : !validD ? m.gate.invalid : null)
+    (!canProbe
+      ? m.probeKindNo
+      : !plateReady
+        ? m.probeGeometryNo
+        : !validD
+          ? m.gate.invalid
+          : !probeOk
+            ? runMessages.why.probeCheck
+            : null)
   const canProbeNow = probeWhy === null && !busy && mayGo(guard, anyway)
   const touchedAll = axes.every((a) => touches[a] !== undefined)
   const touchWhy =
@@ -442,6 +452,8 @@ function XyZeroOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
                     {m.spindleOff}
                   </p>
                 ) : null}
+                {/* DF143: the probe input live, and the probe check before the first probe */}
+                {canProbe ? <ProbeInput doc={doc} /> : null}
                 {guard.finding === undefined ? null : (
                   <MoveGuardFinding
                     id={ids.finding}

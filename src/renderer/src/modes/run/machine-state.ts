@@ -173,11 +173,14 @@ export function runGates(s: RunStatus, opts: { planChosen: boolean }): RunGates 
         ? m.why.running
         : alarm || !s.homed
           ? m.why.homeFirst
-          : !idle
-            ? m.why.busy
-            : opts.planChosen
-              ? null
-              : m.why.noPlan),
+          : // DF143: backed off a limit switch: home before cutting (the host refuses too)
+            s.positionUnverified === true
+            ? m.why.unverified
+            : !idle
+              ? m.why.busy
+              : opts.planChosen
+                ? null
+                : m.why.noPlan),
     disconnect: job ? m.why.running : null,
   }
 }

@@ -46,6 +46,12 @@ import {
   prepareGcodeFile,
   type PreparedGcodeFile,
 } from '../../../../core/run/gcode-file'
+import {
+  NO_PROBE_CHECK,
+  probeCheckForKind,
+  probeCheckOnStatus,
+  type ProbeCheck,
+} from './probe-check'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -381,6 +387,10 @@ export interface RunState {
   readonly zeroUndo: { readonly before: XY; readonly after: XY } | undefined
   /** v0.5 RV5: the plan setup the virtual machine's stock was laid for, in this connection. */
   readonly virtualStockKey: string | undefined
+  /** DF143: the probe check of this connection (docs/modes/run-probing.md#probe-check-df143). */
+  readonly probeCheck: ProbeCheck
+  /** DF143: the probe kind in use; another kind starts the probe check again. */
+  setProbeKind(kind: string): void
 
   /** DF93: reads and prepares a gCode file (main chose it and this window). */
   loadFile(path: string): Promise<void>
@@ -457,6 +467,8 @@ export interface RunState {
   openRecoveryStart(at: StartAt, programHash: string | undefined): void
   home(): Promise<void>
   unlock(): Promise<void>
+  /** DF143: "Unlock and back off" `distance` mm (`run.machine.backOff`, a job). */
+  backOff(distance: number): Promise<void>
   jog(axis: Axis, mm: number, feed: number): Promise<void>
   jogCancel(): Promise<void>
   /**
@@ -845,6 +857,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       checkAlignOpen: false,
       zeroUndo: undefined,
       virtualStockKey: undefined,
+      probeCheck: NO_PROBE_CHECK,
+      setProbeKind: (kind) => {
+        const next = probeCheckForKind(get().probeCheck, kind)
+        if (next !== get().probeCheck) set({ probeCheck: next })
+      },
       startProgram: undefined,
       pending: [],
       probeJobId: undefined,
@@ -1057,6 +1074,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       home: () => job('run.machine.home'),
       unlock: async () => void (await call('run.machine.unlock')),
+      backOff: (distance) => job('run.machine.backOff', { distance }),
       async jog(axis, mm, feed) {
         const request: JogRequest = { kind: 'step', axis: axisIndex(axis), mm, feed }
         const plan = planJog(request)
@@ -1423,7 +1441,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   }
 
   const onStatus = (status: RunStatus): void => {
-    store.setState({ status })
+    const probeCheck = probeCheckOnStatus(store.getState().probeCheck, status)
+    store.setState({ status, probeCheck })
     onJogStatus(status)
     // a closed connection ends the setup sequence (the stock is no longer on a known machine)
     if (status.connection.state === 'closed' && store.getState().settingsCheck !== undefined)
