@@ -91,7 +91,6 @@ const SurfaceMapSchema = z
     maxRange: z.number().exactOptional(),
   })
   .strict()
-type SurfaceMapInput = z.output<typeof SurfaceMapSchema>
 
 /** The map for the export once it parses and belongs to this run (`surfaceMapZero`), or none. */
 function followMap(
