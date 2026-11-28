@@ -34,6 +34,7 @@ import { GoToDialog } from './GoToDialog'
 import { SetXyZeroDialog } from './SetXyZeroDialog'
 import { CheckAlignmentDialog } from './CheckAlignmentDialog'
 import { WorkAreaDialog } from './WorkAreaDialog'
+import { CalibrationDialog } from './CalibrationDialog'
 import { RepeatabilityDialog } from './RepeatabilityDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
@@ -68,6 +69,7 @@ export function RunDialogs(): React.JSX.Element {
       <CheckAlignmentDialog doc={doc} />
       <WorkAreaDialog doc={doc} />
       <RepeatabilityDialog doc={doc} />
+      <CalibrationDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>

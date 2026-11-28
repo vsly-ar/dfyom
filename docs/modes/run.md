@@ -292,6 +292,7 @@ A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is i
 - Write GRBL settings (`$x=`), send raw gCode or `$` lines (no MDI console, Q52), or restart a program at an arbitrary line. (Reconnecting on its own is allowed since DF129 RC4 after a loss during a run, § 6: it only resets and reads.)
 - Stream a program it did not export, in the same job, from a finalized plan at the live work zero; except an external G-code file the user starts from the app after its own checks ([DF93](#run-an-external-g-code-file-df93)), streamed as the file says (only `M6` becomes the tool-change marker).
 - Change a plan's machine copy to match the controller silently ([library.md](../architecture/library.md#grbl--import)).
+- **Accepted (v0.5 RV9, Q222):** streaming a calibration program DFYOM generated for the open plan's setup, with every check of a plan run ([run-calibration.md](run-calibration.md#running)).
 - **Accepted (DF129, D79; in force when built):** starting at a line with a generated lead-in instead of never at an arbitrary line ([run-recovery.md § Start from a line](run-recovery.md#start-from-a-line)).
 
 ### Advanced user (DF143)

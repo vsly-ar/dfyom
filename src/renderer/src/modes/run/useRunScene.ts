@@ -70,6 +70,8 @@ export function useRunScene(mode: AppMode): RunScene | null {
   const ended = useRun((s) => s.ended)
   const file = useRun((s) => s.file)
   const fileLines = file?.state === 'ready' ? file.prepared.lines : undefined
+  // v0.5 RV9: a checked calibration cut is drawn instead of the plan's program (run-calibration.md)
+  const calibration = useRun((s) => s.calibrationPreview)
   const plan =
     fileLines === undefined && replica.status === 'open' && planId !== undefined
       ? replica.doc.plans[planId]
@@ -167,12 +169,13 @@ export function useRunScene(mode: AppMode): RunScene | null {
   const cut = info?.cut
   const lines = useMemo((): ToolpathLines | null => {
     if (fileLines !== undefined) return fileToolpathLines(fileLines)
+    if (calibration !== undefined) return fileToolpathLines(calibration)
     if (read === null) return null
     const linked =
       read.current && lowered.length > 0 ? linkedToolpaths(read.toolpaths, lowered) : read.toolpaths
     const program = linked.filter((_, i) => cut?.has(read.ids[i]!) !== true)
     return program.length === 0 ? null : toolpathLines(program)
-  }, [read, lowered, fileLines, cut])
+  }, [read, lowered, fileLines, calibration, cut])
 
   // playback: a cursor that only moves forward during one run
   const cursor = useRef({ jobId: undefined as string | undefined, done: 0 })

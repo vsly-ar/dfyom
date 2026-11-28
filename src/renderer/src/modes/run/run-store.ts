@@ -384,6 +384,10 @@ export interface RunState {
   readonly workAreaOpen: boolean
   /** v0.5 RV8: the homing repeatability dialog is open (run-machine.md#homing-repeatability-rv8). */
   readonly repeatOpen: boolean
+  /** v0.5 RV9: the calibration cut dialog is open (run-calibration.md). */
+  readonly calibrationOpen: boolean
+  /** v0.5 RV9: the checked calibration program the viewport previews instead of the plan's. */
+  readonly calibrationPreview: readonly string[] | undefined
   /**
    * v0.5 RV5: the last X/Y zero this window set, for "Undo zero change": G54 X/Y before and
    * after (MPos mm); dropped when the connection closes.
@@ -517,6 +521,8 @@ export interface RunState {
   setCheckAlignOpen(open: boolean): void
   setWorkAreaOpen(open: boolean): void
   setRepeatOpen(open: boolean): void
+  setCalibrationOpen(open: boolean): void
+  setCalibrationPreview(lines: readonly string[] | undefined): void
   /**
    * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
    * failed or was stopped (the banner or the alarm panel says why).
@@ -865,6 +871,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       checkAlignOpen: false,
       workAreaOpen: false,
       repeatOpen: false,
+      calibrationOpen: false,
+      calibrationPreview: undefined,
       zeroUndo: undefined,
       virtualStockKey: undefined,
       probeCheck: NO_PROBE_CHECK,
@@ -1212,6 +1220,13 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setCheckAlignOpen: (checkAlignOpen) => set({ checkAlignOpen }),
       setWorkAreaOpen: (workAreaOpen) => set({ workAreaOpen }),
       setRepeatOpen: (repeatOpen) => set({ repeatOpen }),
+      setCalibrationOpen: (calibrationOpen) =>
+        set(
+          calibrationOpen
+            ? { calibrationOpen }
+            : { calibrationOpen, calibrationPreview: undefined },
+        ),
+      setCalibrationPreview: (calibrationPreview) => set({ calibrationPreview }),
       async probeRoutine(args) {
         const r = await call('run.machine.probe', args)
         if (!r.ok) return undefined

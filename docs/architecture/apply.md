@@ -156,6 +156,7 @@ Commands that consume the confirmed design, or leave the project, apply first. T
 | `plan.export`                                                 | gCode reflects the applied design and current toolpaths.               |
 | `run.job.start`                                               | The pre-flight shows the applied plan.                                 |
 | `run.job.check`                                               | The pre-flight's soft-limit result (DF46) is the start's.              |
+| `run.calibration.check`, `run.calibration.start`              | A calibration cut (RV9) reads the plan's tools and toolpaths.          |
 | `plan.create`, `plan.rebuild`, `plan.status.set` into `draft` | They copy the design into a plan; the tool choice must have run first. |
 
 The working-folder flush and a close **without** saving do not apply: pending edits stay recoverable as they are.

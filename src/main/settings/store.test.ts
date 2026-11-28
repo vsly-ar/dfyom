@@ -52,6 +52,7 @@ describe('settings store', () => {
       inspectorGroups: {},
       inspectorTabs: {},
       homingRepeatability: {},
+      calibration: {},
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

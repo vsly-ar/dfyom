@@ -33,6 +33,7 @@ import {
   type TargetReading,
 } from './homing-repeatability'
 import { STILL_STATES } from './grbl/sender'
+import { runCalibrationCheck, runCalibrationStart } from './calibration-job'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
 import {
@@ -1246,6 +1247,8 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runJobCheck,
   runJobContinue,
   runTimeScaleSet,
+  runCalibrationCheck,
+  runCalibrationStart,
 ]
 export const RUN_QUERIES: readonly QueryDef[] = [runStatusGet, runSettingsCheck]
 

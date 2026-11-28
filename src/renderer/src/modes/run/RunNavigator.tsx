@@ -491,6 +491,15 @@ export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JS
             >
               {runMessages.repeat.button}
             </Button>
+            {/* v0.5 RV9: calibration cuts on the plan's stock (run-calibration.md) */}
+            {!manual ? (
+              <Button
+                disabled={activeJob(status) !== undefined}
+                onClick={() => a.setCalibrationOpen(true)}
+              >
+                {runMessages.calibration.button}
+              </Button>
+            ) : null}
           </div>
         ) : null}
         <ConfirmDialog
