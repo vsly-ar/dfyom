@@ -254,9 +254,10 @@ export function planOperationInputs(
       const d = through.get(o.kind === 'profile' && o.roughing === true ? o.roughingOf! : o.id)
       if (d !== undefined) throughDepths.set(o.id, d)
     }
-    // facings, pockets and profiles machine one design operation each
+    // facings, pockets, profiles and Lines machine one design operation each (a recut Line's
+    // material top: DF135 C4 follow-up)
     const material =
-      e.kind === 'facing' || e.kind === 'pocket' || e.kind === 'profile'
+      e.kind === 'facing' || e.kind === 'pocket' || e.kind === 'profile' || e.kind === 'line'
         ? planMaterialBands(plan, port).get(e.ops[0]?.id ?? '')
         : undefined
     const materials = new Map<string, MaterialBand>()

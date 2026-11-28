@@ -269,7 +269,10 @@ export interface LineCutReport {
 
 /**
  * One line's passes (the tool above its start at clearance before, at clearance after).
- * Returns where it ended (XY).
+ * Returns where it ended (XY). With `top` (below `onZ`: DF135 C4, a recut Line's as-cut groove
+ * cut down to there along the line) the floor is already cut at `top`: the passes nowhere below it
+ * are dropped (the last is always kept) and the first kept pass enters from it.
+ * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
  */
 export function cutLine(
   b: MoveBuilder,
@@ -278,11 +281,13 @@ export function cutLine(
   c: LineCutting,
   st: LineStrategy,
   heights: { readonly clearanceHeight: number; readonly retractHeight: number },
+  top?: number,
 ): LineCutReport & { readonly end: Vec2 } {
   const { path, z } = cut
   const L = path.length
   const deepest = Math.min(...z.z)
   const n = linePassCount(onZ - deepest, c.stepdown)
+  const floor = top === undefined ? onZ : Math.min(onZ, top)
   const tan = Math.tan((st.rampAngle * Math.PI) / 180)
   const at = (s: number, h: number): Vec3 => {
     const p = path.point(s)
@@ -290,19 +295,26 @@ export function cutLine(
   }
   const retract = onZ + heights.retractHeight
   const rampLengths: number[] = []
-  let prev = flatZ(L, onZ)
+  // the floor already cut: the old groove's, never below the line itself
+  let prev = floor < onZ ? maxZ(flatZ(L, floor), z) : flatZ(L, onZ)
   let here = 0
+  // passes cut so far (the first enters from clearance; open lines alternate by it)
+  let cuts = 0
   const zf = (f: ZProfile) => (s: number) => evalZ(f, path.fold(s))
   for (let k = 1; k <= n; k++) {
     const target = passTarget(z, onZ, k, c.stepdown)
+    // C4: a pass nowhere below the as-cut groove's floor is in the air
+    if (k < n && floor < onZ && Math.min(...target.z) >= floor - EPS) continue
+    const first = cuts === 0
+    cuts++
     if (path.closed) {
       // a closed line: from where the last pass ended, down along the loop, then one lap
       const sA = here
       const zA = evalZ(prev, path.fold(sA))
-      if (k === 1) {
+      if (first) {
         b.rapid(at(sA, heights.clearanceHeight))
         b.rapid(at(sA, retract))
-        b.line(at(sA, onZ), c.plungeRate)
+        b.line(at(sA, evalZ(prev, path.fold(sA))), c.plungeRate)
       }
       let Lr = 0
       if (st.entry === 'plunge') b.line(at(sA, evalZ(target, path.fold(sA))), c.plungeRate)
@@ -322,12 +334,12 @@ export function cutLine(
       continue
     }
     // an open line: alternating direction, ramp-back from Lr ahead
-    const fwd = k % 2 === 1
+    const fwd = cuts % 2 === 1
     const sA = fwd ? 0 : L
     const dir = fwd ? 1 : -1
     const zA = evalZ(target, sA)
     if (st.entry === 'plunge') {
-      if (k === 1) {
+      if (first) {
         b.rapid(at(sA, heights.clearanceHeight))
         b.rapid(at(sA, retract))
       }
@@ -338,7 +350,7 @@ export function cutLine(
       Lr = Math.max(Lr, (evalZ(prev, sA + dir * Math.min(L, Lr)) - zA) / tan)
       if (Lr <= L) {
         const sR = sA + dir * Lr
-        if (k === 1) {
+        if (first) {
           b.rapid(at(sR, heights.clearanceHeight))
           b.rapid(at(sR, retract))
           b.line(at(sR, evalZ(prev, sR)), c.plungeRate)
@@ -355,7 +367,7 @@ export function cutLine(
         const zS = evalZ(prev, sA)
         const legs = 2 * Math.ceil(Lr / (2 * L) - 1e-9)
         const drop = zS - zA
-        if (k === 1) {
+        if (first) {
           b.rapid(at(sA, heights.clearanceHeight))
           b.rapid(at(sA, retract))
           b.line(at(sA, zS), c.plungeRate)
@@ -377,7 +389,7 @@ export function cutLine(
   }
   const end = path.point(here)
   b.rapid([end[0], end[1], heights.clearanceHeight])
-  return { passes: n, rampLengths, end }
+  return { passes: cuts, rampLengths, end }
 }
 
 export function generateLine(input: LineInput, steps: Steps = noSteps): AppResult<Toolpath> {
@@ -422,7 +434,15 @@ export function generateLine(input: LineInput, steps: Steps = noSteps): AppResul
     const l0 = left.splice(best, 1)[0]!
     const l = flip ? reversed(l0) : l0
     const path = new LinePath(startAtLongest(l), l.closed)
-    const r = cutLine(b, { path, z: zOf(l.profile, op.onZ) }, op.onZ, c, st, heights)
+    const r = cutLine(
+      b,
+      { path, z: zOf(l.profile, op.onZ) },
+      op.onZ,
+      c,
+      st,
+      heights,
+      input.material?.top,
+    )
     here = r.end
   }
   return Ok(toolpath(input, b.build()))

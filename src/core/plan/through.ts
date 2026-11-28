@@ -16,7 +16,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { Direction } from '../geometry/face'
 import { faceWaste, type FaceWaste } from '../geometry/waste'
 import { materialBands, throughDepths, type MaterialCover } from '../geometry/through-depth'
-import { asCutRemovals } from './as-cut'
+import { asCutRemovals, asCutTops } from './as-cut'
 import type { LoadedPlan } from './plan'
 
 interface Derived {
@@ -70,12 +70,16 @@ function derived(plan: LoadedPlan, port: Region2dPort | undefined): Derived {
         for (const id of asCut) m.delete(id)
         return m
       }
+      const bands = visible(
+        materialBands(ops, input.stock, port, earlier(indexOf), earlier(setupOf), asCut),
+      )
+      // C4 follow-up: a recut Line or chamfer starts on what its as-cut twin left (bands have no
+      // Lines or chamfers otherwise)
+      for (const [id, top] of asCutTops(input.operations, removals)) bands.set(id, top)
       return {
         through: visible(throughDepths(ops, input.stock, port, earlier(setupOf), asCut)),
         // openings count from the next setup on (the slug may still sit in its slot in its own)
-        bands: visible(
-          materialBands(ops, input.stock, port, earlier(indexOf), earlier(setupOf), asCut),
-        ),
+        bands,
         waste: (d) => {
           if (!wastes.has(d)) wastes.set(d, faceWaste(input.operations, d, input.stock, port))
           return wastes.get(d)

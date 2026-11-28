@@ -763,6 +763,8 @@ export function toGeneratorInputs(
             inputs: [
               {
                 ...base,
+                // a recut Line starts on its as-cut groove's floor (DF135 C4 follow-up)
+                ...material,
                 cutting: {
                   spindleSpeed: c.spindleSpeed,
                   feedRate: c.feedRate,

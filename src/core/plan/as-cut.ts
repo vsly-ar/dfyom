@@ -12,7 +12,9 @@ import { toGeometryInput } from '../design/geometry-input'
 import { partFromDTO } from '../design/operation'
 import type { OperationDTO, PartDTO } from '../design/part.dto'
 import type { Region2dPort } from '../geometry/2d/port'
-import type { OperationGeometry } from '../geometry/model'
+import { lineChains } from '../geometry/line'
+import { EPSILON, type OperationGeometry } from '../geometry/model'
+import type { MaterialBand } from '../geometry/through-depth'
 import type { LoadedPlan } from './plan'
 
 /** The id suffix of a hidden as-cut removal (never a design id: ids are word characters). */
@@ -90,6 +92,37 @@ export function asCutRemovals(plan: LoadedPlan, port: Region2dPort | undefined):
           index: first.index,
           setup: first.setup,
         })
+  }
+  return out
+}
+
+/** The fields that make two Lines the same grooves (centrelines and cutter), depth aside. */
+const lineKey = (g: Extract<OperationGeometry, { kind: 'line' }>): string =>
+  JSON.stringify([g.direction ?? '+z', g.onZ, g.paths, g.within ?? null, g.cutter])
+
+/**
+ * The material top (z in the face frame) of each recut Line and chamfer whose as-cut twin (its
+ * hidden removal of the same id) is the same cut, less deep or less wide (C4 follow-up): the level
+ * down to which the run already cut along the cut's own surface. A Line's twin has the same
+ * centrelines and cutter; the top is its shallowest depth along any line. Others: none (cut in
+ * full again).
+ * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
+ */
+export function asCutTops(
+  ops: readonly OperationGeometry[],
+  removals: readonly AsCutRemoval[],
+): Map<string, MaterialBand> {
+  const out = new Map<string, MaterialBand>()
+  for (const r of removals) {
+    const twin = r.geometry
+    const id = twin.id.slice(0, -SUFFIX.length)
+    const op = ops.find((o) => o.id === id)
+    if (op === undefined) continue
+    if (op.kind === 'line' && twin.kind === 'line' && lineKey(op) === lineKey(twin)) {
+      const depths = lineChains(twin).lines.flatMap((l) => l.profile.d)
+      const shallowest = Math.min(...depths)
+      if (depths.length > 0 && shallowest > EPSILON) out.set(id, { top: op.onZ - shallowest })
+    }
   }
   return out
 }

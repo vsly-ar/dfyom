@@ -289,7 +289,13 @@ Choices made with the implementation:
 - **The regions the design describes**, as for every DF61 removal (a pocket inset by its floor fillet); never the toolpath's sweep.
 - **The dropped whole-region pass** only where an as-cut removal is part of the coverage (`PartialCover.asCut`): other partly cleared pockets cleared to their floor keep DF61's pass at the floor (it re-traces cleared floor too, but changing it would change existing programs, e.g. the v0.3 exit-criteria flow); every existing snapshot and golden stays byte-equal.
 - **Undo after a run** takes back only the units the run added; a recut unit keeps its new mark (without any it would be cut in full again), Design's undo restores the old one.
-- **Not in C4:** see [§ C4](#cutting-only-the-difference-c4) – 3D and edge operations, through holes, the links' field, as-cut named shapes.
+- **Not in C4:** see [§ C4](#cutting-only-the-difference-c4) – the links' field, as-cut named shapes; edge operations, engravings and through holes in the follow-ups below.
+
+## Implementation (C4 follow-ups)
+
+2026-11-27 ([§ Hand marks](#hand-marks-keep-no-as-cut-geometry-c4-follow-up), [§ Edge operations, engravings and through holes](#edge-operations-engravings-and-through-holes-c4-follow-up)). Hand marks: no code (the decision keeps C4's behaviour, covered by `plan/cut-difference.test.ts`'s hand-mark case).
+
+- **Lines** (done): `src/core/plan/as-cut.ts` (`asCutTops`: the twin's shallowest depth as the material top of a Line with the same placed shapes, `on` level, cell, face and cutter), `src/core/plan/through.ts` (the tops join the plan's material bands), `src/core/plan/inputs.ts` and `src/core/toolpath/inputs.ts` (a Line takes its band), `src/core/toolpath/line.ts` (`cutLine`'s `top`: passes nowhere below it dropped, the last kept; the floor already cut is the old one, never below the line; the first kept pass enters from it; an open line alternates by the passes it cuts). Without a top every Line toolpath is byte-equal. Tests: `toolpath/line.test.ts` (dropped passes, the entry at the old floor, an edit inside the groove keeps one pass, no top byte-equal), `plan/cut-difference-edges.test.ts` (an open and a closed V-bit Line deepened 1.5 → 4 mm after the run: heightmap oracle against one program of the edited design – gouge 0, nothing left, no rapid into material, under a quarter of the full recut's feed in the air; golden `__golden__/cut-deeper-engraving.nc`).
 
 ## Implementation (C5)
 
