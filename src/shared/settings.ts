@@ -62,6 +62,43 @@ export const RepeatabilityResultSchema = z.object({
 })
 export type RepeatabilityResult = z.output<typeof RepeatabilityResultSchema>
 
+const Range = z.tuple([z.number().finite(), z.number().finite()])
+
+/**
+ * v0.5 RV9: one calibration cut (docs/modes/run-calibration.md#saved-results): when, which test,
+ * the tool (its library name and Ø as cut), the plan and setup it was cut on, its footprint on the
+ * stock top (WCS, mm: later cuts keep out of it), what was cut, and what the user read: the
+ * caliper readings of a dimension test, the chosen step of a feed ladder; `summary` is the
+ * suggestion text shown then.
+ */
+export const CalibrationRecordSchema = z.object({
+  date: z.string().min(1).max(40),
+  test: z.enum(['dimension', 'feedLadder']),
+  tool: z.object({ name: z.string().max(200), diameter: z.number().finite().positive() }),
+  planId: z.string().min(1).max(200),
+  setupId: z.string().min(1).max(200),
+  footprint: z.object({ x: Range, y: Range }),
+  /** As cut: the dimension test's nominal size, the depth; the ladder's steps and what varied. */
+  size: z.number().finite().positive().optional(),
+  depth: z.number().finite().positive(),
+  vary: z.enum(['feed', 'stepdown']).optional(),
+  steps: z
+    .array(
+      z.object({
+        n: z.number().int().min(1).max(20),
+        factor: z.number().finite(),
+        feed: z.number().finite(),
+        stepdown: z.number().finite(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  readings: z.record(z.string().min(1).max(20), z.number().finite()).optional(),
+  step: z.number().int().min(1).max(20).optional(),
+  summary: z.string().max(500).optional(),
+})
+export type CalibrationRecord = z.output<typeof CalibrationRecordSchema>
+
 const fields = {
   /** Light / Dark / System (follow the OS); `data-theme` on the root (ui.md decision 1). */
   theme: z.enum(THEMES),
@@ -158,6 +195,11 @@ const fields = {
    * into plans; docs/modes/run-machine.md#homing-repeatability-rv8).
    */
   homingRepeatability: z.record(z.string().min(1), RepeatabilityResultSchema),
+  /**
+   * v0.5 RV9: the calibration cuts per library machine id, newest last (at most 50; app state,
+   * docs/modes/run-calibration.md#saved-results).
+   */
+  calibration: z.record(z.string().min(1), z.array(CalibrationRecordSchema).max(50)),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -183,6 +225,7 @@ export const AppSettingsSchema = z.object({
   inspectorGroups: fields.inspectorGroups.default({}),
   inspectorTabs: fields.inspectorTabs.default({}),
   homingRepeatability: fields.homingRepeatability.default({}),
+  calibration: fields.calibration.default({}),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -196,7 +239,7 @@ export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 /**
  * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
  * `cuttingJogFeed`, `jogStep`,
- * `inspectorGroups`, `inspectorTabs` and `homingRepeatability` merge by key.
+ * `inspectorGroups`, `inspectorTabs`, `homingRepeatability` and `calibration` merge by key.
  */
 export function mergeSettings(
   current: AppSettings,
@@ -227,5 +270,6 @@ export function mergeSettings(
       ...current.homingRepeatability,
       ...(patch.homingRepeatability ?? {}),
     },
+    calibration: { ...current.calibration, ...(patch.calibration ?? {}) },
   }
 }

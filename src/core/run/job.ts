@@ -196,7 +196,7 @@ async function resumeAt(
  * v0.5 RV7: a plan program's `workArea` findings at the live G54 (the export checks the travel;
  * the program's text against the work area's bound, docs/modes/run.md#work-area-rv7).
  */
-function areaFindings(
+export function areaFindings(
   m: MachineService,
   lines: readonly string[],
   workZero: readonly [number, number, number],
@@ -368,7 +368,7 @@ function realMachineChecks(
 }
 
 /** Maps `job.abort` to the controlled stop. */
-function bindJobAbort(m: MachineService, ctx: JobContext): () => void {
+export function bindJobAbort(m: MachineService, ctx: JobContext): () => void {
   const abort = () => void m.controlJob(ctx.jobId, 'stop')
   // An abort while the start was in flight (the host already streams, its reply not yet here)
   // has fired before this listener existed: stop now, or the job runs on (hardening P1).
@@ -386,7 +386,7 @@ function bindJobAbort(m: MachineService, ctx: JobContext): () => void {
  * paused once the run is held, and runs again when the machine's cycle start resumes it.
  * Doc: docs/architecture/commands.md#pausing-a-job, docs/modes/run.md#external-holds-df82
  */
-class RunPause {
+export class RunPause {
   private stage: 'preparing' | 'starting' | 'streaming' | 'over' = 'preparing'
   /** `job.pause`/`job.resume` in flight: their own phase changes are not adopted. */
   private controlling = 0
@@ -496,7 +496,7 @@ function aborted(signal: AbortSignal): Promise<void> {
  * Step 1 of the run job, shared with `run.job.check` (DF46): connected, no job, Idle and homed,
  * the plan runnable, the setup chosen, the plan's machine copy the connected one.
  */
-function startChecks(
+export function startChecks(
   doc: ProjectDoc,
   planId: string,
   setupId: string | undefined,

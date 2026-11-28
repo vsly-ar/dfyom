@@ -1,5 +1,6 @@
 /* Jog step picker (DF88): one row on the segmented controls' track (DF102), the chosen cell in
-   the accent; the custom field is the eighth cell. A row wider than the panel scrolls sideways.
+   the accent; the custom field is the eighth cell. A row wider than the panel scrolls sideways
+   (DF148: without a scroll bar).
    Doc: docs/conventions/ui.md#jog-position-and-probing-df88 */
 .root {
   display: grid;
@@ -32,7 +33,10 @@
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
-  scrollbar-width: thin;
+  /* DF148: no scroll bar: macOS's overlay bar, shown for a moment after every scroll (keepInView
+     too), lay over the cells and took their clicks; the faded ends show there is more, the wheel
+     scrolls the row sideways (JogStepPicker) */
+  scrollbar-width: none;
   border-radius: var(--radius-sm);
   background: var(--bg-active);
 }

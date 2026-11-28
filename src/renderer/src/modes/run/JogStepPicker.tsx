@@ -1,6 +1,7 @@
 // Jog step picker (DF88): seven presets as a radio group (one tab stop, arrow keys move and
 // choose) and an inline custom field as the eighth cell of one row (DF102: one line, scrolled
-// sideways when the panel is narrower, the chosen cell kept in view) – no dialog, no popover. The step is in mm; presets and the field are in the project unit. A custom value
+// sideways when the panel is narrower, the chosen cell kept in view; DF148: no scroll bar, the
+// wheel scrolls it sideways) – no dialog, no popover. The step is in mm; presets and the field are in the project unit. A custom value
 // is chosen when committed (Enter, leaving the field) or when the field is focused holding a
 // valid value; an invalid one shows its reason in the caption row (reserved: nothing moves).
 // Doc: docs/conventions/ui.md#jog-position-and-probing-df88
@@ -108,7 +109,20 @@ export function JogStepPicker({
     if (el === null) return
     const observer = new ResizeObserver(measure)
     observer.observe(el)
-    return () => observer.disconnect()
+    // DF148: no scroll bar, so a plain mouse wheel scrolls the row sideways (not the panel) while
+    // the row can still move that way; non-passive to keep the panel still
+    const wheel = (e: WheelEvent) => {
+      if (e.deltaX !== 0 || e.deltaY === 0) return
+      const max = el.scrollWidth - el.clientWidth
+      if (max <= 0 || (e.deltaY < 0 ? el.scrollLeft <= 0 : el.scrollLeft >= max)) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      observer.disconnect()
+      el.removeEventListener('wheel', wheel)
+    }
   }, [])
 
   return (

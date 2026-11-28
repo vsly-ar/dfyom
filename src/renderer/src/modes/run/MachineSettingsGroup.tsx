@@ -150,7 +150,7 @@ export function MachineSettingsGroup({ doc }: { doc: ProjectDoc | undefined }): 
 }
 
 /** The open connection's `$$` (`run.settings.check {}`), read once per connection. */
-function useControllerSettings(): Readonly<Record<string, number>> | undefined {
+export function useControllerSettings(): Readonly<Record<string, number>> | undefined {
   const { bridge } = useShell()
   const open = useRun((s) => s.status.connection.state === 'open')
   const [settings, setSettings] = useState<Readonly<Record<string, number>> | undefined>(undefined)

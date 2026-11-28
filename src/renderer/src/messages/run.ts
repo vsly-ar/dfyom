@@ -440,6 +440,104 @@ export const runMessages = {
 
   /** v0.5 RV6: Check alignment (docs/modes/alignment.md#check-alignment-rv6). */
   /** v0.5 RV8: Test homing repeatability (docs/modes/run-machine.md#homing-repeatability-rv8). */
+  /** v0.5 RV9: Calibration cut (docs/modes/run-calibration.md). */
+  calibration: {
+    button: 'Calibration cut…',
+    title: 'Calibration cut',
+    description:
+      'Cut a small test on a free spot of the stock, measure it and get suggested corrections for steps/mm, the tool diameter or the feed.',
+    test: 'Test',
+    tests: { dimension: 'Dimension test', feedLadder: 'Feed ladder' },
+    testHint: {
+      dimension:
+        'A square pocket, a square boss and a slot: measure them with calipers to check steps/mm, backlash and the tool diameter.',
+      feedLadder:
+        "Slots side by side at the tool's feed and stepped percentages: pick the one that cut best for a new preset.",
+    } as Record<string, string>,
+    tool: 'Tool',
+    spotX: 'Centre X',
+    spotY: 'Centre Y',
+    suggestSpot: 'Suggest a free spot',
+    size: 'Size',
+    depth: 'Depth',
+    vary: 'Vary',
+    varies: { feed: 'Feed', stepdown: 'Stepdown' },
+    spread: 'Spread ±%',
+    steps: 'Steps',
+    checking: 'Checking…',
+    program: (lines: number, time: string) => `${lines} lines, about ${time}.`,
+    previewed: 'Shown in the viewport.',
+    travelNotChecked: 'Connect and home to check the soft limits and the work area.',
+    finding: 'The program leaves the soft limits or the work area here: move the spot.',
+    problems: {
+      outsideStock: 'Not on the stock top (2 mm clear of its edges): move the spot.',
+      operation: (what: string) => `Overlaps ${what}: move the spot.`,
+      earlierCut: 'Overlaps an earlier calibration cut: move the spot.',
+      workholding: (message: string) => message,
+    },
+    invalid: 'Enter a number.',
+    run: 'Run calibration cut',
+    homeFirst: 'Home the machine first.',
+    noMachine: 'Choose a library machine: the results are kept with it.',
+    fixFirst: 'Fix the problems above first.',
+    confirm: {
+      title: 'Run the calibration cut',
+      description:
+        'The machine cuts the test on the stock at the spot shown. It first waits for the tool and its Z zero. Keep clear of the machine; Stop halts it at once.',
+      confirm: 'Run',
+    },
+    progress: 'Calibration cut',
+    running: (done: number, total: number) => `Line ${done} of ${total}`,
+    waitTool: 'Install the tool and zero Z, then continue.',
+    waitPause: 'The program paused: continue when ready.',
+    continue: 'Continue',
+    stop: 'Stop',
+    stopped: 'The cut was stopped: run it again on a fresh spot.',
+    close: 'Close',
+    last: (date: string, tool: string) => `Last cut ${date} with ${tool}.`,
+    none: 'No calibration cut for this test yet.',
+    readings: 'Measured',
+    reading: {
+      pocketX: 'Pocket X',
+      pocketY: 'Pocket Y',
+      bossX: 'Boss X',
+      bossY: 'Boss Y',
+      slot: 'Slot width',
+      depth: 'Depth',
+    } as Record<string, string>,
+    nominal: (size: string, depth: string, unit: string) =>
+      `Nominal: ${size} ${unit} square, ${depth} ${unit} deep.`,
+    pick: 'Best step',
+    stepLabel: (n: number, value: string, percent: number) =>
+      `Step ${n}: ${value} (${percent > 0 ? '+' : ''}${percent} %)`,
+    save: 'Save results',
+    saved: 'Results saved.',
+    suggestions: 'Suggestions',
+    suggest: {
+      ok: 'Every reading is within tolerance: nothing to correct.',
+      toolDiameter: (d: string, delta: string, unit: string) =>
+        `The tool cuts as Ø ${d} ${unit} (${delta} ${unit} off the library).`,
+      stepsPerMm: (axis: string, percent: string) =>
+        `${axis} moves ${percent} % off: correct its steps/mm.`,
+      stepsNoLine: 'Connect to read the controller value for the exact line.',
+      backlash: (axis: string, mm: string, unit: string) =>
+        `X and Y differ by ${mm} ${unit} (${axis} wider): check for backlash or a loose belt on ${axis}.`,
+      depth: (mm: string, unit: string) =>
+        `The depth is ${mm} ${unit} off: check the Z zero and the Z steps/mm.`,
+      ladder: (vary: string, value: string, percent: number) =>
+        `Set the tool's ${vary} preset to ${value} (${percent > 0 ? '+' : ''}${percent} % of the current).`,
+      ladderHint:
+        "Presets follow the calculator unless you lock them: edit the tool's preset in the Library.",
+    },
+    copy: 'Copy',
+    copied: (line: string) => `Copied ${line}`,
+    applyDiameter: (d: string, unit: string) => `Set library Ø to ${d} ${unit}`,
+    applied: (d: string, unit: string) => `Library Ø set to ${d} ${unit}.`,
+    undo: 'Undo',
+    undone: 'Library Ø restored.',
+    noLibraryTool: 'The tool is not from the library: edit its Ø in the plan.',
+  },
+
   repeat: {
     button: 'Test homing repeatability…',
     title: 'Homing repeatability',
