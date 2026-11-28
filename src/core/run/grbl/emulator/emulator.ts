@@ -17,6 +17,14 @@ import {
   type StatusCode,
 } from './gcode'
 import { Planner, type Vec3 } from './planner'
+import {
+  firstChange,
+  POINT_TIP,
+  probeClosed,
+  type ProbeScene,
+  type ProbeTarget,
+  type ProbeTip,
+} from './probe-scene'
 import { holdProfile, sampleProfile, trapezoid, type Profile } from './profile'
 import { homedPosition, homesNegative, switchAt, travelViolation } from '../envelope'
 import { Settings, type SettingValues } from './settings'
@@ -72,6 +80,13 @@ export interface EmulatorOptions {
    * or below it); absent = no plate, a probe finds nothing (docs/architecture/grbl.md#probing).
    */
   readonly probePlate?: number
+  /**
+   * v0.5 RV3: the probe scene (stock boxes, a corner plate, a hole, a height field); `probePlate`
+   * adds its plane to it (docs/architecture/grbl.md#probe-scene-rv3).
+   */
+  readonly probeScene?: ProbeScene
+  /** v0.5 RV3: the probe's tip (default a point: a cylinder of radius 0). */
+  readonly probeTip?: ProbeTip
 }
 
 export interface EmulatorStatus {
@@ -115,6 +130,8 @@ const zero: Vec3 = [0, 0, 0]
 interface Probing {
   readonly away: boolean
   readonly noError: boolean
+  /** Where on the move the input changes (RV3: found in the scene when the probe starts). */
+  readonly change: Vec3 | undefined
   /** MPos latched when the input changed (GRBL's sys_probe_position). */
   contact?: Vec3
 }
@@ -199,8 +216,11 @@ export class GrblEmulator {
   private doorAfterJog = false
   /** Limit pins held closed (DF134 test hook), in `Pn:` order. */
   private readonly limitPins = new Set<'X' | 'Y' | 'Z'>()
-  /** Touch plate top (MPos Z); undefined = none. */
-  private plate: number | undefined
+  /** RV3: the probe scene (the touch plate is its `plane` target). */
+  private scene: ProbeScene
+  private tip: ProbeTip
+  /** RV3 fault hook: the probe input reads closed whatever touches (a shorted clip or wire). */
+  private probeShorted = false
   private probing: Probing | undefined
   /** The last probe, for `$#` (`[PRB:x,y,z:flag]`). */
   private prb: { readonly pos: Vec3; readonly ok: boolean } = { pos: zero, ok: false }
@@ -223,11 +243,13 @@ export class GrblEmulator {
     private readonly tracing: boolean,
     position: Vec3,
     private readonly silentHoming: boolean | 'drop' = false,
-    probePlate: number | undefined = undefined,
+    scene: ProbeScene = { targets: [] },
     private readonly bannerAfterHoming: boolean | 'alarm' = false,
     workOffset: Vec3 = zero,
+    tip: ProbeTip = POINT_TIP,
   ) {
-    this.plate = probePlate
+    this.scene = scene
+    this.tip = tip
     const s = settings
     this.planner = new Planner({
       get maxRate(): Vec3 {
@@ -256,9 +278,12 @@ export class GrblEmulator {
           options.trace ?? true,
           options.position ?? zero,
           options.silentHoming ?? false,
-          options.probePlate,
+          options.probePlate === undefined
+            ? (options.probeScene ?? { targets: [] })
+            : withPlane(options.probeScene ?? { targets: [] }, options.probePlate),
           options.bannerAfterHoming ?? false,
           options.workOffset ?? zero,
+          options.probeTip ?? POINT_TIP,
         ),
       ),
     )
@@ -361,7 +386,36 @@ export class GrblEmulator {
    * then finds nothing). Takes effect for the next probe cycle (docs/architecture/grbl.md#probing).
    */
   setProbePlate(z: number | undefined): void {
-    this.plate = z
+    this.scene = withPlane(this.scene, z)
+  }
+
+  /**
+   * RV3 test hook: replaces the probe scene (the plate's plane with it), or empties it; takes
+   * effect for the next probe cycle (docs/architecture/grbl.md#probe-scene-rv3).
+   */
+  setProbeScene(scene: ProbeScene | undefined): void {
+    this.scene = scene ?? { targets: [] }
+  }
+
+  /** RV3 test hook: the probe's tip (the bit as a cylinder, a 3D probe's ball). */
+  setProbeTip(tip: ProbeTip): void {
+    this.tip = tip
+  }
+
+  /**
+   * RV3 fault hook: the probe input reads closed whatever the scene says (the clip lying on the
+   * plate, a shorted wire): `Pn:P`, a toward probe is `ALARM:4`, an away probe never opens.
+   */
+  setProbeShorted(shorted: boolean): void {
+    this.probeShorted = shorted
+  }
+
+  /**
+   * RV3 test hook: whether the probe touches now (the contact readout of a touch-off by hand,
+   * which a real operator feels), as `Pn:P` reports it.
+   */
+  probeTouching(): boolean {
+    return this.probeClosed(this.position())
   }
 
   /**
@@ -723,9 +777,9 @@ export class GrblEmulator {
 
   // ── Probing ─────────────────────────────────────────────────────────────────────────────
 
-  /** Probe input: the tool tip at or below the plate. */
+  /** Probe input: the probe touches a target of the scene (or the input is shorted). */
   private probeClosed(at: Vec3): boolean {
-    return this.plate !== undefined && at[2] <= this.plate + 1e-9
+    return this.probeShorted || probeClosed(this.scene, this.tip, at)
   }
 
   /**
@@ -742,7 +796,11 @@ export class GrblEmulator {
       this.softLimit()
       return false
     }
-    this.probing = { away: s.away, noError: s.noError }
+    // the scene is fixed during the cycle: where the input changes is known from the start
+    const change = this.probeShorted
+      ? undefined
+      : firstChange(this.scene, this.tip, this.mpos, s.target, !s.away)
+    this.probing = { away: s.away, noError: s.noError, change }
     const added = this.planner.add(this.mpos, {
       target: s.target,
       rapid: false,
@@ -764,18 +822,14 @@ export class GrblEmulator {
     const p = this.probing
     const b = this.planner.blocks[0]
     const e = this.exec
-    if (p === undefined || p.contact !== undefined || !b || !e || this.plate === undefined)
+    if (p === undefined || p.contact !== undefined || p.change === undefined || !b || !e)
       return undefined
-    const uz = b.unit[2]
-    const z0 = b.start[2]
-    let s: number
-    if (!p.away) {
-      if (uz >= 0) return undefined
-      s = (z0 - this.plate) / -uz
-    } else {
-      if (uz <= 0) return undefined
-      s = (this.plate - z0) / uz
-    }
+    // the distance to the change along the executing (possibly re-planned) block
+    const c = p.change
+    const s =
+      (c[0] - b.start[0]) * b.unit[0] +
+      (c[1] - b.start[1]) * b.unit[1] +
+      (c[2] - b.start[2]) * b.unit[2]
     if (s > e.profile.length + 1e-12) return undefined
     return e.startedAt + timeAtDistance(e.profile, Math.max(0, s)) * 1000
   }
@@ -784,8 +838,7 @@ export class GrblEmulator {
   private probeContact(): void {
     const p = this.probing
     if (p === undefined) return
-    const at = this.position()
-    p.contact = [at[0], at[1], this.plate ?? at[2]]
+    p.contact = p.change ?? this.position()
     this.beginStop('probe')
   }
 
@@ -1292,7 +1345,8 @@ export class GrblEmulator {
     if (mask & 2) parts.push(`Bf:${this.planner.free},${RX_BUFFER_SIZE - this.rx.length}`)
     parts.push(`FS:${this.rateText(this.speed() * 60)},${fixed(this.spindleRpm(), 0)}`)
     // GRBL 1.1 report_realtime_status(): `Pn:` after `FS` (probe, limits, then the control pins)
-    const pins = `${[...this.limitPins].sort().join('')}${this.doorAjar ? 'D' : ''}`
+    const probe = this.probeClosed(pos) ? 'P' : ''
+    const pins = `${probe}${[...this.limitPins].sort().join('')}${this.doorAjar ? 'D' : ''}`
     if (pins !== '') parts.push(`Pn:${pins}`)
     if (this.reportWco > 0) this.reportWco--
     else {
@@ -1361,4 +1415,10 @@ export class GrblEmulator {
     }
     this.lastState = s
   }
+}
+
+/** The scene with its `plane` target (the M4 touch plate) at `z`, or without one. */
+function withPlane(scene: ProbeScene, z: number | undefined): ProbeScene {
+  const rest: ProbeTarget[] = scene.targets.filter((t) => t.kind !== 'plane')
+  return { targets: z === undefined ? rest : [{ kind: 'plane', z }, ...rest] }
 }

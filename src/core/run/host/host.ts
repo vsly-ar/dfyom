@@ -33,8 +33,9 @@ import {
   type ToolChangeInfo,
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
-import { alarmText, limitSwitches, POSITION_ALARMS } from '../grbl/status'
+import { limitSwitches, POSITION_ALARMS } from '../grbl/status'
 import { overrideLimits, overrideSteps } from '../override'
+import { runProbeCycle, type ProbePort } from '../probe-cycle'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
 import type { ControllerTransport } from '../transport'
@@ -183,32 +184,6 @@ const RAPID_BYTES: Readonly<Record<string, RealtimeCommand>> = {
   '100': OVERRIDE.rapid100,
   '50': OVERRIDE.rapid50,
   '25': OVERRIDE.rapid25,
-}
-
-/** `[PRB:x,y,z:flag]` → the contact (report units) and whether the probe touched. */
-function probeResult(lines: readonly string[]): { pos: Vec3; ok: boolean } | undefined {
-  for (const l of lines) {
-    const m = /^\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):([01])\]$/.exec(l)
-    if (m) return { pos: [Number(m[1]), Number(m[2]), Number(m[3])], ok: m[4] === '1' }
-  }
-  return undefined
-}
-
-/**
- * The gCode that puts back what a probe changes in the modal state `$G` reported: units,
- * distance mode and motion (`G1 F…` for a feed motion with a feed set, else `G0`: GRBL cannot set
- * `G2`/`G3` without an arc). Docs: docs/modes/run-machine.md#probing-and-re-zero-m4
- */
-function modalRestore(words: readonly string[], inches: boolean): string[] {
-  const has = (w: string) => words.includes(w)
-  const motion = words.find((w) => /^G(0|1|2|3|38\.[2-5])$/.test(w)) ?? 'G0'
-  const f = Number(words.find((w) => w.startsWith('F'))?.slice(1) ?? '0')
-  const feed = (Number.isFinite(f) ? f : 0) * (inches ? 25.4 : 1)
-  const feedMotion = motion === 'G1' || motion === 'G2' || motion === 'G3'
-  const move = feedMotion && feed > 0 ? `G1 F${fmt(feed)}` : 'G0'
-  const lines = [`G21 ${has('G91') ? 'G91' : 'G90'} ${move}`]
-  if (has('G20')) lines.push('G20')
-  return lines
 }
 
 /** Machine time a manual feed hold may take to report `Hold:0` (as the sender's stop, 5 s). */
@@ -806,9 +781,31 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return Ok(undefined)
   }
 
+  /** RV3: the connection as the probe-cycle runner's port (docs/modes/run-probing.md). */
+  function probePort(c: Connection): ProbePort {
+    return {
+      status: async () => {
+        const s = (await c.sender.freshStatus()) ?? c.sender.status
+        return s === undefined ? stateError('no status report yet', machineState(c)) : Ok(s)
+      },
+      command: (line, opts) => c.sender.command(line, opts),
+      onAlarm: (listener) =>
+        c.sender.onEvent((e) => {
+          if (e.kind === 'alarm') listener(e.code)
+        }),
+      unlock: async () => {
+        const r = await c.sender.command('$X')
+        if (r.isErr()) return Err(r.unwrapErr())
+        c.alarm = undefined
+        return Ok(undefined)
+      },
+    }
+  }
+
   /**
-   * Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4): `G38.2` down from here, G54 Z
-   * so the contact is at Z = plate thickness, retract, restore the modal state.
+   * Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4): one `G38.2` down from here
+   * through the probe-cycle runner (RV3), retract, the modal state back, then G54 Z so the contact
+   * is at Z = plate thickness. An alarm stays for the operator (the modal state after `$X`).
    */
   async function probeZ(c: Connection, a: ProbeZ): Promise<AppResult<unknown>> {
     const where = 'machineHost.probeZ'
@@ -818,23 +815,6 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
     const s = c.sender.status
     if (s === undefined) return stateError('no status report yet', state)
-    if (s.spindle > 0)
-      return fail('run.state', 'the spindle is on: stop it before probing', {
-        where,
-        data: { state, spindle: s.spindle },
-        issues: [{ path: ['spindle'], rule: 'spindleOn', message: 'turn the spindle off' }],
-      })
-    let distance = a.maxTravel
-    const env = c.envelope
-    if (env?.softLimits === true) {
-      // never target below the travel: GRBL would raise a soft-limit alarm before moving
-      distance = Math.min(distance, s.mpos[2] + env.travel[2] - 0.01)
-      if (distance < 1)
-        return fail('run.travel', 'Z is at the bottom of its travel: no room to probe', {
-          where,
-          data: { axis: 'z', target: s.mpos[2], min: -env.travel[2], max: 0, atEdge: true },
-        })
-    }
     if (c.emulator !== undefined) {
       // the virtual plate lies on the surface to zero on (the run's Z reference, DF69; else the
       // stock top) below the work zero's stock top, else just below the tool
@@ -842,44 +822,33 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       c.emulator.setProbePlate(top < s.mpos[2] - 1e-3 ? top : s.mpos[2] - 10)
     }
     c.jogEnd = undefined
-    const gc = await c.sender.command('$G')
-    if (gc.isErr()) return Err(gc.unwrapErr())
-    const modes = gc.unwrap().find((l) => l.startsWith('[GC:'))
-    const restore = modalRestore(modes?.slice(4, -1).split(' ') ?? [], c.inches)
-    let alarm: number | undefined
-    const off = c.sender.onEvent((e) => {
-      if (e.kind === 'alarm') alarm = e.code
-    })
-    const ms = (distance / a.feed) * 60_000 + 10_000
-    log.info({ distance, feed: a.feed }, 'probing Z')
-    const probed = await c.sender.command(
-      `G21 G90 G38.2 Z${fmt(s.wpos[2] - distance)} F${fmt(a.feed)}`,
-      { timeoutMs: ms },
+    const env = c.envelope
+    log.info({ distance: a.maxTravel, feed: a.feed }, 'probing Z')
+    const probed = await runProbeCycle(
+      probePort(c),
+      {
+        axis: 'z',
+        direction: -1,
+        maxDistance: a.maxTravel,
+        fastFeed: a.feed,
+        retract: a.retract,
+        ...(env?.softLimits === true
+          ? { travel: { min: [-env.travel[0], -env.travel[1], -env.travel[2]], max: [0, 0, 0] } }
+          : {}),
+        inches: c.inches,
+        onAlarm: 'stay',
+      },
+      {
+        // GRBL refuses gCode in Alarm: the modal state goes back after the unlock
+        restorePending: (lines) => (c.restoreModes = lines),
+      },
     )
-    off()
+    // the operator takes the virtual plate away (no `Pn:P` while cutting below it)
+    c.emulator?.setProbePlate(undefined)
     if (probed.isErr()) return Err(probed.unwrapErr().withContext(where))
-    const k = c.inches ? 25.4 : 1
-    const result = probeResult(probed.unwrap())
-    if (alarm !== undefined || result?.ok !== true) {
-      // GRBL refuses gCode in Alarm: the modal state goes back after the unlock
-      c.restoreModes = restore
-      const code = alarm ?? 5
-      return fail('machine.alarm', `ALARM:${code} ${alarmText(code)}`, {
-        where,
-        data: { code, text: alarmText(code) },
-      })
-    }
-    const contact: Vec3 = [result.pos[0] * k, result.pos[1] * k, result.pos[2] * k]
-    for (const line of [
-      `G21 G10 L2 P1 Z${fmt(contact[2] - a.plateThickness)}`,
-      `G21 G53 G0 Z${fmt(Math.min(contact[2] + a.retract, 0))}`,
-      ...restore,
-      // the ok of a dwell waits for the retract: `$#` needs Idle
-      'G4 P0',
-    ]) {
-      const r = await c.sender.command(line)
-      if (r.isErr()) return Err(r.unwrapErr().withContext(where))
-    }
+    const contact = probed.unwrap().contact
+    const g10 = await c.sender.command(`G21 G10 L2 P1 Z${fmt(contact[2] - a.plateThickness)}`)
+    if (g10.isErr()) return Err(g10.unwrapErr().withContext(where))
     c.zeroLevel = c.job?.level ?? 0
     const wz = await readWorkZero(c)
     if (wz.isErr()) return Err(wz.unwrapErr())

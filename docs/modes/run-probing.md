@@ -1,0 +1,38 @@
+# Run: probing cycles
+
+Status: accepted (v0.5 [RV3](../plans/v0.5-run.md#slices), delegation D88), RV3 implemented ([§ Implementation (RV3)](#implementation-rv3)); the edge, corner and hole cycles and the probe kinds follow with RV4 · Plan: [v0.5-run.md § 4](../plans/v0.5-run.md#4-xy-probing) (Q220: RV4+ assume a corner plate or the bit as the probe) · Base: [run-machine.md § Probing and re-zero (M4)](run-machine.md#probing-and-re-zero-m4) · GRBL facts and the virtual machine: [grbl.md § Probing](../architecture/grbl.md#probing), [§ Probe scene](../architecture/grbl.md#probe-scene-rv3) · Safety: [run.md § Safety](run.md#safety)
+
+Every probing feature of v0.5 (edges, corners, hole centres, the X/Y zero, the alignment Measure, homing repeatability, surface maps) is a sequence of single-axis probes. This doc defines the one runner they share and the Test probe readout; RV4 adds the cycles built from it.
+
+## The cycle runner (RV3)
+
+`runProbeCycle(port, spec, hooks?)` in `src/core/run/probe-cycle.ts` (headless core) probes along one axis and returns the contact as a value with an uncertainty. The machine host gives it a `ProbePort` over the connection's sender: a fresh status report, `command(line)` (the reply lines, `[PRB]` among them), the `ALARM:n` events and `unlock()` (`$X`, clearing the host's alarm).
+
+- **Spec:** `axis` (`x`/`y`/`z`), `direction` (−1/+1), `maxDistance` (mm from the start), `fastFeed`, optional `slow { feed, backOff, repeats = 1 }`, `retract`, optional `travel` (the MPos travel when soft limits are on), `inches` (`$13=1`), `onAlarm` (`'recover'` default, `'stay'`), `cancelled()`, `resolution` (default 0.001 mm, 0.00254 in inch). Malformed numbers are `input.malformed` before anything is sent.
+- **Guards, before any line:** a fresh report must say `Idle` (`run.state`, "cannot probe in state Run"); the spindle 0 rpm (`run.state`, rule `spindleOn`); the probe input open, `Pn:` without `P` (`run.state`, rule `probeTouching`: "The probe reads as touching: check the clip, the plate and the probe wire before probing."). With `travel`, the distance is cut so the target stays 0.01 mm inside it; under 1 mm left → `run.travel` ("Z is at the bottom of its travel: no room to probe"; X/Y: "the minimum/maximum").
+- **Sequence:**
+  1. `$G` (the modal state to restore, as Probe Z: units, distance mode, motion).
+  2. **Seek:** `G21 G90 G38.2 <axis><start − WCO + direction × distance> F<fast>`, timeout the move's duration plus 10 s. GRBL rejects `G53` with `G38.x`, so probe targets are work coordinates (WCO from the report); every result is MPos.
+  3. **Slow re-probe** (with `slow`, `repeats` times): a rapid `G21 G53 G0 <axis><contact − direction × backOff>` back, then `G38.2` toward `contact + direction × backOff` at the slow feed. Each slow contact is a sample.
+  4. **Retract:** `G21 G53 G0 <axis><contact − direction × retract>`; Z down retracts up to at most MPos 0 (the travel top), X/Y and Z up at most back to the start.
+  5. The modal state back, then `G4 P0` (its `ok` waits for the retract).
+- **Never past the distance:** every target lies on the segment from the start to `start + direction × distance` (the slow probe's target is clamped to it), so no move goes beyond what the spec and the travel allow.
+- **Back-off and retract are rapids, not `G38.3`:** they retrace the path the seek just travelled along the same axis, where nothing can be touched; the plan's rule ([v0.5-run.md § Rules](../plans/v0.5-run.md#rules-for-every-item)) that positioning moves below the safe Z are `G38.3` applies to moves into untravelled space (RV4's corner step-out), which RV4 adds as its own step. A `G38.4` back-off ("until open") would stop microns from the surface and leave the slow probe no room to reach its feed.
+- **Result:** `{ axis, value, uncertainty, contact, seek, samples, start }`: `value` is the mean of the slow samples (else the seek's contact) on the axis, MPos; `uncertainty` is ± the larger of the reading resolution and half the samples' spread. The probe's radius and plate offsets are applied by the cycles (RV4), not here.
+- **Failures:**
+  - `ALARM:5` (no contact) or `ALARM:4` (the input closed at a probe's start despite the guard) → `machine.alarm` with `data { code, text, recovered }`. `'recover'` (the v0.5 cycles): `unlock()`, a rapid back to the start (the failed probe moved along the axis only, so this retraces it), the modal state back; the position is kept (neither alarm loses it) and nothing is written. `'stay'` (Probe Z, M4's behaviour): the alarm stays for the operator and the restore lines go to `hooks.restorePending`, sent after the unlock.
+  - **Cancel:** `cancelled()` is checked before every line; once true, `op.aborted` and nothing more is sent. Stop itself is the existing feed hold + reset ([run.md § 1](run.md#1-emergency-stop-stop-and-reset)), which fails the line in flight; the runner returns that error and sends nothing after it.
+  - Any other command error (`error:N`, a lost connection) comes back as it is.
+- **Probe Z** (M4) runs through it: one pass (no `slow`), `onAlarm: 'stay'`, the travel from the envelope with soft limits; the host then writes `G10 L2 P1 Z<contact − plate thickness>` and reads `$#`. Its lines and results are M4's, except that the G54 write now follows the retract and the modal restore (it does not depend on the position), the status is a fresh report, and a probe input that reads touching is refused before sending instead of becoming `ALARM:4`.
+
+## Test probe (RV3)
+
+The navigator's Probing section shows the probe input live while connected, from `Pn:P` of each report: "Probe input: open. Touch the clip to the plate to test it." or "Probe input: touching. Probing waits until it reads open." (a polite `role="status"`, so touching the clip to the plate is announced). It is the check before the first cycle; on the virtual machine `Pn:P` comes from the probe scene ([grbl.md](../architecture/grbl.md#probe-scene-rv3)).
+
+## Implementation (RV3)
+
+- **Emulator:** `probe-scene.ts` (targets, tips, `firstChange`, `seededBumps`), `emulator.ts` (the scene replaces the plate, `Pn:P`, `setProbeScene`/`setProbeTip`/`setProbeShorted`/`probeTouching`); `probePlate`/`setProbePlate` keep working as the scene's plane.
+- **Runner:** `src/core/run/probe-cycle.ts` (also `modalRestore` and `probeResult`, moved from the host); the host's `probePort()` and `probeZ()` in `src/core/run/host/host.ts`.
+- **App virtual machine:** the host lays the plate before Probe Z as before and takes it away after the cycle (the operator puts the plate away), so a later cut below the old plate top does not report `Pn:P`.
+- **Tests:** `emulator/probe-scene.test.ts` (geometry; a box top and side with a cylinder and a ball, a rotated box, the corner plate's top and walls, a hole from inside, a height field; `G38.3` stopping on an unexpected contact, `G38.4`/`G38.5` backing off and missing, the shorted probe, the plate beside a scene), `probe-cycle.test.ts` (Z with two slow probes, an X edge with the bit, a G54 offset, no contact → `ALARM:5` → unlock → back at the start with nothing written, `'stay'`, already touching refused before sending, spindle on and busy state, the travel cut and edge, cancel between lines, Stop mid-probe, a malformed spec); the existing Probe Z tests (`host-serial.test.ts`, `host.test.ts`, `commands.test.ts`, `e2e/run-serial.e2e.ts`, `e2e/tool-changes.e2e.ts`) pass unchanged; `RunMode.test.tsx` (the Test probe line).
+- **Not verified on hardware:** a real probe pin's debounce and polarity (`$6`); the real-machine row is RV4's corner check.
