@@ -476,11 +476,18 @@ export function fileMoves(lines: readonly string[]): FileMoves {
  * The soft-limit check of a prepared program (docs/modes/run.md#run-an-external-g-code-file-df93):
  * parsed at `workZero` from the machine position `mpos`; X and Y over the whole program, Z until
  * the first tool change (Z zero is set again there), G53 targets always; each axis must stay in
- * `[−travel, 0]`. Findings in the plan's `softLimit` shape, machine coordinates (mm).
+ * `[−travel, 0]`. Findings in the plan's `softLimit` shape, machine coordinates (mm). With a
+ * work area (v0.5 RV7, docs/modes/run.md#work-area-rv7) an axis inside the travel but outside
+ * the area's bound is a `workArea` finding (`params.areaMin`, `areaMax`).
  */
 export function fileSoftLimits(
   lines: readonly string[],
-  at: { readonly workZero: V3; readonly mpos: V3; readonly travel: V3 },
+  at: {
+    readonly workZero: V3
+    readonly mpos: V3
+    readonly travel: V3
+    readonly workArea?: { readonly min: V3; readonly max: V3 } | undefined
+  },
 ): PlanWarning[] {
   const lo = [Infinity, Infinity, Infinity]
   const hi = [-Infinity, -Infinity, -Infinity]
@@ -525,6 +532,19 @@ export function fileSoftLimits(
         message: `the program leaves the ${axis.toUpperCase()} soft limits at this work zero`,
         params: { axis, min: from, max: to, travel },
       })
+    else if (at.workArea !== undefined) {
+      const areaMin = at.workArea.min[k]!
+      const areaMax = at.workArea.max[k]!
+      if (from < areaMin - EPS || to > areaMax + EPS)
+        out.push({
+          code: 'plan.machine',
+          severity: 'warning',
+          field: 'machine',
+          rule: 'workArea',
+          message: `the program leaves the ${axis.toUpperCase()} work area at this work zero`,
+          params: { axis, min: from, max: to, travel, areaMin, areaMax },
+        })
+    }
   })
   return out
 }

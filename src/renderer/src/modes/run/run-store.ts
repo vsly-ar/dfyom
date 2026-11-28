@@ -374,6 +374,8 @@ export interface RunState {
   readonly xyZeroOpen: boolean
   /** v0.5 RV6: the Check alignment dialog is open (docs/modes/alignment.md#check-alignment-rv6). */
   readonly checkAlignOpen: boolean
+  /** v0.5 RV7: the Work area dialog is open (docs/modes/run.md#work-area-rv7). */
+  readonly workAreaOpen: boolean
   /**
    * v0.5 RV5: the last X/Y zero this window set, for "Undo zero change": G54 X/Y before and
    * after (MPos mm); dropped when the connection closes.
@@ -499,6 +501,7 @@ export interface RunState {
   setWorkZeroAt(x: number, y: number): Promise<void>
   setXyZeroOpen(open: boolean): void
   setCheckAlignOpen(open: boolean): void
+  setWorkAreaOpen(open: boolean): void
   /**
    * v0.5 RV4: a probing routine (`run.machine.probe`, a job): its result, or undefined when it
    * failed or was stopped (the banner or the alarm panel says why).
@@ -697,12 +700,13 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       const s = get()
       const status = s.status
       const travel = status.envelope?.travel
+      const workArea = status.envelope?.workArea
       const now = Date.now()
       const guarded = guardActive(status, s.guardSetup, s.guardOff)
       if (!guarded || (s.pastOnceUntil !== undefined && now <= s.pastOnceUntil)) {
         if (guarded) disarmPastOnce()
         const base = queued?.end ?? status.mpos
-        return { args: plainJogArgs(request), end: plainJogEnd(request, base, travel) }
+        return { args: plainJogArgs(request), end: plainJogEnd(request, base, travel, workArea) }
       }
       const g = s.guardSetup!
       const from = jogStart(status, queued?.end, cancelAt, now)
@@ -716,6 +720,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         wco: wcoOf(status),
         offset: [g.zero[0], g.zero[1], status.zeroLevel ?? 0],
         ...(travel === undefined ? {} : { travel }),
+        ...(workArea === undefined ? {} : { workArea }),
         setup: g.setup,
       })
       if (r.kind === 'blocked') {
@@ -843,6 +848,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       zUnset: false,
       xyZeroOpen: false,
       checkAlignOpen: false,
+      workAreaOpen: false,
       zeroUndo: undefined,
       virtualStockKey: undefined,
       startProgram: undefined,
@@ -1182,6 +1188,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       setXyZeroOpen: (xyZeroOpen) => set({ xyZeroOpen }),
       setCheckAlignOpen: (checkAlignOpen) => set({ checkAlignOpen }),
+      setWorkAreaOpen: (workAreaOpen) => set({ workAreaOpen }),
       async probeRoutine(args) {
         const r = await call('run.machine.probe', args)
         if (!r.ok) return undefined

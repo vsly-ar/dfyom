@@ -503,12 +503,21 @@ export function machineChecks(
     const travel = machine.travel[axis].canonical
     const size = hi[k]! - lo[k]!
     if (!Number.isFinite(size)) return
+    const usable = machine.usableTravel(axis)
     if (size > travel + EPS)
       warn({
         field: 'machine',
         rule: 'travel',
         message: `the program spans more than the ${axis.toUpperCase()} travel`,
         params: { axis, size, travel },
+      })
+    // v0.5 RV7: the marked work area less its margin (docs/modes/run.md#work-area-rv7)
+    else if (size > usable + EPS)
+      warn({
+        field: 'machine',
+        rule: 'workArea',
+        message: `the program spans more than the ${axis.toUpperCase()} work area`,
+        params: { axis, size, travel, workArea: usable },
       })
     const zero = input.workZero?.[k]
     if (zero === undefined) return

@@ -158,6 +158,32 @@ describe('Machine', () => {
     expectErrCode(load({ ...machineValues(), probe: { kind: 'laser' } }), 'input.malformed')
   })
 
+  it('round-trips the work area and margin (v0.5 RV7); usableTravel less marks and margin', () => {
+    const workArea = { x: { min: len('-790'), max: len('-5') }, z: { min: len('-95') } }
+    const full = { ...machineValues(), workArea, workAreaMargin: len('3') }
+    const m = expectOk(load(full))
+    expect(m.toDTO()).toEqual(full)
+    // x: 790 − 5 − 2×3; y unmarked: the travel; z: 100 less (100 − 95) and the margin
+    expect(m.usableTravel('x')).toBeCloseTo(779, 9)
+    expect(m.usableTravel('y')).toBe(800)
+    expect(m.usableTravel('z')).toBeCloseTo(92, 9)
+    // the margin unset: 2 mm
+    const d = expectOk(load({ ...machineValues(), workArea }))
+    expect(d.workAreaMargin.isNone()).toBe(true)
+    expect(d.usableTravel('x')).toBeCloseTo(781, 9)
+    expect(expectOk(load(machineValues())).usableTravel('x')).toBe(800)
+    expect(
+      issues({
+        ...machineValues(),
+        workArea: { y: { min: len('-5'), max: len('-10') } },
+        workAreaMargin: len('-1'),
+      }),
+    ).toEqual([
+      ['workArea.y.min', 'lessThanMax'],
+      ['workAreaMargin', 'nonNegative'],
+    ])
+  })
+
   describe('holder (tool-holder.md#model, DF132 H1)', () => {
     const er11 = {
       preset: 'er11' as const,

@@ -11,6 +11,7 @@
 // inside an item, DF133 RW5). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
+import { Line } from '@react-three/drei'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { BufferAttribute, BufferGeometry, Color, Matrix4, SRGBColorSpace } from 'three'
 import type { Placement } from '../../../core/geometry/model'
@@ -111,6 +112,16 @@ export interface RunEnvelope {
   readonly min: readonly [number, number, number]
   readonly max: readonly [number, number, number]
   readonly home: readonly [number, number, number]
+  /**
+   * v0.5 RV7: the work area's bound (the margin in) in work coordinates, drawn dashed in the
+   * info colour inside the travel; absent: none marked (docs/modes/run.md#work-area-rv7).
+   */
+  readonly workArea?:
+    | {
+        readonly min: readonly [number, number, number]
+        readonly max: readonly [number, number, number]
+      }
+    | undefined
 }
 
 /** The 12 edges of the box as line-segment vertices (24 × xyz). Pure. */
@@ -223,6 +234,15 @@ export function RunLayer({
   }, [envelope])
   useEffect(() => () => travel?.dispose(), [travel])
   const travelColour = useMemo(() => colour(palette.gridMajor), [palette])
+  const area = envelope?.workArea
+  const areaPoints = useMemo(() => {
+    if (area === undefined) return null
+    const e = boxEdges(area.min, area.max)
+    const pts: [number, number, number][] = []
+    for (let i = 0; i < e.length; i += 3) pts.push([e[i]!, e[i + 1]!, e[i + 2]!])
+    return pts
+  }, [area])
+  const areaColour = useMemo(() => colour(palette.info), [palette])
 
   const toolColour = useMemo(() => colour(palette.tool), [palette])
   const ghostColour = useMemo(
@@ -253,6 +273,18 @@ export function RunLayer({
               <ringGeometry args={[4, 5, 32]} />
               <meshBasicMaterial color={travelColour} />
             </mesh>
+            {areaPoints ? (
+              <Line
+                points={areaPoints}
+                segments
+                color={areaColour}
+                lineWidth={1}
+                dashed
+                dashSize={4}
+                gapSize={3}
+                raycast={noRaycast}
+              />
+            ) : null}
           </group>
         ) : null}
         {run.workholding ? (

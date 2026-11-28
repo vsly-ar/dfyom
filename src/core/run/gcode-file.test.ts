@@ -190,6 +190,21 @@ describe('fileSoftLimits', () => {
     expect(fz.map((x) => x.params)).toEqual([{ axis: 'z', min: -13, max: 5, travel: 80 }])
   })
 
+  it('v0.5 RV7: inside the travel but outside the work area is its own finding', () => {
+    const z = prepareGcodeFile('G21 G90\nG0 X0 Y0 Z15\nG1 X100 F500\n').lines
+    const workArea = { min: [-280, -200, -80], max: [-60, 0, -8] } as const
+    const f = fileSoftLimits(z, {
+      workZero: [-150, -100, -30],
+      mpos: [-1, -1, -1],
+      travel,
+      workArea,
+    })
+    // X 100 at −150 reaches −50 (area max −60); Z 15 at −30 reaches −15 (area max −8): fine
+    expect(f.map((x) => [x.rule, x.params])).toEqual([
+      ['workArea', { axis: 'x', min: -150, max: -50, travel: 300, areaMin: -280, areaMax: -60 }],
+    ])
+  })
+
   it('Z only until the first tool change that pauses, G53 always', () => {
     const at = { workZero: [-100, -100, -50] as const, mpos: [-1, -1, -1] as const, travel }
     const tc = '(DFYOM TOOL CHANGE 2: bit)\nM0\n'

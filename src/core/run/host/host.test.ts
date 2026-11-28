@@ -314,6 +314,64 @@ describe('machine host', () => {
     expect(low.message).toContain('Y would leave the travel: min -1000 mm')
   })
 
+  it('v0.5 RV7: the work area bounds jogs while homed; the homed corner may move inward', async () => {
+    const h = harness()
+    await connectedHost(h, { settings: { ...SETTINGS, '20': 1, '27': 2 }, timeScale: 'max' })
+    const area = { marks: { x: { min: -800, max: -10 } }, margin: 2 }
+    expectOk(await h.request({ type: 'machine', action: { kind: 'workArea', area } }))
+    // not homed: no inner bound reported
+    expect(lastStatus(h)?.envelope?.workArea).toBeUndefined()
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    expect(lastStatus(h)?.envelope?.workArea).toEqual({
+      min: [-798, -1000, -1000],
+      max: [-12, 0, 0],
+    })
+    // homed at X −2: outside the area's max −12; +X goes further out, −X moves back in
+    const out = expectErrCode(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [1, 0, 0], feed: 500 } }),
+      'run.travel',
+    )
+    expect(out.message).toContain('work area')
+    expect(out.toJSON().frames[0]?.data).toMatchObject({ axis: 'x', max: -12, workArea: true })
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [-20, 0, 0], feed: 3000 } }),
+    )
+    await h.pump(() => lastStatus(h)?.state === 'Idle')
+    // a jog that would end past the area's min less the margin is refused
+    const far = expectErrCode(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [-790, 0, 0], feed: 3000 } }),
+      'run.travel',
+    )
+    expect(far.toJSON().frames[0]?.data).toMatchObject({ axis: 'x', min: -798, workArea: true })
+    // a continuous jog stops at the area's bound, not the travel
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', by: [-1, 0, 0], feed: 6000, continuous: true },
+      }),
+    )
+    expect(
+      await h.pump(() => {
+        const st = lastStatus(h)
+        return st?.state === 'Idle' && Math.abs(st.mpos[0] + 798) < 1e-3
+      }),
+    ).toBe(true)
+    const edge = expectErrCode(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', by: [-1, 0, 0], feed: 6000, continuous: true },
+      }),
+      'run.travel',
+    )
+    expect(edge.toJSON().frames[0]?.data).toMatchObject({ atEdge: true, workArea: true })
+    // cleared: the travel again
+    expectOk(await h.request({ type: 'machine', action: { kind: 'workArea' } }))
+    expect(lastStatus(h)?.envelope?.workArea).toBeUndefined()
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [-1, 0, 0], feed: 500 } }),
+    )
+  })
+
   it('prepare: homes at max speed and places G54', async () => {
     const h = harness()
     const info = await connectedHost(h, { timeScale: 1, prepare: { workZero: [-400, -400, -20] } })

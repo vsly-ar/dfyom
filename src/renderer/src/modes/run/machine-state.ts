@@ -240,13 +240,21 @@ export function actionText(e: AppErrorData, units: UnitSystem): string | undefin
     return m.spindle.refused[rule]
   if (e.code !== 'run.travel') return undefined
   const d = e.frames[0]?.data as
-    { axis?: string; target?: number; min?: number; max?: number; atEdge?: boolean } | undefined
+    | {
+        axis?: string
+        target?: number
+        min?: number
+        max?: number
+        atEdge?: boolean
+        workArea?: boolean
+      }
+    | undefined
   if (d?.axis === undefined || d.target === undefined || d.min === undefined || d.max === undefined)
     return m.travelUnknown
   if (d.atEdge === true) {
     // a continuous jog from the end of the travel (docs/modes/run-machine.md#machine-readiness-m3)
     const atMax = Math.abs(d.target - d.max) <= Math.abs(d.target - d.min)
-    return m.travelAtEdge(
+    return (d.workArea === true ? m.workAreaAtEdge : m.travelAtEdge)(
       d.axis.toUpperCase(),
       atMax ? 'max' : 'min',
       formatLength(atMax ? d.max : d.min, units),
@@ -254,7 +262,7 @@ export function actionText(e: AppErrorData, units: UnitSystem): string | undefin
     )
   }
   const high = d.target > d.max
-  return m.travel(
+  return (d.workArea === true ? m.workAreaJog : m.travel)(
     d.axis.toUpperCase(),
     high ? 'max' : 'min',
     formatLength(high ? d.max : d.min, units),

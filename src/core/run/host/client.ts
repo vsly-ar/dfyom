@@ -31,6 +31,7 @@ import {
   type RunProgram,
   type RunStatus,
 } from '../service'
+import type { WorkAreaSetting } from '../work-area'
 import type { MachineValuesDTO } from '../../library/machine.dto'
 import type { SerialPortInfo } from '../serial'
 import { programmedRates, type ProgrammedRates } from '../override'
@@ -121,6 +122,9 @@ export interface MachineClientOptions {
 type ConnectProfile = {
   readonly spindleMinSpeed?: number | undefined
   readonly machine?: MachineValuesDTO | undefined
+  /** v0.5 RV7: the library machine the connection was made for, and its work area. */
+  readonly libraryMachineId?: string | undefined
+  readonly workArea?: WorkAreaSetting | undefined
 }
 
 /** The connection to open again after a loss (DF129 RC4): as last opened, with its profile. */
@@ -239,6 +243,7 @@ export class MachineClient implements MachineService {
         machineKey: string
         spindleMinSpeed?: number | undefined
         machine?: MachineValuesDTO | undefined
+        libraryMachineId?: string | undefined
         target?: TargetKind | undefined
         port?: { path: string; baud: number } | undefined
         usb?: UsbIdentity | undefined
@@ -311,6 +316,10 @@ export class MachineClient implements MachineService {
 
   get connectedMachine(): MachineValuesDTO | undefined {
     return this.conn?.state === 'open' ? this.conn.machine : undefined
+  }
+
+  get libraryMachineId(): string | undefined {
+    return this.conn?.state === 'open' ? this.conn.libraryMachineId : undefined
   }
 
   status(): RunStatus {
@@ -781,6 +790,18 @@ export class MachineClient implements MachineService {
         ? {}
         : { spindleMinSpeed: profile.spindleMinSpeed }),
       ...(profile?.machine === undefined ? {} : { machine: profile.machine }),
+      ...(profile?.libraryMachineId === undefined
+        ? {}
+        : { libraryMachineId: profile.libraryMachineId }),
+    }
+    // v0.5 RV7: the work area goes to the host with every open (auto-reconnect included)
+    if (profile?.workArea !== undefined) {
+      const sent = await this.request({
+        type: 'machine',
+        requestId: '',
+        action: { kind: 'workArea', area: profile.workArea },
+      })
+      if (sent.isErr()) this.log.warn({ err: sent.unwrapErr() }, 'work area not sent to the host')
     }
     // auto-reconnect kept the lost warning while trying (the user's connect cleared it at once)
     if (auto) this.lost = undefined
@@ -847,7 +868,16 @@ export class MachineClient implements MachineService {
       action.kind === 'override' ||
       action.kind === 'overrideTo' ||
       action.kind === 'feedHold' ||
-      action.kind === 'cycleStart'
+      action.kind === 'cycleStart' ||
+      action.kind === 'workArea'
+    // v0.5 RV7: a reconnect after a loss sends the latest work area
+    if (action.kind === 'workArea' && this.reopen !== undefined) {
+      const { workArea: _old, ...rest } = this.reopen.profile ?? {}
+      this.reopen = {
+        ...this.reopen,
+        profile: action.area === undefined ? rest : { ...rest, workArea: action.area },
+      }
+    }
     if (this.reserved !== undefined && !passes)
       return fail('run.busy', `job ${this.reserved} is starting`, {
         where: `${WHERE}.machine`,

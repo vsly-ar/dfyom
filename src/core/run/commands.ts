@@ -4,10 +4,19 @@
  * Doc: docs/modes/run-v0.1.md#commands-and-queries
  */
 import { z } from 'zod'
-import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
+import {
+  Err,
+  fail,
+  None,
+  Ok,
+  Some,
+  type AppResult,
+  type AsyncAppResult,
+  type Option,
+} from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import type { JobContext, JobDirectory, Services } from '../commands/context'
-import { loadPlan } from '../plan/plan'
+import { loadPlan, snapshotById } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
 import { setupStockSize } from '../plan/setups'
 import { setupZero } from '../plan/alignment'
@@ -20,8 +29,14 @@ import { ROUTINE_DEFAULTS } from './probe-routines'
 import { STILL_STATES } from './grbl/sender'
 import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
-import { Machine } from '../library/machine'
-import { ItemIdSchema } from '../library/item'
+import {
+  machineWorkArea,
+  WORK_AREA_AXES,
+  type WorkAreaMarks,
+  type WorkAreaSetting,
+} from './work-area'
+import { Machine, type WorkArea, type WorkAreaSide } from '../library/machine'
+import { collectFields, ItemIdSchema } from '../library/item'
 import { hashJson } from '../plan/snapshot'
 import {
   AXES,
@@ -34,6 +49,7 @@ import {
   TimeScaleSchema,
   Vec3Schema,
   VirtualStockSchema,
+  WorkAreaSettingSchema,
   type MachineAction,
 } from './host/protocol'
 import { overrideCap, overrideLimits } from './override'
@@ -170,7 +186,7 @@ function connectionMachine(
   services: Services,
   args: { planId?: string | undefined; machineId?: string | undefined },
   where: string,
-): AppResult<{ machine: Machine; key: string }> {
+): AppResult<{ machine: Machine; key: string; libraryId?: string; workArea?: WorkAreaSetting }> {
   if ((args.planId === undefined) === (args.machineId === undefined))
     return fail('input.malformed', 'give exactly one of planId or machineId', {
       where,
@@ -186,9 +202,22 @@ function connectionMachine(
         where,
         data: { planId },
       })
+    // v0.5 RV7: the work area is the shop's measurement: the library machine's, else the copy's
+    const plan = doc.plans[planId]
+    const copy = plan?.machine === undefined ? undefined : snapshotById(plan, plan.machine)
+    const libraryId = copy?.libraryItemId
+    const found =
+      libraryId === undefined ? undefined : services.library?.lookup('machine', libraryId)
+    const lib =
+      found?.state === 'found' && found.item.values instanceof Machine
+        ? found.item.values
+        : undefined
+    const workArea = machineWorkArea(lib ?? machine.unwrap())
     return machineKeyOf(doc, planId, where).map((key) => ({
       machine: machine.unwrap(),
       key: key ?? '',
+      ...(libraryId === undefined ? {} : { libraryId }),
+      ...(workArea === undefined ? {} : { workArea }),
     }))
   }
   const id = args.machineId!
@@ -201,8 +230,14 @@ function connectionMachine(
       issues: [{ path: ['machineId'], rule: 'unknownItem', message: 'no such library machine' }],
     })
   const machine = found.item.values
+  const workArea = machineWorkArea(machine)
   // the same hash a plan's unchanged snapshot of this machine has (machine-key.ts)
-  return Ok({ machine, key: hashJson(machine.toDTO()) })
+  return Ok({
+    machine,
+    key: hashJson(machine.toDTO()),
+    libraryId: id,
+    ...(workArea === undefined ? {} : { workArea }),
+  })
 }
 
 export const runConnectionOpen = defineCommand({
@@ -260,7 +295,7 @@ export const runConnectionOpen = defineCommand({
     if (m.target !== undefined) return fail('run.busy', 'a connection is already open', { where })
     const chosen = connectionMachine(doc, ctx.services, args, where)
     if (chosen.isErr()) return chosen
-    const { machine, key } = chosen.unwrap()
+    const { machine, key, libraryId, workArea } = chosen.unwrap()
     // the spindle override's floor (docs/modes/run-machine.md#overrides-m6); a manual spindle
     // ignores S and has no spindle override
     // DF93: the machine values too, for a file run's settings check on a real connection
@@ -270,6 +305,8 @@ export const runConnectionOpen = defineCommand({
           ? machine.spindle.minSpeed.mapOr(undefined, (q) => q.canonical)
           : undefined,
       machine: machine.toDTO() as MachineValuesDTO,
+      ...(libraryId === undefined ? {} : { libraryMachineId: libraryId }),
+      ...(workArea === undefined ? {} : { workArea }),
     }
     const ctxData =
       args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
@@ -792,6 +829,89 @@ export const runVirtualStock = defineCommand({
   },
 })
 
+/** A length quantity of `mm`, 3 decimals (a marked machine position or the margin). */
+function mmQuantity(mm: number): AppResult<Quantity> {
+  return Quantity.parse(mm.toFixed(3), { kind: 'length', defaultUnit: 'mm' })
+}
+
+const optionalMm = (mm: number | undefined): AppResult<Option<Quantity>> =>
+  mm === undefined ? Ok(None) : mmQuantity(mm).map((q): Option<Quantity> => Some(q))
+
+/** v0.5 RV7: marks (mm) as the library machine's `workArea` (lengths). */
+function workAreaModel(marks: WorkAreaMarks): AppResult<WorkArea> {
+  const out: Record<string, WorkAreaSide> = {}
+  for (const a of WORK_AREA_AXES) {
+    const m = marks[a]
+    if (m === undefined || (m.min === undefined && m.max === undefined)) continue
+    const side = collectFields({ min: optionalMm(m.min), max: optionalMm(m.max) })
+    if (side.isErr()) return Err(side.unwrapErr())
+    out[a] = side.unwrap()
+  }
+  return Ok(out)
+}
+
+/**
+ * v0.5 RV7: the work area of a library machine (docs/modes/run.md#work-area-rv7): the marks
+ * (machine coordinates, mm; `null` clears them) and the margin, written to the library machine;
+ * the open connection made for that machine follows at once. Moves nothing. Not an agent tool
+ * (Q229).
+ */
+export const runWorkAreaSet = defineCommand({
+  kind: 'effect',
+  name: 'run.workArea.set',
+  summary: "Set or clear a library machine's work area marks (MPos, mm) and margin.",
+  title: (a) => (a.marks === null ? 'Clear work area' : 'Set work area'),
+  machine: true,
+  agentTool: false,
+  args: z.object({
+    machineId: ItemIdSchema,
+    revision: z.number().int().min(1).describe('Revision you read; stale: command.conflict'),
+    marks: WorkAreaSettingSchema.shape.marks.nullable().optional(),
+    margin: z.number().min(0).max(100).optional(),
+  }),
+  result: z.object({ revision: z.number().int() }),
+  async run(_doc, args, ctx) {
+    const where = 'run.workArea.set'
+    const lib = ctx.services.library
+    if (lib === undefined) return fail('internal.unexpected', 'no library service', { where })
+    const found = lib.lookup('machine', args.machineId)
+    if (found.state !== 'found' || !(found.item.values instanceof Machine))
+      return fail('input.malformed', `machine ${args.machineId} does not exist or does not load`, {
+        where,
+        issues: [{ path: ['machineId'], rule: 'unknownItem', message: 'no such library machine' }],
+      })
+    const machine = found.item.values
+    const patch: { workArea?: Option<WorkArea>; workAreaMargin?: Option<Quantity> } = {}
+    if (args.marks === null) patch.workArea = None
+    else if (args.marks !== undefined) {
+      const area = workAreaModel(args.marks)
+      if (area.isErr()) return Err(area.unwrapErr().withContext(where))
+      patch.workArea = Object.keys(area.unwrap()).length === 0 ? None : Some(area.unwrap())
+    }
+    if (args.margin !== undefined) {
+      const q = mmQuantity(args.margin)
+      if (q.isErr()) return Err(q.unwrapErr().withContext(where))
+      patch.workAreaMargin = Some(q.unwrap())
+    }
+    const next = machine.with(patch)
+    if (next.isErr()) return Err(next.unwrapErr().prefixIssues('values').withContext(where))
+    const item = await lib.update(
+      args.machineId,
+      args.revision,
+      next.unwrap(),
+      new Date(ctx.clock.now()).toISOString(),
+    )
+    if (item.isErr()) return Err(item.unwrapErr().withContext(where))
+    const m = ctx.services.machine
+    if (m?.target !== undefined && m.libraryMachineId === args.machineId) {
+      const area = machineWorkArea(next.unwrap())
+      const r = await m.machine({ kind: 'workArea', ...(area === undefined ? {} : { area }) })
+      if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    }
+    return Ok({ revision: item.unwrap().revision })
+  },
+})
+
 /**
  * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1). On: Idle only
  * (in a jog a speed change through the spindle override), a G-code spindle, no laser mode, rpm in
@@ -975,6 +1095,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbeZ,
   runMachineProbe,
   runVirtualStock,
+  runWorkAreaSet,
   runMachineSpindle,
   runOverrideSet,
   runAlignGoto,
@@ -1006,6 +1127,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbeZ,
   runMachineProbe,
   runVirtualStock,
+  runWorkAreaSet,
   runMachineSpindle,
   runOverrideSet,
   runJobContinue,

@@ -227,10 +227,20 @@ export function useRunScene(mode: AppMode): RunScene | null {
     if (env === undefined) return undefined
     const w = (v: number, i: number) => v - (wz[i] ?? 0) + (i === 2 ? level : 0)
     const home = homedPosition(env)
+    const a = env.workArea
     return {
       min: [w(-env.travel[0], 0), w(-env.travel[1], 1), w(-env.travel[2], 2)],
       max: [w(0, 0), w(0, 1), w(0, 2)],
       home: [w(home[0], 0), w(home[1], 1), w(home[2], 2)],
+      // v0.5 RV7: the work area's bound, dashed inside the travel
+      ...(a === undefined
+        ? {}
+        : {
+            workArea: {
+              min: [w(a.min[0], 0), w(a.min[1], 1), w(a.min[2], 2)],
+              max: [w(a.max[0], 0), w(a.max[1], 1), w(a.max[2], 2)],
+            },
+          }),
     }
     // workZero values, not the array identity (a new status each report)
   }, [
@@ -239,6 +249,7 @@ export function useRunScene(mode: AppMode): RunScene | null {
     env?.travel[2],
     env?.homingMask,
     env?.pullOff,
+    JSON.stringify(env?.workArea),
     wz[0],
     wz[1],
     wz[2],

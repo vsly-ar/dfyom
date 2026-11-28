@@ -564,6 +564,59 @@ describe('run commands', { timeout: 60_000 }, () => {
     expectOk(await t.run('run.override.set', { spindle: 20, feed: 10 }))
   })
 
+  it('RV7: run.workArea.set writes the library machine and the open connection follows', async () => {
+    const t = await setup()
+    const { kind: _, ...m } = machineValues()
+    const { id, revision } = (await t.s.run('library.machine.add', {
+      values: libraryInput({ ...m, name: 'Marked' }),
+    })) as { id: string; revision: number }
+    expectOk(
+      await t.run('run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' }),
+    )
+    expect(t.client.libraryMachineId).toBe(id)
+    expectOk(await t.run('run.machine.home', {}))
+    expect(t.status().envelope?.workArea).toBeUndefined()
+    const set = expectOk(
+      await t.run(
+        'run.workArea.set',
+        { machineId: id, revision, marks: { x: { min: -700, max: -10 } }, margin: 3 },
+        ui,
+      ),
+    ) as { revision: number }
+    expect(set.revision).toBe(revision + 1)
+    const found = t.s.library.lookup('machine', id)
+    const saved = found.state === 'found' ? (found.item.values as Machine) : undefined
+    expect(saved?.usableTravel('x')).toBeCloseTo(684, 6)
+    expect(await waitFor(() => t.status().envelope?.workArea !== undefined)).toBe(true)
+    expect(t.status().envelope?.workArea?.min[0]).toBeCloseTo(-697, 6)
+    expect(t.status().envelope?.workArea?.max[0]).toBeCloseTo(-13, 6)
+    // a stale revision is a conflict; crossed marks are the model's invariant
+    expectErrCode(
+      await t.run('run.workArea.set', { machineId: id, revision, marks: null }, ui),
+      'command.conflict',
+    )
+    expectErrCode(
+      await t.run(
+        'run.workArea.set',
+        { machineId: id, revision: set.revision, marks: { y: { min: -5, max: -50 } } },
+        ui,
+      ),
+      'model.invariant',
+    )
+    // reconnecting reads it from the library again
+    expectOk(await t.run('run.connection.close', {}))
+    expectOk(
+      await t.run('run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' }),
+    )
+    expectOk(await t.run('run.machine.home', {}))
+    expect(await waitFor(() => t.status().envelope?.workArea?.max[0] === -13)).toBe(true)
+    // cleared: gone from the library and the connection
+    expectOk(
+      await t.run('run.workArea.set', { machineId: id, revision: set.revision, marks: null }, ui),
+    )
+    expect(await waitFor(() => t.status().envelope?.workArea === undefined)).toBe(true)
+  })
+
   it('RV1: the spindle from Run: on in Idle only, the speed in a jog by override, off cancels a jog first', async () => {
     const t = await setup()
     const { kind: _, ...m } = machineValues()

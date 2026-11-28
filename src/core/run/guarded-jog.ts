@@ -13,6 +13,7 @@
  */
 import type { Vec3 } from '../toolpath/model'
 import type { EnvelopeSegment } from '../plan/workholding/envelope'
+import { limitBounds, type Bounds } from './work-area'
 import type { Prism } from '../plan/workholding/obstacles'
 import { jogGuard, type JogContact } from './jog-guard'
 
@@ -49,6 +50,8 @@ export interface GuardedJogInput {
   readonly offset: Vec3
   /** The controller's travel (`$130–$132`, mm), the continuous jog's far end; absent: unknown. */
   readonly travel?: Vec3
+  /** v0.5 RV7: the work area's bound (the status's `envelope.workArea`): a hold ends there. */
+  readonly workArea?: Bounds | undefined
   readonly setup: GuardSetup
 }
 
@@ -80,18 +83,32 @@ export function plainJogArgs(request: JogRequest): JogArgs {
   return { by, feed: request.feed, continuous: true }
 }
 
-/** The machine end of a plain jog from `from` (a hold: at the travel edge), when known. */
-export function plainJogEnd(request: JogRequest, from: Vec3, travel?: Vec3): Vec3 | undefined {
+/**
+ * The machine end of a plain jog from `from` (a hold: at the travel edge, or the work area's
+ * bound, RV7), when known.
+ */
+export function plainJogEnd(
+  request: JogRequest,
+  from: Vec3,
+  travel?: Vec3,
+  workArea?: Bounds,
+): Vec3 | undefined {
   const end: [number, number, number] = [from[0], from[1], from[2]]
   if (request.kind === 'step') end[request.axis] += request.mm
   else if (travel === undefined) return undefined
-  else end[request.axis] = edgeOf(request, travel)
+  else end[request.axis] = edgeOf(request, travel, workArea)
   return end
 }
 
-/** The travel edge a continuous jog runs to (machine, mm), as the host's `jogToEdge`. */
-const edgeOf = (request: JogRequest & { kind: 'hold' }, travel: Vec3): number =>
-  request.sign > 0 ? 0 : -travel[request.axis]
+/** The edge a continuous jog runs to (machine, mm), as the host's `jogToEdge`. */
+const edgeOf = (
+  request: JogRequest & { kind: 'hold' },
+  travel: Vec3,
+  workArea?: Bounds,
+): number => {
+  const b = limitBounds({ travel, workArea })
+  return request.sign > 0 ? b.max[request.axis] : b.min[request.axis]
+}
 
 /** Rounds `v` to 0.001 mm (the host's `$J` precision) towards `from`, never past the stop. */
 function towards(v: number, from: number): number {
@@ -106,13 +123,13 @@ function towards(v: number, from: number): number {
  * start), or `blocked` when that is less than `MIN_JOG_MM` from the start.
  */
 export function guardedJog(input: GuardedJogInput): GuardedJog {
-  const { request, from, wco, offset, travel, setup } = input
+  const { request, from, wco, offset, travel, workArea, setup } = input
   const plain = (): GuardedJog => {
-    const end = plainJogEnd(request, from, travel)
+    const end = plainJogEnd(request, from, travel, workArea)
     return { kind: 'send', args: plainJogArgs(request), ...(end === undefined ? {} : { end }) }
   }
   if (request.kind === 'hold' && travel === undefined) return plain()
-  const to = plainJogEnd(request, from, travel)!
+  const to = plainJogEnd(request, from, travel, workArea)!
   const toSetup = (m: Vec3): Vec3 => [
     m[0] - wco[0] + offset[0],
     m[1] - wco[1] + offset[1],

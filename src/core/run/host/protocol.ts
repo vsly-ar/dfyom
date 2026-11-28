@@ -134,6 +134,11 @@ export const HostStatusSchema = z.object({
       homingMask: z.number().int().min(0).max(7),
       pullOff: Num,
       softLimits: z.boolean(),
+      /**
+       * v0.5 RV7: DFYOM's inner bound (MPos, the margin included) from the marked work area,
+       * while homed; absent: the travel only (docs/modes/run.md#work-area-rv7).
+       */
+      workArea: z.object({ min: Vec3Schema, max: Vec3Schema }).exactOptional(),
     })
     .exactOptional(),
   timeScale: TimeScaleSchema,
@@ -249,6 +254,19 @@ export const VirtualStockSchema = z.object({
   angle: z.number().min(-45).max(45).exactOptional(),
 })
 
+/** v0.5 RV7: one axis's work area marks (MPos, mm). */
+const AxisMarksSchema = z.object({ min: Num.exactOptional(), max: Num.exactOptional() })
+
+/** v0.5 RV7: the work area marks and margin (docs/modes/run.md#work-area-rv7). */
+export const WorkAreaSettingSchema = z.object({
+  marks: z.object({
+    x: AxisMarksSchema.exactOptional(),
+    y: AxisMarksSchema.exactOptional(),
+    z: AxisMarksSchema.exactOptional(),
+  }),
+  margin: z.number().min(0).max(1000),
+})
+
 export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('home') }),
   z.object({ kind: z.literal('unlock') }),
@@ -344,6 +362,11 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     rpm: z.number().positive().max(1e6).exactOptional(),
     dwellSeconds: z.number().min(0).max(60).exactOptional(),
   }),
+  /**
+   * v0.5 RV7: the connection's work area (absent: none); jogs, probing and the status's
+   * `envelope.workArea` follow it while homed. Moves nothing.
+   */
+  z.object({ kind: z.literal('workArea'), area: WorkAreaSettingSchema.exactOptional() }),
   /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
   z.object({
     kind: z.literal('override'),

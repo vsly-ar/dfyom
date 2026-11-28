@@ -192,6 +192,26 @@ async function resumeAt(
   })
 }
 
+/**
+ * v0.5 RV7: a plan program's `workArea` findings at the live G54 (the export checks the travel;
+ * the program's text against the work area's bound, docs/modes/run.md#work-area-rv7).
+ */
+function areaFindings(
+  m: MachineService,
+  lines: readonly string[],
+  workZero: readonly [number, number, number],
+): PlanWarning[] {
+  const s = m.status()
+  const env = s.envelope
+  if (env?.workArea === undefined) return []
+  return fileSoftLimits(lines, {
+    workZero,
+    mpos: s.mpos,
+    travel: env.travel,
+    workArea: env.workArea,
+  }).filter((w) => w.rule === 'workArea')
+}
+
 /** The controller's envelope, needed for the lead-in's machine top and the soft-limit check. */
 function envelopeFor(m: MachineService, where: string): AppResult<Envelope> {
   const envelope = envelopeOf(m.controllerSettings ?? {})
@@ -674,7 +694,10 @@ async function checkAndStart(
   const e = exported.unwrap()
   let program: SenderProgram = { lines: e.lines, sections: programSections(e) }
   let operations = e.operationLines
-  let soft = e.warnings.filter((w) => w.rule === 'softLimit')
+  let soft = [
+    ...e.warnings.filter((w) => w.rule === 'softLimit'),
+    ...areaFindings(m, e.lines, workZero),
+  ]
   // DF129 RC5: what the run's lines refer to, so an interruption maps them back to this program
   let origin: RunOrigin = { programHash: await programHash(e.lines) }
   // a start at a line (DF129 RC2): the lead-in and the program from the line on, checked as a file
@@ -710,6 +733,7 @@ async function checkAndStart(
       workZero,
       mpos: m.status().mpos,
       travel: envelope.unwrap().travel,
+      workArea: m.status().envelope?.workArea,
     })
   }
   // 3. soft limits refuse the start (decision 8)
@@ -886,7 +910,11 @@ export const runJobCheck = defineCommand({
         : {}
     if (args.fromLine === undefined) {
       const findings = e.warnings.filter((w) => w.rule === 'softLimit')
-      return Ok({ setupId: setup.id, findings: [...findings], ...program })
+      return Ok({
+        setupId: setup.id,
+        findings: [...findings, ...areaFindings(m, e.lines, workZero)],
+        ...program,
+      })
     }
     const envelope = envelopeFor(m, where)
     if (envelope.isErr()) return envelope
@@ -906,6 +934,7 @@ export const runJobCheck = defineCommand({
       workZero,
       mpos: m.status().mpos,
       travel: envelope.unwrap().travel,
+      workArea: m.status().envelope?.workArea,
     })
     return Ok({ setupId: setup.id, findings, resume: r.unwrap().preview, ...program })
   },
@@ -1001,6 +1030,7 @@ async function fileChecks(
       workZero: status.workZero,
       mpos: status.mpos,
       travel: envelope.travel,
+      workArea: status.envelope?.workArea,
     })
     return Ok({ m, file, workZero: status.workZero, findings })
   }
@@ -1016,6 +1046,7 @@ async function fileChecks(
     workZero: status.workZero,
     mpos: status.mpos,
     travel: envelope.travel,
+    workArea: status.envelope?.workArea,
   })
   return Ok({ m, file, workZero: status.workZero, findings, resume: r.unwrap() })
 }

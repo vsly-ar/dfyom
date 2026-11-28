@@ -160,6 +160,11 @@ export const runMessages = {
   /** A continuous jog from the end of the travel (`run.travel`, `atEdge`). */
   travelAtEdge: (axis: string, side: 'max' | 'min', limit: string, unit: string) =>
     `${axis} is at the end of its travel (${side} ${limit} ${unit}).`,
+  /** v0.5 RV7: the same against the work area (docs/modes/run.md#work-area-rv7). */
+  workAreaJog: (axis: string, side: 'max' | 'min', limit: string, target: string, unit: string) =>
+    `${axis} would leave the work area: ${side} ${limit} ${unit}, the jog would end at ${target} ${unit}.`,
+  workAreaAtEdge: (axis: string, side: 'max' | 'min', limit: string, unit: string) =>
+    `${axis} is at the end of the work area (${side} ${limit} ${unit}).`,
 
   /**
    * The alarm panel: what happened and the next steps per GRBL alarm
@@ -403,6 +408,44 @@ export const runMessages = {
   },
 
   /** v0.5 RV6: Check alignment (docs/modes/alignment.md#check-alignment-rv6). */
+  /** v0.5 RV7: the Work area dialog (docs/modes/run.md#work-area-rv7). */
+  workArea: {
+    button: 'Work area…',
+    title: 'Work area',
+    description:
+      'Jog slowly to each end the machine reaches safely and mark it. Moves stay inside the marks less the margin; the controller’s soft limits stay the outer bound.',
+    steps:
+      'Jog slowly to the last safe point of each end (the spindle body clear of the gantry, fixtures and cables), then press its Mark button. An end you do not mark stays bounded by the travel.',
+    homeFirst: 'Home the machine first: marks are machine coordinates.',
+    noMachine: 'Choose a library machine: the work area is saved with it.',
+    idleFirst: 'Wait until the machine is idle to mark.',
+    table: 'Marked ends',
+    columns: { axis: 'Axis', min: 'Min', max: 'Max', travel: 'Travel' },
+    unmarked: '—',
+    mark: (axis: string, side: 'min' | 'max') => `Mark ${axis} ${side}`,
+    clearSide: (axis: string, side: 'min' | 'max') => `Clear ${axis} ${side}`,
+    crossed: (axis: string) =>
+      `${axis} min must stay below ${axis} max: clear the other mark first.`,
+    margin: 'Margin',
+    marginHint:
+      'Kept inside every marked end: jogs, Go to and probing stop this far before a mark.',
+    marginTooWide: (axis: string) =>
+      `The margin is wider than half the marked ${axis} span: nothing can move on ${axis}.`,
+    clear: 'Clear work area',
+    clearHint: 'To mark an end further out, clear it first: moves stay inside the current marks.',
+    saved: (what: string) => `${what} saved.`,
+    cleared: 'Work area cleared.',
+    /** A `$13n` line to copy (Q219: DFYOM never writes `$` settings). */
+    lower: (axis: string, reach: string, travel: string, setting: string, unit: string) =>
+      `The marked ${axis} end is ${reach} ${unit} from the homing switch; the controller allows ${travel} ${unit} (${setting}). To make its soft limits stop there too, set:`,
+    raise: (axis: string, reach: string, travel: string, setting: string, unit: string) =>
+      `Your machine reaches ${reach} ${unit} in ${axis}; the controller allows ${travel} ${unit} (${setting}). Raise ${setting} with your controller’s tool to use it:`,
+    copy: (line: string) => `Copy ${line}`,
+    copied: (line: string) => `${line} copied to the clipboard.`,
+    copyFailed: 'Could not copy to the clipboard.',
+    close: 'Close',
+  },
+
   checkAlign: {
     button: 'Check alignment…',
     zeroFirst: 'Set the X/Y zero first: the stops are where the plan puts the stock.',
@@ -717,6 +760,13 @@ export const runMessages = {
     copy: (line: string) => `Copy ${line}`,
     copied: (line: string) => `${line} copied to the clipboard.`,
     copyFailed: 'Could not copy to the clipboard.',
+    /** v0.5 RV7: the work area's summary (docs/modes/run.md#work-area-rv7). */
+    workArea: 'Work area',
+    workAreaNone: 'Not marked: moves are bounded by the travel.',
+    workAreaAxis: (axis: string, min: string, max: string, unit: string) =>
+      `${axis} ${min} … ${max} ${unit}`,
+    workAreaMargin: (margin: string, unit: string) => `margin ${margin} ${unit}`,
+    workAreaEdit: 'Work area…',
   },
 
   dro: {
@@ -862,6 +912,9 @@ export const runMessages = {
     already: 'Already there.',
     travel: (axis: string, target: string, min: string, max: string, unit: string) =>
       `${axis} would leave the travel: the target is at machine ${target}, the travel is ${min} to ${max} ${unit}.`,
+    /** v0.5 RV7: a step outside the work area (its bound, the margin in). */
+    workArea: (axis: string, target: string, min: string, max: string, unit: string) =>
+      `${axis} would leave the work area: the target is at machine ${target}, the work area is ${min} to ${max} ${unit}.`,
     unknown: 'Home the machine first: the position is unknown.',
     jogging: 'The machine is still jogging.',
     spindleOn: 'Stop the spindle first.',
@@ -977,6 +1030,16 @@ export const runMessages = {
     /** One `softLimit` finding (DF46), lengths already in the project's unit. */
     softLimitsAxis: (axis: string, from: string, to: string, travel: string, unit: string) =>
       `${axis} leaves the travel: the program spans ${from} to ${to} ${unit}, the travel is −${travel} to 0 ${unit}.`,
+    /** v0.5 RV7: one `workArea` finding: inside the travel, outside the marked work area. */
+    softLimitsArea: (
+      axis: string,
+      from: string,
+      to: string,
+      min: string,
+      max: string,
+      unit: string,
+    ) =>
+      `${axis} leaves the work area: the program spans ${from} to ${to} ${unit}, the work area is ${min} to ${max} ${unit}.`,
     softLimitsFix: 'Move the work zero so the program fits the travel, then start again.',
     softLimitsFailed: 'The soft-limit check failed:',
     checksTitle: 'Before you start',

@@ -8,9 +8,16 @@
  * which end. Nothing here rotates or writes anything (Q65: the stock is moved, not the program).
  * Pure. Doc: docs/modes/alignment.md#check-alignment-rv6
  */
-import { fail, Ok, type AppResult } from '../../shared/result'
-import { travelViolation, type Envelope } from './grbl/envelope'
-import { goToMoves, machineTopZ, GOTO_EPS_MM, type GoToStep, type Vec3 } from './goto'
+import { Ok, type AppResult } from '../../shared/result'
+import {
+  goToMoves,
+  machineTopZ,
+  stepsViolation,
+  GOTO_EPS_MM,
+  type GoToStep,
+  type MoveLimits,
+  type Vec3,
+} from './goto'
 import type { PlanStock, Side } from './xy-zero'
 
 export type CheckPattern = 'corners' | 'edges' | 'perimeter' | 'both'
@@ -198,7 +205,7 @@ export function sightZ(p: {
   readonly wcoZ: number
   readonly zeroLevel?: number | undefined
   readonly height: number
-  readonly envelope?: Pick<Envelope, 'travel' | 'pullOff'> | undefined
+  readonly envelope?: MoveLimits | undefined
 }): number {
   return Math.min(p.wcoZ - (p.zeroLevel ?? 0) + p.height, machineTopZ(p.envelope))
 }
@@ -242,7 +249,7 @@ export interface CheckMoveInput {
   readonly to: CheckStop
   /** +1 counter-clockwise (Next, Continue), −1 (Previous). */
   readonly dir: 1 | -1
-  readonly envelope?: Pick<Envelope, 'travel' | 'pullOff'> | undefined
+  readonly envelope?: MoveLimits | undefined
 }
 
 /** A stop's machine position at the sighting height. */
@@ -295,18 +302,8 @@ export function checkMoves(p: CheckMoveInput): AppResult<CheckStep[]> {
   for (const [x, y] of legPoints(p.stock, p.gap, p.fromStop!, p.to, p.dir))
     steps.push({ to: [x + p.wco[0], y + p.wco[1], z], axis: 'xy', feed: 'trace' })
   if (z > z0 + GOTO_EPS_MM) steps.push({ to: target, axis: 'z', feed: 'jog' })
-  if (p.envelope !== undefined) {
-    for (const [i, s] of steps.entries()) {
-      const v = travelViolation(p.envelope.travel, s.to)
-      if (v !== undefined)
-        return fail(
-          'run.travel',
-          `${v.axis.toUpperCase()} would leave the travel: the pointer would reach ${v.target.toFixed(3)} mm, the travel is ${v.min.toFixed(3)} to ${v.max.toFixed(3)} mm`,
-          { where: 'checkMoves', data: { ...v, step: i } },
-        )
-    }
-  }
-  return Ok(steps)
+  const outside = stepsViolation(p.from, steps, p.envelope, 'checkMoves', 'the pointer')
+  return outside === undefined ? Ok(steps) : outside
 }
 
 /** The stock edge Measure probes: `y` the front (−1) or back (+1), `x` the left or right. */

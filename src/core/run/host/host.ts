@@ -32,7 +32,16 @@ import {
   type SenderEvent,
   type ToolChangeInfo,
 } from '../grbl/sender'
-import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
+import { envelopeOf, type Envelope } from '../grbl/envelope'
+import {
+  limitBounds,
+  limitViolation,
+  marksEmpty,
+  workAreaBounds,
+  type Bounds,
+  type LimitViolation,
+  type WorkAreaSetting,
+} from '../work-area'
 import { limitSwitches, POSITION_ALARMS } from '../grbl/status'
 import { overrideLimits, overrideSteps } from '../override'
 import { runProbeCycle, type ProbePort } from '../probe-cycle'
@@ -123,6 +132,8 @@ interface Connection {
   readonly envelope: Envelope | undefined
   /** `$32=1` at connect (DF85). */
   readonly laserMode: boolean
+  /** v0.5 RV7: the work area marks and margin main sent (docs/modes/run.md#work-area-rv7). */
+  workArea?: WorkAreaSetting | undefined
   /**
    * End (MPos) of the last jog GRBL accepted; the base of the next relative jog's travel check
    * while jogs queue. Cleared by anything else that moves or questions the position.
@@ -287,6 +298,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
               homingMask: conn.envelope.homingMask,
               pullOff: conn.envelope.pullOff,
               softLimits: conn.envelope.softLimits,
+              ...(areaOf(conn) === undefined ? {} : { workArea: areaOf(conn)! }),
             },
           }),
       timeScale: conn.clock.scale,
@@ -616,11 +628,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         const end: Vec3 | undefined =
           action.to ??
           (base === undefined ? undefined : [base[0] + v[0], base[1] + v[1], base[2] + v[2]])
-        const env = c.envelope
-        const outside =
-          env?.softLimits === true && end !== undefined
-            ? travelViolation(env.travel, end)
-            : undefined
+        const outside = end === undefined ? undefined : jogViolation(c, end, base)
         if (outside !== undefined) return travelError(outside)
         const r = await c.sender.command(line)
         if (r.isErr()) {
@@ -628,13 +636,21 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           // GRBL's own check (error:15) when the estimate lagged: the same refusal in words
           if (e.code === 'machine.error' && e.frames[0]?.data?.['code'] === 15)
             return travelError(
-              env !== undefined && end !== undefined ? travelViolation(env.travel, end) : undefined,
+              c.envelope !== undefined && end !== undefined
+                ? limitViolation({ travel: c.envelope.travel }, end)
+                : undefined,
             )
           return Err(e)
         }
         c.jogEnd = end
         return Ok(undefined)
       }
+      case 'workArea':
+        // v0.5 RV7: bookkeeping only; the next jog, probe and status follow it
+        c.workArea =
+          action.area === undefined || marksEmpty(action.area.marks) ? undefined : action.area
+        status.now()
+        return Ok(undefined)
       case 'jogCancel':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.jogCancel)
@@ -848,7 +864,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       c.emulator.setProbePlate(top < s.mpos[2] - 1e-3 ? top : s.mpos[2] - 10)
     }
     c.jogEnd = undefined
-    const env = c.envelope
+    const travel = probeTravel(c)
     log.info({ distance: a.maxTravel, feed: a.feed }, 'probing Z')
     const probed = await runProbeCycle(
       probePort(c),
@@ -858,9 +874,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         maxDistance: a.maxTravel,
         fastFeed: a.feed,
         retract: a.retract,
-        ...(env?.softLimits === true
-          ? { travel: { min: [-env.travel[0], -env.travel[1], -env.travel[2]], max: [0, 0, 0] } }
-          : {}),
+        ...(travel === undefined ? {} : { travel }),
         inches: c.inches,
         onAlarm: 'stay',
       },
@@ -952,14 +966,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       })
     }
     c.jogEnd = undefined
-    const env = c.envelope
+    const travel = probeTravel(c)
     const { kind: _kind, plateSize: _size, ...spec } = a
     log.info({ routine: a.routine, probe: a.probe.kind }, 'probing')
     const r = await runProbeRoutine(probePort(c), {
       ...spec,
-      ...(env?.softLimits === true
-        ? { travel: { min: [-env.travel[0], -env.travel[1], -env.travel[2]], max: [0, 0, 0] } }
-        : {}),
+      ...(travel === undefined ? {} : { travel }),
       inches: c.inches,
     })
     if (emu !== undefined) {
@@ -1205,14 +1217,28 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const i = axes[0]!
     const env = c.envelope
     if (env === undefined) return stateError('the machine travel is not known yet', machineState(c))
-    const edge = by[i]! > 0 ? 0 : -env.travel[i]!
+    // v0.5 RV7: to the work area's bound (the margin in) when one is marked, else the travel's end
+    const area = areaOf(c)
+    const b = limitBounds({ travel: env.travel, workArea: area })
+    const edge = by[i]! > 0 ? b.max[i]! : b.min[i]!
     const base = c.jogEnd ?? c.sender.status?.mpos
     const axis = AXES[i]!
     if (base !== undefined && (by[i]! > 0 ? base[i]! >= edge - 1e-3 : base[i]! <= edge + 1e-3))
-      return fail('run.travel', `${axis.toUpperCase()} is at the end of its travel`, {
-        where,
-        data: { axis, target: base[i]!, min: -env.travel[i]!, max: 0, atEdge: true },
-      })
+      return fail(
+        'run.travel',
+        `${axis.toUpperCase()} is at the end of its ${area === undefined ? 'travel' : 'work area'}`,
+        {
+          where,
+          data: {
+            axis,
+            target: base[i]!,
+            min: b.min[i]!,
+            max: b.max[i]!,
+            atEdge: true,
+            ...(area === undefined ? {} : { workArea: true }),
+          },
+        },
+      )
     const r = await c.sender.command(
       `$J=G21 G53 G90 ${axis.toUpperCase()}${fmt(edge)} F${fmt(feed)}`,
     )
@@ -1227,17 +1253,59 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return Ok(undefined)
   }
 
-  /** `run.travel`: a jog outside `[−travel, 0]`, in words (docs/modes/run.md DF33). */
-  function travelError(v: TravelViolation | undefined): AppResult<never> {
+  /**
+   * v0.5 RV7: the work area's bound while homed (positions before homing mean nothing), with the
+   * margin in; undefined without marks or a travel.
+   */
+  function areaOf(c: Connection): Bounds | undefined {
+    if (!c.homed || c.workArea === undefined || c.envelope === undefined) return undefined
+    return workAreaBounds(c.envelope.travel, c.workArea)
+  }
+
+  /**
+   * A jog's end against the travel (with soft limits on, as GRBL) and the work area (RV7, never
+   * further out than the jog's start: `limitViolation`).
+   */
+  function jogViolation(c: Connection, end: Vec3, from: Vec3 | undefined) {
+    const env = c.envelope
+    if (env === undefined) return undefined
+    const area = areaOf(c)
+    if (env.softLimits) return limitViolation({ travel: env.travel, workArea: area }, end, from)
+    if (area === undefined) return undefined
+    // soft limits off: the work area only (a huge travel never binds)
+    return limitViolation({ travel: [1e9, 1e9, 1e9], workArea: area }, end, from)
+  }
+
+  /** The probe runner's travel: the work area's bound (RV7), else the travel with soft limits. */
+  function probeTravel(c: Connection): Bounds | undefined {
+    const env = c.envelope
+    if (env === undefined) return undefined
+    const area = areaOf(c)
+    if (area !== undefined) return area
+    return env.softLimits ? limitBounds({ travel: env.travel }) : undefined
+  }
+
+  /** `run.travel`: a jog outside `[−travel, 0]` or the work area, in words (docs/modes/run.md DF33). */
+  function travelError(v: LimitViolation | undefined): AppResult<never> {
     const where = 'machineHost.jog'
     if (v === undefined)
       return fail('run.travel', 'the jog would leave the machine travel (GRBL error 15)', { where })
     const A = v.axis.toUpperCase()
     const limit = v.target > v.max ? `max ${fmt(v.max)} mm` : `min ${fmt(v.min)} mm`
+    const what = v.workArea === true ? 'work area' : 'travel'
     return fail(
       'run.travel',
-      `${A} would leave the travel: ${limit}, the jog would end at ${fmt(v.target)} mm`,
-      { where, data: { axis: v.axis, target: v.target, min: v.min, max: v.max } },
+      `${A} would leave the ${what}: ${limit}, the jog would end at ${fmt(v.target)} mm`,
+      {
+        where,
+        data: {
+          axis: v.axis,
+          target: v.target,
+          min: v.min,
+          max: v.max,
+          ...(v.workArea === true ? { workArea: true } : {}),
+        },
+      },
     )
   }
 

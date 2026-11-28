@@ -347,6 +347,40 @@ describe('machine checks per setup', () => {
       [right, 'z', 'stock length + clearance height exceeds the Z travel'],
     ])
   })
+
+  it('v0.5 RV7: a stock that fits the travel but not the marked work area is its own warning', async () => {
+    const s = await planSetup()
+    const { kind: _, ...m } = machineValues()
+    const add = async (name: string, workArea: unknown) =>
+      (
+        (await s.run('library.machine.add', {
+          values: libraryInput({
+            ...m,
+            name,
+            travel: { x: len('120'), y: len('70'), z: len('200') },
+            workArea,
+          }),
+        })) as { id: string }
+      ).id
+    const area = (planId: string) =>
+      warnings(s, planId)
+        .filter((w) => w.code === 'plan.machine' && w.rule === 'workArea')
+        .map((w) => [w.params['axis'], w.message])
+    // X: 120 − 10 − 2 mm margin = 108 ≥ 100: fits
+    expect(
+      area(
+        await s.create({ machineLibraryItemId: await add('Wide', { x: { min: len('-110') } }) }),
+      ),
+    ).toEqual([])
+    // X: 120 − 20 − 2 = 98 < 100, inside the 120 travel
+    const tight = await s.create({
+      machineLibraryItemId: await add('Tight', { x: { min: len('-100') } }),
+    })
+    expect(area(tight)).toEqual([
+      ['x', 'stock length exceeds the X work area (98 mm with its margin)'],
+    ])
+    expect(warnings(s, tight).some((w) => w.rule === 'travel')).toBe(false)
+  })
 })
 
 describe('rebuild keeps the setup structure', () => {
