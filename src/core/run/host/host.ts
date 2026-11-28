@@ -1171,6 +1171,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     log.info({ homed: c.homed }, 'backed off the limit switch')
     status.now()
     return Ok({ positionUnverified: homedBefore })
+  }
+
   /**
    * v0.5 RV8: one probe of the repeatability target (docs/modes/run-machine.md#homing-repeatability-rv8)
    * through `runTargetProbe`; homed, Idle, no run. The virtual operator lays the target under the
