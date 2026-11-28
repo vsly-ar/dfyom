@@ -18,6 +18,7 @@ interface RunJobStatus {
   phase: string
   toolChange?: { n: number; name: string }
   pause?: number
+  line?: number
 }
 
 /** Timers fired by elapsed time, so a poll can run without the wait's timeout. */
@@ -74,7 +75,8 @@ function setup() {
       pause: z.number().optional(),
     }),
     result: z.object({}).passthrough(),
-    run: async (_doc, args) => Ok(args),
+    // as the real command: the wait's line (a tool number can come back later in the program)
+    run: async (_doc, args) => Ok({ ...args, line: status.job?.line }),
   })
   const runStatus = defineQuery({
     name: 'run.status.get',
@@ -172,6 +174,25 @@ describe('job.wait on a run', () => {
         pause: 1,
         next: { name: 'run.job.continue', args: { jobId, pause: 1 } },
       },
+    })
+  })
+
+  it('returns at the same tool again later in the program (T2, T3, T2)', async () => {
+    const t = setup()
+    const s = t.session
+    t.value((await s.call('project.create', { name: 'A', unitSystem: 'mm' })).result)
+    const { jobId } = t.value((await s.call('run.job.start', { planId: 'pl' })).result) as {
+      jobId: string
+    }
+    const tc2 = { n: 2, name: 'T2 Flat 6.22' }
+    t.status.job = { jobId, phase: 'toolChange', toolChange: tc2, line: 40 }
+    expectOk((await s.call('run.job.continue', { jobId, toolChange: 2 })).result)
+    // the dogfood's plate: T2 drills, T3 countersinks, T2 again for the cut-off
+    t.status.job = { jobId, phase: 'toolChange', toolChange: tc2, line: 1558 }
+    const again = t.value((await s.call('job.wait', { jobId, timeoutSeconds: 60 })).result)
+    expect(again).toMatchObject({
+      timedOut: false,
+      waiting: { kind: 'toolChange', toolChange: tc2 },
     })
   })
 

@@ -192,7 +192,7 @@ interface OperatorWait {
 
 /**
  * The tool change or program pause run `jobId` waits at, unless a logged `run.job.continue`
- * already ended it (the machine status may still show it for a moment).
+ * already ended it at the same line (the machine status may still show it for a moment).
  */
 function operatorWait(d: Dispatcher, source: Source, jobId: string): OperatorWait | undefined {
   const status = d.query('run.status.get', {}, source)
@@ -212,7 +212,9 @@ function operatorWait(d: Dispatcher, source: Source, jobId: string): OperatorWai
     const v = e.outcome.value as Record<string, unknown> | null
     return (
       v?.['jobId'] === jobId &&
-      ('toolChange' in which ? v['toolChange'] === which.toolChange : v['pause'] === which.pause)
+      ('toolChange' in which ? v['toolChange'] === which.toolChange : v['pause'] === which.pause) &&
+      // the same tool comes back later in the program (T2, T3, T2): that wait is a new one
+      (v['line'] === undefined || v['line'] === job['line'])
     )
   })
   if (ended) return undefined
