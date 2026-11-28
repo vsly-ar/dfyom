@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { generateDrilling, tipLength } from './drilling'
-import type { DrillingOperation, DrillMove } from './model'
+import { generateDrilling, HELIX_PLUNGE_FRACTION, tipLength } from './drilling'
+import type { DrillingOperation, DrillMove, Toolpath } from './model'
 import { drill, drillingInput, endMill } from './testing/fixtures'
 import { Heightmap, render, steps } from './testing/oracles'
 import { violations } from './testing/rules'
@@ -80,6 +80,16 @@ describe('generateDrilling', () => {
     expect(through.bottom).toBeCloseTo(-20.5 - tip, 12)
   })
 
+  /** Full turns of a descending helix. */
+  const descending = (tp: Toolpath) =>
+    steps(tp).flatMap(({ from, move }) =>
+      move.kind === 'arc' && move.to[2] < from[2] ? [{ from, move }] : [],
+    )
+  const helixTurns = (tp: Toolpath) =>
+    Math.round(
+      descending(tp).reduce((a, s) => a + Math.abs(arcSweep(s.from, s.move)), 0) / (2 * Math.PI),
+    )
+
   /** Helical boring of a flat hole of `diameter`, 7 deep, from Z −0.5: all properties. */
   function checkHelix(diameter: number, toolDiameter: number, helixPitch: number, rampAngle = 3) {
     const op = hole({ kind: 'flat', depth: 7 }, diameter)
@@ -93,11 +103,13 @@ describe('generateDrilling', () => {
     })
     const tp = generateDrilling(input).unwrap()
     const rho = (diameter - toolDiameter) / 2
+    // DF159: below R/4 the helix is held by the plunge rate only, not the ramp angle
+    const plunging = rho < (HELIX_PLUNGE_FRACTION * toolDiameter) / 2
     expect(
       violations(tp, {
         feedRate: 600,
         plungeRate: 150,
-        rampAngle,
+        rampAngle: plunging ? 89.9 : rampAngle,
         verticalAtMostPlunge: true,
         retractZ: 1.5,
         clearanceZ: 10,
@@ -144,8 +156,17 @@ describe('generateDrilling', () => {
 
   it('a hole barely larger than the tool: capped descent, then plunges for tiny circles', () => {
     checkHelix(6.1, 6, 1.5) // ρ = 0.05 < 0.1 mm: plunges instead of ~700 turns
-    const capped = checkHelix(6.4, 6, 1.5) // ρ = 0.2: a helix capped by the ramp angle
-    expect(steps(capped).some((s) => s.move.kind === 'arc' && s.move.to[2] < s.from[2])).toBe(true)
+    // ρ = 1 ≥ R/4: a helix capped by the ramp angle (2π · tan 3° ≈ 0.33 mm per turn)
+    const capped = checkHelix(8, 6, 1.5)
+    expect(helixTurns(capped)).toBe(Math.ceil(7 / (2 * Math.PI * Math.tan((3 * Math.PI) / 180))))
+    // DF159: ρ = 0.2 < R/4: the ramp angle no longer applies, turns of the helix pitch at the
+    // plunge rate (5 turns, not 7 / (0.4π · tan 3°) = 107)
+    const orbit = checkHelix(6.4, 6, 1.5)
+    expect(helixTurns(orbit)).toBe(5)
+    for (const { from, move } of descending(orbit)) {
+      const len = Math.hypot(arcSweep(from, move) * 0.2, from[2] - move.to[2])
+      expect(((from[2] - move.to[2]) / len) * move.feed).toBeCloseTo(150, 6)
+    }
     const tiny = checkHelix(6.02, 6, 1.5)
     expect(steps(tiny).some((s) => s.move.kind === 'arc' && s.move.to[2] < s.from[2])).toBe(false)
   })

@@ -161,13 +161,19 @@ describe("the user's plate job (dogfood TG #492)", () => {
     const T = { facing1: endMill(6.33, 20), flat: endMill(6.22, 20), vbit: chamferMill(6.35, 90) }
     for (const [id, t, stepdown] of [
       ['facing1', T.facing1, 0.2],
-      ['hole1_drill', T.flat, 0.5],
+      // DF159: ρ 0.19 < R/4, so each helix turn descends the helix pitch (0.25 DC) at the
+      // plunge rate, as the straight plunge below 0.1 mm does
+      ['hole1_drill', T.flat, 0.25 * 6.22],
       // the countersink's rings by level (DF142): each meets at most its level of the cone
       ['hole1_countersink', T.vbit, 1.25],
       ['chamfer1', T.vbit, 1],
       ['line1', T.flat, 0.5],
     ] as const)
       tps.push({ id, tool: t, tp: await generated(s, planId, id), stepdown })
+
+    // DF159: the Ø6.6 bore with the Ø6.22 flat is 7 turns (≈ 7 s per hole), not 169 (≈ 33 s)
+    const bore = tps.find((x) => x.id === 'hole1_drill')!.tp.stats.estimatedSeconds
+    expect(bore / 4).toBeLessThan(10)
 
     // DF144: no feed move buries the tool deeper than its pass, after everything cut before it
     for (const [i, x] of tps.entries())

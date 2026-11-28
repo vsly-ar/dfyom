@@ -16,6 +16,15 @@ export const POINT_ANGLE_TOLERANCE = 0.5
 /** Smallest helical-boring radius (mm); below it the end mill plunges straight down. */
 export const HELIX_MIN_RADIUS = 0.1
 
+/**
+ * DF159: below this fraction of the tool radius a boring helix is held by the plunge rate, not
+ * the ramp angle: the end mill's end covers nearly the whole hole (it plunges with an orbit), so
+ * 2πρ·tan(rampAngle) only made hundreds of slow turns (a Ø6.6 hole with a Ø6.22 flat: 169 turns,
+ * 33 s instead of 6 s). Each turn then descends `helixPitch` at a vertical speed ≤ `plungeRate`.
+ * Doc: docs/modes/plan-v0.1.md#toolpath-generators-task-210
+ */
+export const HELIX_PLUNGE_FRACTION = 0.25
+
 /** Length of a drill's conical tip: radius / tan(SIG / 2). */
 export function tipLength(diameter: number, pointAngle: number): number {
   return pointAngle >= 180 ? 0 : diameter / 2 / Math.tan((pointAngle * Math.PI) / 360)
@@ -161,8 +170,9 @@ export function generateDrilling(
 
   // Helical boring: helix of radius ρ down to `full`, a full circle there, back to the center.
   // Each turn descends at most helixPitch and at most at rampAngle; the feed is capped so the
-  // descent is never faster than the plunge rate. Below HELIX_MIN_RADIUS the helix would need
-  // hundreds of turns: plunge straight down instead, in steps of helixPitch.
+  // descent is never faster than the plunge rate. Below HELIX_PLUNGE_FRACTION × R the ramp angle
+  // no longer applies (DF159: the turn is a plunge with an orbit), only helixPitch and the plunge
+  // rate. Below HELIX_MIN_RADIUS plunge straight down instead, in steps of helixPitch.
   const radius = (op.diameter - tool.diameter) / 2
   const start: Vec2 = [c[0], c[1] - radius]
   const circle: Seg = {
@@ -180,7 +190,9 @@ export function generateDrilling(
   if (radius < HELIX_MIN_RADIUS) {
     for (const z of levels(top, full, st.helixPitch)) b.line(at(start, z), cutting.plungeRate)
   } else {
-    const pitch = Math.min(st.helixPitch, turn * Math.tan((st.rampAngle * Math.PI) / 180))
+    const plunging = radius < (HELIX_PLUNGE_FRACTION * tool.diameter) / 2
+    const ramp = turn * Math.tan((st.rampAngle * Math.PI) / 180)
+    const pitch = plunging ? st.helixPitch : Math.min(st.helixPitch, ramp)
     const turns = Math.max(1, Math.ceil((top - full) / pitch - 1e-9))
     const drop = (top - full) / turns
     const feed = Math.min(cutting.feedRate, (cutting.plungeRate * Math.hypot(turn, drop)) / drop)
