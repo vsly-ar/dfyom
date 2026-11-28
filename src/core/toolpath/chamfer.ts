@@ -116,13 +116,15 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
   // to the chamfer depth in whole turns (as helical boring: at most `rampAngle`, never descending
   // faster than the plunge rate), one full ring there, then a tangent half circle of radius r / 2
   // to the centre (the cone leaves the wall at once) and out.
+  // DF135 C4 follow-up: a recut chamfer's ring goes down to its as-cut cone's depth in the air
   const sweep = st.direction === 'climb' ? 2 * Math.PI : -2 * Math.PI
   const start: Vec2 = [c[0], c[1] - r]
   const ring: Seg = { kind: 'arc', center: c, radius: r, start: -Math.PI / 2, sweep }
+  const z0 = Math.max(tipZ, asCutLevel(op, input.material?.top, tool.angle))
   b.rapid(at(start, heights.clearanceHeight))
   b.rapid(at(start, retract))
-  b.line(at(start, op.onZ), cutting.plungeRate)
-  rampRing(b, ring, op.onZ, tipZ, input)
+  b.line(at(start, z0), cutting.plungeRate)
+  if (z0 > tipZ + 1e-9) rampRing(b, ring, z0, tipZ, input)
   for (const s of flat([ring], tipZ)) b.seg(s, cutting.feedRate)
   const exit: Seg = {
     kind: 'arc',
@@ -135,6 +137,26 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
   else for (const s of flat([exit], tipZ)) b.seg(s, cutting.feedRate)
   b.rapid(at(c, heights.clearanceHeight))
   return Ok(toolpath(input, b.build()))
+}
+
+/**
+ * How deep (tip Z) a contour ring's tool lies wholly in a recut chamfer's as-cut cone (DF135 C4
+ * follow-up): `top`, the as-cut cone's depth below `onZ` (same edge and angle), no deeper than
+ * where the tool's cone reaches the old width at the face (a tool angle within the angle tolerance
+ * of the chamfer's). `onZ` without one. The ring's axis is dt/2 inside the edge, so this holds for
+ * any tip Ø.
+ * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
+ */
+export function asCutLevel(
+  op: { readonly onZ: number; readonly angle: number },
+  top: number | undefined,
+  toolAngle: number | undefined,
+): number {
+  if (top === undefined || !(top < op.onZ)) return op.onZ
+  const d = op.onZ - top
+  const width = d * Math.tan((op.angle * Math.PI) / 360)
+  const reach = Math.tan(((toolAngle ?? op.angle) * Math.PI) / 360)
+  return op.onZ - Math.min(d, width / reach)
 }
 
 /**

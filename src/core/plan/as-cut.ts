@@ -13,7 +13,14 @@ import { partFromDTO } from '../design/operation'
 import type { OperationDTO, PartDTO } from '../design/part.dto'
 import type { Region2dPort } from '../geometry/2d/port'
 import { lineChains } from '../geometry/line'
-import { EPSILON, type OperationGeometry } from '../geometry/model'
+import {
+  chamferDepth,
+  EPSILON,
+  isLoopChamfer,
+  loopChamferDepth,
+  type ChamferGeometry,
+  type OperationGeometry,
+} from '../geometry/model'
 import type { MaterialBand } from '../geometry/through-depth'
 import type { LoadedPlan } from './plan'
 
@@ -104,8 +111,9 @@ const lineKey = (g: Extract<OperationGeometry, { kind: 'line' }>): string =>
  * The material top (z in the face frame) of each recut Line and chamfer whose as-cut twin (its
  * hidden removal of the same id) is the same cut, less deep or less wide (C4 follow-up): the level
  * down to which the run already cut along the cut's own surface. A Line's twin has the same
- * centrelines and cutter; the top is its shallowest depth along any line. Others: none (cut in
- * full again).
+ * centrelines and cutter; the top is its shallowest depth along any line. A chamfer's twin has the
+ * same edge and angle (`chamferKey`); the top is its bevel's depth. Others: none (cut in full
+ * again).
  * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
  */
 export function asCutTops(
@@ -122,7 +130,24 @@ export function asCutTops(
       const depths = lineChains(twin).lines.flatMap((l) => l.profile.d)
       const shallowest = Math.min(...depths)
       if (depths.length > 0 && shallowest > EPSILON) out.set(id, { top: op.onZ - shallowest })
+    } else if (op.kind === 'chamfer' && twin.kind === 'chamfer') {
+      const key = chamferKey(op)
+      if (key === undefined || key !== chamferKey(twin)) continue
+      const depth = isLoopChamfer(twin) ? loopChamferDepth(twin) : chamferDepth(twin)
+      if (depth > EPSILON) out.set(id, { top: op.onZ - depth })
     }
   }
   return out
+}
+
+/**
+ * The fields that make two chamfers the same edge and bevel angle, width aside: a circular one's
+ * edge, axis, edge Ø and face; a loop one's edge (shape, side, depth, cell, loops, tabs). A stepped
+ * chamfer has none (cut in full again: its terraces do not line up).
+ */
+function chamferKey(g: ChamferGeometry): string | undefined {
+  const at = [g.direction ?? '+z', g.onZ, g.edgeOf, g.angle]
+  if (isLoopChamfer(g)) return JSON.stringify(['loop', ...at, g.edge])
+  if (g.stepdown !== undefined) return undefined
+  return JSON.stringify(['circle', ...at, g.center, g.edgeDiameter])
 }

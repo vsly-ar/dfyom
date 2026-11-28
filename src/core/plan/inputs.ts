@@ -87,7 +87,8 @@ export interface PlanOperationInput {
   /**
    * A drilling's material bands by design operation id (DF61 follow-up): a hole whose whole disc
    * earlier cuts cleared below its `on` level starts its cycle on the material. Absent or not
-   * listed = from its `on` level.
+   * listed = from its `on` level. A recut chamfer's (DF135 C4 follow-up): its as-cut bevel's
+   * depth as the top.
    */
   readonly materials?: ReadonlyMap<string, MaterialBand>
   /**
@@ -261,7 +262,8 @@ export function planOperationInputs(
         ? planMaterialBands(plan, port).get(e.ops[0]?.id ?? '')
         : undefined
     const materials = new Map<string, MaterialBand>()
-    if (e.kind === 'drilling')
+    // per hole, and per chamfer (a recut chamfer's bevel already cut: DF135 C4 follow-up)
+    if (e.kind === 'drilling' || e.kind === 'chamfer')
       for (const o of e.ops) {
         const m = planMaterialBands(plan, port).get(o.id)
         if (m !== undefined) materials.set(o.id, m)

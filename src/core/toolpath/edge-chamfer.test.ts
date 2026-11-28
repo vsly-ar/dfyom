@@ -15,9 +15,11 @@ import {
   edgeChamferTipZ,
   generateEdgeChamfer,
   NearestStarts,
+  withoutAsCut,
   type EdgeChamferInput,
   type EdgeChamferOperation,
 } from './edge-chamfer'
+import { asCutLevel } from './chamfer'
 import { generateRequest, GeneratorRequestSchema } from './request'
 import { chamferMill, HEIGHTS, RATES } from './testing/fixtures'
 import { Heightmap, render, samples, steps, surfaceOf } from './testing/oracles'
@@ -530,5 +532,30 @@ describe('NearestStarts (patterns P3)', () => {
       here = points[want]!
     }
     expect(index.take(here)).toBe(-1)
+  })
+})
+
+describe('a recut chamfer from its as-cut bevel (DF135 C4 follow-up)', () => {
+  it('drops the rough rings whose cone lies in the old bevel, keeps every bevel ring', () => {
+    const op = { onZ: 0, width: 2.5, angle: 90 }
+    const all = edgeChamferPasses(op, { diameter: 6, tipDiameter: 4 })
+    // 3 levels (z 0.83, 1.67, 2.5): 3, 2 and 1 rings from the air ring out to the bevel
+    expect(all.map((l) => l.length)).toEqual([3, 2, 1])
+    expect(withoutAsCut(all, op, undefined, 4, 90)).toBe(all)
+    // the old bevel 1 mm wide (1 mm deep): only level 1's air ring (reach 0.83 mm) lies in it
+    const kept = withoutAsCut(all, op, -1, 4, 90)
+    expect(kept.map((l) => l.length)).toEqual([2, 2, 1])
+    expect(kept.flat().filter((r) => r.bevel)).toEqual(all.flat().filter((r) => r.bevel))
+    // an edit inside the old bevel keeps the bevel rings only
+    expect(
+      withoutAsCut(all, op, -3, 4, 90)
+        .flat()
+        .every((r) => r.bevel),
+    ).toBe(true)
+    // a contour ring goes down to the old depth, less when the tool's cone is wider
+    expect(asCutLevel({ onZ: -0.5, angle: 90 }, -1.5, 90)).toBeCloseTo(-1.5, 12)
+    expect(asCutLevel({ onZ: -0.5, angle: 90 }, -1.5, 90.5)).toBeGreaterThan(-1.5)
+    expect(asCutLevel({ onZ: -0.5, angle: 90 }, -1.5, 89.5)).toBeCloseTo(-1.5, 12)
+    expect(asCutLevel({ onZ: -0.5, angle: 90 }, undefined, 90)).toBe(-0.5)
   })
 })
