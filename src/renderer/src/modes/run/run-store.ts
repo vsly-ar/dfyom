@@ -458,6 +458,11 @@ export interface RunState {
   /** Z touch plate (`run.machine.probeZ`, M4): a job; a miss shows in the alarm panel. */
   probeZ(plateThickness: number): Promise<void>
   /**
+   * v0.5 RV1: the spindle on at `rpm` (Idle; in a jog a speed change) or off (`run.machine.spindle`,
+   * docs/modes/run-machine.md#spindle-while-jogging-rv1); a refusal goes to the banner.
+   */
+  spindle(on: boolean, rpm?: number): Promise<void>
+  /**
    * DF69: jog to the touch-off spot (`touchOffMoves`), one jog after the other; DF128: the Go to
    * steps. False when a jog was refused (the banner has why). DF133 RW4: through the workholding
    * guard while it is on: a step that would come within the margin of an item sends nothing (the
@@ -1025,6 +1030,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         void call('run.machine.jogCancel', {}, { keepError: true })
       },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
+      spindle: async (on, rpm) =>
+        void (await call('run.machine.spindle', on ? { on, rpm } : { on: false })),
       probeZ: (plateThickness) =>
         job('run.machine.probeZ', { plateThickness }, (probeJobId) => ({ probeJobId })),
       async moveTo(moves, opts = {}) {

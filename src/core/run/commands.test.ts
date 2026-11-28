@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { fail, Ok, type AppResult } from '../../shared/result'
+import type { ErrorCode } from '../../shared/errors/codes'
 import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
@@ -561,6 +562,87 @@ describe('run commands', { timeout: 60_000 }, () => {
     expectOk(await t.run('run.override.set', { spindle: 10 }))
     programmed = undefined
     expectOk(await t.run('run.override.set', { spindle: 20, feed: 10 }))
+  })
+
+  it('RV1: the spindle from Run: on in Idle only, the speed in a jog by override, off cancels a jog first', async () => {
+    const t = await setup()
+    const { kind: _, ...m } = machineValues()
+    const { id } = (await t.s.run('library.machine.add', {
+      values: libraryInput({
+        ...m,
+        name: 'Router',
+        spindle: { control: 'gcode', maxSpeed: rpm('24000'), minSpeed: rpm('6200') },
+      }),
+    })) as { id: string }
+    // no homing: Idle at once; real time, so a slow continuous jog is still jogging
+    expectOk(
+      await t.run('run.connection.open', {
+        target: 'virtual',
+        machineId: id,
+        homing: false,
+        timeScale: 1,
+      }),
+    )
+    const rule = (r: AppResult<unknown>, code: ErrorCode) => expectErrCode(r, code).issues[0]?.rule
+    expect(
+      rule(await t.run('run.machine.spindle', { on: true, rpm: 5000 }), 'input.malformed'),
+    ).toBe('spindleRange')
+    expectErrCode(await t.run('run.machine.spindle', { on: true }), 'input.malformed')
+    const on = expectOk(await t.run('run.machine.spindle', { on: true, rpm: 12000 })) as {
+      spindle: number
+    }
+    expect(on.spindle).toBe(12000)
+    expect(await waitFor(() => t.status().spindleDirection === 'cw')).toBe(true)
+    expect(t.status().manualSpindle).toEqual({ rpm: 12000 })
+    // Home is refused while it turns
+    expect(rule(await (await t.job('run.machine.home', {})).result, 'run.state')).toBe('spindleOn')
+    // a jog with the spindle on: the speed changes through the override (150 % of S 12000)
+    expectOk(await t.run('run.machine.jog', { by: [-1, 0, 0], feed: 300, continuous: true }))
+    expect(await waitFor(() => t.status().state === 'Jog')).toBe(true)
+    expectOk(await t.run('run.machine.spindle', { on: true, rpm: 18000 }))
+    expect(await waitFor(() => t.status().spindle === 18000)).toBe(true)
+    expect(t.status().overrides?.spindle).toBe(150)
+    expect(t.status().state).toBe('Jog')
+    expect(
+      rule(await t.run('run.machine.spindle', { on: true, rpm: 30000 }), 'input.malformed'),
+    ).toBe('spindleRange')
+    // off during the jog: the jog is cancelled, then M5
+    const off = expectOk(await t.run('run.machine.spindle', { on: false })) as { spindle: number }
+    expect(off.spindle).toBe(0)
+    expect(t.status().state).toBe('Idle')
+    expect(t.status().manualSpindle).toBeUndefined()
+    expect(await waitFor(() => t.status().spindleDirection === undefined)).toBe(true)
+    // on while jogging (spindle off): refused with the reason; the jog goes on
+    expectOk(await t.run('run.machine.jog', { by: [-1, 0, 0], feed: 300, continuous: true }))
+    expect(await waitFor(() => t.status().state === 'Jog')).toBe(true)
+    const refused = expectErrCode(
+      await t.run('run.machine.spindle', { on: true, rpm: 12000 }),
+      'run.state',
+    )
+    expect(refused.issues[0]?.rule).toBe('spindleNotIdle')
+    expect(refused.message).toContain('stop the jog first')
+    expect(t.status().state).toBe('Jog')
+    expectOk(await t.run('run.machine.jogCancel', {}))
+    expect(await waitFor(() => t.status().state === 'Idle')).toBe(true)
+    // on again in Idle: the override left at 150 % goes back to 100 %, so 9000 rpm turns
+    expectOk(await t.run('run.machine.spindle', { on: true, rpm: 9000 }))
+    expect(await waitFor(() => t.status().spindle === 9000)).toBe(true)
+    expect(t.status().overrides?.spindle).toBe(100)
+    expectOk(await t.run('run.machine.spindle', { on: false }))
+    expect(t.status().spindle).toBe(0)
+    // off when off: harmless
+    expectOk(await t.run('run.machine.spindle', { on: false }))
+  })
+
+  it('RV1: a manual spindle has no spindle control; run.machine.spindle is no agent tool', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    expect(
+      expectErrCode(await t.run('run.machine.spindle', { on: true, rpm: 12000 }), 'run.state')
+        .issues[0]?.rule,
+    ).toBe('manualSpindle')
+    // off has no machine check
+    expectOk(await t.run('run.machine.spindle', { on: false }))
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {
@@ -1408,6 +1490,44 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     }
     const draft = await t.d.job(jobId).unwrap().result
     expectErrCode(draft, 'plan.status')
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('RV1: spindle off during a jog over the serial line: 0x85 first, M5 only once Idle; UI only', async () => {
+    const t = await setup({
+      serial: (settings) => ({
+        emulator: { settings: { ...settings, 30: 24000, 31: 6200 }, trace: true },
+        timeScale: 4,
+      }),
+    })
+    const { kind: _, ...m } = machineValues()
+    const { id } = (await t.s.run('library.machine.add', {
+      values: libraryInput({
+        ...m,
+        name: 'Router',
+        spindle: { control: 'gcode', maxSpeed: rpm('24000'), minSpeed: rpm('6200') },
+      }),
+    })) as { id: string }
+    expectOk(
+      await t.run('run.connection.open', { target: 'serial', path: PATH, machineId: id }, ui),
+    )
+    const { jobId } = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(jobId).unwrap().result)
+    expect(await waitFor(() => t.status().homed && t.status().state === 'Idle')).toBe(true)
+    // Q50: an agent may not start the spindle of a real machine
+    expectErrCode(await t.run('run.machine.spindle', { on: true, rpm: 12000 }), 'permission.denied')
+    expectOk(await t.run('run.machine.spindle', { on: true, rpm: 12000 }, ui))
+    expect(t.status().spindle).toBe(12000)
+    expectOk(await t.run('run.machine.jog', { by: [0, 0, -1], feed: 100, continuous: true }, ui))
+    expect(await waitFor(() => t.status().state === 'Jog')).toBe(true)
+    expectOk(await t.run('run.machine.spindle', { on: false }, ui))
+    expect(t.status()).toMatchObject({ state: 'Idle', spindle: 0 })
+    const port = t.serial!.opened[0]!
+    const m5 = port.emulator.trace.lines.filter((l) => l.text === 'M5')
+    // GRBL took it (error:9 in Jog would have failed the command)
+    expect(m5.map((l) => l.response)).toEqual(['ok'])
+    const text = String.fromCharCode(...port.written)
+    expect(text.lastIndexOf('\x85')).toBeLessThan(text.lastIndexOf('M5'))
     expectOk(await t.run('run.connection.close', {}, ui))
   })
 

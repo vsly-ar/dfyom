@@ -97,6 +97,16 @@ export const HostStatusSchema = z.object({
   /** mm/min. */
   feed: Num,
   spindle: Num,
+  /**
+   * RV1: the spindle's direction from the last `A:` (kept between reports, like `Ov`); absent =
+   * off. Doc: docs/modes/run-machine.md#spindle-while-jogging-rv1
+   */
+  spindleDirection: z.enum(['cw', 'ccw']).exactOptional(),
+  /**
+   * RV1: the speed (rpm) the last `run.machine.spindle` turned the spindle on at, until `M5`, a
+   * reset, an alarm or a run start.
+   */
+  manualSpindle: z.object({ rpm: Num }).exactOptional(),
   buffer: z.object({ blocks: z.number(), rx: z.number() }).exactOptional(),
   /** Feed, rapid, spindle overrides in % from the last `Ov` (docs/modes/run-machine.md#overrides-m6). */
   overrides: z.object({ feed: Num, rapid: Num, spindle: Num }).exactOptional(),
@@ -262,6 +272,17 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     maxTravel: z.number().positive().max(1000),
     feed: z.number().positive().max(10_000),
     retract: z.number().min(0).max(100),
+  }),
+  /**
+   * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1): on at `rpm`
+   * (Idle only; in a jog a speed change through the spindle override), or off (a jog is
+   * cancelled first: `M5` is never sent in Jog). `dwellSeconds`: the spin-up dwell from off.
+   */
+  z.object({
+    kind: z.literal('spindle'),
+    on: z.boolean(),
+    rpm: z.number().positive().max(1e6).exactOptional(),
+    dwellSeconds: z.number().min(0).max(60).exactOptional(),
   }),
   /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
   z.object({

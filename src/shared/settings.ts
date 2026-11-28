@@ -88,6 +88,11 @@ const fields = {
    */
   jogFeed: z.record(z.string().min(1), z.number().positive().finite()),
   /**
+   * Cutting jog feed (mm/min) per library machine id (`*` without one), as `jogFeed`: the jog feed
+   * while the spindle turns (v0.5 RV1, Q217, docs/modes/run-machine.md#spindle-while-jogging-rv1).
+   */
+  cuttingJogFeed: z.record(z.string().min(1), z.number().positive().finite()),
+  /**
    * Jog step per library machine id (`*` without one), as `jogFeed` (hardening DF140,
    * docs/conventions/ui.md#jog-pad-df140): the chosen step and the step picker's custom value (mm).
    */
@@ -124,6 +129,7 @@ export const AppSettingsSchema = z.object({
   skipHomeConfirm: fields.skipHomeConfirm.default([]),
   autoReconnect: fields.autoReconnect.default(true),
   jogFeed: fields.jogFeed.default({}),
+  cuttingJogFeed: fields.cuttingJogFeed.default({}),
   jogStep: fields.jogStep.default({}),
   inspectorGroups: fields.inspectorGroups.default({}),
   inspectorTabs: fields.inspectorTabs.default({}),
@@ -138,7 +144,8 @@ export type AppSettingsPatch = Readonly<z.input<typeof AppSettingsPatchSchema>>
 export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 
 /**
- * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`, `jogStep`,
+ * Applies a validated patch: plain fields replace, `layouts`, `sidePanels`, `jogFeed`,
+ * `cuttingJogFeed`, `jogStep`,
  * `inspectorGroups` and `inspectorTabs` merge by key.
  */
 export function mergeSettings(
@@ -160,6 +167,7 @@ export function mergeSettings(
     skipHomeConfirm: patch.skipHomeConfirm ?? current.skipHomeConfirm,
     autoReconnect: patch.autoReconnect ?? current.autoReconnect,
     jogFeed: { ...current.jogFeed, ...(patch.jogFeed ?? {}) },
+    cuttingJogFeed: { ...current.cuttingJogFeed, ...(patch.cuttingJogFeed ?? {}) },
     jogStep: { ...current.jogStep, ...(patch.jogStep ?? {}) },
     inspectorGroups: { ...current.inspectorGroups, ...(patch.inspectorGroups ?? {}) },
     inspectorTabs: { ...current.inspectorTabs, ...(patch.inspectorTabs ?? {}) },

@@ -406,6 +406,31 @@ describe('Run mode', () => {
     expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 0, -10], feed: 1000 })
   })
 
+  it('v0.5 RV1: while the spindle turns the jog uses the cutting jog feed (600 mm/min, remembered); Home waits', async () => {
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    expect(within(t.nav()).getByRole('slider', { name: 'Jog feed' })).toHaveAttribute(
+      'aria-valuetext',
+      '2000 mm/min',
+    )
+    t.machine.push({ spindle: 12000, spindleDirection: 'cw' })
+    const cutting = within(t.nav()).getByRole('slider', { name: 'Cutting jog feed' })
+    expect(cutting).toHaveAttribute('aria-valuetext', '600 mm/min')
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
+    expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [10, 0, 0], feed: 600 })
+    cutting.focus()
+    await t.user.keyboard('{ArrowLeft}')
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ cuttingJogFeed: { [t.s.machineId]: 500 } })
+    // the DRO's spindle value in the accent; Home refused with the reason
+    expect(within(t.nav()).getByRole('button', { name: 'Home' })).toBeDisabled()
+    // off: the jog feed again
+    t.machine.push({ spindle: 0 })
+    expect(within(t.nav()).getByRole('slider', { name: 'Jog feed' })).toHaveAttribute(
+      'aria-valuetext',
+      '2000 mm/min',
+    )
+  })
+
   it('remembers the jog step and feed per machine across restarts (DF140)', async () => {
     const t = await renderRun({ plate: '10' })
     await t.user.click(within(t.nav()).getByRole('radio', { name: '50 mm' }))

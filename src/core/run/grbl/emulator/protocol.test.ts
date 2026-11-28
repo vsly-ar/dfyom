@@ -194,6 +194,34 @@ describe('status report', () => {
     send(emu, 'M5\n')
     expect(emu.status().spindleSpeed).toBe(0)
   })
+
+  it('RV1: a spindle change is reported at once; in a jog M3/M5 are locked, the override works', () => {
+    const emu = emulator({ settings: { 30: 24000, 31: 5000 } })
+    statusOf(emu)
+    statusOf(emu) // WCO, then Ov: the next ones carry neither
+    expect(statusOf(emu)).not.toContain('Ov:')
+    send(emu, 'M3 S12000\n')
+    // GRBL's spindle_set_state() resets the override report counter: Ov and A: come next
+    expect(statusOf(emu)).toBe('<Idle|MPos:0.000,0.000,0.000|FS:0,12000|Ov:100,100,100|A:S>')
+    expect(send(emu, '$J=G91 X-20 F600\n')).toEqual(['ok'])
+    emu.advance(100)
+    expect(emu.status().state).toBe('Jog')
+    // the gCode lock (error:9): no M5, no S in a jog
+    expect(send(emu, 'M5\n')).toEqual(['error:9'])
+    expect(send(emu, 'S6000\n')).toEqual(['error:9'])
+    expect(emu.status().spindleSpeed).toBe(12000)
+    // the spindle override bytes work in every state: +10 % ×5 = 150 %
+    for (let i = 0; i < 5; i++) send(emu, String.fromCharCode(0x9a))
+    expect(emu.status().spindleSpeed).toBe(18000)
+    expect(emu.status().state).toBe('Jog')
+    // jog cancel, then M5 once Idle
+    send(emu, String.fromCharCode(0x85))
+    emu.advance(2000)
+    expect(emu.status().state).toBe('Idle')
+    expect(send(emu, 'M5\n')).toEqual(['ok'])
+    expect(emu.status().spindleSpeed).toBe(0)
+    expect(statusOf(emu)).toMatch(/\|Ov:100,100,150>$/)
+  })
 })
 
 describe('$ commands', () => {

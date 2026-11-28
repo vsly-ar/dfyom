@@ -137,9 +137,17 @@ interface Connection {
   readonly controllerSide?: ((act: (e: GrblEmulator) => void) => void) | undefined
   /** gCode that restores the modal state a failed probe left (sent after `$X`/`$H`, M4). */
   restoreModes?: readonly string[] | undefined
+  /**
+   * RV1: the `S` (rpm) the last spindle action turned the spindle on at; cleared by `M5`, a
+   * reset, an alarm and a run start (docs/modes/run-machine.md#spindle-while-jogging-rv1).
+   */
+  manualSpindle?: { readonly rpm: number } | undefined
+  /** RV1: a spindle off is cancelling a jog: new jogs are refused until it is done. */
+  spindleStopping?: boolean
 }
 
 type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
+type SpindleAction = Extract<MachineAction, { kind: 'spindle' }>
 type OverrideAction = Extract<MachineAction, { kind: 'override' }>
 type OverrideToAction = Extract<MachineAction, { kind: 'overrideTo' }>
 
@@ -281,6 +289,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       workZero: conn.workZero,
       feed: s?.feed ?? 0,
       spindle: s?.spindle ?? 0,
+      ...(s?.spindleDirection === undefined ? {} : { spindleDirection: s.spindleDirection }),
+      ...(conn.manualSpindle === undefined ? {} : { manualSpindle: conn.manualSpindle }),
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
       ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
@@ -565,6 +575,13 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         if (c.job !== undefined) return stateError('cannot home during a run', state)
         if (state !== 'Idle' && state !== 'Alarm')
           return stateError(`cannot home in state ${state}`, state)
+        // RV1: GRBL would home with the spindle turning
+        if ((c.sender.status?.spindle ?? 0) > 0)
+          return fail('run.state', 'the spindle is on: stop it before homing', {
+            where: 'machineHost.machine',
+            data: { state, spindle: c.sender.status?.spindle ?? 0 },
+            issues: [{ path: ['spindle'], rule: 'spindleOn', message: 'turn the spindle off' }],
+          })
         {
           // DF134: homing on a pressed limit switch takes it for home (or, wired in parallel with
           // the axis's other end, the wrong end): release it first, or unlock and jog off it
@@ -597,6 +614,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       case 'jog': {
         if (jobBusy || (state !== 'Idle' && !state.startsWith('Jog')))
           return stateError(`cannot jog in state ${state}${phase ? ` (${phase})` : ''}`, state)
+        if (c.spindleStopping === true)
+          return fail('run.state', 'the spindle is stopping: jog again once it is off', {
+            where: 'machineHost.jog',
+            data: { state },
+            issues: [{ path: [], rule: 'spindleStopping', message: 'the spindle is stopping' }],
+          })
         if ((action.to === undefined) === (action.by === undefined))
           return fail('input.malformed', 'jog needs exactly one of to or by', {
             where: 'machineHost.jog',
@@ -676,6 +699,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return c.sender.realtime(REALTIME.reset)
       case 'probeZ':
         return probeZ(c, action)
+      case 'spindle':
+        return action.on ? spindleOn(c, action) : spindleOff(c)
       case 'feedHold':
       case 'cycleStart':
         // a run's own hold goes through jobControl; a probe at a tool change is a manual cycle
@@ -862,6 +887,153 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return Ok({ workZero: wz.unwrap(), contact })
   }
 
+  /** RV1: `run.state` with a rule (docs/modes/run-machine.md#spindle-while-jogging-rv1). */
+  function spindleRefused(message: string, state: string, rule: string): AppResult<never> {
+    return fail('run.state', message, {
+      where: 'machineHost.spindle',
+      data: { state },
+      issues: [{ path: ['on'], rule, message }],
+    })
+  }
+
+  /**
+   * RV1, spindle on (docs/modes/run-machine.md#spindle-while-jogging-rv1): in Idle without a run
+   * the spindle override back to 100 %, `M3 S<rpm>` and from off the spin-up dwell; in a jog with
+   * the spindle on from Run a speed change through the spindle override; refused otherwise.
+   */
+  async function spindleOn(c: Connection, a: SpindleAction): Promise<AppResult<unknown>> {
+    const state = machineState(c)
+    const rpm = a.rpm
+    if (rpm === undefined)
+      return fail('input.malformed', 'spindle on needs rpm', {
+        where: 'machineHost.spindle',
+        issues: [{ path: ['rpm'], rule: 'required', message: 'give rpm' }],
+      })
+    if (c.job !== undefined)
+      return spindleRefused('the run controls the spindle', state, 'runSpindle')
+    if (c.spindleStopping === true)
+      return spindleRefused('the spindle is stopping', state, 'spindleStopping')
+    if (state.startsWith('Jog')) {
+      const base = c.manualSpindle?.rpm
+      if (base === undefined || (c.sender.status?.spindle ?? 0) <= 0)
+        return spindleRefused(
+          'the spindle turns on only while the machine is idle: stop the jog first',
+          state,
+          'spindleNotIdle',
+        )
+      // GRBL takes no S in a jog: the speed changes through the spindle override (DF85 steps)
+      const percent = Math.round((rpm / base) * 100)
+      const { min, max } = overrideLimits('grbl').spindle
+      if (percent < min || percent > max)
+        return fail('input.malformed', `${rpm} rpm is ${percent} % of S ${base}`, {
+          where: 'machineHost.spindle',
+          issues: [
+            {
+              path: ['rpm'],
+              rule: 'overrideRange',
+              message: `during a jog the override takes ${min}–${max} % of S ${base} rpm`,
+            },
+          ],
+        })
+      const next = overrideChain.then(() =>
+        overrideTo(c, { kind: 'overrideTo', which: 'spindle', percent }),
+      )
+      overrideChain = next.then(
+        () => undefined,
+        () => undefined,
+      )
+      const r = await next
+      if (r.isErr()) return r
+      return Ok({ spindle: c.sender.status?.spindle ?? 0 })
+    }
+    if (state !== 'Idle') return stateError(`cannot turn the spindle on in state ${state}`, state)
+    const wasOn = (c.sender.status?.spindle ?? 0) > 0
+    // the asked speed is what turns: an override left from a run or a jog goes back to 100 %
+    const ov = c.sender.status?.overrides?.spindle
+    if (ov !== undefined && ov !== 100) {
+      const reset = c.sender.realtime(OVERRIDE.spindleReset)
+      if (reset.isErr()) return reset
+    }
+    const dwell = wasOn ? 0 : (a.dwellSeconds ?? 0)
+    log.info({ rpm, dwell }, 'spindle on')
+    const on = await c.sender.command(`M3 S${fmt(rpm)}`)
+    if (on.isErr()) return Err(on.unwrapErr().withContext('machineHost.spindle'))
+    c.manualSpindle = { rpm }
+    if (dwell > 0) {
+      const d = await c.sender.command(`G4 P${fmt(dwell)}`, { timeoutMs: dwell * 1000 + 10_000 })
+      if (d.isErr()) return Err(d.unwrapErr().withContext('machineHost.spindle'))
+    }
+    const fresh = await c.sender.freshStatus()
+    status.now()
+    return Ok({ spindle: fresh?.spindle ?? c.sender.status?.spindle ?? 0 })
+  }
+
+  /**
+   * RV1, spindle off, always (docs/modes/run-machine.md#spindle-while-jogging-rv1): `M5` in Idle
+   * (or at a tool-change wait); in a jog the jog cancel first, a report saying Idle, then `M5`
+   * (never `M5` in Jog: `error:9`); a jog that does not end in time, or a spindle turning in any
+   * other state, is stopped by a reset. Refused while a run streams (Stop stops it).
+   */
+  async function spindleOff(c: Connection): Promise<AppResult<unknown>> {
+    const where = 'machineHost.spindle'
+    const turning = () => (c.sender.status?.spindle ?? 0) > 0
+    const off = async (): Promise<AppResult<unknown>> => {
+      const r = await c.sender.command('M5')
+      if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+      c.manualSpindle = undefined
+      const fresh = await c.sender.freshStatus()
+      status.now()
+      return Ok({ spindle: fresh?.spindle ?? 0 })
+    }
+    const resetToStop = (): AppResult<unknown> => {
+      log.warn({ state: machineState(c) }, 'spindle off by a reset')
+      c.jogEnd = undefined
+      const r = c.sender.realtime(REALTIME.reset)
+      if (r.isErr()) return r
+      c.manualSpindle = undefined
+      return fail('machine.reset', 'the controller was reset to stop the spindle: home again', {
+        where,
+        data: { state: machineState(c) },
+        issues: [{ path: ['on'], rule: 'spindleReset', message: 'the spindle stopped by a reset' }],
+      })
+    }
+    if (c.job !== undefined && c.job.phase !== 'toolChange')
+      return spindleRefused(
+        'the run controls the spindle: Stop stops the run and the spindle',
+        machineState(c),
+        'runSpindle',
+      )
+    const state = machineState(c)
+    if (state === 'Idle') return off()
+    if (state.startsWith('Jog')) {
+      c.spindleStopping = true
+      try {
+        c.jogEnd = undefined
+        const cancel = c.sender.realtime(REALTIME.jogCancel)
+        if (cancel.isErr()) return resetToStop()
+        // machine time, as a feed hold's wait for Hold:0
+        const deadline = c.clock.now() + FEED_HOLD_MS
+        while (c.clock.now() < deadline) {
+          const s = await c.sender.freshStatus()
+          status.now()
+          if (conn !== c) return notConnected()
+          if (s?.state === 'Idle') return await off()
+          if (s !== undefined && !s.state.startsWith('Jog')) break
+          await new Promise<void>((resolve) => c.clock.schedule(c.clock.now() + 50, resolve))
+        }
+        return machineState(c) === 'Idle' ? await off() : resetToStop()
+      } finally {
+        c.spindleStopping = false
+      }
+    }
+    // Alarm and the door stop the spindle themselves; anything else turning: a reset
+    if (!turning()) {
+      c.manualSpindle = undefined
+      return Ok({ spindle: 0 })
+    }
+    return resetToStop()
+  }
+
   /** One override byte (docs/modes/run-machine.md#overrides-m6); answers the overrides reported. */
   async function override(c: Connection, a: OverrideAction): Promise<AppResult<unknown>> {
     const where = 'machineHost.override'
@@ -1010,6 +1182,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     }
     c.job = job
     c.jogEnd = undefined
+    // RV1: the program sends its own M3
+    c.manualSpindle = undefined
     try {
       return await checkAndStream(c, job, program, expect)
     } finally {
@@ -1198,6 +1372,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     switch (e.kind) {
       case 'alarm':
         c.jogEnd = undefined
+        // GRBL's alarm stops the spindle (mc_reset)
+        c.manualSpindle = undefined
         c.alarm = { code: e.code, text: e.text }
         if (POSITION_ALARMS.has(e.code)) c.homed = false
         post({ type: 'event', kind: 'alarm', data: { code: e.code, text: e.text } })
@@ -1215,6 +1391,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         break
       case 'reset':
         c.jogEnd = undefined
+        // a reset stops the spindle
+        c.manualSpindle = undefined
         // DF134: a reset ends a critical alarm (GRBL then waits locked for `$H` or `$X`); the
         // alarm stays shown until one of them, with the reset noted
         if (c.alarm !== undefined && c.alarm.reset !== true) c.alarm = { ...c.alarm, reset: true }

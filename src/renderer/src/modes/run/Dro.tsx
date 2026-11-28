@@ -160,7 +160,8 @@ export function Dro({
         </div>
         <div>
           <dt>{m.spindle}</dt>
-          <dd>
+          {/* v0.5 RV1: accent while the spindle turns */}
+          <dd data-on={status.spindle > 0 ? '' : undefined}>
             {status.spindle.toFixed(0)} {m.rpm}
           </dd>
         </div>

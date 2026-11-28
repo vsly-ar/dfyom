@@ -562,7 +562,11 @@ export class GrblEmulator {
     const check = this.state === 'Check'
     switch (s.kind) {
       case 'spindle':
-        if (!check) this.spindle = { dir: s.dir, rpm: s.rpm }
+        if (!check) {
+          // GRBL's spindle_set_state(): reported at once (`Ov` and `A:`, report_ovr_counter = 0)
+          this.reportOv = 0
+          this.spindle = { dir: s.dir, rpm: s.rpm }
+        }
         return true
       case 'dwell': {
         if (check || s.seconds <= 0) return true
