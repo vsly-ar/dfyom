@@ -1058,8 +1058,15 @@ export function findingText(
       const head = `${named} at ${len('stickout')} stickout`
       if (w.rule === 'zHeadroom' && num('needed') !== undefined && num('available') !== undefined)
         return `${head}: the clearance height ${len('clearanceHeight')} needs ${len('needed')} above the stock top, but with Z homed the tool tip is only ${len('available')} above it. Retracts and tool changes would hit the Z+ limit: lower the clearance height or use a shorter stickout${num('spoilboardThickness') === undefined ? ', and enter the spoilboard thickness (checked as 0)' : ''}.`
-      if (w.rule === 'zReach' && num('zMin') !== undefined && num('lowest') !== undefined)
-        return `${head} cannot reach Z${len('zMin')}: the Z travel ends at Z${len('lowest')}. Use a longer stickout or raise the stock on a thicker spoilboard.`
+      if (w.rule === 'zReach' && num('zMin') !== undefined && num('lowest') !== undefined) {
+        // DF150: once per setup; when every tool is short the profile is the likely error
+        const n = num('toolsShort') ?? 1
+        const others =
+          n > 1 && num('shortMin') !== undefined
+            ? ` ${n - 1} other tool${n > 2 ? 's are' : ' is'} short too (by at least ${len('shortMin')}).`
+            : ''
+        return `${head} cannot reach Z${len('zMin')}: the Z travel ends at Z${len('lowest')}.${others} Use a longer stickout or raise the stock on a thicker spoilboard. If this machine does cut there, the machine profile is off: with Z homed, measure from the collet nut face down to the bare table and enter it as Spindle nose to table under Z height in the machine (Library); check the Z travel and the spoilboard thickness too.`
+      }
       return sentence(message)
     }
     default:
