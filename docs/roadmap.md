@@ -79,9 +79,9 @@ Tasks, exit criteria (the user cuts the v0.4 lid on their machine using only the
 
 Tasks, exit criteria (an agent with MCP only recreates the enclosure base with four toe clamps, and the app measures the deviation) and questions Q37–Q46 (Q36, the slot, answered by the user): [plans/v0.4-llm-first.md](plans/v0.4-llm-first.md).
 
-## v0.5 – Run: machine setup assistance (draft)
+## v0.5 – Run: machine setup assistance
 
-**Draft** (proposed 2026-11-27 from the user's TG #481; slot is [Q216](plans/v0.5-run.md#questions-for-the-user)). The user asked for the next focus on Run mode: spindle control while jogging, calibration cuts on the open stock, a settings section, X/Y probing, the real work area with margins, homing repeatability, assistance setting the X/Y work zero (probing or touching the stock's edge), checking the stock's alignment (corners, edges, a perimeter trace with a gap), and surface probing with Z compensation (stock maps per setup, a reusable bed map). Toward the [direction](#direction)'s real-machine readiness. Uses only GRBL 1.1 (`G38.2`–`G38.5`, `$J=`, real-time overrides); no `$x=` writes.
+**Done** (closed 2026-11-28 on the virtual machine; accepted by delegation D88, proposed 2026-11-27 from the user's TG #481, started beside hardening's X1 and the follow-up's X3 per [Q216](plans/v0.5-run.md#questions-for-the-user); Q220, the probing gear, is still open with the user). The steps left for the user's real machine: [plans/v0.5-run.md § Outcome](plans/v0.5-run.md#outcome). The user asked for the next focus on Run mode: spindle control while jogging, calibration cuts on the open stock, a settings section, X/Y probing, the real work area with margins, homing repeatability, assistance setting the X/Y work zero (probing or touching the stock's edge), checking the stock's alignment (corners, edges, a perimeter trace with a gap), and surface probing with Z compensation (stock maps per setup, a reusable bed map). Toward the [direction](#direction)'s real-machine readiness. Uses only GRBL 1.1 (`G38.2`–`G38.5`, `$J=`, real-time overrides); no `$x=` writes.
 
 Items with what exists and the gap, slices RV0–RV11, exit criteria and questions Q216–Q229: [plans/v0.5-run.md](plans/v0.5-run.md).
 
