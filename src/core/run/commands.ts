@@ -27,9 +27,12 @@ import {
   ControllerInfoSchema,
   OVERRIDE_STEPS,
   PROBE_DEFAULTS,
+  ProbeGeometrySchema,
+  ProbeRoutineSchema,
   type RapidOverride,
   TimeScaleSchema,
   Vec3Schema,
+  VirtualStockSchema,
   type MachineAction,
 } from './host/protocol'
 import { overrideCap, overrideLimits } from './override'
@@ -690,6 +693,110 @@ export const runMachineProbeZ = defineCommand({
   },
 })
 
+/** v0.5 RV4: routine defaults (docs/modes/run-probing.md#probe-settings-rv4), mm and mm/min. */
+export const ROUTINE_DEFAULTS = {
+  reach: 10,
+  zDistance: 25,
+  depth: 3,
+  clearance: 2,
+  fastFeed: 100,
+  slowFeed: 20,
+  moveFeed: 300,
+} as const
+
+const ProbedValueSchema = z.object({ value: z.number(), uncertainty: z.number() })
+const ProbeRoutineResultSchema = z.object({
+  cycle: z.enum(['edge', 'corner', 'centre']),
+  top: ProbedValueSchema.optional(),
+  x: ProbedValueSchema.optional(),
+  y: ProbedValueSchema.optional(),
+  centre: z
+    .object({ x: ProbedValueSchema, y: ProbedValueSchema, diameter: ProbedValueSchema })
+    .optional(),
+  start: Vec3Schema,
+})
+
+/**
+ * v0.5 RV4: an edge, corner or centre probing routine (docs/modes/run-probing.md#xy-probing-rv4):
+ * results in machine coordinates with the probe's radius and the plate's offsets applied; writes
+ * nothing (Set X/Y zero writes, RV5). A job like Probe Z (a feed hold pauses it; Stop resets). Not
+ * an agent tool (Q229).
+ */
+export const runMachineProbe = defineCommand({
+  kind: 'job',
+  name: 'run.machine.probe',
+  summary:
+    'Probe an X/Y edge, a corner (Z, X, Y) or a hole/boss centre from here; results in MPos, nothing written.',
+  title: () => 'Probe',
+  machine: true,
+  agentTool: false,
+  pause: { kind: 'handled' },
+  args: z.object({
+    routine: ProbeRoutineSchema,
+    probe: ProbeGeometrySchema,
+    reach: z.number().positive().max(1000).optional(),
+    zDistance: z.number().positive().max(1000).optional(),
+    depth: z.number().positive().max(100).optional(),
+    clearance: z.number().positive().max(100).optional(),
+    fastFeed: z.number().positive().max(10_000).optional(),
+    slowFeed: z.number().positive().max(10_000).optional(),
+    moveFeed: z.number().positive().max(10_000).optional(),
+    plateSize: z.number().positive().max(1000).optional(),
+  }),
+  result: ProbeRoutineResultSchema,
+  async run(_doc, args, ctx) {
+    const d = ROUTINE_DEFAULTS
+    const r = await actStoppable(
+      ctx,
+      {
+        kind: 'probeRoutine',
+        routine: args.routine,
+        probe: args.probe,
+        reach: args.reach ?? d.reach,
+        zDistance: args.zDistance ?? d.zDistance,
+        depth: args.depth ?? d.depth,
+        clearance: args.clearance ?? d.clearance,
+        fastFeed: args.fastFeed ?? d.fastFeed,
+        slowFeed: args.slowFeed ?? d.slowFeed,
+        moveFeed: args.moveFeed ?? d.moveFeed,
+        ...(args.plateSize === undefined ? {} : { plateSize: args.plateSize }),
+      },
+      'run.machine.probe',
+      true,
+    )
+    if (r.isErr()) return r
+    return Ok(r.unwrap() as z.output<typeof ProbeRoutineResultSchema>)
+  },
+})
+
+/**
+ * v0.5 RV5 (virtual machine only): the stock the virtual operator laid, in machine coordinates,
+ * and whether it closes the probe input while touched (the touch-off's readout;
+ * docs/modes/run-probing.md#implementation-rv5). Not an agent tool.
+ */
+export const runVirtualStock = defineCommand({
+  kind: 'effect',
+  name: 'run.virtual.stock',
+  summary: 'Virtual machine only: lay a stock (MPos box) for probing and the touch readout.',
+  title: () => 'Virtual stock',
+  machine: false,
+  agentTool: false,
+  args: z.object({ stock: VirtualStockSchema.optional(), touch: z.boolean() }),
+  result: Done,
+  async run(_doc, args, ctx) {
+    const r = await act(
+      ctx.services,
+      {
+        kind: 'virtualStock',
+        ...(args.stock === undefined ? {} : { stock: args.stock }),
+        touch: args.touch,
+      },
+      'run.virtual.stock',
+    )
+    return r.map(() => ({}))
+  },
+})
+
 /**
  * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1). On: Idle only
  * (in a jog a speed change through the spindle override), a G-code spindle, no laser mode, rpm in
@@ -871,6 +978,8 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runWorkZeroSet,
   runMachineReset,
   runMachineProbeZ,
+  runMachineProbe,
+  runVirtualStock,
   runMachineSpindle,
   runOverrideSet,
   runAlignGoto,
@@ -900,6 +1009,8 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runWorkZeroSet,
   runMachineReset,
   runMachineProbeZ,
+  runMachineProbe,
+  runVirtualStock,
   runMachineSpindle,
   runOverrideSet,
   runJobContinue,

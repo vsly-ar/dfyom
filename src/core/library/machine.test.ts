@@ -134,6 +134,30 @@ describe('Machine', () => {
     ])
   })
 
+  it('round-trips the probe settings (v0.5 RV4); lengths and feeds checked', () => {
+    const probe = {
+      kind: 'xyzPlate' as const,
+      wallOffsetX: len('5'),
+      wallOffsetY: len('0'),
+      retract: len('2'),
+    }
+    const full = { ...machineValues(), probe }
+    const m = expectOk(load(full))
+    expect(m.probe.unwrap().kind).toBe('xyzPlate')
+    expect(m.toDTO()).toEqual(full)
+    expect(expectOk(load(machineValues())).probe.isNone()).toBe(true)
+    expect(
+      issues({
+        ...machineValues(),
+        probe: { kind: 'tool', wallOffsetX: len('-1'), retract: len('0') },
+      }),
+    ).toEqual([
+      ['probe.wallOffsetX', 'nonNegative'],
+      ['probe.retract', 'positive'],
+    ])
+    expectErrCode(load({ ...machineValues(), probe: { kind: 'laser' } }), 'input.malformed')
+  })
+
   describe('holder (tool-holder.md#model, DF132 H1)', () => {
     const er11 = {
       preset: 'er11' as const,

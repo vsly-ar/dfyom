@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import { ResultWireSchema } from '../../../shared/errors/schema'
 import { LOG_LEVELS } from '../../../shared/logging'
+import { PROBE_KINDS } from '../../library/machine.dto'
 import { MAX_TIME_SCALE } from '../clock'
 import { SerialPortInfoSchema } from '../serial'
 
@@ -217,6 +218,37 @@ export const PROBE_DEFAULTS = { maxTravel: 25, feed: 50, retract: 2 } as const
 export const SIMULATED_INPUTS = ['x', 'y', 'z', 'door'] as const
 export type SimulatedInput = (typeof SIMULATED_INPUTS)[number]
 
+const Mm = z.number().min(0).max(1000)
+const PositiveMm = z.number().positive().max(1000)
+const Feed = z.number().positive().max(10_000)
+const Side = z.union([z.literal(-1), z.literal(1)])
+
+/** v0.5 RV4: a probing routine (docs/modes/run-probing.md#xy-probing-rv4). */
+export const ProbeRoutineSchema = z.discriminatedUnion('cycle', [
+  z.object({ cycle: z.literal('edge'), axis: z.enum(['x', 'y']), side: Side }),
+  z.object({ cycle: z.literal('corner'), corner: z.tuple([Side, Side]).readonly() }),
+  z.object({
+    cycle: z.literal('centre'),
+    feature: z.enum(['hole', 'boss']),
+    diameter: PositiveMm,
+  }),
+])
+
+/** v0.5 RV4: what probes (docs/modes/run-probing.md#probe-settings-rv4). */
+export const ProbeGeometrySchema = z.object({
+  kind: z.enum(PROBE_KINDS),
+  tipDiameter: z.number().min(0).max(100),
+  plateThickness: PositiveMm.exactOptional(),
+  wallOffset: z.tuple([Mm, Mm]).readonly().exactOptional(),
+})
+
+/** v0.5 RV5: the virtual machine's stock (MPos box, rotated by `angle`° about its min corner). */
+export const VirtualStockSchema = z.object({
+  min: Vec3Schema,
+  max: Vec3Schema,
+  angle: z.number().min(-45).max(45).exactOptional(),
+})
+
 export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('home') }),
   z.object({ kind: z.literal('unlock') }),
@@ -272,6 +304,32 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     maxTravel: z.number().positive().max(1000),
     feed: z.number().positive().max(10_000),
     retract: z.number().min(0).max(100),
+  }),
+  /**
+   * v0.5 RV4: an edge, corner or centre probing routine from here (docs/modes/run-probing.md);
+   * writes nothing. `plateSize`: the corner plate's size (the virtual machine lays it).
+   */
+  z.object({
+    kind: z.literal('probeRoutine'),
+    routine: ProbeRoutineSchema,
+    probe: ProbeGeometrySchema,
+    reach: PositiveMm,
+    zDistance: PositiveMm,
+    depth: PositiveMm,
+    clearance: PositiveMm,
+    fastFeed: Feed,
+    slowFeed: Feed,
+    moveFeed: Feed,
+    plateSize: PositiveMm.exactOptional(),
+  }),
+  /**
+   * v0.5 RV5 (virtual only): the stock the virtual operator laid (`stock` absent: the one laid before); with
+   * `touch` it closes the probe input whenever the tool touches it (the touch-off's readout).
+   */
+  z.object({
+    kind: z.literal('virtualStock'),
+    stock: VirtualStockSchema.exactOptional(),
+    touch: z.boolean(),
   }),
   /**
    * RV1: the spindle from Run (docs/modes/run-machine.md#spindle-while-jogging-rv1): on at `rpm`

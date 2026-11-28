@@ -6,7 +6,7 @@
 import type { LibraryTabKind, MaterialClass } from '../../../core/library/item'
 import type { HolderSize } from '../../../core/library/holder'
 import type { HolderPresetId } from '../../../core/library/holder.dto'
-import type { HomingCorner, Rigidity } from '../../../core/library/machine.dto'
+import type { HomingCorner, ProbeKind, Rigidity } from '../../../core/library/machine.dto'
 import type { ToolMaterial, ToolType } from '../../../core/library/tool.dto'
 import type { BaseType, SurfaceType, WorkholdingType } from '../../../core/library/workholding.dto'
 
@@ -451,6 +451,27 @@ export const libraryMessages = {
       'Optional: the largest extent of your Z touch plate. Touch-off spots leave room for it.',
     probePlateThickness: 'Touch plate thickness',
     probePlateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
+    /** v0.5 RV4: the probe for X/Y probing (run-probing.md#probe-settings-rv4). */
+    probeKind: 'Probe kind',
+    probeKinds: {
+      zPlate: 'Z touch plate',
+      xyzPlate: 'XYZ corner plate',
+      tool: 'The bit on the stock',
+      '3d': '3D probe',
+    } satisfies Record<ProbeKind, string>,
+    probeWallOffsetX: 'Plate wall X',
+    probeWallOffsetY: 'Plate wall Y',
+    probeWallOffsetNote:
+      'The corner plate: how far each wall the bit touches sits out from the stock edge the plate hooks on (often the wall thickness). Needed to probe X/Y with it.',
+    probeTipDiameter: 'Ball diameter',
+    probeTipDiameterNote: 'The 3D probe stylus ball; X/Y results subtract its radius.',
+    probeFastFeed: 'Probe seek feed',
+    probeFastFeedNote: 'Optional: unset = 100 mm/min. The first move toward the plate or stock.',
+    probeSlowFeed: 'Probe slow feed',
+    probeSlowFeedNote: 'Optional: unset = 20 mm/min. The re-probes that measure.',
+    probeRetract: 'Probe back-off',
+    probeRetractNote:
+      'Optional: unset = 2 mm. Off the contact before a re-probe and between moves.',
     /** The Spindle tab's "Holder" group (tool-holder.md § Implementation (H1), DF132). */
     holder: {
       title: 'Holder',
