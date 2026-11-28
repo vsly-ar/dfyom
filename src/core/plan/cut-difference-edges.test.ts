@@ -171,7 +171,7 @@ async function recut(build: Build, ids: string[], edit: Build) {
         planOperationId: opOf(s.plan(planId), design).id,
       }) as { toolpath: Toolpath }
     ).toolpath
-  return { s, planId, before, after, reference, toolpath }
+  return { s, svc, planId, before, after, reference, toolpath }
 }
 
 /** A V-bit Line along an open 40 mm path and round a closed 20 × 10 loop, on the raw top. */
@@ -297,6 +297,20 @@ describe('cut state C4 follow-up: recut Lines and chamfers cut the difference', 
     await expect(r.after.lines.join('\n') + '\n').toMatchFileSnapshot(
       '__golden__/cut-deeper-engraving.nc',
     )
+    // another tool than the Line's cutter (the groove may be narrower than it): cut in full
+    const wide = (
+      (await r.s.run('library.tool.add', {
+        values: libraryInput({ ...V_BIT, name: 'V-bit 90', angle: deg('90') }),
+      })) as { id: string }
+    ).id
+    await r.s.run('plan.tool.assign', {
+      planId: r.planId,
+      planOperationId: opOf(r.s.plan(r.planId), 'line1').id,
+      toolLibraryItemId: wide,
+    })
+    const again = expectOk(await exportPlan(r.s.d.doc, r.planId, r.svc as never)).text
+    expect(again).toContain('Z-1.5 F')
+    expect(cutZs(r.toolpath('line1')).filter((z) => z > -1.5 - 1e-6).length).toBeGreaterThan(2)
   }, 120_000)
 
   it('a circular chamfer made 1 mm wider ramps from the old cone depth, not from the face', async () => {

@@ -16,7 +16,7 @@ import { elementPoint, lineChains, type LineProfile, type ResolvedLine } from '.
 import type { LineGeometry, Vec2, Vec3 } from '../geometry/model'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, toolpath } from './common'
-import type { CuttingParams, GeneratorInput, Toolpath } from './model'
+import type { CuttingParams, GeneratorInput, Toolpath, ToolpathTool } from './model'
 import { MoveBuilder, segSlice, type Seg } from './path'
 
 /** A Line in the face frame without its direction (generators are top-down). */
@@ -35,6 +35,30 @@ export type LineCutting = Pick<
 >
 
 export type LineInput = GeneratorInput<LineOperation, LineStrategy, LineCutting>
+
+/**
+ * Whether `tool` has the shape of `cutter` (DF135 C4 follow-up): a recut Line credits its as-cut
+ * groove only then (the groove was cut by the Line's cutter; a wider tool would meet more than one
+ * stepdown of material on its first kept pass).
+ * Doc: docs/modes/cut-state.md#edge-operations-engravings-and-through-holes-c4-follow-up
+ */
+export function isCutter(tool: ToolpathTool, cutter: LineGeometry['cutter']): boolean {
+  const same = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) <= 1e-9
+  if (!same(tool.diameter, cutter.diameter)) return false
+  if (cutter.kind === 'vBit')
+    return (
+      tool.type === 'chamferMill' &&
+      same(tool.angle, cutter.angle) &&
+      same(tool.tipDiameter ?? 0, cutter.tipDiameter)
+    )
+  if (cutter.kind === 'taperedBall')
+    return (
+      tool.type === 'taperedBallEndMill' &&
+      same(tool.tipDiameter, cutter.tipDiameter) &&
+      same(tool.taperAngle, cutter.taperAngle)
+    )
+  return tool.type === (cutter.kind === 'ball' ? 'ballEndMill' : 'flatEndMill')
+}
 
 const EPS = 1e-9
 /** Moves shorter than this are dropped (mm). */

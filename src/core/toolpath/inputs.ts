@@ -15,6 +15,7 @@ import {
   type StockGeometry,
 } from '../geometry/model'
 import type { EdgeChamferOperation } from './edge-chamfer'
+import { isCutter } from './line'
 import { openReach, opensStock, openRegion, uncoveredRegion } from '../geometry/open-sides'
 import { slotSplit } from '../geometry/slots'
 import type { MaterialBand } from '../geometry/through-depth'
@@ -770,8 +771,9 @@ export function toGeneratorInputs(
             inputs: [
               {
                 ...base,
-                // a recut Line starts on its as-cut groove's floor (DF135 C4 follow-up)
-                ...material,
+                // a recut Line starts on its as-cut groove's floor (DF135 C4 follow-up) when the
+                // plan's tool is the Line's cutter: the run cut the groove with it
+                ...(isCutter(tool, operation.cutter) ? material : {}),
                 cutting: {
                   spindleSpeed: c.spindleSpeed,
                   feedRate: c.feedRate,
