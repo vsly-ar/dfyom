@@ -278,6 +278,46 @@ describe('machine host', () => {
     expect(lastStatus(h)?.pins ?? '').not.toContain('P')
   })
 
+  it('v0.5 RV10: surface map points on the virtual stock top, tilted about G54', async () => {
+    const h = harness()
+    await connectedHost(h)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const stock = { min: [-200, -300, -70], max: [-100, -250, -50] }
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'virtualStock', stock, touch: false } }),
+    )
+    expectOk(
+      await h.request({
+        type: 'machine',
+        action: { kind: 'jog', to: [-190, -290, -40], feed: 3000 },
+      }),
+    )
+    await h.pump(() => lastStatus(h)?.state === 'Idle' && lastStatus(h)?.mpos[2] === -40)
+    const point = async (at: [number, number], travelZ: number) =>
+      expectOk(
+        await h.request({
+          type: 'machine',
+          action: {
+            kind: 'surfacePoint',
+            at,
+            travelZ,
+            zDistance: 25,
+            retract: 2,
+            fastFeed: 300,
+            slowFeed: 50,
+            moveFeed: 1000,
+          },
+        }),
+      ) as { z: number }
+    const a = await point([-190, -290], -40)
+    // G54 is 0 0 0: the tilt is about the machine origin, the top at the stock's (−50)
+    expect(a.z).toBeCloseTo(-50 + 0.004 * -190 - 0.002 * -290, 2)
+    const b = await point([-150, -290], a.z + 2)
+    expect(b.z - a.z).toBeCloseTo(0.004 * 40, 2)
+    expect(lastStatus(h)).toMatchObject({ state: 'Idle', workZero: [0, 0, 0] })
+    expect(lastStatus(h)?.mpos[2]).toBeCloseTo(b.z + 2, 2)
+  })
+
   it('machine frame: envelope, power-up position, queued jogs checked against the travel (DF33, DF34)', async () => {
     const h = harness()
     await connectedHost(h, {

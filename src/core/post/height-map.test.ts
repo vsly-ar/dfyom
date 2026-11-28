@@ -68,8 +68,9 @@ function program(blocks: Block[] = engraving()): MachiningProgram {
 }
 
 /** The motion blocks' end points in order, with the position they start from. */
-function motions(blocks: readonly Block[]): { from: Vec3 | undefined; b: Block }[] {
-  const out: { from: Vec3 | undefined; b: Block }[] = []
+type Motion = Extract<Block, { kind: 'rapid' | 'feed' | 'arc' }>
+function motions(blocks: readonly Block[]): { from: Vec3 | undefined; b: Motion }[] {
+  const out: { from: Vec3 | undefined; b: Motion }[] = []
   let pos: Vec3 | undefined
   for (const b of blocks) {
     if (b.kind === 'toolChange') pos = undefined

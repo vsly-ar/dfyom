@@ -32,6 +32,7 @@ import {
   repeatabilityStats,
   type TargetReading,
 } from './homing-repeatability'
+import { SURFACE_DEFAULTS } from './surface-probe'
 import { STILL_STATES } from './grbl/sender'
 import { runCalibrationCheck, runCalibrationStart } from './calibration-job'
 import { machineOf, runJobCheck, runJobStart } from './job'
@@ -950,6 +951,52 @@ export const runMachineRepeatability = defineCommand({
 })
 
 /**
+ * v0.5 RV10: one point of a stock surface map (docs/modes/run-surface.md#probing-a-map): up to the
+ * travel height along Z, across with `G38.3`, `G38.2` down at most `zDistance` with a slow
+ * re-probe, retract; the contact in MPos, nothing written. The Run dialog runs one per point, so a
+ * failure or a Stop keeps the points measured before. A job (Stop resets). Not an agent tool (Q229).
+ */
+export const runMachineSurfacePoint = defineCommand({
+  kind: 'job',
+  name: 'run.machine.surfacePoint',
+  summary: 'Probe one surface map point (MPos X/Y) from the travel height; the contact Z in MPos.',
+  title: () => 'Map point',
+  machine: true,
+  agentTool: false,
+  pause: { kind: 'handled' },
+  args: z.object({
+    at: z.tuple([z.number(), z.number()]).readonly(),
+    travelZ: z.number(),
+    zDistance: z.number().positive().max(1000).optional(),
+    retract: z.number().positive().max(100).optional(),
+    fastFeed: z.number().positive().max(10_000).optional(),
+    slowFeed: z.number().positive().max(10_000).optional(),
+    moveFeed: z.number().positive().max(10_000).optional(),
+  }),
+  result: z.object({ z: z.number(), uncertainty: z.number() }),
+  async run(_doc, args, ctx) {
+    const d = SURFACE_DEFAULTS
+    const r = await actStoppable(
+      ctx,
+      {
+        kind: 'surfacePoint',
+        at: args.at,
+        travelZ: args.travelZ,
+        zDistance: args.zDistance ?? d.firstDepth,
+        retract: args.retract ?? d.clearance,
+        fastFeed: args.fastFeed ?? d.fastFeed,
+        slowFeed: args.slowFeed ?? d.slowFeed,
+        moveFeed: args.moveFeed ?? d.moveFeed,
+      },
+      'run.machine.surfacePoint',
+      true,
+    )
+    if (r.isErr()) return r
+    return Ok(r.unwrap() as { z: number; uncertainty: number })
+  },
+})
+
+/**
  * v0.5 RV5 (virtual machine only): the stock the virtual operator laid, in machine coordinates,
  * and whether it closes the probe input while touched (the touch-off's readout;
  * docs/modes/run-probing.md#implementation-rv5). Not an agent tool.
@@ -1249,6 +1296,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbeZ,
   runMachineProbe,
   runMachineRepeatability,
+  runMachineSurfacePoint,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,
@@ -1285,6 +1333,7 @@ export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbeZ,
   runMachineProbe,
   runMachineRepeatability,
+  runMachineSurfacePoint,
   runVirtualStock,
   runWorkAreaSet,
   runMachineSpindle,
