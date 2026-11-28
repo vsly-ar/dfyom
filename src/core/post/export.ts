@@ -14,6 +14,7 @@ import { arcSweep, expandDrill, PECK_CLEARANCE } from '../toolpath/stats'
 import type { Move, Toolpath, Vec3 } from '../toolpath/model'
 import { DEFAULT_SPIN_UP_SECONDS, postGrblLines, type PostOptions } from './grbl/post'
 import type { Block, MachiningProgram, ProgramTool, ProgramZRef, SetupHeader } from './program'
+import { applyHeightMap, type HeightMap, type SurfaceSummary } from './height-map'
 
 /** One plan operation's toolpath with its tool copy, in machining order. */
 export interface ExportOperation {
@@ -67,6 +68,12 @@ export interface ExportInput {
    * clearance height. Doc: docs/modes/run-machine.md#section-resume-m5
    */
   readonly resumeFrom?: number
+  /**
+   * v0.5 RV10: follow a surface map (docs/modes/run-surface.md#following-the-map): moves below the
+   * clearance split and offset by the map relative to each tool run's touch-off spot; `maxRange`
+   * is the follow limit (mm). Refused with `run.surfaceMap`.
+   */
+  readonly heightMap?: { readonly map: HeightMap; readonly maxRange?: number }
 }
 
 export interface ProgramStats {
@@ -97,6 +104,8 @@ export interface GrblExport {
    * check before a homed connection gives the actual work zero.
    */
   readonly travelFit: readonly TravelFit[]
+  /** With `ExportInput.heightMap`: what the compensation did (RV10). */
+  readonly surface?: SurfaceSummary
 }
 
 /** One axis of `GrblExport.travelFit`. */
@@ -124,9 +133,19 @@ export function exportGrbl(input: ExportInput, opts: PostOptions): AppResult<Grb
   const machine = input.machine.unwrap()
   const built = toMachiningProgram(input, machine)
   if (built.isErr()) return built
-  const program = built.unwrap()
+  let program = built.unwrap()
+  let surface: SurfaceSummary | undefined
+  if (input.heightMap !== undefined) {
+    const followed = applyHeightMap(program, input.heightMap.map, {
+      ...(input.heightMap.maxRange === undefined ? {} : { maxRange: input.heightMap.maxRange }),
+    })
+    if (followed.isErr()) return followed
+    program = followed.unwrap().program
+    surface = followed.unwrap().surface
+  }
   return postGrblLines(program, opts).map((lines) => ({
     program,
+    ...(surface === undefined ? {} : { surface }),
     lines,
     text: `${lines.join('\n')}\n`,
     stats: programStats(program, machine, opts),

@@ -190,6 +190,12 @@ export const ERROR_CODES = {
       'The program would leave the machine travel at the current work zero. Move the work zero.',
     retryable: false,
   },
+  // v0.5 RV10: docs/modes/run-surface.md#refusals
+  'run.surfaceMap': {
+    severity: 'warn',
+    userMessage: 'The surface map cannot be followed for this program.',
+    retryable: false,
+  },
   // Plans (task 2.13): docs/modes/plan-v0.1.md#commands-and-queries-v01
   'plan.status': {
     severity: 'warn',
