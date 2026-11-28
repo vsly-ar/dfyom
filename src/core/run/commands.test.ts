@@ -199,6 +199,11 @@ describe('run commands', { timeout: 60_000 }, () => {
         expectOk(await t.run('job.resume', { jobId }))
         // a continue for another tool change is refused (a retried continue skips nothing)
         expectErrCode(await t.run('run.job.continue', { jobId, toolChange: n + 1 }), 'run.state')
+        // DF149: the same tool at another line (T2, T3, T2) is another wait: a late retry is refused
+        expectErrCode(
+          await t.run('run.job.continue', { jobId, toolChange: n, line: job.line - 1 }),
+          'run.state',
+        )
       }
       if (job.phase === 'toolChange') {
         // touch off 1 mm lower; the new tool has the same length: Z keeps its offset
@@ -219,7 +224,9 @@ describe('run commands', { timeout: 60_000 }, () => {
       }
       const which =
         job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
-      expectOk(await t.run('run.job.continue', { jobId, ...which }))
+      expect(
+        expectOk(await t.run('run.job.continue', { jobId, ...which, line: job.line })),
+      ).toEqual({ jobId, ...which, line: job.line })
       await waitFor(() => finished || t.status().job?.phase === 'streaming')
     }
     const summary = expectOk(await result) as { lines: number; toolChanges: number; pauses: number }

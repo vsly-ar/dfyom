@@ -218,16 +218,21 @@ function operatorWait(d: Dispatcher, source: Source, jobId: string): OperatorWai
     )
   })
   if (ended) return undefined
+  // DF149: naming the line keeps a late retry from ending the next wait at the same tool
+  const lineArg = typeof job['line'] === 'number' ? { line: job['line'] } : {}
   return 'toolChange' in which
     ? {
         kind: 'toolChange',
         toolChange: { n: tc!.n, name: tc!.name },
-        next: { name: 'run.job.continue', args: { jobId, toolChange: which.toolChange } },
+        next: {
+          name: 'run.job.continue',
+          args: { jobId, toolChange: which.toolChange, ...lineArg },
+        },
       }
     : {
         kind: 'programPause',
         pause: which.pause,
-        next: { name: 'run.job.continue', args: { jobId, pause: which.pause } },
+        next: { name: 'run.job.continue', args: { jobId, pause: which.pause, ...lineArg } },
       }
 }
 

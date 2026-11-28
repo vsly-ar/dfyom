@@ -1403,9 +1403,17 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (job === undefined) return
         set({ dismissedWait: undefined })
         if (job.phase === 'toolChange' && job.toolChange)
-          await call('run.job.continue', { jobId: job.jobId, toolChange: job.toolChange.n })
+          await call('run.job.continue', {
+            jobId: job.jobId,
+            toolChange: job.toolChange.n,
+            line: job.line,
+          })
         else if (job.phase === 'programPause')
-          await call('run.job.continue', { jobId: job.jobId, pause: job.pause ?? 0 })
+          await call('run.job.continue', {
+            jobId: job.jobId,
+            pause: job.pause ?? 0,
+            line: job.line,
+          })
       },
     }
   })

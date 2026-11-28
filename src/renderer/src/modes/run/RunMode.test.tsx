@@ -764,7 +764,8 @@ describe('Run mode', () => {
     await t.user.click(within(inspector).getByRole('button', { name: 'Show instructions' }))
     const again = screen.getByRole('dialog', { name: 'Tool change 2' })
     await t.user.click(within(again).getByRole('button', { name: 'Continue' }))
-    expect(t.callsOf('run.job.continue')).toEqual([{ jobId: 'run-1', toolChange: 2 }])
+    // DF149: the wait's line too, so a late second click cannot end a later wait at T2
+    expect(t.callsOf('run.job.continue')).toEqual([{ jobId: 'run-1', toolChange: 2, line: 1 }])
   })
 
   // docs/modes/z-reference.md#dfyom-run (DF69)

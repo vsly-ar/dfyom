@@ -73,10 +73,11 @@ function setup() {
       jobId: z.string(),
       toolChange: z.number().optional(),
       pause: z.number().optional(),
+      line: z.number().optional(),
     }),
     result: z.object({}).passthrough(),
     // as the real command: the wait's line (a tool number can come back later in the program)
-    run: async (_doc, args) => Ok({ ...args, line: status.job?.line }),
+    run: async (_doc, args) => Ok({ ...args, line: args.line ?? status.job?.line }),
   })
   const runStatus = defineQuery({
     name: 'run.status.get',
@@ -192,7 +193,12 @@ describe('job.wait on a run', () => {
     const again = t.value((await s.call('job.wait', { jobId, timeoutSeconds: 60 })).result)
     expect(again).toMatchObject({
       timedOut: false,
-      waiting: { kind: 'toolChange', toolChange: tc2 },
+      // DF149: the next call names the wait's line, so a late retry cannot end a later T2 wait
+      waiting: {
+        kind: 'toolChange',
+        toolChange: tc2,
+        next: { name: 'run.job.continue', args: { jobId, toolChange: 2, line: 1558 } },
+      },
     })
   })
 

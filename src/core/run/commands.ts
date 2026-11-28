@@ -568,6 +568,13 @@ export const runJobContinue = defineCommand({
         .int()
         .optional()
         .describe('Program pause (M0) number (job.pause); default: the current wait'),
+      line: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "The wait's program line (job.line): a late retry naming it never ends a later wait at the same tool",
+        ),
     })
     .refine(
       (a) => a.toolChange === undefined || a.pause === undefined,
@@ -609,7 +616,8 @@ export const runJobContinue = defineCommand({
       )
     // Defaults: the wait the run is at (llm-api.md#a2-jobwait-at-operator-waits). The host
     // checks a named wait against the one it is at, so a retried continue naming it skips nothing.
-    const expect =
+    // A tool number comes back in a program (T2, T3, T2): `line` tells those waits apart (DF149).
+    const which =
       args.toolChange !== undefined
         ? { toolChange: args.toolChange }
         : args.pause !== undefined
@@ -617,10 +625,11 @@ export const runJobContinue = defineCommand({
           : job.phase === 'toolChange'
             ? { toolChange: job.toolChange?.n ?? 0 }
             : { pause: job.pause ?? 0 }
+    const expect = args.line === undefined ? which : { ...which, line: args.line }
     return (await m.unwrap().controlJob(job.jobId, 'continue', expect)).map(() => ({
       jobId: job.jobId,
-      ...expect,
-      line: job.line,
+      ...which,
+      line: args.line ?? job.line,
     }))
   },
 })
