@@ -119,14 +119,16 @@ describe("the user's plate job (dogfood TG #492)", () => {
       setupId,
       items: [{ kind: 'block', center: ['-9.5', '87'], length: '18', width: '80', top: '-0.6' }],
     })
-    // DF146: one plan operation per clone group, in a safe order (cut-off and its chamfer last)
+    // DF146: one plan operation per clone group, in a safe order (the cut-off last); DF152: the
+    // part's one-sided chamfer before the cut-off (its bevel lies on the kept side), right after
+    // the countersinks' V-bit: no tool change once the part comes loose
     const ops = opsOf(s.plan(planId))
     expect(ops.map((o) => [o.designOperationIds[0], o.designOperationIds.length])).toEqual([
       ['facing1', 1],
       ['hole1_drill', 4],
       ['hole1_countersink', 4],
-      ['line1', 1],
       ['chamfer1', 1],
+      ['line1', 1],
     ])
     for (const op of ops)
       await s.run('plan.operation.update', {
@@ -152,6 +154,8 @@ describe("the user's plate job (dogfood TG #492)", () => {
     expect(loose.message).toMatch(
       /the offcut \(left of .*\) and the part \(right of .*\) are not held and come loose/,
     )
+    // DF152: nothing is cut after the cut-off, so nothing on a loose piece
+    expect(warnings.filter((w) => w.code === 'plan.loosePiece')).toEqual([])
 
     const tps: { tool: ToolpathTool; tp: Toolpath; stepdown: number; id: string }[] = []
     const T = { facing1: endMill(6.33, 20), flat: endMill(6.22, 20), vbit: chamferMill(6.35, 90) }
@@ -160,8 +164,8 @@ describe("the user's plate job (dogfood TG #492)", () => {
       ['hole1_drill', T.flat, 0.5],
       // the countersink's rings by level (DF142): each meets at most its level of the cone
       ['hole1_countersink', T.vbit, 1.25],
-      ['line1', T.flat, 0.5],
       ['chamfer1', T.vbit, 1],
+      ['line1', T.flat, 0.5],
     ] as const)
       tps.push({ id, tool: t, tp: await generated(s, planId, id), stepdown })
 

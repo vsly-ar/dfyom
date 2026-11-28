@@ -1,7 +1,7 @@
 // The user's one-sided chamfer through the plan (DF147 SL4, engraved-patterns.md § One-sided chamfer
 // along a line): the cut-off of line-through-plan.test.ts, then a 0.5 × 45° chamfer on the side that
-// stays (left of the line: the 78 mm part) with the 1/4" 90° V-bit. Ordered after the cut-off (the
-// edge dependency), no plan errors, the cut-off warning names the part and the offcut; on the
+// stays (left of the line: the 78 mm part) with the 1/4" 90° V-bit. Ordered before the cut-off (DF152:
+// the bevel is on the kept side), no plan errors, the cut-off warning names the part and the offcut; on the
 // heightmap of both toolpaths the part's wall is bevelled 0.5 mm, the offcut's wall is untouched,
 // nothing is gouged, no move meets more than its pass of uncut material (DF144 `deepCuts`); a golden
 // and the virtual machine.
@@ -46,8 +46,9 @@ describe("the user's one-sided chamfer (DF147 SL4)", () => {
     await s.run('project.apply', {})
     const planId = await planned(s)
     const ops = opsOf(s.plan(planId))
-    expect(ops.map((o) => o.designOperationIds[0])).toEqual(['line1', 'chamfer1'])
-    expect(s.plan(planId).snapshots.find((c) => c.id === ops[1]!.tool)!.libraryItemId).toBe(vbit)
+    // DF152: before the cut-off, while both sides are still one piece (the bevel is on the kept side)
+    expect(ops.map((o) => o.designOperationIds[0])).toEqual(['chamfer1', 'line1'])
+    expect(s.plan(planId).snapshots.find((c) => c.id === ops[0]!.tool)!.libraryItemId).toBe(vbit)
     const warnings = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] })
       .warnings
     expect(warnings.filter((w) => w.severity === 'error')).toEqual([])
@@ -64,7 +65,7 @@ describe("the user's one-sided chamfer (DF147 SL4)", () => {
         vTool,
         { length: 100, width: 100 },
         { stepdown: 0.5, finishRadial: 0 },
-        { before: [{ tool: flatTool, tp: slot }], cell: 0.1 },
+        { cell: 0.1 },
       ),
     ).toEqual([])
     const hm = new Heightmap(100, 100, 0.05)
@@ -95,6 +96,16 @@ describe("the user's one-sided chamfer (DF147 SL4)", () => {
     const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
     const run = await streamProgram(e.lines, machine)
     expect(run.lines).toBe(e.lines.length)
+
+    // DF152: the user may still bevel after the cut-off (the part held): no order error, but the
+    // chamfer is named as cut on a freed piece
+    await s.run('plan.operation.move', { planId, planOperationId: ops[0]!.id, toIndex: 1 })
+    expect(opsOf(s.plan(planId)).map((o) => o.designOperationIds[0])).toEqual(['line1', 'chamfer1'])
+    const after = (s.query('plan.warning.list', { planId }) as { warnings: PlanWarning[] }).warnings
+    expect(after.filter((w) => w.severity === 'error')).toEqual([])
+    expect(after.filter((w) => w.code === 'plan.loosePiece')).toMatchObject([
+      { rule: 'cutOffFirst', planOperationId: ops[0]!.id, params: { operation: 'chamfer1' } },
+    ])
   })
 
   it('refuses a missing side, and a side on any other edge', async () => {

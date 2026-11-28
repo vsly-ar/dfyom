@@ -8,14 +8,34 @@
 (Tool reaches past stock: left 8.4, right 8.4 mm)
 (Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
-(Tool 1: Wexme 1/4in 1F, dia 6.22 mm, min stickout 15.4 mm)
-(Tool 2: 90 V-bit 1/4in, dia 6.35 mm, min stickout 5.5 mm)
+(Tool 1: 90 V-bit 1/4in, dia 6.35 mm, min stickout 5.5 mm)
+(Tool 2: Wexme 1/4in 1F, dia 6.22 mm, min stickout 15.4 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
 G0 Z10
+(Chamfer 1)
+(DFYOM TOOL CHANGE 1: 90 V-bit 1/4in, 6.35 mm chamfer)
+M3 S18000
+(Set spindle to 18000 rpm)
+M0 ;Set spindle to 18000 rpm
+X-5.175 Y25.11
+Z2
+G1 Z-0.5 F150
+X0 F600
+X100
+X105.175
+G0 Z10
 (Line 1)
-(DFYOM TOOL CHANGE 1: Wexme 1/4in 1F, 6.22 mm flat)
+(Tool change to T2: spindle off, retract)
+M5
+X50 Y63
+(Stop the spindle)
+(DFYOM TOOL CHANGE 2: Wexme 1/4in 1F, 6.22 mm flat)
+M0 ;Stop spindle, install T2 Wexme 1/4in 1F, 6.22 mm flat, then zero Z
+G90 G94 G17 G21
+G54
+G0 Z10
 M3 S18000
 (Set spindle to 18000 rpm)
 M0 ;Set spindle to 18000 rpm
@@ -105,26 +125,6 @@ Z-10.4 F150
 X0 F600
 X100
 X105.11
-G0 Z10
-(Chamfer 1)
-(Tool change to T2: spindle off, retract)
-M5
-X50 Y61
-(Stop the spindle)
-(DFYOM TOOL CHANGE 2: 90 V-bit 1/4in, 6.35 mm chamfer)
-M0 ;Stop spindle, install T2 90 V-bit 1/4in, 6.35 mm, then zero Z
-G90 G94 G17 G21
-G54
-G0 Z10
-M3 S18000
-(Set spindle to 18000 rpm)
-M0 ;Set spindle to 18000 rpm
-X-5.175 Y25.11
-Z2
-G1 Z-0.5 F150
-X0 F600
-X100
-X105.175
 G0 Z10
 M5
 (Stop the spindle)
