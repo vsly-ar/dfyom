@@ -34,6 +34,29 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/${name}.png` })
 }
 
+/** Records whether the dialog ever showed "Stop test", however briefly. */
+async function watchStop(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const g = globalThis as unknown as {
+      document: {
+        body: object
+        querySelectorAll(s: string): ArrayLike<{ textContent: string | null }>
+      }
+      MutationObserver: new (cb: () => void) => { observe(n: object, o: object): void }
+      __stopSeen: boolean
+    }
+    g.__stopSeen = false
+    new g.MutationObserver(() => {
+      const buttons = Array.from(g.document.querySelectorAll('[role="dialog"] button'))
+      if (buttons.some((b) => (b.textContent ?? '').trim() === 'Stop test')) g.__stopSeen = true
+    }).observe(g.document.body, { childList: true, subtree: true, characterData: true })
+  })
+}
+
+async function stopSeen(page: Page): Promise<boolean> {
+  return page.evaluate(() => (globalThis as unknown as { __stopSeen: boolean }).__stopSeen)
+}
+
 async function runTest(scatter: string | undefined, shotName: string | undefined) {
   const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'dfyom-e2e-')))
   if (scatter !== undefined) process.env['DFYOM_TEST_HOMING_SCATTER'] = scatter
@@ -83,12 +106,15 @@ async function runTest(scatter: string | undefined, shotName: string | undefined
     await dialog.getByRole('button', { name: 'Use this position' }).click()
     await expect(dialog.locator('[data-start]')).toContainText('X -300.000 Y -200.000 Z -20.000')
     await dialog.getByRole('textbox', { name: 'Homings' }).fill('3')
+    // the test runs: Stop replaces Close throughout. At the Max time scale the whole test can take
+    // less than one assertion poll (hardening P14: under load Playwright never saw it), so a
+    // MutationObserver started before the click records that Stop was shown, however briefly
+    await watchStop(page)
     await dialog.getByRole('button', { name: 'Start test' }).click()
-    // the test runs: Stop is visible throughout
-    await expect(dialog.getByRole('button', { name: 'Stop test' })).toBeVisible()
     const table = dialog.getByRole('table', { name: 'Result' })
     await expect(table).toBeVisible({ timeout: 120_000 })
     await expect(dialog.getByRole('button', { name: 'Stop test' })).toHaveCount(0)
+    expect(await stopSeen(page)).toBe(true)
     const spread = parseFloat(
       (await table.locator('[data-axis="z"] td').first().textContent()) ?? '',
     )
