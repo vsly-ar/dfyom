@@ -208,6 +208,23 @@ describe('operations: add with defaults, update, undo/redo', () => {
     // a band's floor is offered, never the default `on`
     await s.run('design.pocket.add', { partId: s.partId, shape: rect('10', '10'), depth: '2' })
     expect(s.op('pocket1')).toMatchObject({ on: 'stock.top' })
+    // DF154: a hole or drilling whose centre lies in the band stands on the band's floor
+    await s.run('design.drilling.add', { partId: s.partId, center: ['50', '10'], diameter: '5' })
+    await s.run('design.drilling.add', { partId: s.partId, center: ['50', '40'], diameter: '5' })
+    expect([s.op('drill1').on, s.op('drill2').on]).toEqual(['facing1.floor', 'stock.top'])
+    await s.run('design.hole.add', {
+      partId: s.partId,
+      center: ['20', '11'],
+      type: 'countersink',
+      fastener: 'M6',
+    })
+    expect(s.op('hole1_drill')).toMatchObject({ on: 'facing1.floor' })
+    await s.run('design.hole.add', { partId: s.partId, center: ['20', '30'], fastener: 'M6' })
+    expect(s.op('hole2_drill')).toMatchObject({ on: 'stock.top' })
+    for (const id of ['hole2', 'hole1'])
+      await s.run('design.feature.remove', { partId: s.partId, featureId: id })
+    for (const id of ['drill2', 'drill1'])
+      await s.run('design.operation.remove', { partId: s.partId, operationId: id })
     await expectUndoRedo(s, 'design.facing.update', {
       partId: s.partId,
       operationId: 'facing1',

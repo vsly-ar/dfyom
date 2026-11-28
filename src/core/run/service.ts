@@ -284,11 +284,11 @@ export interface MachineService {
     expect: { readonly workZero: readonly [number, number, number]; readonly machineKey: string },
     about?: JobAbout | FileJobAbout,
   ): AsyncAppResult<RunningJob>
-  /** `continue` names the wait it ends (`toolChange` n or `pause` n). */
+  /** `continue` names the wait it ends (`toolChange` n or `pause` n, and its program `line`). */
   controlJob(
     jobId: string,
     action: JobControlAction,
-    expect?: { readonly toolChange?: number; readonly pause?: number },
+    expect?: { readonly toolChange?: number; readonly pause?: number; readonly line?: number },
   ): AsyncAppResult<void>
   setTimeScale(scale: TimeScale): AsyncAppResult<void>
   /**

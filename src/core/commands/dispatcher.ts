@@ -674,6 +674,16 @@ class ProjectDispatcher implements Dispatcher {
     // Commit: nothing below may fail.
     const frozenSource = freeze({ kind: source.kind, id: source.id }, true)
     const revisionBefore = this.rev
+    // DF153: an auto-Apply joins the undo entry of the command it follows, so one undo takes
+    // back the edit and its Apply (docs/architecture/apply.md#agents-mcp-and-cli)
+    const top = this.undo.peekUndo()
+    const joins =
+      mode.kind === 'auto' &&
+      changed &&
+      top !== undefined &&
+      top.revisionAfter === revisionBefore &&
+      top.source.kind === source.kind &&
+      top.source.id === source.id
     if (changed) this.commit(ran.next, frozenSource, ran.patches, { derived: true })
     const runs = starts.map(({ start, def }) => {
       const superseded = this.applyRuns.get(start.key)
@@ -684,7 +694,7 @@ class ProjectDispatcher implements Dispatcher {
     })
     const outcome: ApplyOutcome = {
       changes: pending.length,
-      entrySeq: changed ? this.actionLog.lastSeq + 1 : null,
+      entrySeq: joins ? top.seq : changed ? this.actionLog.lastSeq + 1 : null,
       toolChanges: contributions.flatMap((c) => [...(c.toolChanges ?? [])]),
       plans: contributions.flatMap((c) => [...(c.plans ?? [])]),
       jobIds: runs.map((j) => j.id),
@@ -697,26 +707,27 @@ class ProjectDispatcher implements Dispatcher {
       outcome: toWire(Ok(outcome)),
       ...(changed ? { patches: ran.patches } : {}),
     })
-    if (changed)
-      this.undo.push(
-        {
-          seq: event.seq,
-          command: name,
-          args: logArgs,
-          source: frozenSource,
-          title,
-          patches: ran.patches,
-          inversePatches: ran.inversePatches,
-          revisionBefore,
-          revisionAfter: this.rev,
-          at: event.at,
-        },
-        size,
-      )
+    if (changed) {
+      const entry: HistoryEntry = {
+        seq: event.seq,
+        command: name,
+        args: logArgs,
+        source: frozenSource,
+        title,
+        patches: ran.patches,
+        inversePatches: ran.inversePatches,
+        revisionBefore,
+        revisionAfter: this.rev,
+        at: event.at,
+      }
+      // the merged entry keeps the command's seq, name and title
+      if (joins) this.undo.mergeTop(entry, size)
+      else this.undo.push(entry, size)
+    }
     this.undo.markApplied(this.current)
     this.openMarks = []
     this.lastApplyInfo = {
-      entrySeq: changed ? event.seq : null,
+      entrySeq: outcome.entrySeq,
       revision: this.rev,
       at: event.at,
       source: { kind: source.kind, id: source.id },

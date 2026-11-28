@@ -1698,7 +1698,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   async function jobControl(
     jobId: string,
     action: 'hold' | 'resume' | 'continue' | 'stop',
-    expect: { toolChange?: number; pause?: number } | undefined,
+    expect: { toolChange?: number; pause?: number; line?: number } | undefined,
   ): Promise<AppResult<void>> {
     const c = conn
     if (c === undefined) return notConnected()
@@ -1729,18 +1729,21 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       }
       case 'continue': {
         const wait = c.sender.wait
+        // a named line must be this wait's: the same tool comes back later (T2, T3, T2; DF149)
+        const line = c.sender.line ?? 0
         const named =
           wait === undefined
             ? undefined
-            : 'toolChange' in wait
-              ? expect?.toolChange === wait.toolChange
-              : expect?.pause === wait.pause
+            : ('toolChange' in wait
+                ? expect?.toolChange === wait.toolChange
+                : expect?.pause === wait.pause) &&
+              (expect?.line === undefined || expect.line === line)
         if (named !== true)
           return fail(
             'run.state',
             wait === undefined
               ? 'the run does not wait at a tool change or pause'
-              : `the run waits at ${'toolChange' in wait ? `tool change ${wait.toolChange}` : `pause ${wait.pause}`}, not the one given`,
+              : `the run waits at ${'toolChange' in wait ? `tool change ${wait.toolChange}` : `pause ${wait.pause}`} (line ${line}), not the one given`,
             {
               where: 'machineHost.continue',
               data: { state: machineState(c), ...(c.job.phase ? { phase: c.job.phase } : {}) },

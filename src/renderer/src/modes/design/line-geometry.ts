@@ -122,3 +122,56 @@ export function arcPoints(op: LineDTO): [Mm, Mm, Mm] | undefined {
   const b = mmOf(p.arc.end)
   return a === undefined || t === undefined || b === undefined ? undefined : [a, t, b]
 }
+
+/** Where "Distance from edge" measures to (hardening DF156): the line's centre or the part's wall. */
+export type DistanceTo = 'centreline' | 'wall'
+
+/** The direction `parallelToEdge` draws along (front/back: +u, left/right: +v). */
+const EDGE_RUN: Record<FaceEdge, Mm> = {
+  front: [1, 0],
+  back: [1, 0],
+  left: [0, 1],
+  right: [0, 1],
+}
+/** From a parallel line toward its edge. */
+const TOWARD_EDGE: Record<FaceEdge, Mm> = {
+  front: [0, -1],
+  back: [0, 1],
+  left: [-1, 0],
+  right: [1, 0],
+}
+
+/**
+ * Hardening DF156: a Straight line `distance` from `edge` placed by the **part's wall**: the
+ * centreline moves half the slot (`slot` mm wide) toward the offcut, so the kept side (`kept`, a
+ * one-sided chamfer's `edgeSide` along the current segment) keeps `distance` up to the wall. The
+ * new segment runs the way the current one does, so `kept` still names the same side. Undefined
+ * while the current segment does not evaluate.
+ */
+export function parallelToWall(
+  op: LineDTO,
+  edge: FaceEdge,
+  distance: number,
+  slot: number,
+  kept: 'left' | 'right',
+  face: { readonly length: number; readonly width: number },
+  units: UnitSystem,
+): Record<string, unknown> | undefined {
+  const p = op.paths[0]
+  if (p === undefined || !('segment' in p)) return undefined
+  const a = mmOf(p.segment.start)
+  const b = mmOf(p.segment.end)
+  if (a === undefined || b === undefined) return undefined
+  const d: Mm = [b[0] - a[0], b[1] - a[1]]
+  // the kept side's normal: left of start → end is the direction turned counter-clockwise
+  const n: Mm = kept === 'left' ? [-d[1], d[0]] : [d[1], -d[0]]
+  const t = TOWARD_EDGE[edge]
+  const partAtEdge = n[0] * t[0] + n[1] * t[1] > 0
+  const centre = partAtEdge ? distance + slot / 2 : distance - slot / 2
+  const placed = parallelToEdge(edge, centre, face, units) as {
+    segment: { start: string[]; end: string[] }
+  }
+  const run = EDGE_RUN[edge]
+  const reversed = d[0] * run[0] + d[1] * run[1] < 0
+  return reversed ? { segment: { start: placed.segment.end, end: placed.segment.start } } : placed
+}

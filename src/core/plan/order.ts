@@ -133,6 +133,9 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
         if (q !== undefined && q !== p.id) rest.add(q)
       }
       for (const d of edgeDependencies(o)) {
+        // DF152: a cut-off's one-sided chamfer needs no slot first: its bevel lies wholly on the
+        // kept side, so it may (and by default does, `frees`) come before the freeing cut
+        if (isThroughLine(part.operations[index.get(d) ?? -1])) continue
         const q = owner.get(d)
         if (q !== undefined && q !== p.id) edgeDeps.add(q)
       }
@@ -476,11 +479,12 @@ function frees(
   release: ReadonlySet<string> = new Set(),
 ): boolean {
   if (op.id === profile.id) return false
+  // DF147 SL3: a cut-off frees both sides, so it comes after every other cut of its direction
+  // but the other freeing cuts (engraved-patterns.md § Cutting the part out along a line); DF152:
+  // its own one-sided chamfers too (the bevel lies on the kept side, cut before the slot)
+  if (profile.kind === 'line') return !isThroughProfile(op) && !isThroughLine(op)
   // a chamfer on the profile's own edge bevels the rim round it, not material inside it (X2)
   if (op.kind === 'chamfer' && op.edgeOf === profile.id) return false
-  // DF147 SL3: a cut-off frees both sides, so it comes after every other cut of its direction
-  // but the other freeing cuts (engraved-patterns.md § Cutting the part out along a line)
-  if (profile.kind === 'line') return !isThroughProfile(op) && !isThroughLine(op)
   if (op.kind === 'facing') return true
   // DF57: the cut that releases the part comes after everything else of its setup
   if (release.has(profile.id) && !release.has(op.id)) return true

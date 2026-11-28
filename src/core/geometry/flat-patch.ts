@@ -14,6 +14,7 @@ import {
   arcSweep,
   line,
   chainBounds,
+  EMPTY_REGION,
   regionArea,
   regionLoops,
   type Bounds2,
@@ -248,6 +249,19 @@ export class FlatPatches {
       }
     }
     this.history.push(...cuts)
+  }
+
+  /**
+   * Hardening DF151: `region` (face frame of `direction`) is no longer part of the workpiece, the
+   * offcut of a cut-off: every surface of that direction loses it, so no touch-off spot lands there.
+   */
+  free(direction: Direction, region: Region): void {
+    for (let i = 0; i < this.surfaces.length; i++) {
+      const s = this.surfaces[i]!
+      if (s.direction !== direction || s.patch.pieces.length === 0) continue
+      const patch = this.port.difference(s.patch, region).mapOr(EMPTY_REGION, (r) => r)
+      this.surfaces[i] = { ...s, patch }
+    }
   }
 
   /** `patch` of `s` less what `c` cuts below its level. */

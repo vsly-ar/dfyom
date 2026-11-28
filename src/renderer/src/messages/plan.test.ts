@@ -231,4 +231,25 @@ describe('plan status texts', () => {
       'The webs are 1.50 mm thin and finished in levels of 10.00 mm: a thin wall bends under a full-height pass. Finish in steps of at most 3.00 mm.',
     )
   })
+
+  it('zReach once per setup: the other tools short too, and what to measure (DF150)', () => {
+    const w = finding({
+      code: 'plan.machine',
+      severity: 'warning',
+      rule: 'zReach',
+      field: 'stickout',
+      message: 'core text',
+      params: {
+        tool: 'Flat 1F',
+        stickout: 29.7,
+        zMin: -10.5,
+        lowest: 8.2,
+        toolsShort: 3,
+        shortMin: 8.4,
+      },
+    })
+    expect(findingText(w)).toBe(
+      'Flat 1F at 29.70 mm stickout cannot reach Z-10.50 mm: the Z travel ends at Z8.20 mm. 2 other tools are short too (by at least 8.40 mm). Use a longer stickout or raise the stock on a thicker spoilboard. If this machine does cut there, the machine profile is off: with Z homed, measure from the collet nut face down to the bare table and enter it as Spindle nose to table under Z height in the machine (Library); check the Z travel and the spoilboard thickness too.',
+    )
+  })
 })

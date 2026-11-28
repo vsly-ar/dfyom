@@ -131,6 +131,60 @@ describe('default rule (docs/modes/z-reference.md#default-rule)', () => {
     expect(r[0]!.zRef!.at).toEqual([50, 30])
     expect(r[1]!.zRef!.at).toEqual([21, 21])
   })
+
+  // DF151 (plate dogfood F3): a tool change after a cut-off touched off on the loose offcut
+  async function cutOff(side?: 'left' | 'right') {
+    const s = await planSetup({ part: false, services: { region2d } })
+    const partId = s.partId
+    // a through Line at Y25: the side left of it (Y > 25, the larger) is the offcut
+    await s.run('design.line.add', {
+      partId,
+      paths: [{ segment: { start: ['0', '25'], end: ['100', '25'] } }],
+      depth: 'through',
+    })
+    if (side !== undefined)
+      await s.run('design.chamfer.add', { partId, edgeOf: 'line1', width: '1', edgeSide: side })
+    await s.run('design.drilling.add', { partId, center: ['50', '10'], diameter: '6' })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const of = (design: string) =>
+      s.plan(planId).setups[0]!.operations.find((o) => o.designOperationIds[0] === design)!.id
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: of('line1'),
+      toolLibraryItemId: s.tools.flat6,
+    })
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: of('drill1'),
+      toolLibraryItemId: s.tools.drill6,
+    })
+    // the drill after the cut-off
+    await s.run('plan.operation.move', {
+      planId,
+      planOperationId: of('drill1'),
+      toIndex: s.plan(planId).setups[0]!.operations.length - 1,
+    })
+    return { s, planId, drill: of('drill1') }
+  }
+
+  it('a tool change after a cut-off touches off on the kept side, never the offcut (DF151)', async () => {
+    const { s, planId, drill } = await cutOff('right')
+    const run = refs(s, planId).find((x) => x.planOperationId === drill)!
+    expect(run.zRef!.surface).toBe('stock.top')
+    // on the part (Y < 25 less the slot), not the larger offcut beyond the line
+    expect(run.zRef!.at[1]).toBeLessThan(25 - 3)
+    expect(zFindings(s, planId).filter((w) => w.planOperationId === drill)).toEqual([])
+  })
+
+  it('a cut-off with no side named the part: the spot is flagged (DF151)', async () => {
+    const { s, planId, drill } = await cutOff()
+    const run = refs(s, planId).find((x) => x.planOperationId === drill)!
+    expect(run.zRef!.at[1]).toBeGreaterThan(25)
+    const [w] = zFindings(s, planId).filter((x) => x.planOperationId === drill)
+    expect(w).toMatchObject({ severity: 'warning', rule: 'cutOff', params: { line: 'line1' } })
+    expect(w!.message).toMatch(/may be on the loose offcut/)
+  })
 })
 
 describe('stored choice (plan.operation.update zRef)', () => {

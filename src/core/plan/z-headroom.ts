@@ -51,8 +51,9 @@ const FIELD_TEXT = {
 
 /**
  * `plan.machine` findings of one setup: `zHeadroom` (warning, per tool) when the clearance height
- * plus the margin is above the tip at Z home, `zReach` (warning, per tool, only with `zMin` and a
- * known spoilboard) when the lowest Z is below the tip at the end of the Z travel. Nothing
+ * plus the margin is above the tip at Z home, `zReach` (warning, once per setup naming the worst
+ * tool, DF150; only with `zMin` and a known spoilboard) when a tool's lowest Z is below the tip at
+ * the end of the Z travel. Nothing
  * without `noseToTable`; without the spoilboard the top is checked as if there were none (a
  * spoilboard only lowers the headroom, so a warning then is certain). Callers add
  * `zHeadroomUnknown` once per plan or program.
@@ -66,6 +67,7 @@ export function zHeadroomFindings(machine: Machine, input: ZHeadroomInput): Plan
   // GRBL homes Z up: MPos after homing is −pull-off and the travel ends at −travel
   const down = machine.travel.z.canonical - machine.pullOff.mapOr(1, (q) => q.canonical)
   const seen = new Set<string>()
+  const short: ZReachShort[] = []
   for (const t of input.tools) {
     const key = `${t.toolName}\u0000${t.stickout}`
     if (seen.has(key)) continue
@@ -99,21 +101,51 @@ export function zHeadroomFindings(machine: Machine, input: ZHeadroomInput): Plan
       })
     if (t.zMin === undefined || !boardKnown) continue
     const lowest = atHome - down
-    if (t.zMin < lowest - EPS)
-      out.push({
-        code: 'plan.machine',
-        severity: 'warning',
-        planOperationId: t.planOperationId,
-        field: 'stickout',
-        rule: 'zReach',
-        message:
-          `${t.toolName} at ${mm(t.stickout)} mm stickout: the program goes down to Z${mm(t.zMin)} mm, ` +
-          `the Z travel ends at Z${mm(lowest)} mm (short by ${mm(lowest - t.zMin)} mm). ` +
-          `Use a longer stickout or raise the stock on a thicker spoilboard`,
-        params: { ...base, zMin: t.zMin, lowest },
-      })
+    if (t.zMin < lowest - EPS) short.push({ t, base, lowest, by: lowest - t.zMin })
   }
-  return out
+  const reach = zReachFinding(short)
+  return reach === undefined ? out : [...out, reach]
+}
+
+interface ZReachShort {
+  readonly t: ZHeadroomTool
+  readonly base: Readonly<Record<string, number | string>>
+  readonly lowest: number
+  readonly by: number
+}
+
+/** How to check the profile when the estimate and the machine disagree (DF150). */
+export const Z_REACH_MEASURE =
+  'If this machine does cut there, the machine profile is off: with Z homed, measure from the ' +
+  'spindle nose (the collet nut face) down to the bare table under the spoilboard and enter it as ' +
+  'the spindle nose to table distance; check the Z travel ($132) and the spoilboard thickness too'
+
+/**
+ * One `zReach` per setup (DF150), not per tool: the worst tool names it (`params` as before, plus
+ * `toolsShort` and `shortMin`, the smallest shortfall). The math is right; a profile with a wrong
+ * `noseToTable` makes every tool short by about the same, so the message says what to measure.
+ */
+function zReachFinding(short: readonly ZReachShort[]): PlanWarning | undefined {
+  if (short.length === 0) return undefined
+  const worst = short.reduce((a, b) => (b.by > a.by + EPS ? b : a))
+  const shortMin = Math.min(...short.map((s) => s.by))
+  const { t, lowest, by } = worst
+  const head =
+    short.length === 1
+      ? `${t.toolName} at ${mm(t.stickout)} mm stickout`
+      : `${short.length} tools cannot reach their lowest Z; ${t.toolName} at ${mm(t.stickout)} mm stickout`
+  return {
+    code: 'plan.machine',
+    severity: 'warning',
+    planOperationId: t.planOperationId,
+    field: 'stickout',
+    rule: 'zReach',
+    message:
+      `${head}: the program goes down to Z${mm(t.zMin!)} mm, the Z travel ends at Z${mm(lowest)} mm ` +
+      `(short by ${mm(by)} mm${short.length === 1 ? '' : `, the others by at least ${mm(shortMin)} mm`}). ` +
+      `Use a longer stickout or raise the stock on a thicker spoilboard. ${Z_REACH_MEASURE}`,
+    params: { ...worst.base, zMin: t.zMin!, lowest, toolsShort: short.length, shortMin },
+  }
 }
 
 /**

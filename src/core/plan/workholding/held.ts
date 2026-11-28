@@ -246,7 +246,7 @@ export function cutOffLoose(
 }
 
 /** The side a one-sided chamfer of the Line keeps (SL4 `edgeSide`), if one does. */
-function keptSide(plan: LoadedPlan, lineId: string): CutOffSide | undefined {
+export function keptSide(plan: LoadedPlan, lineId: string): CutOffSide | undefined {
   for (const o of plan.part.operations)
     if (o.kind === 'chamfer' && o.edgeOf === lineId && o.edgeSide.isSome())
       return o.edgeSide.unwrap()

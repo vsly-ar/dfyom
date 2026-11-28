@@ -96,6 +96,44 @@ describe('zHeadroomFindings (DF68)', () => {
     expect(check(machine({ noseToTable: len('113') }), [stub], 5)).toEqual([])
   })
 
+  it("zReach once per setup, naming the worst tool and what to measure (DF150, the user's plate)", () => {
+    // the user's 3020 profile: nose to table 150, spoilboard 23, Z travel 80, 10.1 mm plate. The
+    // math holds (tip at home 150 − 23 − 10.1 − 29.7 = 87.2, travel ends 79 lower at 8.2): the
+    // profile is what is off, so the finding comes once and says what to measure
+    const m = machine({
+      noseToTable: len('150'),
+      spoilboardThickness: len('23'),
+      travel: { x: len('300'), y: len('200'), z: len('80') },
+    })
+    const tool = (planOperationId: string, toolName: string, zMin: number) => ({
+      planOperationId,
+      toolName,
+      stickout: 29.7,
+      zMin,
+    })
+    const ws = zHeadroomFindings(m, {
+      setupId: 's1',
+      clearance: 5,
+      stockThickness: 10.1,
+      tools: [
+        tool('po-1', 'Finish 3F', -0.2),
+        tool('po-2', 'Flat 1F', -10.5),
+        tool('po-3', 'V 90', -1.2),
+      ],
+    })
+    expect(ws).toHaveLength(1)
+    expect(ws[0]).toMatchObject({
+      rule: 'zReach',
+      planOperationId: 'po-2',
+      params: { tool: 'Flat 1F', toolsShort: 3, lowest: expect.closeTo(8.2, 6) },
+    })
+    expect(ws[0]!.params['shortMin']).toBeCloseTo(8.4, 6)
+    expect(ws[0]!.message).toMatch(
+      /^3 tools cannot reach their lowest Z; Flat 1F at 29\.7 mm stickout: .*short by 18\.7 mm, the others by at least 8\.4 mm\)/,
+    )
+    expect(ws[0]!.message).toContain('with Z homed, measure from the spindle nose')
+  })
+
   it('one finding per tool name and stickout', () => {
     const again = { ...extralong, planOperationId: 'po-5' }
     expect(check(machine(), [extralong, again]).map((w) => w.planOperationId)).toEqual(['po-4'])

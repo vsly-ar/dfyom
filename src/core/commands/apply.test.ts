@@ -480,10 +480,10 @@ describe('auto-apply and stale writes', () => {
     ) as CommandOutcome
     expect(out.applied).toMatchObject({ changes: 1 })
     expect(out.revision).toBe(t.d.revision)
-    expect(t.d.history.undoable.slice(-2).map((e) => e.command)).toEqual([
-      'design.pocket.update',
-      'project.apply',
-    ])
+    // DF153: the auto-Apply joins the edit's undo entry (named by the edit)
+    const top = t.d.history.undoable.at(-1)!
+    expect(top.command).toBe('design.pocket.update')
+    expect(out.applied).toMatchObject({ entrySeq: top.seq })
     expect(t.events.at(-1)).toMatchObject({ name: 'project.apply', args: { auto: true } })
   })
 

@@ -479,6 +479,8 @@ export const MainMessage = z.discriminatedUnion('type', [
       .object({
         toolChange: z.number().int().exactOptional(),
         pause: z.number().int().exactOptional(),
+        /** The wait's program line: a tool number comes back in a program (DF149). */
+        line: z.number().int().exactOptional(),
       })
       .exactOptional(),
   }),

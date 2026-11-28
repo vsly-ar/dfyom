@@ -147,6 +147,39 @@ describe('Line inspector: Straight / Arc / Shape (DF147 SL2)', () => {
   })
 })
 
+describe('Line inspector: distance to the part wall (hardening DF156)', () => {
+  it('with a side kept, Distance from edge places the wall: the slot moves to the offcut side', async () => {
+    const { user, part, d, partId } = await renderLine()
+    // drawn right to left; the chamfer keeps its left: the front (v = 0) side is the part
+    await d.dispatch(
+      'design.line.add',
+      {
+        partId,
+        paths: [{ segment: { start: ['100', '40'], end: ['0', '40'] } }],
+        depth: 'through',
+      },
+      src,
+    )
+    await d.dispatch(
+      'design.chamfer.add',
+      { partId, edgeOf: 'line1', width: '1', edgeSide: 'left' },
+      src,
+    )
+    await user.click(await within(navigator()).findByRole('button', { name: /^Line 1/ }))
+    await within(inspector()).findByRole('heading', { name: 'Line 1' })
+    await user.click(within(inspector()).getByRole('button', { name: /^More/ }))
+    expect(within(inspector()).getByRole('radio', { name: 'Part wall' })).toBeChecked()
+    await user.type(field('Distance from edge'), '22{Enter}')
+    // the design's Ø6 flat: centreline 22 + 3, still drawn right to left (the kept side holds)
+    await waitFor(() => expect(pathsOf(part())[0]!.segment!.start.map(exact)).toEqual([100, 25]))
+    expect(pathsOf(part())[0]!.segment!.end.map(exact)).toEqual([0, 25])
+    await expectNoAxeViolations(inspector())
+    // Centreline: the distance names the line's centre again
+    await user.click(within(inspector()).getByRole('radio', { name: 'Centreline' }))
+    await waitFor(() => expect(pathsOf(part())[0]!.segment!.start.map(exact)).toEqual([100, 22]))
+  })
+})
+
 describe('Line inspector: Through (DF147 SL3)', () => {
   it('Depth → Through stores a through Line, shows its note, and offers no fields', async () => {
     const { user, part } = await renderLine()

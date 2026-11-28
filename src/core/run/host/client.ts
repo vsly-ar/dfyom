@@ -1030,7 +1030,7 @@ export class MachineClient implements MachineService {
   async controlJob(
     jobId: string,
     action: JobControlAction,
-    expect?: { readonly toolChange?: number; readonly pause?: number },
+    expect?: { readonly toolChange?: number; readonly pause?: number; readonly line?: number },
   ): AsyncAppResult<void> {
     if (this.conn?.state !== 'open') return this.notConnected()
     const r = await this.request({

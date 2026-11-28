@@ -117,12 +117,11 @@ describe('auto-apply per call', () => {
     expect(out.revision).toBe(t.project.revision)
     expect(t.pendingCount()).toBe(0)
     expect(t.project.doc.name).toBe('applied #2')
-    // undo once reverts the automation and leaves the edit pending; twice reverts the edit
+    // DF153: one undo reverts the edit and its automatic Apply together, nothing left pending
     await t.call(a, 'history.undo', {})
     expect(t.project.doc.name).toBe('applied #1')
-    expect(t.pendingCount()).toBe(1)
-    await t.call(a, 'history.undo', {})
     expect(t.pendingCount()).toBe(0)
+    expect(t.project.history.redoable.map((e) => e.command)).toEqual(['design.pocket.update'])
   })
 
   it('apply: false batches edits for one project.apply', async () => {

@@ -18,6 +18,7 @@ import { deepEqual } from '../library/snapshot'
 import type { Stock } from '../library/stock'
 import type { ProjectDoc } from '../project/document'
 import {
+  centreAt,
   defaultOn,
   Fields,
   invalid,
@@ -428,7 +429,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
         f,
         id,
         name,
-        on: args.on ?? defaultOn(ops),
+        on: args.on ?? defaultOn(ops, featureCentre(args, l, f)),
         before: ops,
         features: l.features,
       })
@@ -707,3 +708,18 @@ const featureList = defineQuery({
 
 export const FEATURE_COMMANDS: readonly AnyCommand[] = [featureRemove, featureMove]
 export const FEATURE_QUERIES: readonly QueryDef[] = [featureList]
+
+/**
+ * DF154: a feature's centre (`center` arg, top face frame) for its default `on`, parsed on a
+ * scratch Fields so its errors come once, from the feature's own build.
+ */
+function featureCentre(args: object, l: LoadedPart, f: Fields): ReturnType<typeof centreAt> {
+  const c = (args as { center?: unknown }).center
+  if (!Array.isArray(c) || c.length !== 2 || !c.every((x) => typeof x === 'string'))
+    return undefined
+  const scratch = f.scratch()
+  return centreAt(l.stock, [
+    scratch.q('center.0', 'length', c[0] as string),
+    scratch.q('center.1', 'length', c[1] as string),
+  ])
+}
