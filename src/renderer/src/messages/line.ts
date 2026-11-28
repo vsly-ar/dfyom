@@ -22,6 +22,11 @@ export const lineMessages = {
     'Where the level steps between two joined lines, the depth changes over this length on either side.',
   /** A shape the part no longer has (its name, never its id). */
   shapeMissing: 'Missing shape',
+  /** DF147 SL1: the Path picker's Shape Editor entries and the button under it. */
+  editor: 'Shape Editor',
+  newShape: 'New shape…',
+  editShapeEntry: 'Edit shape…',
+  editInEditor: 'Edit in Shape Editor',
   /** The depth legend under the levels' fields (engraved-patterns.md § Depth legend). */
   legend: {
     ticks: (deepest: string, shallowest: string, used: readonly string[]) =>

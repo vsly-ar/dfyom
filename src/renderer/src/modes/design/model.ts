@@ -347,6 +347,16 @@ export function lineWave(
   }
 }
 
+/** A Line's New shape… (DF147 SL1): one open straight path, 40 mm / 1.5" along u from its start. */
+export function newLineShapeItem(units: UnitSystem): Record<string, unknown> {
+  return {
+    kind: 'path',
+    closed: false,
+    start: ['0', '0'],
+    segments: [{ kind: 'line', to: [units === 'inch' ? '1.5' : '40', '0'] }],
+  }
+}
+
 // ── surfaces ──────────────────────────────────────────────────────────────────────────────
 
 export interface SurfaceChoice {

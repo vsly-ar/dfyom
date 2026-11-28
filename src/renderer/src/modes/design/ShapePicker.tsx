@@ -1,6 +1,6 @@
 // The shape picker of a pocket or profile (task U2): one Select with the inline kinds (Rectangle,
-// Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…" and "Import
-// SVG…" (DF49: imports and uses the first shape, one undo step); under it "Edit shape" and "Place
+// Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…", "Edit shape…"
+// (the picked named shape, DF147 SL1) and "Import SVG…" (DF49: imports and uses the first shape, one undo step); under it "Edit shape" and "Place
 // as drawn" (X2-2: at its own coordinates, a section's shape where the section lies) for a named
 // shape or "Convert to shape" for an inline one, and the shape's issues and corner warnings with
 // "Round corners to ≥ r" (or to the largest radius each corner takes). The placement
@@ -24,6 +24,7 @@ import { dfmNames, quantityOf, updateArgs } from './model'
 import {
   cornerPoints,
   isCornerWarning,
+  EDIT_SHAPE,
   IMPORT_SVG,
   isOpenNamed,
   NEW_SHAPE,
@@ -59,6 +60,14 @@ export interface ShapeActions {
   pickOnLine(shape: Record<string, unknown>): void
   /** X2-2 "Place as drawn": anchor min/min, then the position `center` (mm), one undo step. */
   placeAsDrawn(center: readonly [number, number]): void
+}
+
+/** A Line's Path picker actions (DF147 SL1, design only). */
+export interface LineShapeActions {
+  /** Adds an open-path shape, makes it path `index`'s and opens the Shape Editor, one undo step. */
+  newShape(index: number): void
+  /** Opens the shape in the Shape Editor window. */
+  editShape(shapeId: string): void
 }
 
 /** A named shape's loops resolved by the renderer's port (shape frame, mm). */
@@ -154,6 +163,7 @@ export function ShapePicker({
   const choose = (value: string) => {
     if (value === NEW_SHAPE) return actions?.newShape()
     if (value === IMPORT_SVG) return actions?.importSvg()
+    if (value === EDIT_SHAPE) return shape.kind === 'named' && actions?.editShape(shape.shapeId)
     const choice = value as PickerValue
     if (choice === pickerValue(shape)) return
     const id = choice.startsWith('named:')
@@ -188,6 +198,9 @@ export function ShapePicker({
     ...(actions && !ctx.readOnly
       ? [
           { value: NEW_SHAPE, label: p.newShape, group: p.named },
+          ...(shape.kind === 'named'
+            ? [{ value: EDIT_SHAPE, label: p.editShapeEntry, group: p.named }]
+            : []),
           { value: IMPORT_SVG, label: p.importSvg, group: p.named },
         ]
       : []),

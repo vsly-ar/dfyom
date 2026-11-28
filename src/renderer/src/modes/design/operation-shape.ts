@@ -32,6 +32,8 @@ export type PickerValue = 'rectangle' | 'circle' | `named:${string}`
 export const NEW_SHAPE = 'new' as const
 /** The picker's "Import SVG…" entry (DF49). */
 export const IMPORT_SVG = 'import-svg' as const
+/** Every shape picker's "Edit shape…" entry: the picked named shape in the Shape Editor (DF147 SL1). */
+export const EDIT_SHAPE = 'edit-shape' as const
 
 export const pickerValue = (s: OperationShapeDTO): PickerValue =>
   s.kind === 'named' ? `named:${s.shapeId}` : s.kind

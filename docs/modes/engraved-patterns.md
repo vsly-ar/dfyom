@@ -300,7 +300,7 @@ Built 2026-11-26 (provisional, on a branch): the last deferred item of the engra
 
 ## Simple Line: straight and arc (hardening DF147)
 
-Status: **draft** (2026-11-28, from the user's TG #492; awaits [Q235–Q238](#questions-q235q238)) · Intake: [hardening.md DF147](../plans/hardening.md#intake-user-feedback-goes-here)
+Status: **accepted** for SL1–SL2 (2026-11-28, from the user's TG #492; Q235 and Q236 taken as recommended by delegation D89); SL3–SL4 await [Q237–Q238](#questions-q235q238) · Intake: [hardening.md DF147](../plans/hardening.md#intake-user-feedback-goes-here)
 
 The user: "I think I need a 'Straight Line' operation: I'd use it to cut out the part and to chamfer only the part that stays. Current 'Line' operation is too complicated for a simple straight line, requiring to create a shape in a separate shapes editor. Or better yet, the Line op can be simplified by default for just one straight line or an arc. And user may switch to the Shape mode to be able to use a shape or SVG. Btw. there's no option to open the Shapes editor from the 'Path' dropdown (for the Line op) or anywhere on this side panel, which makes it obscure."
 
@@ -340,6 +340,10 @@ The user: "I think I need a 'Straight Line' operation: I'd use it to cut out the
 | SL2   | **Straight and Arc:** inline `segment` / `arc` items (model, DTO, conversion to a path, `design.line.add/update` args, ≈ 0.3 K of `tools/list`, measured), the mode row, Convert to shape, Parallel to an edge | A straight Line 22 mm from the front edge and a three-point arc evaluate and plan as the same line drawn as a shape (byte-equal G-code); goldens unchanged        |
 | SL3   | **Through Line:** `depth: 'through'`, open ends with side entry, freeing-cut order, loose-piece check                                                                                                          | The user's cut-off (6.22 mm flat across a 100 mm bar, 10.4 mm deep): every feed move meets ≤ stepdown of uncut material (`deepCuts` oracle); virtual machine Idle |
 | SL4   | **One-sided chamfer:** `edgeSide` on chamfers of Lines and profiles `on`, edge offset and clipping, toolpath, removal solid, UI side pick                                                                      | The part side of the cut-off is chamfered 0.5 mm and the offcut side not (heightmap); refusals for a missing side                                                 |
+
+### Implementation (SL1–SL2)
+
+- **SL1 (built):** the Line's Path picker lists, in a "Shape Editor" group, **New shape…** (adds a shape of one open straight path, 40 mm / 1.5" along u, makes it that path's shape at the same position and opens the [Shape Editor window](../conventions/ui.md#shape-editor-window-df94): two commands, one undo step) and **Edit shape…** (the picked shape); an **Edit in Shape Editor** button sits under each path's picker. The pocket and profile picker (which already had New shape…) gains **Edit shape…** for a named shape. The Shape Editor is its own window, so the project window keeps the operation selected; the new shape is already picked when the editor opens. **Decided here:** the Clones `along` and engraved-pattern motif pickers are not changed in SL1 (the motif picker has its own Presets…/Shapes flow; `along` has no picker in the inspector yet). Tests: `LineShape.test.tsx` (with axe).
 
 ## Questions for the user
 

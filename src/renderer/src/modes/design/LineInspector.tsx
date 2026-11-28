@@ -12,9 +12,11 @@ import { lineMessages } from '../../messages/line'
 import { DEFAULTS } from '../../../../core/design/operation'
 import type { UnitSystem } from '../../../../core/project/document'
 import { useRegion2d } from '../../shell/ShellContext'
-import { Field, InspectorGroup, SegmentedControl, Select } from '../../ui'
+import { Button, Field, Icon, InspectorGroup, SegmentedControl, Select } from '../../ui'
+import styles from './Design.module.css'
 import { DepthLegend } from './DepthLegend'
 import { linePathArgs, quantityAt } from './model'
+import { EDIT_SHAPE, NEW_SHAPE } from './operation-shape'
 import { OnField, ParamField, type OperationFieldsContext } from './OperationFields'
 
 const t = lineMessages
@@ -187,9 +189,22 @@ function PathFields({
 }): React.JSX.Element {
   const shapes = (ctx.part.dto.shapes ?? []).filter((s) => SHAPE_ID_PATTERN.test(s.id))
   const id = op.paths[index]!.shapeId
-  const options = shapes.map((s) => ({ value: s.id, label: s.name }))
-  if (!options.some((o) => o.value === id)) options.push({ value: id, label: t.shapeMissing })
+  const actions = ctx.readOnly ? undefined : ctx.lineShapeActions
+  const known = shapes.some((s) => s.id === id)
+  const options: { value: string; label: string; group?: string }[] = shapes.map((s) => ({
+    value: s.id,
+    label: s.name,
+  }))
+  if (!known) options.push({ value: id, label: t.shapeMissing })
+  // DF147 SL1: the Shape Editor from the picker (engraved-patterns.md § Simple Line)
+  if (actions !== undefined) {
+    options.push({ value: NEW_SHAPE, label: t.newShape, group: t.editor })
+    if (known) options.push({ value: EDIT_SHAPE, label: t.editShapeEntry, group: t.editor })
+  }
   const choose = (shapeId: string) => {
+    if (shapeId === NEW_SHAPE) return actions?.newShape(index)
+    if (shapeId === EDIT_SHAPE) return actions?.editShape(id)
+    if (shapeId === id) return
     const paths = linePathArgs(op)
     paths[index] = { ...paths[index]!, shapeId }
     ctx.send({ paths }, `paths.${index}.shapeId`)
@@ -199,6 +214,13 @@ function PathFields({
       <Field label={t.path(index + 1)} readOnly={ctx.readOnly}>
         <Select options={options} value={id} disabled={ctx.readOnly} onValueChange={choose} />
       </Field>
+      {actions !== undefined && known ? (
+        <div className={styles['pickerActions']}>
+          <Button size="sm" icon={<Icon name="edit" />} onClick={() => actions.editShape(id)}>
+            {t.editInEditor}
+          </Button>
+        </div>
+      ) : null}
       <ParamField
         ctx={ctx}
         path={`paths.${index}.center.0`}

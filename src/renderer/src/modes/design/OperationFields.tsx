@@ -46,7 +46,7 @@ import {
 import { ChamferInspector } from './ChamferInspector'
 import { LineInspector } from './LineInspector'
 import { isOpenNamed } from './operation-shape'
-import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
+import { isRotated, ShapePicker, type LineShapeActions, type ShapeActions } from './ShapePicker'
 import { RoundField } from './RoundField'
 import { TabPositions } from './TabsFields'
 import { profileTabs } from './tabs-model'
@@ -104,6 +104,8 @@ export interface OperationFieldsContext {
   cancelGesture(gesture: string): Promise<boolean>
   /** The shape picker's design-only actions (task U2): New shape…, Edit shape, Convert, fixes. */
   readonly shapeActions?: ShapeActions | undefined
+  /** A Line's Path picker actions (DF147 SL1): New shape… for path `index`, Edit shape…. */
+  readonly lineShapeActions?: LineShapeActions | undefined
   /**
    * Read-only fields of an owned operation (v0.4 task U1): a finding with a suggestion offers this
    * fix instead of "Use …" ("Fix in Hole 1": select the feature, focus the mapped field).

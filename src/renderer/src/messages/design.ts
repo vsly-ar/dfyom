@@ -1158,6 +1158,8 @@ export const designMessages = {
         `${op} could not use ${shape}; the reason shows at its Shape field.`,
       usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
       editShape: 'Edit shape',
+      /** The picker's entry for the picked shape (DF147 SL1). */
+      editShapeEntry: 'Edit shape…',
       /** v0.4-llm-first X2-2 (reference-tools.md#ui-reach-of-the-agents-values-x2). */
       placeAsDrawn: 'Place as drawn',
       placeAsDrawnTip:
