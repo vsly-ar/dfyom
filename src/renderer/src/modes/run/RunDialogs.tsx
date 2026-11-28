@@ -33,6 +33,8 @@ import { SetupChangeDialog } from './SetupChangeDialog'
 import { GoToDialog } from './GoToDialog'
 import { SetXyZeroDialog } from './SetXyZeroDialog'
 import { CheckAlignmentDialog } from './CheckAlignmentDialog'
+import { WorkAreaDialog } from './WorkAreaDialog'
+import { RepeatabilityDialog } from './RepeatabilityDialog'
 import { StartAtSection, usePreflightStart } from './StartAt'
 import { FilePreflightDialog } from './RunFile'
 import { useFinalizeAndStart } from './finalize-start'
@@ -64,6 +66,8 @@ export function RunDialogs(): React.JSX.Element {
       <GoToDialog doc={doc} />
       <SetXyZeroDialog doc={doc} />
       <CheckAlignmentDialog doc={doc} />
+      <WorkAreaDialog doc={doc} />
+      <RepeatabilityDialog doc={doc} />
       <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>
@@ -341,13 +345,22 @@ export function SoftLimitResult({
     <ul className={styles['findings']}>
       {check.findings.map((f, i) => (
         <li key={i}>
-          {m.softLimitsAxis(
-            String(f.params['axis'] ?? '').toUpperCase(),
-            len(f.params['min']),
-            len(f.params['max']),
-            len(f.params['travel']),
-            runMessages.dro.units[units],
-          )}
+          {f.rule === 'workArea'
+            ? m.softLimitsArea(
+                String(f.params['axis'] ?? '').toUpperCase(),
+                len(f.params['min']),
+                len(f.params['max']),
+                len(f.params['areaMin']),
+                len(f.params['areaMax']),
+                runMessages.dro.units[units],
+              )
+            : m.softLimitsAxis(
+                String(f.params['axis'] ?? '').toUpperCase(),
+                len(f.params['min']),
+                len(f.params['max']),
+                len(f.params['travel']),
+                runMessages.dro.units[units],
+              )}
         </li>
       ))}
     </ul>

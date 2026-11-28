@@ -234,7 +234,7 @@ function GoToOpen({
   const travel =
     planned?.isErr() === true
       ? (planned.unwrapErr().frames[0]?.data as
-          { axis: Axis; target: number; min: number; max: number } | undefined)
+          { axis: Axis; target: number; min: number; max: number; workArea?: true } | undefined)
       : undefined
 
   // DF133 RW4: the steps through the guard; "Go anyway" is for this very move
@@ -386,7 +386,7 @@ function GoToOpen({
         {
           id: 'travel',
           severity: 'error',
-          text: m.travel(
+          text: (travel.workArea === true ? m.workArea : m.travel)(
             travel.axis.toUpperCase(),
             formatLength(travel.target, units),
             formatLength(travel.min, units),

@@ -204,3 +204,52 @@ describe('fault hooks', () => {
     expect(statusOf(emu)).toMatch(/^<Idle\|/)
   })
 })
+
+describe('v0.5 RV8: homing scatter and lost steps', () => {
+  const probeDown = (emu: ReturnType<typeof emulator>) => {
+    send(emu, 'G53 G0 Z-50\n')
+    settle(emu)
+    send(emu, 'G38.2 Z-90 F100\n')
+    settle(emu)
+    return prb(outLines(emu))
+  }
+  const homeAndProbe = (emu: ReturnType<typeof emulator>) => {
+    send(emu, '$H\n')
+    settle(emu)
+    emu.readOutput()
+    return parseFloat(probeDown(emu)?.slice(5).split(',')[2] ?? '')
+  }
+
+  it('each $H draws an offset within ±width/2 (seeded); probes see it, reports do not', () => {
+    const opts = { homing: true, probePlate: -80, homingScatter: { z: 0.03 }, homingSeed: 7 }
+    const a = emulator(opts)
+    const b = emulator(opts)
+    a.readOutput()
+    b.readOutput()
+    const za: number[] = []
+    const offsets: number[] = []
+    for (let k = 0; k < 5; k++) {
+      za.push(homeAndProbe(a))
+      offsets.push(a.physicalOffset[2])
+      expect(homeAndProbe(b)).toBe(za[k]) // the same seed, the same draws
+    }
+    for (const o of offsets) expect(Math.abs(o)).toBeLessThanOrEqual(0.015)
+    expect(new Set(offsets).size).toBe(5)
+    // the plate is physical: reported contact = plate − offset (PRB's µm rounding)
+    za.forEach((z, k) => expect(z).toBeCloseTo(-80 - offsets[k]!, 3))
+    // without scatter homing is exact
+    const exact = emulator({ homing: true, probePlate: -80 })
+    exact.readOutput()
+    expect(homeAndProbe(exact)).toBe(-80)
+    expect(exact.physicalOffset).toEqual([0, 0, 0])
+  })
+
+  it('lost steps shift the probe until the next homing', () => {
+    const emu = emulator({ homing: true, probePlate: -80 })
+    emu.readOutput()
+    expect(homeAndProbe(emu)).toBe(-80)
+    emu.loseSteps('z', 0.25)
+    expect(probeDown(emu)).toMatch(/,-80\.250:1\]$/)
+    expect(homeAndProbe(emu)).toBe(-80)
+  })
+})

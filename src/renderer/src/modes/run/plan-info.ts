@@ -20,6 +20,11 @@ import { runPlanHash } from '../../../../core/run/plan-hash'
 import type { RunStatus } from '../../../../core/run/service'
 import type { PlanStock } from '../../../../core/run/xy-zero'
 import {
+  DEFAULT_WORK_AREA_MARGIN,
+  WORK_AREA_AXES,
+  type WorkAreaMarks,
+} from '../../../../core/run/work-area'
+import {
   setupFrame,
   setupOrientation,
   setupZeroCorner,
@@ -421,4 +426,36 @@ export function resumeChanges(
   const now = ids.filter((id) => before.includes(id))
   const reordered = before.some((id, i) => now[i] !== id)
   return { changed, removed, reordered }
+}
+
+/** A length DTO's canonical value (mm), any sign. */
+const signedLength = (v: unknown): number | undefined => {
+  const dto = QuantityDtoSchema.safeParse(v)
+  if (!dto.success) return undefined
+  const q = Quantity.fromDTO(dto.data)
+  return q.isOk() && q.unwrap().kind === 'length' ? q.unwrap().canonical : undefined
+}
+
+/**
+ * v0.5 RV7: a machine's work area marks and margin (mm) from its values DTO
+ * (docs/modes/run.md#work-area-rv7); undefined values: nothing marked, the default margin.
+ */
+export function workAreaOfValues(values: unknown): {
+  readonly marks: WorkAreaMarks
+  readonly margin: number
+} {
+  const v = values as { workArea?: Record<string, unknown>; workAreaMargin?: unknown } | undefined
+  const marks: Record<string, { min?: number; max?: number }> = {}
+  for (const a of WORK_AREA_AXES) {
+    const side = v?.workArea?.[a] as { min?: unknown; max?: unknown } | undefined
+    const min = signedLength(side?.min)
+    const max = signedLength(side?.max)
+    if (min === undefined && max === undefined) continue
+    marks[a] = { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) }
+  }
+  const margin = signedLength(v?.workAreaMargin)
+  return {
+    marks,
+    margin: margin === undefined || margin < 0 ? DEFAULT_WORK_AREA_MARGIN : margin,
+  }
 }

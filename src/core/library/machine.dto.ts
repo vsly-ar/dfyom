@@ -50,6 +50,22 @@ export const ProbeDtoSchema = z.object({
 })
 export type ProbeDTO = z.output<typeof ProbeDtoSchema>
 
+const WorkAreaSideDto = z.object({
+  min: quantityDto('length').optional(),
+  max: quantityDto('length').optional(),
+})
+
+/**
+ * v0.5 RV7: the reachable extents marked after homing, machine coordinates per axis and side.
+ * Doc: docs/modes/run.md#work-area-rv7
+ */
+export const WorkAreaDtoSchema = z.object({
+  x: WorkAreaSideDto.optional(),
+  y: WorkAreaSideDto.optional(),
+  z: WorkAreaSideDto.optional(),
+})
+export type WorkAreaDTO = z.output<typeof WorkAreaDtoSchema>
+
 export const MachineValuesDtoSchema = z.object({
   kind: z.literal('machine'),
   ...commonValuesShape,
@@ -105,6 +121,9 @@ export const MachineValuesDtoSchema = z.object({
     .describe('Z touch plate thickness; unset = no plate, Run offers no Probe Z'),
   // v0.5 RV4: X/Y probing (docs/modes/run-probing.md#probe-settings-rv4); unset = a Z plate
   probe: ProbeDtoSchema.optional(),
+  // v0.5 RV7: the work area (docs/modes/run.md#work-area-rv7)
+  workArea: WorkAreaDtoSchema.optional().describe('Marked reachable extents (MPos), set in Run'),
+  workAreaMargin: quantityDto('length').optional().describe('Kept inside them; unset = 2 mm'),
   // collet nut and spindle body (docs/modes/tool-holder.md#model, hardening DF132 H1)
   holder: HolderDtoSchema.optional(),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),

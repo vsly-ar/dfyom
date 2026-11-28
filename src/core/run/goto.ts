@@ -7,7 +7,16 @@
  * Doc: docs/modes/run-goto.md#the-move-safe-order
  */
 import { fail, Ok, type AppResult } from '../../shared/result'
-import { travelViolation, type Envelope } from './grbl/envelope'
+import type { Envelope } from './grbl/envelope'
+import { limitViolation, type Bounds } from './work-area'
+
+/**
+ * The controller's travel and, while homed with a marked work area, its inner bound (v0.5 RV7,
+ * the status's `envelope`; docs/modes/run.md#work-area-rv7).
+ */
+export type MoveLimits = Pick<Envelope, 'travel' | 'pullOff'> & {
+  readonly workArea?: Bounds | undefined
+}
 
 export type Vec3 = readonly [number, number, number]
 
@@ -41,17 +50,19 @@ export interface GoToInput {
   readonly safeZ: number
   /** "Lift to the top first": raise Z to the machine top before any X/Y move. */
   readonly liftToTop: boolean
-  /** The controller's travel; unknown = no travel check (the host's and GRBL's stay). */
-  readonly envelope?: Pick<Envelope, 'travel' | 'pullOff'> | undefined
+  /** The controller's travel (and the work area); unknown = no check (the host's and GRBL's stay). */
+  readonly envelope?: MoveLimits | undefined
 }
 
 /**
  * The highest point Z reaches without touching its switch (machine Z, mm): −pull-off, as after
- * `$H` (Z homes up); 0 without a known envelope.
+ * `$H` (Z homes up), or the work area's top when lower (RV7); 0 without a known envelope.
  */
-export function machineTopZ(envelope: Pick<Envelope, 'travel' | 'pullOff'> | undefined): number {
+export function machineTopZ(envelope: MoveLimits | undefined): number {
   if (envelope === undefined) return 0
-  return Math.max(-envelope.pullOff, -envelope.travel[2])
+  const top = Math.max(-envelope.pullOff, -envelope.travel[2])
+  const area = envelope.workArea?.max[2]
+  return area === undefined ? top : Math.min(top, area)
 }
 
 /**
@@ -63,7 +74,7 @@ export function goToSafeZ(p: {
   readonly wcoZ: number
   readonly zeroLevel?: number | undefined
   readonly clearance?: number | undefined
-  readonly envelope?: Pick<Envelope, 'travel' | 'pullOff'> | undefined
+  readonly envelope?: MoveLimits | undefined
 }): number {
   const z = p.wcoZ - (p.zeroLevel ?? 0) + (p.clearance ?? DEFAULT_GOTO_CLEARANCE_MM)
   return Math.min(z, machineTopZ(p.envelope))
@@ -101,18 +112,36 @@ export function goToMoves(p: GoToInput): AppResult<GoToStep[]> {
   if (xy) steps.push({ to: [tx, ty, z], axis: 'xy' })
   if (moves(tz, z)) steps.push({ to: [tx, ty, tz], axis: 'z' })
 
-  if (p.envelope !== undefined) {
-    for (const [i, s] of steps.entries()) {
-      const v = travelViolation(p.envelope.travel, s.to)
-      if (v !== undefined)
-        return fail(
-          'run.travel',
-          `${v.axis.toUpperCase()} would leave the travel: the go-to would reach ${v.target.toFixed(3)} mm, the travel is ${v.min.toFixed(3)} to ${v.max.toFixed(3)} mm`,
-          { where: 'goToMoves', data: { ...v, step: i } },
-        )
-    }
+  const outside = stepsViolation(p.from, steps, p.envelope, 'goToMoves', 'the go-to')
+  return outside === undefined ? Ok(steps) : outside
+}
+
+/**
+ * `run.travel` for the first step that ends outside the travel or the work area (RV7: a step may
+ * start outside the area and not go further out), with the axis, the end, the bound and the step
+ * (`data: { axis, target, min, max, step, workArea? }`, mm, machine); undefined when all fit.
+ */
+export function stepsViolation(
+  from: Vec3,
+  steps: readonly { readonly to: Vec3 }[],
+  limits: MoveLimits | undefined,
+  where: string,
+  what: string,
+): AppResult<never> | undefined {
+  if (limits === undefined) return undefined
+  let at = from
+  for (const [i, s] of steps.entries()) {
+    const v = limitViolation(limits, s.to, at)
+    at = s.to
+    if (v === undefined) continue
+    const bound = v.workArea === true ? 'work area' : 'travel'
+    return fail(
+      'run.travel',
+      `${v.axis.toUpperCase()} would leave the ${bound}: ${what} would reach ${v.target.toFixed(3)} mm, the ${bound} is ${v.min.toFixed(3)} to ${v.max.toFixed(3)} mm`,
+      { where, data: { ...v, step: i } },
+    )
   }
-  return Ok(steps)
+  return undefined
 }
 
 /** Length of each step (mm). */

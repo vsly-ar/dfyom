@@ -555,12 +555,21 @@ export function stockFindings(size: AxisSizes, clearance: number, machine: Machi
   const out: Finding[] = []
   const fit = (axis: 'x' | 'y' | 'z', size: number, what: string) => {
     const travel = machine.travel[axis].canonical
+    // v0.5 RV7: the marked work area less its margin (docs/modes/run.md#work-area-rv7)
+    const usable = machine.usableTravel(axis)
     if (size > travel + EPS)
       out.push({
         field: 'machine',
         rule: 'travel',
         message: `${what} exceeds the ${axis.toUpperCase()} travel`,
         params: { axis, size, travel },
+      })
+    else if (size > usable + EPS)
+      out.push({
+        field: 'machine',
+        rule: 'workArea',
+        message: `${what} exceeds the ${axis.toUpperCase()} work area (${Math.round(usable * 100) / 100} mm with its margin)`,
+        params: { axis, size, travel, workArea: usable },
       })
   }
   fit('x', size.x[1], `stock ${size.x[0]}`)

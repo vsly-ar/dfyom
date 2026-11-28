@@ -151,6 +151,11 @@ export const HostStatusSchema = z.object({
       homingMask: z.number().int().min(0).max(7),
       pullOff: Num,
       softLimits: z.boolean(),
+      /**
+       * v0.5 RV7: DFYOM's inner bound (MPos, the margin included) from the marked work area,
+       * while homed; absent: the travel only (docs/modes/run.md#work-area-rv7).
+       */
+      workArea: z.object({ min: Vec3Schema, max: Vec3Schema }).exactOptional(),
     })
     .exactOptional(),
   timeScale: TimeScaleSchema,
@@ -201,6 +206,18 @@ export const VirtualTargetSchema = z.object({
   workZero: Vec3Schema.exactOptional(),
   /** Home at `max` speed, then set G54 to this MPos (docs/modes/run-v0.1.md decision 7). */
   prepare: z.object({ workZero: Vec3Schema }).exactOptional(),
+  /**
+   * v0.5 RV8 test seam: the emulator's homing scatter (mm, full width per axis) and its seed
+   * (docs/architecture/grbl.md#homing-scatter-and-lost-steps-rv8).
+   */
+  homingScatter: z
+    .object({
+      x: z.number().min(0).max(5).exactOptional(),
+      y: z.number().min(0).max(5).exactOptional(),
+      z: z.number().min(0).max(5).exactOptional(),
+      seed: z.number().int().exactOptional(),
+    })
+    .exactOptional(),
 })
 export type VirtualTarget = z.output<typeof VirtualTargetSchema>
 
@@ -264,6 +281,19 @@ export const VirtualStockSchema = z.object({
   min: Vec3Schema,
   max: Vec3Schema,
   angle: z.number().min(-45).max(45).exactOptional(),
+})
+
+/** v0.5 RV7: one axis's work area marks (MPos, mm). */
+const AxisMarksSchema = z.object({ min: Num.exactOptional(), max: Num.exactOptional() })
+
+/** v0.5 RV7: the work area marks and margin (docs/modes/run.md#work-area-rv7). */
+export const WorkAreaSettingSchema = z.object({
+  marks: z.object({
+    x: AxisMarksSchema.exactOptional(),
+    y: AxisMarksSchema.exactOptional(),
+    z: AxisMarksSchema.exactOptional(),
+  }),
+  margin: z.number().min(0).max(1000),
 })
 
 export const MachineActionSchema = z.discriminatedUnion('kind', [
@@ -351,6 +381,26 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     plateSize: PositiveMm.exactOptional(),
   }),
   /**
+   * v0.5 RV8: one probe of a fixed target from its start `at` (MPos), from the machine top after a
+   * homing (docs/modes/run-machine.md#homing-repeatability-rv8); writes nothing. Homed, Idle, no
+   * run. The virtual machine lays the target under `at` (a Z plate, else a corner plate).
+   */
+  z.object({
+    kind: z.literal('targetProbe'),
+    at: Vec3Schema,
+    probe: ProbeGeometrySchema,
+    corner: z.tuple([Side, Side]).readonly(),
+    zDistance: PositiveMm,
+    reach: PositiveMm,
+    depth: PositiveMm,
+    clearance: PositiveMm,
+    fastFeed: Feed,
+    slowFeed: Feed,
+    moveFeed: Feed,
+    travelFeed: Feed,
+    plateSize: PositiveMm.exactOptional(),
+  }),
+  /**
    * v0.5 RV5 (virtual only): the stock the virtual operator laid (`stock` absent: the one laid before); with
    * `touch` it closes the probe input whenever the tool touches it (the touch-off's readout).
    */
@@ -372,6 +422,11 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     rpm: z.number().positive().max(1e6).exactOptional(),
     dwellSeconds: z.number().min(0).max(60).exactOptional(),
   }),
+  /**
+   * v0.5 RV7: the connection's work area (absent: none); jogs, probing and the status's
+   * `envelope.workArea` follow it while homed. Moves nothing.
+   */
+  z.object({ kind: z.literal('workArea'), area: WorkAreaSettingSchema.exactOptional() }),
   /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
   z.object({
     kind: z.literal('override'),

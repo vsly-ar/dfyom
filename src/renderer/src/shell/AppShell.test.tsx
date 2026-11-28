@@ -249,6 +249,7 @@ describe('AppShell', () => {
         jogStep: {},
         inspectorGroups: {},
         inspectorTabs: {},
+        homingRepeatability: {},
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

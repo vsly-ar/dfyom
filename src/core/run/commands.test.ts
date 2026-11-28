@@ -564,6 +564,94 @@ describe('run commands', { timeout: 60_000 }, () => {
     expectOk(await t.run('run.override.set', { spindle: 20, feed: 10 }))
   })
 
+  it('RV8: run.machine.repeatability homes and probes the target each cycle; Stop ends it', async () => {
+    const t = await setup()
+    expectOk(await t.open())
+    expectOk(await (await t.job('run.machine.home', {})).result)
+    const args = {
+      at: [-100, -100, -30],
+      probe: { kind: 'zPlate', tipDiameter: 0 },
+      cycles: 3,
+      travelFeed: 5000,
+    }
+    const { result, jobId } = await t.job('run.machine.repeatability', args)
+    const r = expectOk(await result) as {
+      readings: { z?: number }[]
+      axes: { z?: { spread: number } }
+      pass: boolean
+    }
+    expect(r.readings).toHaveLength(3)
+    for (const x of r.readings) expect(x.z).toBeCloseTo(-35, 2)
+    expect(r.axes.z?.spread).toBeLessThan(0.005)
+    expect(r.pass).toBe(true)
+    expect(t.d.job(jobId).unwrap().progress).toEqual({ done: 3, total: 3 })
+    // nothing written: G54 as homing left it
+    expect(t.status().state).toBe('Idle')
+    // the lost-steps check: one probe, no homing
+    const once = await t.job('run.machine.repeatability', { ...args, cycles: 1, home: false })
+    expect((expectOk(await once.result) as { readings: unknown[] }).readings).toHaveLength(1)
+    // Stop (abort) during the test resets the controller and ends it
+    await t.run('run.timeScale.set', { scale: 1 })
+    const stopped = await t.job('run.machine.repeatability', { ...args, cycles: 5 })
+    expect(await waitFor(() => t.status().state === 'Home')).toBe(true)
+    expectOk(await t.run('job.abort', { jobId: stopped.jobId }))
+    expect((await stopped.result).isErr()).toBe(true)
+    expect(await waitFor(() => t.status().homed === false)).toBe(true)
+  })
+
+  it('RV7: run.workArea.set writes the library machine and the open connection follows', async () => {
+    const t = await setup()
+    const { kind: _, ...m } = machineValues()
+    const { id, revision } = (await t.s.run('library.machine.add', {
+      values: libraryInput({ ...m, name: 'Marked' }),
+    })) as { id: string; revision: number }
+    expectOk(
+      await t.run('run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' }),
+    )
+    expect(t.client.libraryMachineId).toBe(id)
+    expectOk(await t.run('run.machine.home', {}))
+    expect(t.status().envelope?.workArea).toBeUndefined()
+    const set = expectOk(
+      await t.run(
+        'run.workArea.set',
+        { machineId: id, revision, marks: { x: { min: -700, max: -10 } }, margin: 3 },
+        ui,
+      ),
+    ) as { revision: number }
+    expect(set.revision).toBe(revision + 1)
+    const found = t.s.library.lookup('machine', id)
+    const saved = found.state === 'found' ? (found.item.values as Machine) : undefined
+    expect(saved?.usableTravel('x')).toBeCloseTo(684, 6)
+    expect(await waitFor(() => t.status().envelope?.workArea !== undefined)).toBe(true)
+    expect(t.status().envelope?.workArea?.min[0]).toBeCloseTo(-697, 6)
+    expect(t.status().envelope?.workArea?.max[0]).toBeCloseTo(-13, 6)
+    // a stale revision is a conflict; crossed marks are the model's invariant
+    expectErrCode(
+      await t.run('run.workArea.set', { machineId: id, revision, marks: null }, ui),
+      'command.conflict',
+    )
+    expectErrCode(
+      await t.run(
+        'run.workArea.set',
+        { machineId: id, revision: set.revision, marks: { y: { min: -5, max: -50 } } },
+        ui,
+      ),
+      'model.invariant',
+    )
+    // reconnecting reads it from the library again
+    expectOk(await t.run('run.connection.close', {}))
+    expectOk(
+      await t.run('run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' }),
+    )
+    expectOk(await t.run('run.machine.home', {}))
+    expect(await waitFor(() => t.status().envelope?.workArea?.max[0] === -13)).toBe(true)
+    // cleared: gone from the library and the connection
+    expectOk(
+      await t.run('run.workArea.set', { machineId: id, revision: set.revision, marks: null }, ui),
+    )
+    expect(await waitFor(() => t.status().envelope?.workArea === undefined)).toBe(true)
+  })
+
   it('RV1: the spindle from Run: on in Idle only, the speed in a jog by override, off cancels a jog first', async () => {
     const t = await setup()
     const { kind: _, ...m } = machineValues()

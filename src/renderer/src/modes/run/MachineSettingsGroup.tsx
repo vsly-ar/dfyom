@@ -5,7 +5,8 @@
 // field each maps to and a `$n=value` line to copy where the machine differs. DFYOM never writes
 // `$` settings. Doc: docs/conventions/ui.md#run-settings-v05-rv2
 import { useEffect, useMemo, useState } from 'react'
-import type { ProjectDoc } from '../../../../core/project/document'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import { WORK_AREA_AXES } from '../../../../core/run/work-area'
 import type { HomingCorner, MachineValuesDTO } from '../../../../core/library/machine.dto'
 import { itemUnitSystem } from '../../../../core/library/values-input'
 import {
@@ -19,12 +20,13 @@ import { commandInput, draftIssues, itemValues, type MachineDraft } from '../../
 import type { LibraryItemDTO } from '../../../../core/library/library-item'
 import { libraryMessages } from '../../messages/library'
 import { runMessages } from '../../messages/run'
-import { useShell } from '../../shell/ShellContext'
+import { useSettings, useShell } from '../../shell/ShellContext'
 import { Button, ErrorMessage, Icon, InspectorGroup, StatusChip } from '../../ui'
 import { useLibraryItems } from '../plan/usePlan'
 import { useMachineJog } from './JogPad'
-import { isConnected } from './machine-state'
-import { NO_PLAN, useRun, useRunUnits } from './run-store'
+import { formatLength, isConnected } from './machine-state'
+import { workAreaOfValues } from './plan-info'
+import { NO_PLAN, useRun, useRunStore, useRunUnits } from './run-store'
 import styles from './Run.module.css'
 
 const m = runMessages.machineSettings
@@ -115,6 +117,8 @@ export function MachineSettingsGroup({ doc }: { doc: ProjectDoc | undefined }): 
               setError(undefined)
             }}
           />
+          <WorkAreaSummary values={item} units={fallbackUnits} />
+          <RepeatabilitySummary machineId={item.id} units={fallbackUnits} />
           {conflict ? (
             <div className={styles['notice']} role="alert">
               <p className={styles['why']}>{m.conflict}</p>
@@ -221,5 +225,71 @@ function ControllerSettings({ rows }: { rows: readonly ControllerSettingRow[] })
         {announce}
       </p>
     </section>
+  )
+}
+
+/**
+ * v0.5 RV8: the machine's last homing repeatability test, read-only (run in the Homing
+ * repeatability dialog, which this opens; docs/modes/run-machine.md#homing-repeatability-rv8).
+ */
+function RepeatabilitySummary({
+  machineId,
+  units,
+}: {
+  machineId: string
+  units: UnitSystem
+}): React.JSX.Element {
+  const store = useRunStore()
+  const r = useSettings((s) => s.settings.homingRepeatability[machineId])
+  const t = runMessages.repeat
+  const unit = runMessages.dro.units[units]
+  const worst =
+    r === undefined ? 0 : Math.max(0, ...Object.values(r.axes).map((x) => x?.spread ?? 0))
+  const date = r === undefined ? '' : new Date(r.date).toLocaleDateString()
+  return (
+    <div className={styles['buttons']} data-repeatability-summary="">
+      <p className={styles['hint']}>
+        <span className={styles['settingName']}>{t.summary}</span>
+        {r === undefined
+          ? t.summaryNone
+          : (r.pass ? t.summaryPass : t.summaryFail)(formatLength(worst, units), unit, date)}
+      </p>
+      <Button size="sm" onClick={() => store.getState().setRepeatOpen(true)}>
+        {t.open}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * v0.5 RV7: the marked work area, read-only (marked in the Work area dialog, which this opens;
+ * docs/modes/run.md#work-area-rv7). An unmarked side shows the travel's end as "—".
+ */
+function WorkAreaSummary({
+  values,
+  units,
+}: {
+  values: unknown
+  units: UnitSystem
+}): React.JSX.Element {
+  const store = useRunStore()
+  const { marks, margin } = workAreaOfValues(values)
+  const unit = runMessages.dro.units[units]
+  const f = (mm: number | undefined) => (mm === undefined ? '—' : formatLength(mm, units))
+  const axes = WORK_AREA_AXES.filter((a) => marks[a] !== undefined)
+  return (
+    <div className={styles['buttons']} data-work-area-summary="">
+      <p className={styles['hint']}>
+        <span className={styles['settingName']}>{m.workArea}</span>
+        {axes.length === 0
+          ? m.workAreaNone
+          : `${axes
+              .map((a) => m.workAreaAxis(a.toUpperCase(), f(marks[a]?.min), f(marks[a]?.max), unit))
+              .join(' · ')}; ${m.workAreaMargin(f(margin), unit)}`}
+      </p>
+      <Button size="sm" onClick={() => store.getState().setWorkAreaOpen(true)}>
+        {m.workAreaEdit}
+      </Button>
+    </div>
   )
 }

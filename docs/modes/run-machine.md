@@ -267,6 +267,32 @@ The spindle under the operator's hand ([v0.5 Run item 1](../plans/v0.5-run.md#1-
 - **Agents:** no tool (Q229); `run.status.get` reports `spindle`, `spindleDirection` and `manualSpindle`.
 - **Virtual machine:** the emulator already has `M3`/`M4`/`M5`, `S`, `FS`, `A:`, the gCode lock in Jog and the spindle override bytes in every state; RV1 adds GRBL's immediate `Ov`/`A:` report after a spindle state change (`spindle_set_state` sets `report_ovr_counter = 0`), so the direction shows on the next report.
 
+## Homing repeatability (RV8)
+
+Whether homing returns the machine to the same place: the user fixes a target on the bed, the test homes N times and probes the target after each ([v0.5-run.md item 6, Q224](../plans/v0.5-run.md)). Opened by **"Test homing repeatability…"** in the navigator's Homing section (while connected) or **Test…** on the Machine group's result line.
+
+- **The target:** what the machine's probe kind can probe: a Z plate (Z only); an XYZ corner plate, a block with a square corner for the bit (`tool`) or for a 3D probe (Z, X and Y: the RV4 corner routine on the front-left corner). The user jogs a few mm above it (the jog pad is in the dialog) and presses **Use this position**: the start, in machine coordinates, kept with the result so the lost-steps check finds the target again.
+- **A cycle:** `$H`; then from the machine top `G53 G1` across to above the start at the top Z (nothing below it moves), `G38.3` down to the start (a contact on the way stops: it goes back up and the test ends with the reason, rule `unexpectedContact`), the probe through the shared runner (a Z plate: `G38.2` down at most the routine's Z distance, two slow re-probes; the other kinds: the corner routine, every move `G38.2`/`G38.3` with a maximum distance), back up to the start. Nothing is written (no `G10`). The contact per axis is a reading.
+- **Homings:** 5 by default, 2–20. **The result per axis:** spread (max − min), sample standard deviation, mean (machine coordinates). **Pass:** every spread under 0.02 mm (Q224); over it, the advice names the switches, their mounts, the pull-off and the homing feeds (`$24`, `$25`: shown, never written, Q219).
+- **Stored** with the date per library machine in the app settings (`homingRepeatability`, [ui.md § Settings](../conventions/ui.md#settings)): app state like the jog feed, not copied into plans. The Machine group shows "Pass, 0.012 mm (date)" or "Over, …" or "Not tested".
+- **Lost steps (before/after a run):** **Check for lost steps** probes the stored target once without homing and shows the drift from the test's means per axis; a drift of 0.02 mm or more says steps were lost and to home before the next job. Kept with the result (`check`).
+- **Stop:** the test is one job (`run.machine.repeatability`); **Stop test** in the dialog and the footer's Stop (always visible) abort it, which resets the controller at once, inside a homing cycle too (GRBL ignores a feed hold there). A real machine's test is confirmed once for all its cycles; Pause is refused ("use Stop").
+- **Gates:** a library machine, connected, homed (the start is machine coordinates), Idle, spindle off; the host refuses `targetProbe` otherwise (not homed, not Idle, during a run).
+
+### Decisions (RV8)
+
+- **One job, not N commands:** the loop is the `run.machine.repeatability` job (`$H` and a host `targetProbe` action per cycle), so Stop is the ordinary job abort and the progress ("Cycle 2 of 5: homing") is the job's progress. Not an agent tool (Q229); an agent cannot home a real machine anyway.
+- **The start is taken, not computed:** the user puts the tool above the target once; the test never guesses where the target is, and every probe move from there is bounded (the routine's distances). The first probe is a cycle like the others (no separate learning probe): the spread already compares them all.
+- **The descent is `G38.3` and the move across is at the top:** a target moved or a clamp in the way stops the test instead of crashing the probe.
+- **The lost-steps check uses the same job** with `home: false` and one cycle, against the stored means.
+- **The virtual machine's target:** for each probe the host lays a Z plate 5 mm below the start, or a corner plate whose corner is 5 mm into the chosen corner, in physical coordinates, then takes it away; with the emulator's [homing scatter](../architecture/grbl.md#homing-scatter-and-lost-steps-rv8) (the e2e seam `DFYOM_TEST_HOMING_SCATTER=<mm>`) the readings scatter as a real machine's would.
+
+### Implementation (RV8)
+
+- Core: `src/core/run/homing-repeatability.ts` (`repeatabilityStats`, `drift`, `runTargetProbe`), the host action `targetProbe` (`host.ts`), the job `run.machine.repeatability` (`commands.ts`); the emulator's `homingScatter`/`homingSeed` and `loseSteps` (`emulator.ts`). Settings: `homingRepeatability` (`src/shared/settings.ts`). UI: `RepeatabilityDialog.tsx`, the navigator button, `MachineSettingsGroup.tsx`'s line.
+- **Tests:** `homing-repeatability.test.ts` (the stats, a Z plate probe's lines, an injected 0.03 mm scatter reported within 0.005 mm over 5 homings, the corner plate's X/Y/Z and 0.2 mm of lost X steps found without homing, an unexpected contact, below the start refused), `emulator/probe.test.ts` (seeded scatter, lost steps until the next homing), `commands.test.ts` (3 cycles, the lost-steps mode, Stop resets), `RepeatabilityDialog.test.tsx` (start, result kept, pass/fail, the drift; axe), `e2e/run-repeatability.e2e.ts` (scatter 0.1 mm fails with its spread, exact homing passes).
+- **Not verified on hardware:** the user's own result (the plan's real-machine row).
+
 ## Fault injection (M8)
 
 The new failure paths are tested end to end without hardware: commands → dispatcher → `MachineClient` → machine host → sender → loopback serial port → GRBL emulator.

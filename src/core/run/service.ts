@@ -27,6 +27,7 @@ import { AlignmentStepSchema, type AlignmentStep } from './alignment'
 import { RECONNECT_PHASES } from './host/reconnect'
 import { InterruptionSchema, type RunOrigin } from './interruption'
 import type { MachineValuesDTO } from '../library/machine.dto'
+import type { WorkAreaSetting } from './work-area'
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
 
@@ -244,6 +245,11 @@ export interface MachineService {
    */
   readonly connectedMachine: MachineValuesDTO | undefined
   /**
+   * v0.5 RV7: the library machine the open connection was made for (the chosen machine, or the
+   * one the plan's copy came from); its work area follows `run.workArea.set`.
+   */
+  readonly libraryMachineId?: string | undefined
+  /**
    * `target.machineKey` names the machine copy emulated or checked against (decision 6);
    * `profile` what the commands keep from that machine for the connection's lifetime.
    */
@@ -252,6 +258,8 @@ export interface MachineService {
     profile?: {
       readonly spindleMinSpeed?: number | undefined
       readonly machine?: MachineValuesDTO | undefined
+      readonly libraryMachineId?: string | undefined
+      readonly workArea?: WorkAreaSetting | undefined
     },
   ): AsyncAppResult<ConnectedInfo>
   /** The serial ports the machine host sees (spawns the host if none runs). */

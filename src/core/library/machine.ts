@@ -21,8 +21,17 @@ import {
   toOption,
 } from './item'
 import { checkHolder, holderFromDTO, holderToDTO, type Holder } from './holder'
-import type { HomingCorner, MachineValuesDTO, ProbeDTO, ProbeKind, Rigidity } from './machine.dto'
+import type {
+  HomingCorner,
+  MachineValuesDTO,
+  ProbeDTO,
+  ProbeKind,
+  Rigidity,
+  WorkAreaDTO,
+} from './machine.dto'
 import type { QuantityDTO } from '../quantity/quantity.dto'
+
+const AXES = ['x', 'y', 'z'] as const
 
 export interface Axes<T> {
   readonly x: T
@@ -113,6 +122,58 @@ function probeToDTO(p: ProbeSettings): ProbeDTO {
   } as ProbeDTO
 }
 
+/** v0.5 RV7: the margin kept inside every marked work area side when unset (mm, Q223). */
+export const DEFAULT_WORK_AREA_MARGIN = 2
+
+/** v0.5 RV7: one axis's marked extents (lengths, machine coordinates; min < max when both). */
+export interface WorkAreaSide {
+  readonly min: Option<Quantity>
+  readonly max: Option<Quantity>
+}
+
+/** v0.5 RV7: the work area marks per axis (docs/modes/run.md#work-area-rv7). */
+export type WorkArea = Partial<Record<'x' | 'y' | 'z', WorkAreaSide>>
+
+function checkWorkArea(c: InvariantChecker, area: WorkArea) {
+  for (const axis of AXES) {
+    const side = area[axis]
+    if (side === undefined) continue
+    const min = side.min.isSome() ? side.min.unwrap() : undefined
+    const max = side.max.isSome() ? side.max.unwrap() : undefined
+    const okMin = min === undefined || checkKind(c, ['workArea', axis, 'min'], min, 'length')
+    const okMax = max === undefined || checkKind(c, ['workArea', axis, 'max'], max, 'length')
+    if (okMin && okMax && min !== undefined && max !== undefined)
+      c.check(lessThan(min, max), ['workArea', axis, 'min'], 'lessThanMax', 'must be below max', {
+        max: max.canonical,
+        actual: min.canonical,
+      })
+  }
+}
+
+function workAreaFromDTO(dto: WorkAreaDTO): AppResult<WorkArea> {
+  const side = (axis: 'x' | 'y' | 'z') => {
+    const d = dto[axis]
+    if (d === undefined) return Ok(undefined)
+    return collectFields({
+      min: optionalQuantityFromDTO(d.min, 'workArea', axis, 'min'),
+      max: optionalQuantityFromDTO(d.max, 'workArea', axis, 'max'),
+    })
+  }
+  return collectFields({ x: side('x'), y: side('y'), z: side('z') }).map((a) =>
+    Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)),
+  )
+}
+
+function workAreaToDTO(area: WorkArea): WorkAreaDTO {
+  const out: Record<string, unknown> = {}
+  for (const axis of AXES) {
+    const side = area[axis]
+    if (side === undefined) continue
+    out[axis] = { ...optionalQuantityDTO('min', side.min), ...optionalQuantityDTO('max', side.max) }
+  }
+  return out as WorkAreaDTO
+}
+
 export interface MachineProps {
   readonly name: string
   readonly notes: Option<string>
@@ -162,9 +223,11 @@ export interface MachineProps {
    * (docs/modes/tool-holder.md#model, hardening DF132).
    */
   readonly holder: Option<Holder>
+  /** v0.5 RV7: the marked work area; None = the travel only. */
+  readonly workArea: Option<WorkArea>
+  /** v0.5 RV7: kept inside every marked side (length ≥ 0); None = 2 mm. */
+  readonly workAreaMargin: Option<Quantity>
 }
-
-const AXES = ['x', 'y', 'z'] as const
 
 function checkAxes(c: InvariantChecker, field: string, a: Axes<Quantity>, kind: QuantityKind) {
   for (const axis of AXES) checkPositive(c, [field, axis], a[axis], kind)
@@ -218,6 +281,8 @@ export class Machine implements MachineProps {
     readonly probePlateThickness: Option<Quantity>,
     readonly probe: Option<ProbeSettings>,
     readonly holder: Option<Holder>,
+    readonly workArea: Option<WorkArea>,
+    readonly workAreaMargin: Option<Quantity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -256,6 +321,18 @@ export class Machine implements MachineProps {
         checkPositive(c, ['probePlateSize'], probePlateSize.unwrap(), 'length')
       if (probe.isSome()) checkProbe(c, probe.unwrap())
       if (holder.isSome()) checkHolder(c, ['holder'], holder.unwrap())
+      if (workArea.isSome()) checkWorkArea(c, workArea.unwrap())
+      if (workAreaMargin.isSome()) {
+        const margin = workAreaMargin.unwrap()
+        if (checkKind(c, ['workAreaMargin'], margin, 'length'))
+          c.check(
+            margin.exact.compare(Rational.ZERO) >= 0,
+            ['workAreaMargin'],
+            'nonNegative',
+            'must be 0 or more',
+            { actual: margin.canonical },
+          )
+      }
       if (spoilboardThickness.isSome()) {
         const board = spoilboardThickness.unwrap()
         const path = ['spoilboardThickness']
@@ -282,6 +359,7 @@ export class Machine implements MachineProps {
     if (stepsPerMm.isSome()) Object.freeze(stepsPerMm.unwrap())
     if (holder.isSome()) Object.freeze(holder.unwrap())
     if (probe.isSome()) Object.freeze(probe.unwrap())
+    if (workArea.isSome()) Object.freeze(workArea.unwrap())
     Object.freeze(spindle)
     Object.freeze(this)
   }
@@ -314,6 +392,8 @@ export class Machine implements MachineProps {
           p.probePlateThickness,
           p.probe.map((x) => ({ ...x })),
           p.holder.map((h) => ({ ...h })),
+          p.workArea.map((a) => ({ ...a })),
+          p.workAreaMargin,
         ),
     )
   }
@@ -356,6 +436,9 @@ export class Machine implements MachineProps {
         dto.holder === undefined
           ? Ok(None)
           : holderFromDTO(dto.holder, 'holder').map((h) => Some(h)),
+      workArea:
+        dto.workArea === undefined ? Ok(None) : workAreaFromDTO(dto.workArea).map((a) => Some(a)),
+      workAreaMargin: optionalQuantityFromDTO(dto.workAreaMargin, 'workAreaMargin'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -387,6 +470,8 @@ export class Machine implements MachineProps {
         probePlateThickness: q.probePlateThickness,
         probe: q.probe,
         holder: q.holder,
+        workArea: q.workArea,
+        workAreaMargin: q.workAreaMargin,
       }),
     )
   }
@@ -428,7 +513,29 @@ export class Machine implements MachineProps {
       ...optionalQuantityDTO('probePlateThickness', this.probePlateThickness),
       ...optionalField('probe', this.probe.map(probeToDTO)),
       ...optionalField('holder', this.holder.map(holderToDTO)),
+      ...optionalField('workArea', this.workArea.map(workAreaToDTO)),
+      ...optionalQuantityDTO('workAreaMargin', this.workAreaMargin),
     } as MachineValuesDTO
+  }
+
+  /**
+   * v0.5 RV7: the usable length of an axis (mm): the travel, less each marked work area side and
+   * the margin (docs/modes/run.md#work-area-rv7); the travel without marks.
+   */
+  usableTravel(axis: 'x' | 'y' | 'z'): number {
+    const travel = this.travel[axis].canonical
+    const side = this.workArea.isSome() ? this.workArea.unwrap()[axis] : undefined
+    if (side === undefined) return travel
+    const margin = this.workAreaMargin.mapOr(DEFAULT_WORK_AREA_MARGIN, (q) => q.canonical)
+    const lo = Math.max(
+      -travel,
+      side.min.mapOr(-Infinity, (q) => q.canonical + margin),
+    )
+    const hi = Math.min(
+      0,
+      side.max.mapOr(Infinity, (q) => q.canonical - margin),
+    )
+    return Math.max(0, hi - lo)
   }
 
   private props(): MachineProps {
