@@ -2,6 +2,25 @@
 // (line, V-groove). Doc: docs/modes/engraved-patterns.md#ui
 export const lineMessages = {
   groups: { paths: 'Paths', depth: 'Depth' },
+  /** DF147 SL2: the geometry mode and the inline fields (engraved-patterns.md § Simple Line). */
+  geometry: 'Geometry',
+  geometryModes: { straight: 'Straight', arc: 'Arc', shape: 'Shape' },
+  startU: 'Start u',
+  startV: 'Start v',
+  endU: 'End u',
+  endV: 'End v',
+  throughU: 'Through u',
+  throughV: 'Through v',
+  pointsNote: 'Points on the face, from its front-left corner; a value may be a formula.',
+  throughNote: 'A point the arc passes through, between its start and its end.',
+  lengthReadout: (length: string) => `Length ${length}`,
+  arcReadout: (radius: string, sweep: string) => `Radius ${radius}, sweep ${sweep}°`,
+  convert: 'Convert to shape',
+  converted: (name: string) => `Converted to ${name}`,
+  parallel: 'Parallel to',
+  edges: { front: 'Front edge', back: 'Back edge', left: 'Left edge', right: 'Right edge' },
+  distance: 'Distance from edge',
+  parallelNote: 'Places a straight line across the whole face, this far from the edge.',
   /** One path's shape: "Path 1". */
   path: (n: number) => `Path ${n}`,
   pathU: 'Position u',
@@ -22,6 +41,11 @@ export const lineMessages = {
     'Where the level steps between two joined lines, the depth changes over this length on either side.',
   /** A shape the part no longer has (its name, never its id). */
   shapeMissing: 'Missing shape',
+  /** DF147 SL1: the Path picker's Shape Editor entries and the button under it. */
+  editor: 'Shape Editor',
+  newShape: 'New shape…',
+  editShapeEntry: 'Edit shape…',
+  editInEditor: 'Edit in Shape Editor',
   /** The depth legend under the levels' fields (engraved-patterns.md § Depth legend). */
   legend: {
     ticks: (deepest: string, shallowest: string, used: readonly string[]) =>

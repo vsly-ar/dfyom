@@ -70,9 +70,11 @@ import {
   updateArgs,
   type DesignPart,
   dfmNames,
+  linePathArgs,
+  newLineShapeItem,
 } from './model'
 import { newItemArgs } from './shape-model'
-import type { ShapeActions } from './ShapePicker'
+import type { LineShapeActions, ShapeActions } from './ShapePicker'
 import { useSvgImport } from './ShapeList'
 import { adjustedNote } from './RoundField'
 import { isOpenNamed, shapeChoiceArgs } from './operation-shape'
@@ -586,6 +588,52 @@ function OperationInspector({
             })(),
         }
       : undefined
+  // a Line's Path picker (DF147 SL1): the new shape is path `index`'s, one undo step
+  const lineShapeActions: LineShapeActions | undefined =
+    op.kind === 'line'
+      ? {
+          newShape: (index) =>
+            void (async () => {
+              const gesture = { gesture: newGestureId() }
+              const added = await call(
+                'design.shape.add',
+                { partId: part.dto.id, items: [newLineShapeItem(part.units)] },
+                gesture,
+              )
+              if (failed(added) || !added.ok) return
+              const shapeId = (added.value as { shapeId: string }).shapeId
+              const paths = linePathArgs(op)
+              paths[index] = { shapeId, center: paths[index]?.['center'] ?? ['0', '0'] }
+              const used = await call(
+                'design.line.update',
+                { partId: part.dto.id, operationId: op.id, paths },
+                gesture,
+              )
+              failed(used)
+              openShape(shapeId)
+            })(),
+          editShape: openShape,
+          // DF147 SL2: Straight / Arc → Shape keeps the line as a named shape
+          convert: () =>
+            void (async () => {
+              const r = await call('design.shape.convert', {
+                partId: part.dto.id,
+                operationId: op.id,
+              })
+              if (failed(r) || !r.ok) return
+              const id = (r.value as { shapeId: string }).shapeId
+              const got = await bridge.call('design.shape.get', {
+                partId: part.dto.id,
+                shapeId: id,
+              })
+              ui.getState().setRemovedToast(
+                got.ok
+                  ? t.picker.converted((got.value as { shape: { name: string } }).shape.name)
+                  : t.picker.convertedUnnamed,
+              )
+            })(),
+        }
+      : undefined
   const ctx: OperationFieldsContext = {
     part,
     op,
@@ -604,6 +652,7 @@ function OperationInspector({
     },
     cancelGesture,
     shapeActions,
+    lineShapeActions,
     ...(facingDepth !== undefined
       ? {
           recommended: {

@@ -15,12 +15,16 @@ import { Rational } from '../quantity/rational'
 import {
   bottomEdgeFace,
   chamferEdgeKind,
+  isInlinePath,
+  type Point,
   type Operation,
   type Part,
   type RoughingMargins,
   type Shape,
 } from './operation'
 import { roundRadiusHolds } from './round'
+import { circleThrough, INLINE_MIN_LENGTH } from './line-inline'
+import type { Vec2 } from '../geometry/model'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -461,11 +465,39 @@ export function operationIssues(
             actual: op.blend.unwrap().canonical,
           },
         )
-      for (const [i, p] of op.paths.entries())
+      for (const [i, p] of op.paths.entries()) {
+        if (isInlinePath(p)) {
+          // DF147 SL2: an inline Straight / Arc is the Line's only path, not a point, not a line
+          c.check(
+            op.paths.length === 1,
+            `paths.${i}`,
+            'inlineAlone',
+            'a straight line or arc is the only path of its Line',
+          )
+          const pt = (q: Point): Vec2 => [q[0].canonical, q[1].canonical]
+          const s = pt(p.start)
+          const e = pt(p.end)
+          const long = Math.hypot(e[0] - s[0], e[1] - s[1]) >= INLINE_MIN_LENGTH
+          c.check(
+            long,
+            `paths.${i}.${p.kind}.end`,
+            'lineTooShort',
+            `must be at least ${INLINE_MIN_LENGTH} mm from the start`,
+          )
+          if (long && p.kind === 'arc')
+            c.check(
+              circleThrough(s, pt(p.through), e) !== undefined,
+              `paths.${i}.arc.through`,
+              'arcCollinear',
+              'must lie off the straight line from start to end',
+            )
+          continue
+        }
         if (p.scale !== undefined)
           c.check(p.scale > 0, `paths.${i}.scale`, 'positive', 'must be greater than 0', {
             actual: p.scale,
           })
+      }
       break
     }
     case 'chamfer': {

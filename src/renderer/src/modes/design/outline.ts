@@ -11,12 +11,15 @@ import { shapeCentre } from '../../../../core/design/anchor'
 import {
   CENTRE_ANCHOR,
   isGeneralShape,
+  isInlinePath,
+  type InlineLinePath,
   type Operation,
   type Part,
   type Shape,
 } from '../../../../core/design/operation'
 import { chamferEdge } from '../../../../core/design/geometry-input'
 import { placeShape } from '../../../../core/design/placement'
+import { inlineBounds, inlineElement } from '../../../../core/design/line-inline'
 import { resolveEngraving } from '../../../../core/design/engraving/resolve'
 import type { EngravingRecord } from '../../../../core/design/shape.dto'
 import type { Element, Loop, Region } from '../../../../core/geometry/2d/model'
@@ -125,6 +128,22 @@ function engravingLoops(
  * face): one closed loop for a v0.1 rectangle or circle; for a named or rotated shape the placed
  * loops through `ctx` (none without it).
  */
+/** An inline Straight / Arc (DF147 SL2) as one open loop at height `w`. */
+function inlineLoops(p: InlineLinePath, w: number): OutlineLoop[] {
+  const el = inlineElement(p)
+  if (el === undefined) return []
+  const pt = (u: number, v: number): Vec3 => [u, v, w]
+  const pts = chainPoints([el], pt)
+  pts.push(pt(el.b[0], el.b[1]))
+  return [Object.assign(pts, { open: true as const })]
+}
+
+/** An inline path's bounding-box centre (mm), its gizmo's place. */
+function inlineCentre(p: InlineLinePath): [number, number] {
+  const b = inlineBounds(p)
+  return [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2]
+}
+
 export function shapeLoops(shape: Shape, w: number, ctx?: ShapeContext): OutlineLoop[] {
   if (shape.kind === 'named' || isGeneralShape(shape))
     return ctx === undefined ? [] : generalLoops(shape, w, ctx)
@@ -349,6 +368,8 @@ export function operationOutline(
       return place(
         face,
         op.paths.flatMap((p) => {
+          // DF147 SL2: an inline Straight / Arc is one open line
+          if (isInlinePath(p)) return inlineLoops(p, face.w)
           // an engraved pattern's owned shape (E3): its resolved lines, moved by the path centre
           const rec = ctx?.shapes?.get(p.shapeId)?.engraving
           return rec === undefined
@@ -397,7 +418,11 @@ export function markerPoint(
     case 'profile':
       return at(...shapeCentre(op.shape))
     case 'line':
-      return op.paths[0] === undefined ? at(0, 0) : at(...shapeCentre(op.paths[0]))
+      return op.paths[0] === undefined
+        ? at(0, 0)
+        : isInlinePath(op.paths[0])
+          ? at(...inlineCentre(op.paths[0]))
+          : at(...shapeCentre(op.paths[0]))
     case 'drilling':
       return at(op.center[0].canonical, op.center[1].canonical)
     case 'chamfer': {
@@ -454,7 +479,13 @@ export function anchorPoint(
   const first = op.kind === 'line' ? op.paths[0] : undefined
   if (op.kind === 'line' && first === undefined) return null
   const c =
-    op.kind === 'drilling' ? op.center : op.kind === 'line' ? first!.center : op.shape.center
+    op.kind === 'drilling'
+      ? op.center
+      : op.kind === 'line'
+        ? isInlinePath(first!)
+          ? first.start
+          : first!.center
+        : op.shape.center
   return {
     at: toPartFrame(face.frame, [c[0].canonical, c[1].canonical, face.w]),
     u: face.frame.u,

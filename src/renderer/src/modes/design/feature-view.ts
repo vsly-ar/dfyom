@@ -556,7 +556,13 @@ function centreSpread(ops: readonly OperationDTO[]): number {
         : o.kind === 'facing' || o.kind === 'chamfer'
           ? undefined
           : o.kind === 'line'
-            ? o.paths[0]?.center
+            ? o.paths[0] === undefined
+              ? undefined
+              : 'segment' in o.paths[0]
+                ? o.paths[0].segment.start
+                : 'arc' in o.paths[0]
+                  ? o.paths[0].arc.start
+                  : o.paths[0].center
             : o.shape.center
     const u = c === undefined ? undefined : mmOf(c[0])
     return u === undefined ? [] : [u]

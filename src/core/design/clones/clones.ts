@@ -52,7 +52,7 @@ import { definitionOf, shapeFromDTO } from '../shape'
 import { itemChain } from '../shape-items'
 import type { Region2dPort } from '../../geometry/2d/port'
 import { Some } from '../../../shared/result'
-import type { LinePath, Part, Shape } from '../operation'
+import { isInlinePath, type LinePath, type Part, type Shape } from '../operation'
 import {
   flipFootprint,
   flipKey,
@@ -423,7 +423,11 @@ export function referencePoint(src: readonly Operation[]): UV {
     op.kind === 'drilling'
       ? op.center
       : op.kind === 'line'
-        ? op.paths[0]?.center
+        ? op.paths[0] === undefined
+          ? undefined
+          : isInlinePath(op.paths[0])
+            ? op.paths[0].start
+            : op.paths[0].center
         : op.kind === 'facing' || op.kind === 'chamfer'
           ? undefined
           : op.shape.center
@@ -597,16 +601,20 @@ function valueOf(q: Quantity, delta: Rational): AppResult<Quantity> {
   })
 }
 
-/** A Line path's position (`paths.<i>.center.<k>`) or rotation (`paths.<i>.rotation`). */
-const LINE_PATH = /^paths\.(\d+)\.(center\.([01])|rotation)$/
+/**
+ * A Line path's position (`paths.<i>.center.<k>`; an inline one's `segment.start`, `arc.through`, …,
+ * DF147 SL2) or rotation (`paths.<i>.rotation`).
+ */
+const LINE_PATH =
+  /^paths\.(\d+)\.((?:center|(?:segment|arc)\.(?:start|through|end))\.([01])|rotation)$/
 
 /** The shape a rotation path turns: an operation's shape or a Line's path. */
 function rotatedShape(op: Operation, path: string): Shape | undefined {
   if (path === 'shape.rotation' && 'shape' in op) return op.shape
   const m = LINE_PATH.exec(path)
-  return m !== null && m[2] === 'rotation' && op.kind === 'line'
-    ? op.paths[Number(m[1])]
-    : undefined
+  const p =
+    m !== null && m[2] === 'rotation' && op.kind === 'line' ? op.paths[Number(m[1])] : undefined
+  return p === undefined || isInlinePath(p) ? undefined : p
 }
 
 /** The tab positions `flippedTabs` reads, per expansion. */
@@ -702,7 +710,14 @@ function flipShapes(op: Operation, flip: Flip): AppResult<Operation> {
     return halfTurn().map((q) => ({ ...f, rotation: Some(q) }))
   }
   if (op.kind === 'line')
-    return collect(op.paths.map(turn)).map((paths) => ({ ...op, paths: paths as LinePath[] }))
+    return collect(
+      op.paths.map((p): AppResult<LinePath> =>
+        isInlinePath(p) ? Ok(p) : (turn(p) as AppResult<LinePath>),
+      ),
+    ).map((paths) => ({
+      ...op,
+      paths: paths as LinePath[],
+    }))
   if ('shape' in op) return turn(op.shape).map((shape) => ({ ...op, shape }) as Operation)
   return Ok(op)
 }

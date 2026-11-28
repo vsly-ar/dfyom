@@ -1,11 +1,12 @@
-// Engraved patterns E1 in the built app: Add → Operations → Line adds a Line on a new wave shape
-// (the part has no shape yet), its inspector switches the depth to Start → end, and the Line is
+// Engraved patterns E1 in the built app: Add → Operations → Line adds a Line (DF147: Straight across
+// the face), its inspector switches the depth to Start → end, and the Line is
 // planned as its own operation in Plan. E2: an SVG whose line fades by data-level imported through
 // the stubbed "Import SVG…" dialog, the Line set to From SVG levels, and the program exported from
-// Plan cutting at many depths between Shallowest and Deepest. Windows stay hidden (app.fixture.ts).
+// Plan cutting at many depths between Shallowest and Deepest. DF147: Add → Line is Straight (two
+// points, planned), Shape mode and the Path picker's New shape…. Windows stay hidden (app.fixture.ts).
 // Docs: docs/modes/engraved-patterns.md#implementation-e1, #implementation-e2, docs/conventions/ui.md
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import type { PreloadApi } from '../src/shared/preload-api'
 import { closeDialog, expect, openPartSetup, test } from './app.fixture'
@@ -15,6 +16,27 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
   await field.fill(value)
   await field.press('Enter')
   await field.blur()
+}
+
+/** The Line panel light and dark as `name`-light/-dark.png (only with DFYOM_SL_DIR). */
+async function shootPanel(page: Page, panel: Locator, name: string): Promise<void> {
+  const into = process.env['DFYOM_SL_DIR']
+  if (into === undefined) return
+  const dir = resolve(into)
+  mkdirSync(dir, { recursive: true })
+  for (const theme of ['light', 'dark'] as const) {
+    // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+    await page.evaluate((t) => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', t)
+    }, theme)
+    await page.waitForTimeout(400)
+    await panel.screenshot({ path: join(dir, `${name}-${theme}.png`) })
+  }
 }
 
 const V_BIT = {
@@ -103,6 +125,69 @@ test('line: add a Line in Design, see it in Plan', async ({ dfyom }) => {
   expect(dfyom.rendererErrors).toEqual([])
 })
 
+test('line: a Straight line by two points cut in Plan; New shape… from the Path picker (DF147)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(150_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  const added = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    ['library.tool.add', { values: V_BIT }] as const,
+  )
+  expect(added.ok, JSON.stringify(added)).toBe(true)
+  await newProject(page)
+
+  // ── Add → Line: Straight; two points 22 mm from the front edge ────────────────────────────
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('group', { name: 'Operations' })
+    .getByRole('menuitem', { name: 'Line' })
+    .click()
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await expect(inspector.getByRole('radio', { name: 'Straight' })).toBeChecked()
+  await setField(inspector, 'Start u', '10')
+  await setField(inspector, 'Start v', '22')
+  await setField(inspector, 'End u', '90')
+  await setField(inspector, 'End v', '22')
+  await expect(inspector.getByText('Length 80 mm')).toBeVisible()
+  await shootPanel(page, inspector, 'line-straight')
+  // Arc keeps the ends; back to Straight drops the through point
+  await inspector.getByRole('radio', { name: 'Arc' }).click()
+  await expect(inspector.getByText(/^Radius .*, sweep .*°$/)).toBeVisible()
+  await shootPanel(page, inspector, 'line-arc')
+  await inspector.getByRole('radio', { name: 'Straight' }).click()
+  await expect(inspector.getByText('Length 80 mm')).toBeVisible()
+
+  // ── Plan: the Line's toolpath is generated ─────────────────────────────────────────────────
+  await planWithMachine(page)
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 90_000 })
+
+  // ── Design: Shape mode, then New shape… opens the Shape Editor with the new shape picked ──
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByRole('radio', { name: 'Design' })).toBeChecked()
+  // the Line stays selected across the mode switch (a click would deselect it)
+  const row = navigator
+    .getByRole('list', { name: 'Operations in design order' })
+    .getByRole('button', { name: 'Line 1' })
+  await expect(row).toBeVisible()
+  if ((await row.getAttribute('aria-pressed')) !== 'true') await row.click()
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  await inspector.getByRole('radio', { name: 'Shape' }).click()
+  const picker = inspector.getByRole('combobox', { name: 'Path 1' })
+  await expect(picker).toBeVisible()
+  await picker.click()
+  await page.getByRole('option', { name: 'New shape…' }).click()
+  await expect.poll(() => dfyom.app.windows().length).toBe(2)
+  await expect(picker).toHaveText(/Shape 2/)
+  await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
 test('line: depth from SVG levels, varying depth in the Plan program (E2)', async ({ dfyom }) => {
   test.setTimeout(150_000)
   const svg = join(dfyom.dataDir, 'fade.svg')
@@ -155,6 +240,11 @@ test('line: depth from SVG levels, varying depth in the Plan program (E2)', asyn
     .getByRole('menuitem', { name: 'Line' })
     .click()
   await expect(inspector.getByRole('heading', { name: 'Line 1' })).toBeVisible()
+  // DF147 SL2: a new Line is Straight; Shape converts it, then Path 1 takes the drawing
+  await inspector.getByRole('radio', { name: 'Shape' }).click()
+  await inspector.getByRole('combobox', { name: 'Path 1' }).click()
+  await page.getByRole('option', { name: 'fade' }).click()
+  await expect(inspector.getByRole('combobox', { name: 'Path 1' })).toHaveText(/fade/)
   await inspector.getByRole('radio', { name: 'From SVG levels' }).click()
   const field = (label: string) =>
     inspector.getByLabel(label, { exact: true }).and(inspector.locator('input'))

@@ -66,6 +66,7 @@ import {
   type Line,
   type LineDepth,
   type LinePath,
+  type Point,
   type Operation,
   type Part,
   type Shape,
@@ -228,13 +229,18 @@ const profileParams = {
 }
 
 /** A Line's paths and depth (engraved-patterns.md § Agent API, budget ≈ 1.4 K with update). */
-const LinePathArg = z.object({
-  shapeId: z.string().regex(SHAPE_ID_PATTERN),
-  center: PointArg,
-  rotation: RotationArg,
-  mirror: z.literal(true).optional(),
-  scale: z.number().positive().optional(),
-})
+const LinePathArg = z.union([
+  z.object({
+    shapeId: z.string().regex(SHAPE_ID_PATTERN),
+    center: PointArg,
+    rotation: RotationArg,
+    mirror: z.literal(true).optional(),
+    scale: z.number().positive().optional(),
+  }),
+  // DF147 SL2: one inline element on `on` instead of a shape (engraved-patterns.md § Simple Line)
+  z.object({ segment: z.object({ start: PointArg, end: PointArg }) }),
+  z.object({ arc: z.object({ start: PointArg, through: PointArg, end: PointArg }) }),
+])
 /** A Line's depth as entered (also the engraved pattern's, engraved-patterns.md E3). */
 export const LineDepthArg = z
   .union([Src, z.object({ start: Src, end: Src }), z.object({ min: Src, max: Src })])
@@ -245,7 +251,9 @@ const lineParams = {
     .array(LinePathArg)
     .min(1)
     .max(LINE_PATHS_MAX)
-    .describe('Placed as a named shape; each loop or open path is a line'),
+    .describe(
+      'Placed as a named shape; each loop or open path is a line. Or one segment/arc, alone',
+    ),
   depth: LineDepthArg,
   blend: Src.describe('±, at level steps; default 1 mm'),
 }
@@ -434,17 +442,28 @@ export class Fields {
     return { kind: 'rectangle', center, anchor, length, width, ...corner, rotation }
   }
 
-  /** A Line's `paths[i]`: a named shape placed by its centre (engraved-patterns.md E1). */
-  linePath(
-    a: {
-      shapeId: string
-      center: readonly [string, string]
-      rotation?: string | undefined
-      mirror?: true | undefined
-      scale?: number | undefined
-    },
-    i: number,
-  ): LinePath {
+  /**
+   * A Line's `paths[i]`: a named shape placed by its centre (engraved-patterns.md E1), or (DF147
+   * SL2) an inline segment or three-point arc in the face frame.
+   */
+  linePath(a: z.output<typeof LinePathArg>, i: number): LinePath {
+    const pt = (key: string, p: readonly [string, string]): Point => [
+      this.q(`paths.${i}.${key}.0`, 'length', p[0]),
+      this.q(`paths.${i}.${key}.1`, 'length', p[1]),
+    ]
+    if ('segment' in a)
+      return {
+        kind: 'segment',
+        start: pt('segment.start', a.segment.start),
+        end: pt('segment.end', a.segment.end),
+      }
+    if ('arc' in a)
+      return {
+        kind: 'arc',
+        start: pt('arc.start', a.arc.start),
+        through: pt('arc.through', a.arc.through),
+        end: pt('arc.end', a.arc.end),
+      }
     if (!(this.env.dto.shapes ?? []).some((s) => s.id === a.shapeId))
       this.results.push(
         fail('input.malformed', `shape ${a.shapeId} does not exist in the part`, {

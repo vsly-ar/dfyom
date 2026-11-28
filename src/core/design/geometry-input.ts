@@ -36,8 +36,10 @@ import {
   circularEdgeDiameter,
   isBottomChamfer,
   isGeneralShape,
+  isInlinePath,
   lineDepths,
   type LinePath,
+  type NamedPlacement,
   type Operation,
   type Part,
   type Point,
@@ -46,6 +48,7 @@ import {
 } from './operation'
 import { throughDepths, withThroughDepths } from '../geometry/through-depth'
 import { placeShape } from './placement'
+import { inlineGeometry } from './line-inline'
 import { operationReferences, surfaceDependants, SurfaceTable } from './surfaces'
 import { shapeCentre } from './anchor'
 import { instanceOf, stepOf } from './feature'
@@ -328,6 +331,12 @@ function operationGeometry(
       // E3: an engraved pattern's owned shape is many lines (its motif placed in the face frame)
       const placed = collect(
         op.paths.map((p) => {
+          // DF147 SL2: an inline Straight / Arc is one open path, as a named shape would be
+          if (isInlinePath(p)) {
+            const g = inlineGeometry(p)
+            if (g === undefined) return bug(op, `paths.0 is a degenerate ${p.kind}`)
+            return Ok([{ shape: g, levels: null }])
+          }
           const rec = shapes?.get(p.shapeId)?.engraving
           if (rec !== undefined)
             return engravingPaths(p, rec, shapes, port) as AppResult<
@@ -384,7 +393,7 @@ function operationGeometry(
  * a Clones copy's is its offset), each with its levels.
  */
 function engravingPaths(
-  p: LinePath,
+  p: NamedPlacement,
   rec: EngravingRecord,
   shapes: Part['shapes'],
   port: Region2dPort | undefined,
@@ -410,6 +419,7 @@ function linePathLevels(
   g: ShapeGeometry,
   shapes: Part['shapes'],
 ): LinePathLevels | null {
+  if (isInlinePath(p)) return null
   const items = shapes?.get(p.shapeId)?.items ?? []
   const paths = items.filter((i) => i.kind === 'path' && i.levels !== undefined)
   if (paths.length === 0) return null
