@@ -107,6 +107,7 @@ describe("the user's plate job (dogfood TG #492)", () => {
       paths: [{ segment: { start: ['0', '22 + 6.22/2'], end: ['100', '22 + 6.22/2'] } }],
       depth: 'through',
     })
+    // DF155: no `on`: the kept side at the wall is in the band, so the chamfer stands on its floor
     await s.run('design.chamfer.add', { partId, edgeOf: 'line1', width: '1', edgeSide: 'right' })
     for (const [operationId, id] of [
       ['hole1_drill', flat],
@@ -120,6 +121,9 @@ describe("the user's plate job (dogfood TG #492)", () => {
     // DF160: the design's cut-off warning names the offcut (the chamfer keeps the part's side)
     const kernel = (await loadManifold(nodeManifoldSource())).unwrap()
     const input = expectOk(partGeometryInput(s.d.doc, partId, region2d))
+    // DF155: the one-sided chamfer stands on the band's floor (its kept side's top at the wall),
+    // so its 1 mm is 1 mm at the part's faced top
+    expect(input.operations.find((o) => o.id === 'chamfer1')).toMatchObject({ onZ: FACE })
     const solid = kernel.withSolids((x) => evaluatePart(input, x, undefined, region2d)).unwrap()
     const cut = solid.warnings.filter((w) => w.code === 'dfm.loosePiece')
     expect(cut).toMatchObject([{ operation: 'line1', params: { cutOff: true, kept: true } }])
@@ -203,7 +207,9 @@ describe("the user's plate job (dogfood TG #492)", () => {
       ['hole1_drill', T.flat, 0.25 * 6.22],
       // the countersink's rings by level (DF142): each meets at most its level of the cone
       ['hole1_countersink', T.vbit, 1.25],
-      ['chamfer1', T.vbit, 1],
+      // DF155: the bevel is 1 mm below the band; before the slot (DF152) the V-bit's other flank
+      // meets the unfaced offcut side 0.2 mm higher, inside the slot to come
+      ['chamfer1', T.vbit, 1 - FACE],
       ['line1', T.flat, 0.5],
     ] as const)
       tps.push({ id, tool: t, tp: await generated(s, planId, id), stepdown })
@@ -251,8 +257,8 @@ describe("the user's plate job (dogfood TG #492)", () => {
         } else if (r > CS_R + 0.1 && y < WALL - 1.1) {
           if (Math.abs(z - FACE) > 0.02) count('band not faced flat')
         } else if (y > WALL - 0.9 && y < WALL - 0.1) {
-          // the part's bevel: 1 mm below the stock top at the wall, 45° up to the faced band
-          const expected = Math.min(FACE, -(1 - (WALL - y)))
+          // the part's bevel: 1 mm below the faced band at the wall (DF155), 45° up to it
+          const expected = FACE - Math.max(0, 1 - (WALL - y))
           if (Math.abs(z - expected) > 0.08) count('bevel')
         } else if (y > WALL + 0.1 && y < WALL + 2 * R - 0.1) {
           if (z > BOTTOM) count('slot not through')

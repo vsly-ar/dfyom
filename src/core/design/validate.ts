@@ -25,7 +25,7 @@ import {
 import { roundRadiusHolds } from './round'
 import { circleThrough, INLINE_MIN_LENGTH } from './line-inline'
 import type { Vec2 } from '../geometry/model'
-import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
+import { slotCoversOpening, STOCK_TOP, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
 const HALF = Rational.create(1n, 2n).unwrap()
@@ -570,9 +570,13 @@ export function operationIssues(
         c.check(op.loops.isNone(), 'loops', 'chamferLoops', 'a groove has no loops')
         c.check(!op.cornerLift, 'cornerLift', 'chamferLift', 'a groove has no corner lift')
         // the bevel ends above the groove's floor (and above a through profile's tabs)
+        // DF155: from a kept-side facing floor the bevel starts that much lower on the wall
+        const lower = keptFacing(op, edge, ops.slice(0, index))
         const floor = grooveFloor(edge, T.canonical)
         const angle = op.angle.canonical
-        const bevel = op.width.canonical / Math.tan(((angle / 2) * Math.PI) / 180)
+        const bevel =
+          op.width.canonical / Math.tan(((angle / 2) * Math.PI) / 180) +
+          (lower?.depth.canonical ?? 0)
         if (floor !== undefined && angle > 0 && angle < 180)
           c.check(
             bevel <= floor + 1e-6,
@@ -621,18 +625,26 @@ export function operationIssues(
       if (edge !== undefined) {
         // E4b: a through profile's bottom edge from the opposite stock face (a flipped setup)
         const bottom = bottomEdgeFace(edge)
+        // DF155: a one-sided chamfer of a top-face Line may stand on a top facing's floor (the
+        // kept side's top at the wall)
+        const floors =
+          edgeKind === 'wall' && edge.kind === 'line' && edge.on === STOCK_TOP
+            ? ops
+                .slice(0, index)
+                .filter((o) => o.kind === 'facing' && o.on === STOCK_TOP)
+                .map((o) => `${o.id}.floor`)
+            : []
+        const allowed = [edge.on, ...(bottom === undefined ? [] : [bottom]), ...floors]
         c.check(
-          edge.on === op.on || op.on === bottom,
+          allowed.includes(op.on),
           'on',
           'chamferOn',
-          bottom === undefined
-            ? `must be the face of ${edge.name}`
-            : `must be the face of ${edge.name} or, for its bottom edge, ${bottom}`,
-          {
-            allowed: bottom === undefined ? [edge.on] : [edge.on, bottom],
-            actual: op.on,
-            edgeOf: edge.id,
-          },
+          bottom !== undefined
+            ? `must be the face of ${edge.name} or, for its bottom edge, ${bottom}`
+            : floors.length > 0
+              ? `must be the face of ${edge.name} or a top facing's floor (${floors.join(', ')})`
+              : `must be the face of ${edge.name}`,
+          { allowed, actual: op.on, edgeOf: edge.id },
         )
       }
       c.positive(op.width, 'width')
@@ -718,4 +730,15 @@ function grooveFloor(edge: Operation | undefined, T: number): number | undefined
     ? edge.tabs.positions.unwrap().length > 0
     : edge.tabs.count.canonical > 0
   return tabs ? T - edge.tabs.thickness.canonical : undefined
+}
+
+/** DF155: the top facing whose floor a one-sided chamfer of a Line stands on, if it does. */
+function keptFacing(
+  op: Extract<Operation, { kind: 'chamfer' }>,
+  edge: Operation | undefined,
+  before: readonly Operation[],
+): Extract<Operation, { kind: 'facing' }> | undefined {
+  if (edge?.kind !== 'line' || op.on === edge.on) return undefined
+  const f = before.find((o) => `${o.id}.floor` === op.on)
+  return f?.kind === 'facing' && f.on === STOCK_TOP ? f : undefined
 }

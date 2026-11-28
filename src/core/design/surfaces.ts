@@ -513,7 +513,8 @@ export function followRound(ops: readonly Operation[]): Operation[] {
  * Chamfers keep their edge's face: each chamfer's `on` is set to its `edgeOf` operation's `on`
  * (an edited drilling moved to another face takes its chamfers along). A bottom chamfer (E4b)
  * stays on the face opposite its through profile's; one whose profile stopped being through (or
- * moved to a side) follows the profile's face. Pure; unchanged operations keep their identity.
+ * moved to a side) follows the profile's face. A one-sided chamfer of a top-face Line on a top
+ * facing's floor stays there (DF155). Pure; unchanged operations keep their identity.
  */
 export function followEdges(ops: readonly Operation[]): Operation[] {
   const byId = new Map(ops.map((o) => [o.id, o]))
@@ -521,6 +522,16 @@ export function followEdges(ops: readonly Operation[]): Operation[] {
     if (op.kind !== 'chamfer') return op
     const edge = byId.get(op.edgeOf)
     if (edge === undefined || edge.on === op.on || op.on === bottomEdgeFace(edge)) return op
+    // DF155: a one-sided chamfer of a top-face Line may stand on a top facing's floor
+    const floor = ops.find((o) => `${o.id}.floor` === op.on)
+    if (
+      edge.kind === 'line' &&
+      edge.on === STOCK_TOP &&
+      op.edgeSide.isSome() &&
+      floor?.kind === 'facing' &&
+      floor.on === STOCK_TOP
+    )
+      return op
     return { ...op, on: edge.on }
   })
 }

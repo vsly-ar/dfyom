@@ -136,4 +136,44 @@ describe("the user's one-sided chamfer (DF147 SL4)", () => {
       'chamferSide',
     ])
   })
+
+  it('DF155: stands on the floor of the facing band that holds its kept side at the wall', async () => {
+    const s = await planSetup({ part: false, stock: PLATE })
+    const { flat } = await userTools(s)
+    const band = { band: { edge: 'front', width: '18' } }
+    await s.run('design.facing.add', { partId: s.partId, depth: '0.2', region: band })
+    await cutOff(s, flat)
+    // the wall at Y18.89; right of the line (start → end along +X) is the front, in the band
+    await s.run('design.chamfer.add', {
+      partId: s.partId,
+      edgeOf: 'line1',
+      width: '0.5',
+      edgeSide: 'right',
+    })
+    expect(s.op('chamfer1').on).toBe('facing1.floor')
+    // an edit that keeps the edge and the side keeps it; the other side is not in the band
+    await s.run('design.chamfer.update', { partId: s.partId, operationId: 'chamfer1', width: '1' })
+    expect(s.op('chamfer1').on).toBe('facing1.floor')
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      edgeSide: 'left',
+    })
+    expect(s.op('chamfer1').on).toBe('stock.top')
+    // given: a top facing's floor or the Line's face; any other surface is refused
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      on: 'facing1.floor',
+    })
+    expect(s.op('chamfer1').on).toBe('facing1.floor')
+    const refused = await s.fail(
+      'design.chamfer.update',
+      { partId: s.partId, operationId: 'chamfer1', on: 'stock.bottom' },
+      'model.invariant',
+    )
+    expect(refused.issues.find((i) => i.rule === 'chamferOn')?.params).toMatchObject({
+      allowed: ['stock.top', 'facing1.floor'],
+    })
+  })
 })

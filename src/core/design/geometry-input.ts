@@ -301,13 +301,22 @@ function operationGeometry(
         const wall = grooveWall(built, edgeOp, on.faceZ.add(table.extent(on.direction)).toNumber())
         if (built === undefined || wall === undefined)
           return bug(op, `edge ${op.edgeOf} is not an earlier groove of one path`)
+        // DF155: on a kept-side facing floor (not the Line's face) the bevel starts there, so the
+        // groove's wall below it is that much shorter
+        const own = built.kind === 'line' && op.on !== edgeOp?.on
+        const onZ = built.kind === 'line' && !own ? built.onZ : on.faceZ.toNumber()
+        const drop = built.kind === 'line' ? built.onZ - onZ : 0
         return Ok({
           kind: 'chamfer',
           id: op.id,
           ...direction,
-          onZ: built.kind === 'line' ? built.onZ : on.faceZ.toNumber(),
+          onZ,
           edgeOf: op.edgeOf,
-          wall: { ...wall, side: op.edgeSide.unwrapOr('left') },
+          wall: {
+            ...wall,
+            ...(wall.floor === undefined ? {} : { floor: wall.floor - drop }),
+            side: op.edgeSide.unwrapOr('left'),
+          },
           width: op.width.canonical,
           angle: op.angle.canonical,
         })
