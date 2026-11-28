@@ -4,12 +4,17 @@
 // and builds the solid (`inProcessStockMesh`), off the render, cached by the input's key (the
 // same cut toolpaths, stock and zeros give the same solid; switching modes or setups does not
 // recompute). Nothing while the plan has no cut operation or one of them has no toolpath yet.
+// A recut unit's as-cut regions are stamped into the maps (C4 follow-up, `asCutStamps`, with the
+// window's 2D port).
 // Doc: docs/modes/cut-state.md#in-process-stock-display-c5
 import { useEffect, useMemo, useState } from 'react'
 import type { Vec2 } from '../../../../core/geometry/model'
+import { recutUnits } from '../../../../core/design/already-cut'
 import {
+  asCutStamps,
   inProcessStockInput,
   inProcessStockMesh,
+  stampAsCut,
   type CutToolpathEntry,
 } from '../../../../core/plan/in-process-stock'
 import { cutIds } from '../../../../core/plan/cut'
@@ -17,7 +22,7 @@ import { loadPlanDTO } from '../../../../core/plan/plan'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { simulateHeightmap } from '../../../../core/toolpath/simulate'
-import { useShell } from '../../shell/ShellContext'
+import { useRegion2d, useShell } from '../../shell/ShellContext'
 import type { InProcessStockView } from '../../viewport'
 
 /** Solids by input key; a few plans' worth (each is a few MB of vertices). */
@@ -52,10 +57,12 @@ export function useInProcessStock(
       }),
     [events],
   )
+  const port = useRegion2d()
   const cut = useMemo(() => (plan === undefined ? [] : [...cutIds(plan)]), [plan])
+  const recut = useMemo(() => (plan === undefined ? 0 : recutUnits(plan.design.part).size), [plan])
   const zeroKey = zeros === undefined ? '' : JSON.stringify(zeros)
   useEffect(() => {
-    if (!active || plan === undefined || cut.length === 0) {
+    if (!active || plan === undefined || (cut.length === 0 && recut === 0)) {
       setView(undefined)
       return
     }
@@ -76,15 +83,17 @@ export function useInProcessStock(
         loaded.unwrap(),
         (id) => entries.get(id),
         given === undefined ? undefined : (s) => given[s.id] ?? [0, 0],
+        asCutStamps(loaded.unwrap(), port),
       )
       if (input.kind !== 'ready') return setView(undefined)
       const hit = cache.get(input.key)
       if (hit !== undefined) return setView(hit)
       const maps = simulateHeightmap(input.simulate)
       if (maps.isErr()) return setView(undefined)
+      const stamped = stampAsCut(maps.unwrap(), input.stamps, input.simulate.stock)
       const made = {
-        mesh: inProcessStockMesh(maps.unwrap(), input.simulate.stock),
-        operations: input.operations.length,
+        mesh: inProcessStockMesh(stamped, input.simulate.stock),
+        operations: input.operations.length + input.recut.length,
       }
       remember(input.key, made)
       setView(made)
@@ -92,6 +101,6 @@ export function useInProcessStock(
     return () => {
       live = false
     }
-  }, [active, plan, cut, units, zeroKey, generated, bridge])
+  }, [active, plan, cut, recut, units, zeroKey, generated, bridge, port])
   return active ? view : undefined
 }
