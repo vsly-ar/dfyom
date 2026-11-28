@@ -79,6 +79,12 @@ Tasks, exit criteria (the user cuts the v0.4 lid on their machine using only the
 
 Tasks, exit criteria (an agent with MCP only recreates the enclosure base with four toe clamps, and the app measures the deviation) and questions Q37–Q46 (Q36, the slot, answered by the user): [plans/v0.4-llm-first.md](plans/v0.4-llm-first.md).
 
+## v0.5 – Run: machine setup assistance (draft)
+
+**Draft** (proposed 2026-11-27 from the user's TG #481; slot is [Q216](plans/v0.5-run.md#questions-for-the-user)). The user asked for the next focus on Run mode: spindle control while jogging, calibration cuts on the open stock, a settings section, X/Y probing, the real work area with margins, homing repeatability, assistance setting the X/Y work zero (probing or touching the stock's edge), checking the stock's alignment (corners, edges, a perimeter trace with a gap), and surface probing with Z compensation (stock maps per setup, a reusable bed map). Toward the [direction](#direction)'s real-machine readiness. Uses only GRBL 1.1 (`G38.2`–`G38.5`, `$J=`, real-time overrides); no `$x=` writes.
+
+Items with what exists and the gap, slices RV0–RV11, exit criteria and questions Q216–Q229: [plans/v0.5-run.md](plans/v0.5-run.md).
+
 Next after the v0.4 follow-up, in the direction's order (unscheduled): STEP import, assisted recreation and deviation view, the golden-path reference cycle with a UX pass, real-machine readiness, LLM-first readiness for full cycles, from-scratch complex parts.
 
 ## Later (unordered)
