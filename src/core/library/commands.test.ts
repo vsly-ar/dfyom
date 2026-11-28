@@ -22,12 +22,12 @@ import { followRecommended } from '../feeds-speeds/preset'
 const agent = agentSource()
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
 
-async function setup(withLibrary = true) {
+async function setup(withLibrary = true, project = doc) {
   const storage = createMemoryLibraryStorage()
   const library = expectOk(await Library.open(storage))
   const d = createDispatcher({
     registry: expectOk(createAppRegistry()),
-    doc,
+    doc: project,
     ids: fakeIds(),
     clock: fakeClock(Date.UTC(2026, 10, 17, 10)),
     services: withLibrary ? { workers: inProcessWorkers, library } : { workers: inProcessWorkers },
@@ -52,6 +52,42 @@ describe('library commands', () => {
         expect(reg.command(`library.${kind}.${verb}`).unwrap().kind).toBe('effect')
     expect(LIBRARY_COMMANDS).toHaveLength(13)
     expect(LIBRARY_QUERIES.map((q) => q.name)).toContain('library.tool.list')
+  })
+
+  it("DF161: add fromSnapshot copies the open project's snapshot (a copied project's tools)", async () => {
+    const takenAt = '2026-11-28T10:00:00.000Z'
+    const project = {
+      ...doc,
+      snapshots: {
+        'snap-tool': {
+          id: 'snap-tool',
+          kind: 'tool',
+          libraryItemId: 'tool-elsewhere',
+          takenAt,
+          values: flatEndMillValues(),
+        },
+        'snap-machine': { id: 'snap-machine', kind: 'machine', takenAt, values: machineValues() },
+      },
+    } as typeof doc
+    const { d } = await setup(true, project)
+    const tool = expectOk(
+      await d.dispatch('library.tool.add', { fromSnapshot: 'snap-tool' }, agent),
+    ).value as { id: string; name: string }
+    expect(tool).toMatchObject({ name: flatEndMillValues().name })
+    const got = expectOk(d.query('library.tool.get', { id: tool.id }, agent)).value
+    expect(got).toMatchObject({ kind: 'tool', diameter: flatEndMillValues().diameter })
+    const machine = expectOk(
+      await d.dispatch('library.machine.add', { fromSnapshot: 'snap-machine' }, agent),
+    ).value as { name: string }
+    expect(machine.name).toBe(machineValues().name)
+    // a snapshot of another kind, an unknown one, both or neither are refused
+    for (const args of [
+      { fromSnapshot: 'snap-machine' },
+      { fromSnapshot: 'nope' },
+      { fromSnapshot: 'snap-tool', values: libraryInput(flatEndMillValues()) },
+      {},
+    ])
+      expectErrCode(await d.dispatch('library.tool.add', args, agent), 'input.malformed')
   })
 
   it('add stores revision 1 with a generated id; get and list return it', async () => {
