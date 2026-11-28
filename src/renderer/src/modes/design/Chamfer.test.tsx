@@ -472,6 +472,33 @@ describe('chamfer UI (U4)', () => {
     await expectNoAxeViolations()
   })
 
+  it('DF147 SL4 follow-up: a profile on a closed loop names the sides Inside / Outside', async () => {
+    const { user, chamfer } = await renderDesign(async (d) => {
+      ;(
+        await d.dispatch(
+          'design.profile.add',
+          {
+            partId: partId(d),
+            shape: { kind: 'rectangle', center: ['50', '30'], length: '40', width: '20' },
+            side: 'on',
+            depth: '3',
+            tabs: { count: '0' },
+          },
+          ui,
+        )
+      ).unwrap()
+    })
+    const row = await within(navigator()).findByRole('button', { name: /^Profile 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: row })
+    await user.click(await screen.findByRole('menuitem', { name: 'Chamfer' }))
+    await waitFor(() => expect(chamfer()).toMatchObject({ edgeOf: 'profile1', edgeSide: 'left' }))
+    const side = await within(inspector()).findByRole('radiogroup', { name: 'Side that stays' })
+    expect(within(side).getByRole('radio', { name: 'Inside' })).toHaveAttribute('data-state', 'on')
+    await user.click(within(side).getByRole('radio', { name: 'Outside' }))
+    await waitFor(() => expect(chamfer().edgeSide).toBe('right'))
+    await expectNoAxeViolations()
+  })
+
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {
     const { user, chamfer } = await renderDesign(async (d) => {
       await addEdges(d)

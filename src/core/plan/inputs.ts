@@ -9,7 +9,13 @@
  * generators through the `WorkerPort` (docs/architecture/workers.md#toolpath-cache).
  */
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
-import { roughingIdOf, roughingOwnerId, type Operation, type Part } from '../design/operation'
+import {
+  chamferEdgeKind,
+  roughingIdOf,
+  roughingOwnerId,
+  type Operation,
+  type Part,
+} from '../design/operation'
 import { roughingSkin } from '../design/roughing'
 import type { OperationKind } from '../design/part.dto'
 import type { Direction } from '../geometry/face'
@@ -428,13 +434,14 @@ export function roughingLeave(
 }
 
 /**
- * DF147 SL4: the Ø of the tool of the plan operation that cuts the through Line a one-sided
- * chamfer bevels; undefined for any other operation or an unresolved tool.
+ * DF147 SL4: the Ø of the tool of the plan operation that cuts the Line a one-sided chamfer
+ * bevels; undefined for any other operation (a profile `on`: its slot width) or an unresolved tool.
  */
 function wallSlot(plan: LoadedPlan, op: Operation | undefined): number | undefined {
   if (op?.kind !== 'chamfer') return undefined
   const edge = plan.part.operations.find((o) => o.id === op.edgeOf)
-  if (edge?.kind !== 'line' || edge.depth.kind !== 'through') return undefined
+  // a Line's groove is as wide as its tool (a profile `on`'s is its slot width)
+  if (edge?.kind !== 'line' || chamferEdgeKind(edge) !== 'wall') return undefined
   const cut = plan.setups
     .flatMap((s) => s.operations)
     .find((p) => p.designOperationIds.includes(edge.id))

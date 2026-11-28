@@ -111,7 +111,7 @@ describe('design.chamfer.add / update', () => {
     expect(s.op('chamfer1')).toMatchObject({ on: 'facing1.floor', angle: { source: '60' } })
   })
 
-  it('inside and outside profiles are edges (E1, E2); an on profile is not', async () => {
+  it('inside and outside profiles are edges (E1, E2); an on profile needs its side (DF147)', async () => {
     const s = await designSetup()
     const circle = { kind: 'circle', center: ['50', '30'], diameter: '22' }
     await s.run('design.profile.add', {
@@ -145,7 +145,10 @@ describe('design.chamfer.add / update', () => {
       { partId: s.partId, edgeOf: 'profile3' },
       'model.invariant',
     )
-    expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
+    expect(e.issues.map((i) => i.rule)).toContain('chamferSide')
+    // DF147 SL4 follow-up: the wall that stays, outside the circle (right of its counter-clockwise loop)
+    await chamfer(s, { edgeOf: 'profile3', edgeSide: 'right' })
+    expect(s.op('chamfer3')).toMatchObject({ edgeOf: 'profile3', edgeSide: 'right' })
   })
 
   it('E4a: loops and cornerLift on a general edge; null = every loop; refused on a circle', async () => {

@@ -39,7 +39,7 @@ const chamfer = (e: Element, width: number, side: ChamferWall['side']): WallCham
   onZ: 0,
   width,
   angle: 90,
-  wall: { element: e, halfWidth: g, side },
+  wall: { elements: [e], halfWidth: g, side },
 })
 
 /** Every ring's toolpath, outermost level first. */
@@ -111,13 +111,17 @@ describe('one-sided chamfer along a through Line (DF147 SL4)', () => {
   })
 
   it('an inner end: the wall path stops short by the cone reach; open ends run to the edge', () => {
-    const w: ChamferWall = { element: line([0, 30], [60, 30]), halfWidth: g, side: 'left' }
-    const p = wallPath(w, g, 0.5, STOCK)!
+    const w: ChamferWall = { elements: [line([0, 30], [60, 30])], halfWidth: g, side: 'left' }
+    const p = wallPath(w, g, 0.5, STOCK) as Element[]
     expect(p[0]!.a).toEqual([0, 30 + g])
     expect(p.at(-1)!.b[0]).toBeCloseTo(59.5, 9)
     // a slanted cut-off: the wall continues along the tangent to the stock edge
-    const slanted: ChamferWall = { element: line([0, 0], [60, 60]), halfWidth: g, side: 'right' }
-    const q = wallPath(slanted, g, 0.5, STOCK)!
+    const slanted: ChamferWall = {
+      elements: [line([0, 0], [60, 60])],
+      halfWidth: g,
+      side: 'right',
+    }
+    const q = wallPath(slanted, g, 0.5, STOCK) as Element[]
     const a = q[0]!.a
     expect(Math.min(a[0], a[1], 100 - a[0], 60 - a[1])).toBeLessThanOrEqual(1e-9)
   })

@@ -27,6 +27,8 @@ import { OVERSHOOT } from '../geometry/model'
 import { faceToFace, localStock, stockFaceDirection, type Direction } from '../geometry/face'
 import { orientPath, orientRegion } from '../geometry/2d/place'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
+import { reverseLoop, signedArea } from '../geometry/2d/model'
+import type { ChamferWall } from '../geometry/wall-chamfer'
 import { profileChain, shapeOutline } from '../geometry/outline'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Stock } from '../library/stock'
@@ -292,24 +294,20 @@ function operationGeometry(
       }))
     case 'chamfer': {
       const edgeOp = ops.slice(0, index).find((o) => o.id === op.edgeOf)
-      // DF147 SL4: one wall of a through Line's slot, the side that stays
+      // DF147 SL4: one wall of a groove, the side that stays: a through Line's slot, a Line's
+      // groove with a depth, a profile `on`'s groove
       if (chamferEdgeKind(edgeOp) === 'wall') {
-        const line = ctx.built.find((o) => o.id === op.edgeOf)
-        const outline = line?.kind === 'line' ? shapeOutline(line.paths[0]!) : undefined
-        const element = outline?.kind === 'path' ? outline.path.elements[0] : undefined
-        if (line?.kind !== 'line' || element === undefined)
-          return bug(op, `edge ${op.edgeOf} is not an earlier through Line of one element`)
+        const built = ctx.built.find((o) => o.id === op.edgeOf)
+        const wall = grooveWall(built, edgeOp, on.faceZ.add(table.extent(on.direction)).toNumber())
+        if (built === undefined || wall === undefined)
+          return bug(op, `edge ${op.edgeOf} is not an earlier groove of one path`)
         return Ok({
           kind: 'chamfer',
           id: op.id,
           ...direction,
-          onZ: line.onZ,
+          onZ: built.kind === 'line' ? built.onZ : on.faceZ.toNumber(),
           edgeOf: op.edgeOf,
-          wall: {
-            element,
-            halfWidth: line.cutter.diameter / 2,
-            side: op.edgeSide.unwrapOr('left'),
-          },
+          wall: { ...wall, side: op.edgeSide.unwrapOr('left') },
           width: op.width.canonical,
           angle: op.angle.canonical,
         })
@@ -387,6 +385,11 @@ function operationGeometry(
       })
     }
     case 'line': {
+      // DF147 SL4: a Line with a depth whose groove a one-sided chamfer bevels has straight walls
+      const walled =
+        op.depth.kind !== 'through' &&
+        chamferEdgeKind(op) === 'wall' &&
+        ops.some((o) => o.kind === 'chamfer' && o.edgeOf === op.id && o.edgeSide.isSome())
       // E3: an engraved pattern's owned shape is many lines (its motif placed in the face frame)
       const placed = collect(
         op.paths.map((p) => {
@@ -441,8 +444,9 @@ function operationGeometry(
               },
             }
           : {}),
-        cutter: lineCutter(op, ctx.snapshots),
+        cutter: lineCutter(op, ctx.snapshots, walled),
         ...(op.depth.kind === 'through' ? { through: true as const } : {}),
+        ...(walled ? { walled: true as const } : {}),
       })
     }
   }
@@ -608,4 +612,49 @@ function bug(op: Operation, message: string): AppResult<never> {
     where: 'toGeometryInput',
     data: { operationId: op.id },
   })
+}
+
+/**
+ * DF147 SL4: the groove a one-sided chamfer bevels, without its side: a through Line's slot (one
+ * element, open ends led out), a Line's groove with a depth (one element, capped ends, its
+ * shallowest depth the floor), a profile `on`'s groove (its path, or its loop counter-clockwise;
+ * the slot width; a blind depth or the height above its tabs the floor). `material`: the stock
+ * below the face. Undefined when `built` is not such a groove.
+ * Doc: docs/modes/engraved-patterns.md#implementation-sl3sl4
+ */
+function grooveWall(
+  built: OperationGeometry | undefined,
+  edge: Operation | undefined,
+  material: number,
+): Omit<ChamferWall, 'side'> | undefined {
+  if (built?.kind === 'line') {
+    const outline = shapeOutline(built.paths[0]!)
+    const element = outline.kind === 'path' ? outline.path.elements[0] : undefined
+    if (element === undefined || built.paths.length !== 1 || 'min' in built.depth) return undefined
+    const halfWidth = built.cutter.diameter / 2
+    if (built.through === true) return { elements: [element], halfWidth }
+    return {
+      elements: [element],
+      halfWidth,
+      capped: true,
+      floor: Math.min(built.depth.start, built.depth.end),
+    }
+  }
+  if (built?.kind !== 'profile' || built.side !== 'on' || edge?.kind !== 'profile') return undefined
+  const { chain, closed } = profileChain(built)
+  if (chain.elements.length === 0) return undefined
+  const loop = closed && signedArea(chain) < 0 ? reverseLoop(chain) : chain
+  const tabs =
+    closed &&
+    built.depth === undefined &&
+    (built.tabs.positions !== undefined ? built.tabs.positions.length > 0 : built.tabs.count > 0)
+  const floor =
+    built.depth !== undefined ? built.depth : tabs ? material - built.tabs.thickness : undefined
+  return {
+    elements: loop.elements,
+    ...(closed ? { closed: true as const } : {}),
+    halfWidth: built.slotWidth / 2,
+    capped: true,
+    ...(floor === undefined ? {} : { floor }),
+  }
 }

@@ -298,8 +298,10 @@ export interface Chamfer extends Common {
   /** E4a: lift the V-bit into the sharp inside corners of a general edge (a mitre). */
   readonly cornerLift: boolean
   /**
-   * DF147 SL4: along a through Line, the side that stays (left or right of the Line from its start
-   * to its end): only that wall is bevelled. Some exactly for a through Line's chamfer.
+   * DF147 SL4: along a groove (a Line, a profile `on`), the side that stays (left or right of the
+   * path from its start to its end; of a closed loop taken counter-clockwise, left is inside):
+   * only that wall is bevelled. Some exactly for a chamfer of such an edge (`chamferEdgeKind`
+   * 'wall').
    * Doc: docs/modes/engraved-patterns.md#one-sided-chamfer-along-a-line
    */
   readonly edgeSide: Option<EdgeSide>
@@ -442,10 +444,22 @@ export function circularEdgeDiameter(op: Operation | undefined): Quantity | unde
 export function chamferEdgeKind(op: Operation | undefined): 'circle' | 'loop' | 'wall' | undefined {
   if (circularEdgeDiameter(op) !== undefined) return 'circle'
   if (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side !== 'on')) return 'loop'
-  // DF147 SL4: one wall of a through Line's slot (`edgeSide`)
-  if (isThroughLine(op)) return 'wall'
+  // DF147 SL4: one wall of a groove (`edgeSide`): a through Line's slot, a Line's groove with a
+  // constant or start → end depth along one Straight / Arc, a profile `on`'s groove
+  if (isWallEdgeLine(op) || (op?.kind === 'profile' && op.side === 'on')) return 'wall'
   return undefined
 }
+
+/**
+ * DF147 SL4: a Line a one-sided chamfer can bevel: through, or with a constant or start → end
+ * depth, along one inline Straight / Arc (Shape mode and levels: not yet).
+ * Doc: docs/modes/engraved-patterns.md#implementation-sl3sl4
+ */
+export const isWallEdgeLine = (op: Operation | undefined): op is Line =>
+  op?.kind === 'line' &&
+  op.depth.kind !== 'levels' &&
+  op.paths.length === 1 &&
+  isInlinePath(op.paths[0]!)
 
 /**
  * The stock face a bottom chamfer (edge-chamfers.md E4b) sits on: the face opposite a **through**

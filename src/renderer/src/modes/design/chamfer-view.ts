@@ -16,6 +16,7 @@ import { chamferMessages } from '../../messages/chamfer'
 import { lengthSource } from '../../messages/dfm'
 import type { ChamferSectionValues, WallChamferSectionValues } from '../../viewport/chamfer-section'
 import { itemName, quantityOf, type DesignPart } from './model'
+import { isOpenNamed } from './operation-shape'
 import { operationFace } from './outline'
 
 type ChamferDTO = Extract<OperationDTO, { kind: 'chamfer' }>
@@ -39,9 +40,34 @@ function edgeDiameterDto(op: OperationDTO) {
 export const isChamferEdge = (op: OperationDTO): boolean =>
   edgeDiameterDto(op) !== undefined || isLoopEdge(op) || isWallEdge(op)
 
-/** DF147 SL4: a through Line: its chamfer bevels the wall on the side that stays (`edgeSide`). */
-export const isWallEdge = (op: OperationDTO): boolean =>
-  op.kind === 'line' && op.depth === 'through'
+/**
+ * DF147 SL4: a groove whose chamfer bevels the wall on the side that stays (`edgeSide`, core
+ * `chamferEdgeKind` 'wall'): a Line along one Straight / Arc (through, or a constant or start → end
+ * depth) or a profile `on`.
+ */
+export const isWallEdge = (op: OperationDTO): boolean => {
+  if (op.kind === 'profile') return op.side === 'on'
+  if (op.kind !== 'line' || op.paths.length !== 1) return false
+  const p = op.paths[0]!
+  const d = op.depth as unknown
+  const levels = typeof d === 'object' && d !== null && 'min' in d
+  return ('segment' in p || 'arc' in p) && !levels
+}
+
+/**
+ * DF147 SL4: how the side that stays is named on `edge`: Inside / Outside along a profile `on`'s
+ * closed loop (left of the counter-clockwise loop is inside), Left / Right of an open path.
+ */
+export function edgeSideNames(part: Pick<PartDTO, 'shapes'>, edge: OperationDTO): 'loop' | 'path' {
+  if (edge.kind !== 'profile') return 'path'
+  if (edge.shape.kind !== 'named') return 'loop'
+  const id = edge.shape.shapeId
+  return isOpenNamed(part.shapes?.find((x) => x.id === id)) ? 'path' : 'loop'
+}
+
+/** DF147 SL4: a groove's role in the Edge field: a through Line's cut-off, else a groove. */
+export const wallEdgeRole = (op: OperationDTO): 'cutOff' | 'groove' =>
+  op.kind === 'line' && op.depth === 'through' ? 'cutOff' : 'groove'
 
 /**
  * A general edge (edge-chamfers.md E1/E2): a pocket or inside profile that is not round, or any
@@ -144,7 +170,7 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
   const options = before.filter(isChamferEdge).map((o) => ({
     value: o.id,
     label: isWallEdge(o)
-      ? chamferMessages.edgeLineOption(o.name)
+      ? chamferMessages.edgeLineOption(o.name, wallEdgeRole(o))
       : isLoopEdge(o)
         ? chamferMessages.edgeLoopOption(o.name, loopEdgeRole(o))
         : chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
@@ -215,6 +241,20 @@ function edgeDepth(part: DesignPart, edge: OperationDTO): { depth: number; throu
   return { depth: face.w + face.local.thickness, through: true }
 }
 
+/** DF147 SL4: a Line's groove depth for the section: through, or its shallowest depth. */
+function lineEdgeDepth(edge: Extract<OperationDTO, { kind: 'line' }>): {
+  depth: number
+  through: boolean
+} {
+  const d = edge.depth
+  if (d === 'through') return { depth: Number.NaN, through: true }
+  const q = (x: Parameters<typeof quantityOf>[0]) => quantityOf(x)?.canonical ?? Number.NaN
+  if (typeof d === 'object' && d !== null && 'start' in d)
+    return { depth: Math.min(q(d.start), q(d.end)), through: false }
+  if (typeof d === 'object' && d !== null && 'min' in d) return { depth: q(d.min), through: false }
+  return { depth: q(d as Parameters<typeof quantityOf>[0]), through: false }
+}
+
 /**
  * The wall section's values of a chamfer along a general edge (edge chamfers E3): width, angle,
  * the wall's depth and side, no diameter. Undefined for a round edge (`chamferSectionValues`) or
@@ -235,10 +275,8 @@ export function wallSectionValues(
     !(isLoopEdge(edge) || isWallEdge(edge))
   )
     return undefined
-  // DF147 SL4: a through Line's slot goes through
-  const { depth, through } = isWallEdge(edge)
-    ? { depth: Number.NaN, through: true }
-    : edgeDepth(part, edge)
+  // DF147 SL4: a through Line's slot goes through; a Line's groove is its shallowest depth
+  const { depth, through } = edge.kind === 'line' ? lineEdgeDepth(edge) : edgeDepth(part, edge)
   return {
     width,
     angle,
