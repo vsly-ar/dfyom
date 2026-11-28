@@ -88,6 +88,22 @@ export function pocketRegion(op: Extract<OperationGeometry, { kind: 'pocket' }>)
   return { region, onZ: op.onZ, depth: op.depth }
 }
 
+/** DF145: a region facing as the pocket of its region, `depth` below the face (no fillet). */
+export function regionPocket(
+  op: Extract<OperationGeometry, { kind: 'facing' }>,
+  region: Shape,
+): Extract<OperationGeometry, { kind: 'pocket' }> {
+  return {
+    kind: 'pocket',
+    id: op.id,
+    ...(op.direction === undefined ? {} : { direction: op.direction }),
+    onZ: 0,
+    shape: region,
+    depth: op.depth,
+    floorRadius: 0,
+  }
+}
+
 /** The loop or path a profile cuts along (a profile takes one loop, `profileOneLoop`). */
 export function profileChain(op: Extract<OperationGeometry, { kind: 'profile' }>): {
   readonly chain: Loop

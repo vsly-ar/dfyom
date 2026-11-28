@@ -19,7 +19,8 @@ import {
   type Region,
 } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
-import type { Vec2 } from '../geometry/model'
+import type { Shape, Vec2 } from '../geometry/model'
+import { shapeOutline } from '../geometry/outline'
 import type { Footprint } from '../plan/workholding/obstacles'
 import { fromWcs, type SetupWcs } from './wcs'
 
@@ -144,4 +145,28 @@ export function facingRegion(length: number, width: number, overshoot: number): 
       { outer: { elements: [line(a!, b!), line(b!, c!), line(c!, d!), line(d!, a!)] }, holes: [] },
     ],
   }
+}
+
+/**
+ * DF145: a region facing's region for the keep-out: its region within the stock face grown by
+ * the overshoot, less the rest of the face (open sides run off the stock, inner sides stay).
+ */
+export function regionFacingArea(
+  port: Region2dPort,
+  region: Shape,
+  stock: { readonly length: number; readonly width: number },
+  overshoot: number,
+): AppResult<Region> {
+  const o = shapeOutline(region)
+  if (o.kind !== 'region') return Ok({ pieces: [] })
+  const face = facingRegion(stock.length, stock.width, 0)
+  const own = port.intersect(o.region, face)
+  if (own.isErr()) return own
+  const grown = port.offset(own.unwrap(), -overshoot)
+  if (grown.isErr()) return grown
+  const rest = port.difference(face, own.unwrap())
+  if (rest.isErr()) return rest
+  const open = port.difference(grown.unwrap(), rest.unwrap())
+  if (open.isErr()) return open
+  return port.intersect(open.unwrap(), facingRegion(stock.length, stock.width, overshoot))
 }

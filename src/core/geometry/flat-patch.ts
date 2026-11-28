@@ -20,7 +20,13 @@ import {
   type Region,
 } from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
-import { chosenLoopsBand, choosesEveryLoop, loopChamferRegion, pocketRegion } from './outline'
+import {
+  chosenLoopsBand,
+  choosesEveryLoop,
+  loopChamferRegion,
+  pocketRegion,
+  regionPocket,
+} from './outline'
 import {
   frameMap,
   holeRegion,
@@ -69,7 +75,17 @@ function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort):
       // a groove leaves no flat face a patch could stand on (engraved-patterns.md E1)
       return []
     case 'facing':
-      return [{ direction, lowest: -op.depth, region: 'face' }]
+      // DF145: a region facing cuts its region (clipped to the face)
+      return [
+        {
+          direction,
+          lowest: -op.depth,
+          region:
+            op.region === undefined
+              ? 'face'
+              : clip(pocketRegion(regionPocket(op, op.region)).region),
+        },
+      ]
     case 'pocket':
       return [{ direction, lowest: op.onZ - op.depth, region: clip(pocketRegion(op).region) }]
     case 'drilling':
@@ -128,7 +144,16 @@ function floorOf(
   const direction = op.direction ?? '+z'
   const face = localStock(direction, stock)
   const rect = rectangle(face.length, face.width)
-  if (op.kind === 'facing') return { level: -op.depth, region: rect }
+  if (op.kind === 'facing')
+    return {
+      level: -op.depth,
+      region:
+        op.region === undefined
+          ? rect
+          : port
+              .intersect(pocketRegion(regionPocket(op, op.region)).region, rect)
+              .mapOr(undefined, (x) => x),
+    }
   if (op.kind === 'pocket') {
     const own = pocketRegion(op).region
     const flat =

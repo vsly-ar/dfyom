@@ -594,7 +594,10 @@ const designOperationUpdate = defineCommand({
   machine: false,
   args: z.object({ ...PlanArg, operationId: OperationIdSchema, ...OPERATION_UPDATE_ARGS }),
   // the same shape as on the pocket and profile add tools (llm-api.md#schemas, listed sketches)
-  listedArgs: { shape: listedAs('object', 'design.pocket.add shape') },
+  listedArgs: {
+    shape: listedAs('object', 'design.pocket.add shape'),
+    region: listedAs('object', 'design.facing.add region'),
+  },
   result: Empty,
   run(draft, rawArgs, ctx) {
     const where = 'plan.design.operation.update'

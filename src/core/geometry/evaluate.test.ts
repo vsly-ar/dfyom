@@ -148,6 +148,32 @@ const pocket = (
   floorRadius,
 })
 
+describe('evaluatePart: facing region (DF145)', () => {
+  it('a 22 mm band from the front edge removes the band and nothing else', () => {
+    // TEST_STOCK is 100 × 60; the band reaches 1 mm past the stock on its three open sides
+    const band: OperationGeometry = {
+      kind: 'facing',
+      id: 'facing1',
+      depth: 1.5,
+      region: {
+        center: [50, 10.5],
+        contour: { kind: 'rectangle', length: 102, width: 23, cornerRadius: 0 },
+      },
+    }
+    const whole = TEST_STOCK.length * TEST_STOCK.width * TEST_STOCK.thickness
+    const e = evaluate(withOp(band))
+    expect(e.pieces).toBe(1)
+    expect(e.volume).toBeCloseTo(whole - 100 * 22 * 1.5, 6)
+    expect(e.surfaces).toContain('facing1.floor')
+    // only the inner (back) side stands as a wall: wall[2] of the band's rectangle
+    expect(e.surfaces.filter((s) => s.startsWith('facing1.wall'))).toEqual(['facing1.wall[2]'])
+    for (const c of centroids(e, 'facing1.floor')) {
+      expect(c[1]).toBeLessThanOrEqual(22 + 1e-6)
+      expect(c[2]).toBeCloseTo(-1.5, 9)
+    }
+  })
+})
+
 describe('evaluatePart: edge cases', () => {
   it.each([
     [

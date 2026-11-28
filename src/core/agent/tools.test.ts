@@ -444,6 +444,8 @@ describe('agent tools', () => {
       'design.clones.update',
       'design.engraving.add',
       'design.engraving.update',
+      'design.facing.add',
+      'design.facing.update',
       'design.line.update',
       'design.part.add',
       'design.part.update',

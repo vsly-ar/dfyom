@@ -132,12 +132,28 @@ const stockFaceOn = SurfaceIdSchema.optional().describe(
   'Stock face it starts from; default stock.top',
 )
 
+export const BAND_EDGE_VALUES = ['front', 'back', 'left', 'right'] as const
+
+/**
+ * DF145: the part of the face a facing faces: a band `width` deep from one stock edge (face
+ * frame: front = lowest v, left = lowest u), or a shape placed as a pocket's; absent = the whole
+ * face (records stay unchanged). Doc: docs/modes/design.md#facing-region-hardening-df145
+ */
+export const FacingRegionDtoSchema = z.union([
+  z.object({
+    band: z.object({ edge: z.enum(BAND_EDGE_VALUES), width: length() }),
+  }),
+  z.object({ shape: OperationShapeDtoSchema }),
+])
+
 export const FacingDtoSchema = z.object({
   kind: z.literal('facing'),
   ...common,
   on: stockFaceOn,
   depth: length(),
+  region: FacingRegionDtoSchema.optional(),
 })
+export type FacingDTO = z.output<typeof FacingDtoSchema>
 /** DF122: a roughing pass's stock to leave on walls and floor (docs/modes/roughing.md#stock-to-leave-wall-and-floor). */
 export const RoughingMarginsDtoSchema = z.object({
   wall: length().optional(),

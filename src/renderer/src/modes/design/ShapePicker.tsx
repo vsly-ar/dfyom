@@ -155,12 +155,16 @@ export function ShapePicker({
   if (op.kind !== 'pocket' && op.kind !== 'profile') return null
   const shape = op.shape
   const usedBy = (id: string) =>
-    ctx.part.dto.operations.filter(
-      (o) =>
-        (o.kind === 'pocket' || o.kind === 'profile') &&
-        o.shape.kind === 'named' &&
-        o.shape.shapeId === id,
-    ).length
+    ctx.part.dto.operations.filter((o) => {
+      // DF145: a facing's shape region uses its shape too
+      const s =
+        o.kind === 'pocket' || o.kind === 'profile'
+          ? o.shape
+          : o.kind === 'facing' && o.region !== undefined && 'shape' in o.region
+            ? o.region.shape
+            : undefined
+      return s?.kind === 'named' && s.shapeId === id
+    }).length
 
   const choose = (value: string) => {
     if (value === NEW_SHAPE) return actions?.newShape()

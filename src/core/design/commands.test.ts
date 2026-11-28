@@ -190,6 +190,48 @@ describe('operations: add with defaults, update, undo/redo', () => {
     expect(s.op('facing1')).toMatchObject({ name: 'Skim', depth: { source: '1/32"' } })
   })
 
+  it('facing region (DF145): a band, a shape, null resets; the band is no default on', async () => {
+    const s = await designSetup()
+    const r = (await expectUndoRedo(s, 'design.facing.add', {
+      partId: s.partId,
+      region: { band: { edge: 'front', width: '22' } },
+    })) as { placed: unknown }
+    expect(r.placed).toEqual({
+      face: 'stock.top',
+      min: [0, 0],
+      max: [100, 22],
+      box: { min: [0, 0, -0.5], max: [100, 22, 0] },
+    })
+    expect(s.op('facing1')).toMatchObject({
+      region: { band: { edge: 'front', width: { source: '22' } } },
+    })
+    // a band's floor is offered, never the default `on`
+    await s.run('design.pocket.add', { partId: s.partId, shape: rect('10', '10'), depth: '2' })
+    expect(s.op('pocket1')).toMatchObject({ on: 'stock.top' })
+    await expectUndoRedo(s, 'design.facing.update', {
+      partId: s.partId,
+      operationId: 'facing1',
+      region: { shape: circle('20') },
+    })
+    expect(s.op('facing1')).toMatchObject({ region: { shape: { kind: 'circle' } } })
+    await s.run('design.facing.update', { partId: s.partId, operationId: 'facing1', region: null })
+    expect(s.op('facing1')).not.toHaveProperty('region')
+    // the width is at most the face's extent across the edge (60 mm across front/back)
+    const e = expectErrCode(
+      await s.d.dispatch(
+        'design.facing.update',
+        {
+          partId: s.partId,
+          operationId: 'facing1',
+          region: { band: { edge: 'back', width: '61' } },
+        },
+        { kind: 'ui', id: 'window-1' },
+      ),
+      'model.invariant',
+    )
+    expect(e.issues[0]).toMatchObject({ path: ['region', 'band', 'width'], rule: 'bandWidth' })
+  })
+
   it('inch projects take the inch defaults', async () => {
     const s = await designSetup({ units: 'inch' })
     await s.run('design.facing.add', { partId: s.partId })

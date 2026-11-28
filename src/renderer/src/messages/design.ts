@@ -1065,7 +1065,24 @@ export const designMessages = {
       tool: 'Tool',
       /** A profile's On, Side and Depth (DF110 target layout). */
       cut: 'Cut',
+      /** DF145: a facing's Region (design.md § Facing region). */
+      region: 'Region',
     },
+    /** DF145: a facing's region (design.md § Facing region). */
+    region: 'Region',
+    regions: { whole: 'Whole face', band: 'Band', shape: 'Shape' },
+    bandEdge: 'From edge',
+    /** Edges in the face frame of `on`, with the axis end they are at ("Front (Y min)"). */
+    bandEdges: (edge: 'front' | 'back' | 'left' | 'right', u: string, v: string) =>
+      ({
+        front: `Front (${v} min)`,
+        back: `Back (${v} max)`,
+        left: `Left (${u} min)`,
+        right: `Right (${u} max)`,
+      })[edge],
+    bandWidth: 'Width',
+    bandWidthInfo:
+      'Faced from the stock edge inwards. The tool runs off the stock on the open sides and keeps inside the inner one.',
     /**
      * Closed accordions' summaries (inspector-layout.md § Accordions): the values that matter, so
      * nothing hides silently.

@@ -42,7 +42,7 @@ import type {
 import type { RegionProfileOperation } from './region-profile'
 import type { GeneratorRequest, SingleRequest } from './request'
 import { setupWcs, toWcs } from './wcs'
-import { facingRegion, keepOutRegion } from './keep-out'
+import { facingRegion, keepOutRegion, regionFacingArea } from './keep-out'
 
 const WHERE = 'toGeneratorInputs'
 
@@ -441,16 +441,18 @@ export function toGeneratorInputs(
       return single('facing').andThen((operation) =>
         milling().andThen((c): AppResult<GeneratorRequest> => {
           // WH-D: around the workholding, a facing clears its region as a pocket does
-          const kept =
+          // DF145: a region facing's is its region within the face grown by the overshoot
+          const area =
             region2d === undefined || input.keepOut === undefined
+              ? undefined
+              : operation.region === undefined
+                ? Ok(facingRegion(stock.length, stock.width, s.overshoot))
+                : regionFacingArea(region2d, operation.region, stock, s.overshoot)
+          if (area?.isErr()) return Err(area.unwrapErr())
+          const kept =
+            region2d === undefined || input.keepOut === undefined || area === undefined
               ? Ok(undefined)
-              : keepOutRegion(
-                  region2d,
-                  facingRegion(stock.length, stock.width, s.overshoot),
-                  input.keepOut,
-                  -operation.depth,
-                  wcs,
-                )
+              : keepOutRegion(region2d, area.unwrap(), input.keepOut, -operation.depth, wcs)
           if (kept.isErr()) return Err(kept.unwrapErr())
           const around = kept.unwrap()
           if (around !== undefined)

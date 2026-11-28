@@ -24,7 +24,7 @@ import {
   type Region,
 } from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2, type Vec3 } from './model'
-import { pocketRegion, profileChain } from './outline'
+import { pocketRegion, profileChain, regionPocket } from './outline'
 
 type Profile = Extract<OperationGeometry, { kind: 'profile' }>
 type Drilling = Extract<OperationGeometry, { kind: 'drilling' }>
@@ -241,8 +241,19 @@ function clearsOf(
   const out: Clear[] = []
   for (const o of ops) {
     if (o === op || !before(o, op) || (o.direction ?? '+z') !== direction) continue
-    if (o.kind === 'facing') out.push({ id: o.id, top: 0, bottom: o.depth, region: 'face' })
+    if (o.kind === 'facing' && o.region === undefined)
+      out.push({ id: o.id, top: 0, bottom: o.depth, region: 'face' })
     else if (port === undefined) continue
+    // DF145: a region facing clears its region (a pocket of it from the face)
+    else if (o.kind === 'facing') {
+      const p = regionPocket(o, o.region!)
+      out.push({
+        id: o.id,
+        top: 0,
+        bottom: o.depth,
+        region: placed(direction, () => pocketRegion(p).region),
+      })
+    }
     // DF108: a roughing pocket clears only part of its region (the pattern's pocket counts)
     else if (o.kind === 'pocket' && o.roughing !== true) {
       const p = o
@@ -524,8 +535,9 @@ export function materialBands(
     const local = localStock(direction, stock)
     const face = rectangle(local.length, local.width)
     const target = lazy((): Region | undefined => {
-      if (op.kind === 'facing') return face
+      if (op.kind === 'facing' && op.region === undefined) return face
       if (port === undefined) return undefined
+      if (op.kind === 'facing') return pocketFaceRegion(regionPocket(op, op.region!), stock, port)
       if (op.kind === 'profile') return slotRegion(op, stock, port)
       if (op.kind === 'drilling') return holeRegion(op, stock, port)
       return pocketFaceRegion(op, stock, port)

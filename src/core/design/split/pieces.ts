@@ -864,6 +864,11 @@ function mapOperation(
       break
     }
     case 'facing':
+      // DF145: a region facing is not carried to the pieces (its region is in the part's frame)
+      if (base.region !== undefined) {
+        c.finding(op, `region:${op.id}`, `${op.name} faces a region: face the pieces instead`)
+        return Ok(undefined)
+      }
       out = { ...base, on, ...(depthChanged ? { depth: L(zDepth) } : {}) }
       break
     case 'drilling': {

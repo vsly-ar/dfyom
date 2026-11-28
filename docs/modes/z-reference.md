@@ -52,7 +52,7 @@ The flat patch reuses the 2D coverage model of the material bands ([plan-v0.2.md
 Absent a choice, each tool run's Z reference is, in order:
 
 1. **The up face (`stock.top` of the setup)** while it has a flat patch for a spot: it is Z0 already, so nothing changes for the operator and every plan without a facing exports as today (byte-identical gCode, [§ Exported gCode](#exported-gcode)).
-2. Else **the floor of the most recent facing** of the setup's direction before this tool run (the faced top), when it has a flat patch.
+2. Else **the floor of the most recent facing** of the setup's direction before this tool run (the faced top), when it has a flat patch. A region facing's floor ([DF145](design.md#facing-region-hardening-df145)) does not count here; it can still win rule 3 or be chosen.
 3. Else **the largest flat patch** among the eligible floors, as a **warning** (`zRef.chosen`: "Tool 3 touches off on Pocket 1 floor; check it"), so the operator's attention goes to a choice DFYOM made on an unusual surface.
 4. No eligible surface (everything cut away or not flat): **error** `zRef.none`, the setup's export and `run.job.start` are blocked until the user chooses (Q84).
 

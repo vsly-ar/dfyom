@@ -19,6 +19,7 @@ import { generateMark, type MarkInput } from './mark'
 import { generateLine, type LineInput } from './line'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
+import { generateRegionFacing } from './region-facing'
 import type {
   ChamferInput,
   DrillingInput,
@@ -202,8 +203,12 @@ function generateLocal(
   region2d: PortSource,
 ): AppResult<Toolpath> {
   switch (request.kind) {
-    case 'facing':
-      return generateFacing(request.inputs[0]!, steps)
+    case 'facing': {
+      const input = request.inputs[0]!
+      // DF145: a region facing needs the 2D port; a whole-face one keeps its rows
+      if (input.operation.region === undefined) return generateFacing(input, steps)
+      return region2d().andThen((port) => generateRegionFacing(input, port, steps))
+    }
     case 'pocket':
       return generatePocket(request.inputs[0]!, steps)
     case 'profile':

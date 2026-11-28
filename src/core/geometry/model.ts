@@ -161,7 +161,18 @@ interface FacePlacement {
 /** v0.1 operations resolved to float64 mm (docs/modes/design.md#operations-v01). */
 export type OperationGeometry = FacePlacement &
   (
-    | { readonly kind: 'facing'; readonly id: string; readonly depth: number }
+    | {
+        readonly kind: 'facing'
+        readonly id: string
+        readonly depth: number
+        /**
+         * DF145: the region it faces (face frame), absent = the whole face (inputs unchanged). A
+         * band reaches `OVERSHOOT` past the stock on its three stock-edge sides, a shape is as
+         * placed; either is clipped to the face by the stock.
+         * Doc: docs/modes/design.md#facing-region-hardening-df145
+         */
+        readonly region?: Shape
+      }
     | {
         readonly kind: 'pocket'
         readonly id: string

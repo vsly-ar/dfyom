@@ -225,6 +225,30 @@ describe('editing shapes', () => {
     )
     expect(e.issues[0]!.rule).toBe('operationKind')
   })
+
+  it("converts a facing's shape region (DF145): the region places the new shape", async () => {
+    const s = await setup()
+    await s.run('design.facing.add', {
+      partId: s.partId,
+      region: {
+        shape: { kind: 'rectangle', center: ['50', '30'], length: '40', width: '20' },
+      },
+    })
+    const id = s.part().operations.at(-1)!.id
+    const r = (await s.run('design.shape.convert', { partId: s.partId, operationId: id })) as {
+      shapeId: string
+    }
+    expect(s.part().operations.at(-1)).toMatchObject({
+      region: { shape: { kind: 'named', shapeId: r.shapeId } },
+    })
+    await s.run('design.facing.update', { partId: s.partId, operationId: id, region: null })
+    const e = await s.fail(
+      'design.shape.convert',
+      { partId: s.partId, operationId: id },
+      'input.malformed',
+    )
+    expect(e.issues[0]!.rule).toBe('operationKind')
+  })
 })
 
 describe('queries', () => {

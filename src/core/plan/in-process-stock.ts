@@ -12,7 +12,7 @@ import { chainBounds, type Region } from '../geometry/2d/model'
 import { regionContains } from '../geometry/2d/measure'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { StockGeometry, Vec2 } from '../geometry/model'
-import { pocketRegion } from '../geometry/outline'
+import { pocketRegion, regionPocket } from '../geometry/outline'
 import { holeRegion, isOpening, openingRegion, slotRegion } from '../geometry/through-depth'
 import { recutUnits } from '../design/already-cut'
 import type { Toolpath } from '../toolpath/model'
@@ -168,7 +168,12 @@ export function asCutStamps(plan: LoadedPlan, port: Region2dPort | undefined): A
     const add = (region: Region | 'face' | undefined, floor: number) => {
       if (region !== undefined && floor < 0) out.push({ unit, direction, region, floor })
     }
-    if (g.kind === 'facing') add('face', -g.depth)
+    if (g.kind === 'facing')
+      add(
+        // DF145: a region facing stamps its region
+        g.region === undefined ? 'face' : pocketRegion(regionPocket(g, g.region)).region,
+        -g.depth,
+      )
     else if (g.kind === 'pocket' && g.roughing !== true) {
       const r = pocketRegion(g).region
       add(

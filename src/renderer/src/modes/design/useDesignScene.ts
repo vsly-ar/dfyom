@@ -29,6 +29,7 @@ import {
   operationOutline,
   lineMergeLoops,
   patternGuideLoops,
+  facingRegionGuide,
   surfaceAxes,
 } from './outline'
 import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
@@ -233,6 +234,14 @@ export function useDesignScene(): SceneProps {
       const facts = patternFacts(pattern.id, part.dto.shapes ?? [], port)
       // the area, the ghosts left out at the border and the thinnest web's ring (P2, P5)
       if (facts !== undefined) guide = patternGuideLoops(selectedOp, s, table, facts)
+    } else if (selectedOp.kind === 'facing' && selectedOp.region !== undefined) {
+      // DF145: a region facing's open sides dashed (the rows run off the stock there)
+      guide = facingRegionGuide(
+        selectedOp,
+        s,
+        table,
+        port === undefined ? undefined : { port, shapes: part.loaded.part.shapes },
+      )
     } else if (merge !== undefined) {
       // engraved patterns: a dashed ring at each place two grooves leave a thin wall
       guide = lineMergeLoops(selectedOp, s, table, merge)
