@@ -56,7 +56,12 @@ function WorkAreaOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Eleme
   const marginText = marginEdit ?? formatLength(stored.margin, units)
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [announce, setAnnounce] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [writing, setWriting] = useState(false)
+  // the revision the last write made: until the list read again shows it, `item` (its revision,
+  // its marks) is stale, and a mark, clear or margin edit then would be refused (command.conflict)
+  // or build on old marks; the controls wait, as during the write itself
+  const [written, setWritten] = useState(0)
+  const saving = writing || (item !== undefined && item.revision < written)
   const ids = { jog: useId(), why: useId() }
   const f = (mm: number) => formatLength(mm, units)
 
@@ -78,15 +83,16 @@ function WorkAreaOpen({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Eleme
     what: string,
   ): Promise<boolean> => {
     if (item === undefined) return false
-    setSaving(true)
+    setWriting(true)
     const r = await bridge.call('run.workArea.set', {
       machineId: item.id,
       revision: item.revision,
       ...args,
     })
-    setSaving(false)
+    setWriting(false)
     if (r.ok) {
       setError(undefined)
+      setWritten((r.value as { revision: number }).revision)
       setWrites((n) => n + 1)
       setAnnounce(what)
     } else setError(r.error)

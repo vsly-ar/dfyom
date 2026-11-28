@@ -1,6 +1,6 @@
 // Work area (v0.5 RV7) in the app against the fake bridge, `run.workArea.set` on the real
 // dispatcher (the library machine): the Homing section opens it, Mark takes the position, a
-// crossed mark is refused, the `$13n=` line to copy, Clear; axe.
+// crossed mark is refused, the `$13n=` line to copy, Clear; axe. The library list answers late.
 // Spec: docs/modes/run.md#work-area-rv7
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
@@ -27,6 +27,14 @@ async function renderRun() {
   await s.create({ machineLibraryItemId: s.machineId })
   const bridge = createFakeBridge()
   bridge.bind(s.d)
+  // the window reads the library machine late, as under load (hardening P15): the dialog must not
+  // offer a write on the stale revision, and the test waits on state, not on that read
+  const real = createFakeBridge()
+  real.bind(s.d)
+  bridge.handle('library.machine.list', async (a) => {
+    await new Promise((r) => setTimeout(r, 200))
+    return real.call('library.machine.list', a)
+  })
   let status: RunStatus = closedStatus()
   const push = (patch: Partial<RunStatus>) => {
     status = { ...status, ...patch }
@@ -83,7 +91,7 @@ describe('Work area (v0.5 RV7)', () => {
     // not homed yet: Mark waits, with the reason
     const markXmin = () => within(dialog()).getByRole('button', { name: 'Mark X min' })
     expect(markXmin()).toBeDisabled()
-    expect(within(dialog()).getByText(/marks are machine coordinates/)).toBeInTheDocument()
+    expect(await within(dialog()).findByText(/marks are machine coordinates/)).toBeInTheDocument()
     // homed (the dialog is modal: as if homed from the controller's own panel)
     t.push({ state: 'Idle', homed: true, envelope, mpos: [-1, -1, -1] })
     await waitFor(() => expect(markXmin()).toBeEnabled())
@@ -111,9 +119,13 @@ describe('Work area (v0.5 RV7)', () => {
     await t.user.clear(margin)
     await t.user.type(margin, '3{Enter}')
     await waitFor(() => expect(t.library()?.margin).toBe(3))
-    // Clear: back to the travel
-    await t.user.click(within(dialog()).getByRole('button', { name: 'Clear work area' }))
+    // Clear: back to the travel (enabled once the window has read the machine's new revision)
+    const clear = within(dialog()).getByRole('button', { name: 'Clear work area' })
+    await waitFor(() => expect(clear).toBeEnabled())
+    await t.user.click(clear)
     await waitFor(() => expect(t.library()).toBeUndefined())
-    expect(within(dialog()).queryByRole('button', { name: /Copy \$13/ })).toBeNull()
+    await waitFor(() =>
+      expect(within(dialog()).queryByRole('button', { name: /Copy \$13/ })).toBeNull(),
+    )
   })
 })
