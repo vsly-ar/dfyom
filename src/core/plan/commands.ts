@@ -1695,6 +1695,9 @@ const operationFeedsGet = defineQuery({
           depth: Num.optional().describe(
             'Chamfer depth below the tip, or the taper Line depth, mm',
           ),
+          plungeEdgeDiameter: Num.optional().describe(
+            'Plunged chamfer: the hole Ø; power is the annulus at the plunge rate, mm',
+          ),
         }),
         rigidity: z.string().describe('Machine rigidity (default without a machine)'),
         spindlePower: Num.nullable().describe('W; null: power check skipped'),
@@ -1758,9 +1761,17 @@ const operationFeedsGet = defineQuery({
                 ? { kind: g.kind, ae: g.ae }
                 : g.kind === 'helix'
                   ? { kind: g.kind, ap: g.ap }
-                  : g.kind === 'chamfer' || g.kind === 'taper'
-                    ? { kind: g.kind, depth: g.depth }
-                    : { kind: g.kind },
+                  : g.kind === 'chamfer'
+                    ? {
+                        kind: g.kind,
+                        depth: g.depth,
+                        ...(g.plunge === undefined
+                          ? {}
+                          : { plungeEdgeDiameter: g.plunge.edgeDiameter }),
+                      }
+                    : g.kind === 'taper'
+                      ? { kind: g.kind, depth: g.depth }
+                      : { kind: g.kind },
             rigidity: machine.mapOr<string>(DEFAULT_RIGIDITY, (m) => m.rigidity),
             spindlePower: machine.andThen((m) => m.power).unwrapOr(null as unknown as number),
           }

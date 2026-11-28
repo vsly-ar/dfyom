@@ -13,6 +13,8 @@ import {
   feedRate,
   materialRemovalRate,
   plungeRate,
+  plungedChip,
+  plungedRemovalRate,
   rctf,
   spindleSpeed,
   taperedStepdown,
@@ -134,6 +136,31 @@ describe('F9 plunge rate', () => {
   it('plungeRate = kPlunge · vf (doc examples 0.5 wood/plastic, 0.3 metals)', () => {
     expect(plungeRate(0.5, 2000)).toBe(1000)
     expect(plungeRate(0.3, 1000)).toBeCloseTo(300, 9)
+  })
+})
+
+describe('F12 plunged chamfer removal rate and chip (hardening DF141)', () => {
+  it('Q = π/4 · (De² − d²) · vp: the annulus between the hole and the cone at the face', () => {
+    // the X3 countersink: Ø4.861 on a Ø2.447 hole, plunged at 1500 mm/min
+    // π/4 · (23.629321 − 5.987809) = π/4 · 17.641512 = 13.85558 mm² → 20 783.4 mm³/min
+    expect(plungedRemovalRate(4.861, 2.447, 1500)).toBeCloseTo(20_783.4, 1)
+    // into solid material (a witness mark): the full disc, Sandvik's solid drilling Q = π D² / 4 · vf
+    expect(plungedRemovalRate(2, 0, 100)).toBeCloseTo(Math.PI * 100, 9)
+    // Sandvik's enlarging form: Q = vc · ap · fn · (D − ap) / D with ap = (D − d) / 2, vc = π D n
+    const [D, d, n, fn] = [10, 4, 1000, 0.1]
+    const ap = (D - d) / 2
+    const vc = (Math.PI * D * n) / 1000 // m/min
+    expect(plungedRemovalRate(D, d, n * fn)).toBeCloseTo((vc * 1000 * ap * fn * (D - ap)) / D, 6)
+    // an edge as large as the cone removes nothing
+    expect(plungedRemovalRate(3, 3, 1000)).toBe(0)
+    expect(plungedRemovalRate(3, 4, 1000)).toBe(0)
+  })
+
+  it('h = vp / (n · z) · sin(α/2)', () => {
+    // 82°: sin 41° = 0.656059; 1500 mm/min at 18 000 rpm, 2 flutes: 0.041667 · 0.656059 = 0.027336
+    expect(plungedChip(1500, 18_000, 2, 82)).toBeCloseTo(0.027336, 6)
+    // 180° would be a flat end mill plunging: the full feed per tooth
+    expect(plungedChip(1000, 10_000, 2, 180)).toBeCloseTo(0.05, 12)
   })
 })
 

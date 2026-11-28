@@ -97,6 +97,23 @@ export const chipThinning = (radial: number, axial: number): number =>
 /** F6 `Q = ae · ap · vf` (mm³/min). */
 export const materialRemovalRate = (ae: number, ap: number, vf: number): number => ae * ap * vf
 
+/**
+ * F12 material removal rate of a plunged chamfer (hardening DF141): the cone fed along its axis
+ * into an edge (hole) of Ø `d` removes the annulus between `d` and the cone's Ø `De` at the face per
+ * mm of feed, `Q = π/4 · (De² − d²) · vp` (mm³/min; d = 0 into solid material). The same geometry
+ * as Sandvik's drilling MRR for enlarging a pre-drilled hole. Its chip is `h = vp / (n · z) ·
+ * sin(α/2)` (`plungedChip`). Doc: docs/architecture/feeds-speeds.md#plunged-chamfers-hardening-df141
+ */
+export const plungedRemovalRate = (De: number, d: number, vp: number): number =>
+  (Math.PI / 4) * Math.max(0, De * De - d * d) * vp
+
+/**
+ * F12 chip thickness of a cone of included angle `angle` (degrees) fed `vp` along its axis:
+ * `h = vp / (n · z) · sin(α/2)` (Sandvik `hex = fz · sin κr`, the edge at α/2 to the feed).
+ */
+export const plungedChip = (vp: number, n: number, z: number, angle: number): number =>
+  (vp / (n * z)) * Math.sin(((angle / 2) * Math.PI) / 180)
+
 /** F7 `Pc = Q · u / 60 000` (kW; u in W·s/mm³). */
 export const cuttingPower = (Q: number, u: number): number => (Q * u) / 60_000
 

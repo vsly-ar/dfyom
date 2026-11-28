@@ -5,6 +5,7 @@
  */
 import { None, Option, Some } from '../../shared/result'
 import { partIssueText } from '../design/issue-text'
+import { chamferEdge } from '../design/geometry-input'
 import { roughingOwnerId, type Operation } from '../design/operation'
 import { cutFindings } from './cut'
 import type { OperationKind } from '../design/part.dto'
@@ -213,6 +214,27 @@ export function evaluateOperation(
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
       ...(strategy.kind === 'chamfer' || strategy.kind === 'line'
         ? { chamferDepth: strategy.cutDepth }
+        : {}),
+      // DF141: a plunged chamfer cuts at the plunge rate, the annulus between its edge Ø and the
+      // cone (F12); the smallest edge of the group (a witness mark: solid, 0)
+      ...(strategy.kind === 'chamfer' && strategy.entry === 'plunge' && t.type === 'chamferMill'
+        ? {
+            chamferPlunge: {
+              edgeDiameter:
+                aid?.kind === 'witnessMark'
+                  ? 0
+                  : ops.reduce(
+                      (m, o) =>
+                        Math.min(
+                          m,
+                          o.kind === 'chamfer'
+                            ? (chamferEdge(plan.part.operations, o.edgeOf)?.diameter ?? 0)
+                            : 0,
+                        ),
+                      ops.length > 0 ? Infinity : 0,
+                    ),
+            },
+          }
         : {}),
       // DF74: the finishing pass's engagement
       ...(strategy.kind === 'pocket' || strategy.kind === 'profile'

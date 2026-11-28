@@ -234,6 +234,62 @@ describe('adaptPreset: spindle range (Q214) and feed limits', () => {
   })
 })
 
+// Doc: docs/architecture/feeds-speeds.md#plunged-chamfers-hardening-df141
+describe('adaptPreset: a plunged chamfer cuts at the plunge rate (F12, DF141)', () => {
+  // the X3 countersink: Ø4.861 on the Ø2.447 hole, plunged by Chamfer 82 (DC 6.35 covers it)
+  const depth = 4.861 / 2 / Math.tan((41 * Math.PI) / 180)
+  const engagement: Engagement = { kind: 'chamfer', depth, plunge: { edgeDiameter: 2.447 } }
+  const at = (v: PresetValues): CuttingValues => ({ ...values(v), vp: v.plungeRate! })
+  // π/4 · (4.861² − 2.447²) = 13.85558 mm²; hardwood u = 0.25 hp · 2.73 = 0.6825 W·s/mm³;
+  // budget 500 W · 0.8 · 18 000 / 24 000 = 0.3 kW
+  const pc = (vp: number) => (13.85558 * vp * 0.6825) / 60_000
+
+  it('the X3 countersink: only the plunge moves (Z max), no power warning at 1500 mm/min', () => {
+    const t = chamfer82()
+    const v = stored(t, 'hardwood')
+    expect(v).toMatchObject({ spindleSpeed: 18000, feedRate: 4572, plungeRate: 2286 })
+    const input = { tool: t, materialClass: 'hardwood' as const, engagement, machine: Some(X3) }
+    // the rerun's own values: the plunge at 2286 needs 0.360 kW of 0.3 kW (on the plunge rate)
+    const before = checkCutting(input, at(v))
+    expect(before.map((w) => [w.code, w.field])).toEqual([['feeds.powerExceeded', 'plungeRate']])
+    expect(before[0]!.params['cuttingPower']).toBeCloseTo(pc(2286), 4)
+    expect(pc(2286)).toBeCloseTo(0.3603, 4)
+    expect(before[0]!.message).toBe('Cutting power exceeds the spindle: reduce the plunge rate.')
+    const a = adaptPreset(v, input, X3)
+    expect(a.values).toEqual({ ...v, plungeRate: 1500 })
+    expect(a.adapted).toEqual({ plungeRate: { from: 2286, reason: 'maxFeedRateZ' } })
+    expect(a.powerExceeded).toBe(false)
+    // 20 783 mm³/min → 0.236 kW (the F6 rectangle at the 2744 floor feed gave 0.427 kW)
+    expect(checkModel(input).unwrap().power(at(a.values)).unwrap().pc).toBeCloseTo(pc(1500), 5)
+    expect(pc(1500)).toBeCloseTo(0.2364, 4)
+    expect(checkCutting(input, at(a.values))).toEqual([])
+  })
+
+  it('above the budget without the Z clamp: the plunge rate is fitted, the feed kept', () => {
+    const t = chamfer82()
+    const v = stored(t, 'hardwood')
+    const m = { ...X3, maxFeedZ: 5000 }
+    const input = { tool: t, materialClass: 'hardwood' as const, engagement, machine: Some(m) }
+    const a = adaptPreset(v, input, m)
+    // 2286 · 0.3 / 0.36029 · 0.999 = 1901.6 → 1901
+    expect(a.values).toEqual({ ...v, plungeRate: 1901 })
+    expect(a.adapted).toEqual({ plungeRate: { from: 2286, reason: 'power' } })
+    expect(a.powerExceeded).toBe(false)
+    expect(checkCutting(input, at(a.values))).toEqual([])
+  })
+
+  it('without a plunge rate there is nothing to check; a contoured cut keeps the F6 model', () => {
+    const t = chamfer82()
+    const input = { tool: t, materialClass: 'hardwood' as const, engagement, machine: Some(X3) }
+    expect(checkModel(input).unwrap().power({ n: 18000, vf: 4572 }).isNone()).toBe(true)
+    const contour = { ...input, engagement: { kind: 'chamfer', depth } as Engagement }
+    // F6 at the 2744 feed: 4.861 · 2.796 · 2744 · 0.6825 / 60 000 = 0.424 kW (vp ignored)
+    expect(
+      checkModel(contour).unwrap().power({ n: 18000, vf: 2744, vp: 1 }).unwrap().pc,
+    ).toBeCloseTo((4.861 * depth * 2744 * 0.6825) / 60_000, 9)
+  })
+})
+
 describe('adaptPreset: power without a preset stepdown (Q213)', () => {
   it('a chamfer (fixed depth): the feed is reduced at the kept speed', () => {
     const t = chamfer82()

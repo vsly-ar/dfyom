@@ -189,7 +189,8 @@ describe('resolveFeeds: recommended presets adapted to the plan machine (DF139 A
 
   it('power above the budget at the chip-load floor keeps a warning that says so', () => {
     const t = x3Tools().chamfer82
-    // the X3 countersink: Ø4.861 with the 82° tool
+    // the X3 countersink's depth (Ø4.861 with the 82° tool) cut as a contour, F6 at the feed rate
+    // (the X3 countersink itself is plunged: F12 at the plunge rate, DF141, § X3 recheck)
     const depth = 4.861 / 2 / Math.tan((41 * Math.PI) / 180)
     const r = resolveFeeds(x3Input(t, { kind: 'chamfer', chamferDepth: depth }))
     expect(r.fields.feedRate.unwrap()).toMatchObject({
@@ -299,7 +300,12 @@ describe('X3 recheck: the rerun plan’s feeds on the X3 machine (DF139 A4, rese
       partialProfile1: x3Input(t.flat6, { kind: 'profile' }),
       partialProfile2: x3Input(t.flat6, { kind: 'profile' }),
       drilling: x3Input(t.flat2, { kind: 'drilling' }),
-      countersink: x3Input(t.chamfer82, { kind: 'chamfer', chamferDepth: countersinkDepth }),
+      // plunged (DC 6.35 covers Ø4.861, the tip in the Ø2.447 hole): F12 (DF141)
+      countersink: x3Input(t.chamfer82, {
+        kind: 'chamfer',
+        chamferDepth: countersinkDepth,
+        chamferPlunge: { edgeDiameter: 2.447 },
+      }),
       cavity: x3Input(t.flat6, { kind: 'pocket' }),
       outline: x3Input(t.flat6, { kind: 'profile' }),
     }
@@ -335,19 +341,28 @@ describe('X3 recheck: the rerun plan’s feeds on the X3 machine (DF139 A4, rese
     })
   })
 
-  it('after: only the countersink keeps a power warning, which says the preset is adapted', () => {
+  it('after: no F5 entries; the countersink plunge at 1500 mm/min needs 0.24 kW (F12, DF141)', () => {
     expect(perOp(findings, true)).toEqual({
       facing: [],
       partialProfile1: [],
       partialProfile2: [],
       drilling: [],
-      countersink: ['feeds.powerExceeded'],
+      countersink: [],
       cavity: [],
       outline: [],
     })
-    const r = resolveFeeds(ops()['countersink']!)
-    const w = r.warnings.find((x) => x.code === 'feeds.powerExceeded')
-    expect(w?.message).toMatch(/even with the preset adapted/)
+    // π/4 · (4.861² − 2.447²) · 1500 = 20 783 mm³/min · 0.6825 / 60 000 = 0.236 kW of 0.3 kW;
+    // before DF141 the F6 rectangle at the feed rate (never used by a plunge) asked 0.427 kW
+    const used = resolveFeeds(ops()['countersink']!).used.unwrap()
+    expect(used.Q.unwrap()).toBeCloseTo(20_783.4, 0)
+    expect(used.Pc.unwrap()).toBeCloseTo(0.2364, 4)
+  })
+
+  it('the rerun’s own countersink values warn on the plunge rate (0.36 kW at 2286 mm/min)', () => {
+    const r = resolveFeeds(unadapted(ops()['countersink']!))
+    const w = r.warnings.filter((x) => x.code === 'feeds.powerExceeded')
+    expect(w.map((x) => x.field)).toEqual(['plungeRate'])
+    expect(w[0]!.params['cuttingPower']).toBeCloseTo(0.3603, 4)
   })
 
   it('after: the adapted values only lower the stored ones', () => {
@@ -366,7 +381,7 @@ describe('X3 recheck: the rerun plan’s feeds on the X3 machine (DF139 A4, rese
       partialProfile1: ['stepdown 1.8 → 1.6 (power)'],
       partialProfile2: ['stepdown 1.8 → 1.6 (power)'],
       drilling: [],
-      countersink: ['feedRate 4572 → 2744 (power)', 'plungeRate 2286 → 1500 (maxFeedRateZ)'],
+      countersink: ['plungeRate 2286 → 1500 (maxFeedRateZ)'],
       cavity: ['stepdown 1.8 → 1.6 (power)'],
       outline: ['stepdown 1.8 → 1.6 (power)'],
     })

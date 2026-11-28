@@ -254,7 +254,7 @@ export function adaptPreset(
       reasons.feedRate = reason
     } else scaleBoth(maxFeed / vf, reason)
   }
-  // 3. Z max plunge; nothing depends on the plunge rate
+  // 3. Z max plunge; nothing else depends on the plunge rate (a plunged chamfer's power: step 4)
   if (pr !== undefined && pr > machine.maxFeedZ) {
     pr = floorTo(machine.maxFeedZ, step.feed)
     reasons.plungeRate = 'maxFeedRateZ'
@@ -271,7 +271,37 @@ export function adaptPreset(
     },
     ...(data === undefined ? [] : [data]),
   )
-  if (model.isSome() && n !== undefined && vf !== undefined && n > 0 && vf > 0) {
+  if (
+    model.isSome() &&
+    model.unwrap().plunged &&
+    n !== undefined &&
+    vf !== undefined &&
+    pr !== undefined &&
+    n > 0 &&
+    vf > 0 &&
+    pr > 0
+  ) {
+    // a plunged chamfer (F12, DF141) cuts at the plunge rate: it is the field the power lowers.
+    // No chip-load floor: plunge rates sit below the feed's chip by convention (F9's kPlunge), and
+    // the plunge rate has no chip-load check, so a lower one is only slower (as the Z max clamp)
+    const m = model.unwrap()
+    const overP = (p: number): boolean =>
+      m.power({ n: n!, vf: vf!, vp: p }).mapOr(false, (x) => x.pc > x.budget * (1 + CHECK_EPS))
+    if (overP(pr)) {
+      let v = pr
+      for (let i = 0; i < FIT_ITERATIONS && overP(v); i++) {
+        const p = m.power({ n, vf, vp: v }).unwrap()
+        v = v * (p.budget / p.pc) * 0.999
+      }
+      // at least one rounding step (a plunge rate of 0 would not cut)
+      const rounded = Math.max(step.feed, floorTo(v, step.feed))
+      if (rounded < pr) {
+        pr = rounded
+        reasons.plungeRate = 'power'
+      }
+      powerExceeded = overP(pr)
+    }
+  } else if (model.isSome() && n !== undefined && vf !== undefined && n > 0 && vf > 0) {
     const m = model.unwrap()
     const at = (a: number | undefined, feed: number) => {
       const apUsed = a ?? input.stepdown
